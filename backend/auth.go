@@ -476,7 +476,7 @@ func initAuth() {
 	UnverifiedSubject = "Welcome to " + AppName
 
 	air.GET("/check-username/:username", func(req *air.Request, res *air.Response) error {
-		return SendMsgpack(res, 200, obj{"ok": IsUsernameAvailable(req.Param("username"))})
+		return res.WriteMsgPack(obj{"ok": IsUsernameAvailable(req.Param("username"))})
 	})
 
 	air.POST("/auth", func(req *air.Request, res *air.Response) error {
@@ -485,7 +485,7 @@ func initAuth() {
 		}
 
 		var authreq AuthRequest
-		err := UnmarshalMsgpackBody(req, &authreq)
+		err := req.Bind(&authreq)
 		if err != nil {
 			return BadRequestError.Send(res)
 		}
@@ -540,7 +540,7 @@ func initAuth() {
 				}
 
 				user.Update(
-					`{session: REMOVE_VALUE(u.sessions, @session)}`,
+					"{session: REMOVE_VALUE(u.sessions, @session)}",
 					obj{"session": time.Unix(tk.Timestamp, 0)},
 				)
 			}()
