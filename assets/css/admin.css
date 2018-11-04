@@ -1,0 +1,509 @@
+:root {
+  --the-mood: hsl(44, 100%, 68%);
+  --the-mood-overlays: hsl(0, 0%, 0%);
+  --the-mood-old: hsl(345, 97%, 59%);
+  --the-mood-highlight: hsl(355, 100%, 67%);
+}
+
+*,
+* * {
+  box-sizing: border-box;
+  position: relative;
+}
+
+a,
+a:visited {
+  font-weight: bold;
+  text-decoration: none;
+  transition: transform 120ms ease-out;
+}
+
+a:hover {
+  transform: translateY(-2px);
+}
+
+a:active {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .18)) brightness(95%);
+}
+
+ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+li {
+  padding-left: 1.5em;
+  text-indent: -.5em;
+}
+
+li::before {
+  display: inline-block;
+  margin-right: .2em;
+  font-size: 1.1em;
+  content: "•";
+  color: inherit;
+}
+
+li:hover::before {
+  color: var(--the-mood);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .14);
+}
+
+html {
+  overflow: auto;
+  overflow-x: hidden;
+}
+
+body {
+  font-family: Nunito, Verdunda, Helvetica, Arial, sans-serif;
+
+  display: grid;
+  width: 100vw;
+  padding: .5em;
+  margin: 0;
+  overflow: hidden;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto 1fr;
+  grid-gap: .5em;
+  justify-content: center;
+  align-content: center;
+  align-items: center;
+  background: hsl(0, 0%, 0%);
+}
+
+button,
+body>nav>a {
+  display: inline-flex;
+  justify-content: center;
+  align-content: center;
+  align-items: center;
+  padding: .5em;
+  margin: .5em 0 .5em .5em;
+  border-radius: 5px;
+  border: 0;
+  outline: 0;
+  background: var(--the-mood);
+  color: var(--the-mood-overlays);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .14);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .14);
+}
+
+body>nav {
+  overflow: hidden;
+  display: flex;
+  justify-content: flex-start;
+  align-content: center;
+  align-items: center;
+  flex-flow: row wrap;
+  background: hsl(0, 0%, 25%);
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .14);
+}
+
+body>nav>a {
+  display: flex;
+  justify-content: center;
+  align-content: center;
+  align-items: center;
+  flex-flow: row wrap;
+  padding: .5em;
+  margin: .5em 0 .5em .5em;
+  border-radius: 4px;
+  background: var(--the-mood);
+  color: var(--the-mood-overlays);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .14);
+}
+
+body>nav>a:last-of-type {
+  margin-right: .5em;
+}
+
+body>nav>div.msg{
+  display: flex;
+  overflow: auto;
+  justify-content: flex-start;
+  align-content: center;
+  align-items: center;
+  flex-flow: row wrap;
+  background: #fff;
+  padding: .3em;
+  margin: .3em auto;
+  border-radius: 4px;
+  min-width: 1em;
+  min-height: 1em;
+  height: 100%;
+  width: auto;
+}
+
+button {
+  cursor: pointer;
+}
+
+main {
+  display: flex;
+  justify-content: flex-start;
+  align-content: center;
+  align-items: center;
+  flex-flow: column;
+}
+
+markdown-editor {
+  flex: 1 1 auto;
+  display: block;
+  margin: .3em auto;
+  margin-top: 2.3em;
+  min-width: 280px;
+  width: 100%;
+  max-width: 800px;
+  border-radius: 4px 0 4px 4px;
+  background: #fff;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,.14));
+}
+
+markdown-editor button {
+  display: inline-flex;
+  justify-content: center;
+  align-content: center;
+  align-items: center;
+  flex-flow: row wrap;
+  overflow: visible;
+  border: 0;
+  outline: 0;
+  padding: .3em;
+  background: var(--the-mood);
+  color: var(--the-mood-overlays);
+  cursor: pointer;
+}
+
+markdown-editor button::before {
+  margin: 0 0 !important;
+}
+
+markdown-editor>pre,
+markdown-editor>article {
+  flex: 1 1 auto;
+  min-height: 300px;
+  padding:.3em;
+  margin: .3em;
+  border-radius: 5px;
+  background: hsl(39, 19%, 82%);
+  text-align: left;
+}
+
+markdown-editor>article {
+  background: #fff;
+}
+
+markdown-editor>.buttons {
+  position: absolute;
+  bottom: calc(100% - .3em);
+  right: 0;
+  display: inline-flex;
+  justify-content: space-around;
+  align-content: center;
+  align-items: center;
+  flex-flow: row wrap;
+  width: auto;
+  border-radius: 4px 4px 0 0;
+  background: #fff;
+  z-index: 2;
+}
+
+markdown-editor>.buttons>button {
+  outline: 0;
+  border: 0;
+  margin: .3em;
+  cursor: pointer;
+}
+markdown-editor>.buttons>button:first-of-type {
+  margin-right: 0;
+}
+markdown-editor>.buttons>button:last-of-type {
+  margin-left: 0;
+}
+
+markdown-editor>.buttons>button.publish.published {
+  background: rgb(48, 255, 12);
+}
+
+main[route-active="editor"] {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: 1fr;
+  grid-gap: .3em .3em;
+  grid-template-areas: "list view";
+  justify-content: center;
+  align-content: center;
+  align-items: flex-start;
+}
+
+main[route-active="editor"] > markdown-editor {
+  grid-area: view;
+}
+main[route-active="editor"] > .writlist {
+  grid-area: list;
+  border-radius: 4px;
+}
+
+main[route-active="editor"] > .viewmode > .meta {
+  display: none;
+}
+
+main[route-active="editor"] .meta {
+  flex: 0 1 auto;
+  display: flex;
+  justify-content: center;
+  align-content: center;
+  align-items: center;
+  align-items: space-around;
+  flex-flow: column wrap;
+  width: auto;
+  background: hsl(0, 0%, 93%);
+  padding: 0;
+  border-radius: 5px;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  padding: .3em;
+  box-shadow: inset 0 2px 3px -1px rgba(0, 0, 0, .14);
+}
+
+main[route-active="editor"] .meta>* {
+  pointer-events: none;
+  opacity: 0;
+  font-size: 0;
+  margin: 0;
+  transition: 120ms ease-in-out;
+}
+
+main[route-active="editor"] .meta:hover>* {
+  pointer-events: all;
+  opacity: 1;
+  font-size: unset;
+  margin: .3em;
+}
+
+main[route-active="editor"] .meta>tag-input>input {
+  display: none;
+}
+main[route-active="editor"] .meta:hover>tag-input>input {
+  display: inline-block;
+}
+
+main[route-active="editor"] .inject {
+  display: inline-block;
+  width: auto;
+  margin: .3em;
+  background: #fff;
+  flex: 0 1 auto;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .14);
+  width: calc(100% - .6em);
+}
+
+main[route-active="editor"] .inject>label,
+main[route-active="editor"] .tags>label {
+  font-size: .8em;
+  margin: .3em;
+  margin-bottom: .1em;
+  color: hsl(0, 0%, 18%);
+}
+
+
+main[route-active="editor"] .inject textarea,
+main[route-active="editor"] .tags input {
+  vertical-align: top;
+  display: inline-block;
+  border: 0;
+  outline: 0;
+  padding: .3em;
+  width: 100%;
+  max-width: 800px;
+  border-radius: 4px;
+}
+
+.writlist {
+  display: flex;
+  justify-content: center;
+  align-content: center;
+  align-items: center;
+  flex-flow: column wrap;
+  padding: .3em;
+  background: #fff;
+}
+
+.writlist > * {
+  cursor: pointer;
+  transition: 120ms ease-out;
+}
+.writlist > *:hover {
+  filter: brightness(90%);
+}
+
+.writlist>*:not(.new-writ) {
+  flex: 1 1 auto;
+  display: inline-flex;
+  justify-content: center;
+  align-content: center;
+  align-items: center;
+  flex-flow: column wrap;
+  background: var(--the-mood);
+  border-radius: 4px;
+  outline: 0;
+  border: 0;
+  width: 100%;
+  padding: .3em;
+  margin: .3em 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .18);
+}
+
+tag-input {
+  position: relative;
+  display: block;
+  padding: .3em;
+  margin: .3em;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .14);
+}
+
+tag-input > div {
+  display: inline-block;
+  flex: 0 1 auto;
+}
+
+tag-input input {
+  display: inline-block;
+  overflow: hidden;
+  width: 172px;
+  padding: .3em;
+  margin: .3em;
+  margin-left: .3em;
+  outline: 0;
+  border: 0;
+  background: hsl(0, 0%, 96%);
+  border-radius: 3px;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, .14);
+  transition: all 120ms ease-out;
+}
+
+tag-input .tag {
+  display: inline-flex;
+  justify-content: center;
+  align-content: center;
+  align-items: center;
+  flex-flow: row wrap;
+  padding: 0 .3em;
+  margin: .3em;
+  min-height: calc(22px + .3em);
+  border-radius: 3px;
+  background: var(--the-mood);
+  color: var(--the-mood-overlays);
+  font-size: .9em;
+  transition: all 120ms ease-in-out;
+  cursor: default;
+}
+
+tag-input button {
+  display: inline-flex;
+  justify-content: center;
+  align-content: center;
+  align-items: center;
+  flex-flow: row wrap;
+  outline: 0;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  color: var(--the-mood-overlays);
+  box-shadow: none;
+  background: transparent;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .14);
+  margin-left: .3em;
+}
+
+tag-input .tag>button {
+  font-size: 0;
+  opacity: 0;
+  height: 0;
+  width: 0;
+  pointer-events: none;
+  transition: 120ms ease-in-out;
+}
+
+tag-input .tag:hover>button {
+  font-size: .9em;
+  opacity: 1;
+  height: 20px;
+  width: 20px;
+  pointer-events: all;
+}
+
+
+main[route-active="stats"],
+main[route-active="settings"] {
+  background: hsl(0, 0%, 94%);
+  border-radius: 4px;
+  padding: .3em;
+  min-height: 80vh;
+}
+
+main[route-active="settings"] > section {
+  background: #fff;
+  padding: .6em;
+  margin: .3em;
+  border-radius: 4px;
+  min-width: 280px;
+  min-height: 280px;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,.14));
+}
+
+main[route-active="settings"]>section>h1,
+main[route-active="settings"]>section>h2 {
+  margin-top: 0;
+}
+
+@media all and (max-width: 660px) {
+  main[route-active="editor"] {
+    display: flex;
+    display: inline-flex;
+    justify-content: center;
+    align-content: space-around;
+    align-items: center;
+    flex-flow: column wrap;
+    text-align: center;
+  }
+  main[route-active="editor"] > .writlist {
+    flex: 0 1 auto;
+    display: inline-flex;
+    justify-content: center;
+    align-content: space-around;
+    align-items: center;
+    flex-flow: column wrap;
+    width: auto;
+  }
+  markdown-editor {
+    max-width: calc(100vw - .6em);
+  }
+  tag-input >div {
+    display: block;
+    margin: .3em auto;
+  }
+  tag-input .tag>button {
+    font-size: .9em !important;
+    opacity: 1 !important;
+    height: 20px !important;
+    width: 20px !important;
+    pointer-events: all !important;
+  }
+
+  main[route-active="editor"] .meta>* {
+    pointer-events: all !important;
+    opacity: 1 !important;
+    font-size: 1em !important;
+    margin: .3em !important;
+  }
+
+  main[route-active="editor"] .meta>tag-input>input {
+    display: inline-block !important;
+  }
+}

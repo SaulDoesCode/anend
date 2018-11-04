@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="author" content="Saul van der Walt">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Saul's personal site</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.0/normalize.min.css">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Nunito">
+  <link href="https://unpkg.com/eva-icons@1.0.2/style/eva-icons.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/2.10.0/github-markdown.min.css">
+  <link rel="stylesheet" href="/css/admin.css">
+  <script src="https://unpkg.com/simple-msgpack@0.0.3/msgpack.min.js"></script>
+  <script src="/js/haal.min.js"></script>
+  <script src="https://unpkg.com/rilti@0.9.5/dist/rilti.min.js"></script>
+  <script src="https://unpkg.com/showdown@1.8.7/dist/showdown.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dayjs/1.7.7/dayjs.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dayjs/1.7.7/plugin/relativeTime.js"></script>
+  <script>
+(dayjs.extend(dayjs_plugin_relativeTime))
+const icon = (i, ops = {}) => rilti.dom.i(ops, el => {
+  el.update = i => { el.className = `eva eva-${i}-outline` }
+  el.update(i)
+  el.style.pointerEvents = 'none'
+})
+const converter = new showdown.Converter({openLinksInNewWindow: true, tasklists: true})
+const md2html = (md, plain) => plain ? converter.makeHtml(md) : rilti.html(converter.makeHtml(md))
+</script>
+  <script src="/js/router.min.js"></script>
+  <script src="/js/admin.js"></script>
+  <script src="/js/editor.js"></script>
+  <script src="/js/tag-input.js"></script>
+</head>
+
+<body>
+  <nav>
+    <a route-link="editor">editor</a>
+    <a route-link="users">users</a>
+    <a route-link="settings">settings</a>
+    <a route-link="stats">stats</a>
+    <div class="msg"></div>
+  </nav>
+  
+  <main route-active></main>
+  
+  <template route="editor">
+    <!-- div class="options">
+      <button class="publish icon-eye" title="publish"></button>
+      <button class="save icon-floppy" title="save"></button 
+    </div -->
+    <aside class="writlist">
+      <button class="new-writ" title="make a new writ">new</button>
+    </aside>
+    <markdown-editor>
+      <section class="meta">
+        <tag-input></tag-input>
+        <div class="inject">
+          <label>inject</label>
+          <textarea title="inject html in the writ" rows="1"></textarea>
+        </div>
+      </section>
+    </markdown-editor>
+  </template>
+
+  <template route="settings">
+    <section class="app-admin">
+      <h2>Administrative Functions</h2>
+      <span>warning: these settings are dangerous</span>
+      <div class="admin-fns">
+        <button class="btn-danger" onclick="app.restartApp()">restart app</button>
+      </div>
+    </section>
+  </template>
+
+  <template route="stats">
+    <h1>stats will be here</h1>
+  </template>
+</body>
+
+</html>

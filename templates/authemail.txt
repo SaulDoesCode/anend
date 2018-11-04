@@ -1,0 +1,7 @@
+Hi, {{.Username}}!
+
+To login at {{.AppName}}, just follow this magic link:
+{{.Link}}
+Note, this link will expire in about 15 minutes.
+If it doesn't work try logging in again from https://{{.Domain}}.
+	
