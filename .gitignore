@@ -4,12 +4,13 @@ logs
 npm-debug.log*
 
 # Developer Tools
-caddy.exe
+*.exe
 Caddyfile
 *.bat
 *.lock
 .stignore
 .stfolder
+.toml
 
 # Runtime data
 pids
