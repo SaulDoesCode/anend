@@ -4,7 +4,7 @@ require (
 	github.com/CrowdSurge/banner v0.0.0-20140923200336-8c0e79dc5ff7
 	github.com/Machiel/slugify v1.0.1
 	github.com/NYTimes/gziphandler v1.0.1
-	github.com/SaulDoesCode/air v0.0.0-20181104143852-926588c1af9a
+	github.com/SaulDoesCode/air v0.0.0-20181104160344-c21617ff3238
 	github.com/SaulDoesCode/mailyak v0.0.0-20181018150953-d080bea9f965
 	github.com/arangodb/go-driver v0.0.0-20181029154412-d60f4a8520d3
 	github.com/asaskevich/govalidator v0.0.0-20180720115003-f9ffefc3facf

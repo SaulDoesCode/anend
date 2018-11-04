@@ -8,13 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+	"net/http"
 	"time"
 
 	"github.com/throttled/throttled"
 	"github.com/throttled/throttled/store/memstore"
+	"github.com/NYTimes/gziphandler"
 	"github.com/CrowdSurge/banner"
 	"github.com/logrusorgru/aurora"
-	"github.com/NYTimes/gziphandler"
 	"github.com/SaulDoesCode/air"
 )
 
@@ -160,7 +161,7 @@ func Init() {
 		log.Fatal(err)
 	}
 
-	quota := throttled.RateQuota{MaxRate: throttled.PerMin(20), MaxBurst: 4}	
+	quota := throttled.RateQuota{MaxRate: throttled.PerMin(10), MaxBurst: 4}	
 	rateLimiter, err := throttled.NewGCRARateLimiter(store, quota)
 	if err != nil {
 		log.Fatal(err)
@@ -170,10 +171,10 @@ func Init() {
 		RateLimiter: rateLimiter,
 		VaryBy:      &throttled.VaryBy{Path: true},
 	}
-
-	air.TheServer.Server.Handler = httpRateLimiter.RateLimit(
-		gziphandler.MustNewGzipLevelHandler(9)(air.TheServer.Server.Handler),
-	)
+	
+	air.TheServer.InterceptHandler = func(h http.Handler) http.Handler {
+		return httpRateLimiter.RateLimit(gziphandler.MustNewGzipLevelHandler(9)(h))
+	}
 
 	go func() {
 		time.Sleep(2 * time.Second)

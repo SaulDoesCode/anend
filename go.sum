@@ -9,6 +9,12 @@ github.com/NYTimes/gziphandler v1.0.1/go.mod h1:3wb06e3pkSAbeQ52E9H9iFoQsEEwGN64
 github.com/SaulDoesCode/air v0.0.0-20181104082610-014cbc34fdc9/go.mod h1:Cl+iUCHDfiUPSjGeK3F9xUgM45ct1CY5aP3uCuL77ys=
 github.com/SaulDoesCode/air v0.0.0-20181104143852-926588c1af9a h1:JYDuuugzQlLCE2suqgqOnfDi/E9JzqzE+a6q22vTR3Y=
 github.com/SaulDoesCode/air v0.0.0-20181104143852-926588c1af9a/go.mod h1:Cl+iUCHDfiUPSjGeK3F9xUgM45ct1CY5aP3uCuL77ys=
+github.com/SaulDoesCode/air v0.0.0-20181104145208-852c4850740d h1:RMxaPhiaoOYPopF0V1yej/kzWxO4v1KYfZ19sGmSgpY=
+github.com/SaulDoesCode/air v0.0.0-20181104145208-852c4850740d/go.mod h1:Cl+iUCHDfiUPSjGeK3F9xUgM45ct1CY5aP3uCuL77ys=
+github.com/SaulDoesCode/air v0.0.0-20181104151653-9081126e90e9 h1:+OI/1xdpx7rQZATZPICP2BmPkewMNWdmphpyupJbiIw=
+github.com/SaulDoesCode/air v0.0.0-20181104151653-9081126e90e9/go.mod h1:Cl+iUCHDfiUPSjGeK3F9xUgM45ct1CY5aP3uCuL77ys=
+github.com/SaulDoesCode/air v0.0.0-20181104160344-c21617ff3238 h1:SOzazS/sXyDs15a39OwsBYzHtX47CZftVhXKiTJ4UsQ=
+github.com/SaulDoesCode/air v0.0.0-20181104160344-c21617ff3238/go.mod h1:Cl+iUCHDfiUPSjGeK3F9xUgM45ct1CY5aP3uCuL77ys=
 github.com/SaulDoesCode/mailyak v0.0.0-20181018150953-d080bea9f965 h1:5voFulayXOi8VfjPxxgMBLOeLceLTn2ANbsrzNzCRBM=
 github.com/SaulDoesCode/mailyak v0.0.0-20181018150953-d080bea9f965/go.mod h1:dJKpmWvdHaLWYNVTK/7dV0q8YVIQyJRAw5Tvtftl26w=
 github.com/arangodb/go-driver v0.0.0-20181029154412-d60f4a8520d3 h1:xJIAsR7WlIqIT+J4vdyDdjqmtduDqzH6sUFTuiQyqHY=
