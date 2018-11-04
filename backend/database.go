@@ -19,6 +19,8 @@ var (
 	Users driver.Collection
 	// Writs arangodb writ collection containing writs
 	Writs driver.Collection
+	// Logs arangodb log collection for storing the app's logs
+	Logs driver.Collection
 	// RateLimits arangodb ratelimits collection
 	RateLimits driver.Collection
 	// DBHealthTicker to see if the DB is still ok
@@ -63,19 +65,50 @@ func setupDB(endpoints []string, dbname, username, password string) error {
 	}
 
 	DB = db
+
 	users, err := DB.Collection(nil, "users")
 	if err != nil {
-		fmt.Println("Could not get users collection from db:")
-		return err
+		if driver.IsArangoErrorWithCode(err, 1203) || err.Error() == "collection not found" {
+			err = nil
+			users, err = DB.CreateCollection(nil, "users", &driver.CreateCollectionOptions{
+				WaitForSync: true,
+			})
+		}
+
+		if err != nil {
+			fmt.Println("Could not get users collection from db:", err)
+			return err
+		}
 	}
 	Users = users
 
 	writs, err := DB.Collection(nil, "writs")
 	if err != nil {
-		fmt.Println("Could not get users collection from db:")
-		return err
+		if driver.IsArangoErrorWithCode(err, 1203) || err.Error() == "collection not found" {
+			err = nil
+			writs, err = DB.CreateCollection(nil, "writs", &driver.CreateCollectionOptions{})
+		}
+
+		if err != nil {
+			fmt.Println("Could not get writs collection from db:", err)
+			return err
+		}
 	}
 	Writs = writs
+
+	logs, err := DB.Collection(nil, "logs")
+	if err != nil {
+		if driver.IsArangoErrorWithCode(err, 1203) || err.Error() == "collection not found" {
+			err = nil
+			logs, err = DB.CreateCollection(nil, "logs", &driver.CreateCollectionOptions{})
+		}
+
+		if err != nil {
+			fmt.Println("Could not get logs collection from db:", err)
+			return err
+		}
+	}
+	Logs = logs
 
 	_, _, err = Users.EnsureHashIndex(
 		nil,
@@ -148,7 +181,7 @@ func dbdiedEmergencyEmail(msg string, die bool) {
 }
 
 func startDBHealthCheck() {
-	DBHealthTicker = time.NewTicker(20 * time.Second)
+	DBHealthTicker = time.NewTicker(15 * time.Second)
 	go func() {
 		for range DBHealthTicker.C {
 			for _, endpoint := range dbendpoints {
@@ -173,6 +206,21 @@ func startDBHealthCheck() {
 						dbdiedEmergencyEmail("it seems the DB is remote, only you can save us now!", true)
 					}
 				}
+			}
+
+			if len(LogQ) > 0 {
+				_, errs, err := Logs.CreateDocuments(nil, LogQ)
+				if err != nil {
+					fmt.Println("log caching: db had trouble storing the current LogQ - ", err)
+				}
+				if len(errs) > 0 {
+					for _, err := range errs {
+						if err != nil {
+							fmt.Println("log caching error: ", err)
+						}
+					}
+				}
+				LogQ = []obj{}
 			}
 		}
 	}()

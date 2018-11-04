@@ -50,6 +50,8 @@ var (
 	AppLocation string
 	// StartupDate when the app started running
 	StartupDate time.Time
+	// LogQ server logging 
+	LogQ = []obj{}
 )
 
 // Init start the backend server
@@ -174,6 +176,53 @@ func Init() {
 	air.TheServer.InterceptHandler = func(h http.Handler) http.Handler {
 		return httpRateLimiter.RateLimit(h)
 	}
+
+	air.Gases = append(air.Gases, func(next air.Handler) air.Handler {
+		return func(req *air.Request, res *air.Response) error {
+			startTime := time.Now()
+			err := next(req, res)
+			endTime := time.Now()
+
+			latency := endTime.Sub(startTime)
+			extras := obj{
+				"method":         req.Method,
+				"status":         res.Status,
+				"path":           req.Path,
+				"remote_address": req.RemoteAddress,
+				"client_address": req.ClientAddress,
+				"start_time":     startTime.UnixNano(),
+				"end_time":       endTime.UnixNano(),
+				"latency":        latency,
+				"bytes_out":      res.ContentLength,
+			}
+			
+			if req.ContentLength != 0 {
+				extras["bytes_in"] = req.ContentLength
+			}
+
+			if err != nil {
+				extras["error"] = err.Error()
+			}
+
+			LogQ = append(LogQ, extras)
+
+			if DevMode {
+				fmt.Printf(
+					"\n%s | %d: | ms: %g | %s, client - %s",
+					req.Method,
+					res.Status,
+					float64(latency)/ float64(time.Millisecond),
+					req.Path,
+					req.ClientAddress,
+				)
+				if err != nil {
+					fmt.Println("err: ", err)
+				}
+			}
+
+			return err
+		}
+	})
 
 	go func() {
 		time.Sleep(2 * time.Second)
