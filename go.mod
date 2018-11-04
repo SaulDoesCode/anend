@@ -1,4 +1,4 @@
-module github.com/SaulDoesCode/saul.app
+module github.com/SaulDoesCode/anend
 
 require (
 	github.com/CrowdSurge/banner v0.0.0-20140923200336-8c0e79dc5ff7
