@@ -183,17 +183,21 @@ func Init() {
 			err := next(req, res)
 			endTime := time.Now()
 
-			latency := endTime.Sub(startTime)
+			latency := float64(endTime.Sub(startTime)) / float64(time.Millisecond)
 			extras := obj{
-				"method":         req.Method,
-				"status":         res.Status,
-				"path":           req.Path,
-				"remote_address": req.RemoteAddress,
-				"client_address": req.ClientAddress,
-				"start_time":     startTime.UnixNano(),
-				"end_time":       endTime.UnixNano(),
-				"latency":        latency,
-				"bytes_out":      res.ContentLength,
+				"method":       req.Method,
+				"status":       res.Status,
+				"latency":      latency,
+				"path":         req.Path,
+				"client": 			req.ClientAddress,
+				"start":     		startTime,
+				"end":       		endTime,
+				"bytes_out":    res.ContentLength,
+				"devmode": 			DevMode,
+			}
+
+			if req.ClientAddress != req.RemoteAddress {
+				extras["remote_client"] = req.RemoteAddress
 			}
 			
 			if req.ContentLength != 0 {
@@ -211,7 +215,7 @@ func Init() {
 					"\n%s | %d: | ms: %g | %s, client - %s",
 					req.Method,
 					res.Status,
-					float64(latency)/ float64(time.Millisecond),
+					latency,
 					req.Path,
 					req.ClientAddress,
 				)
