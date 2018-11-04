@@ -15,6 +15,8 @@ github.com/SaulDoesCode/air v0.0.0-20181104151653-9081126e90e9 h1:+OI/1xdpx7rQZA
 github.com/SaulDoesCode/air v0.0.0-20181104151653-9081126e90e9/go.mod h1:Cl+iUCHDfiUPSjGeK3F9xUgM45ct1CY5aP3uCuL77ys=
 github.com/SaulDoesCode/air v0.0.0-20181104160344-c21617ff3238 h1:SOzazS/sXyDs15a39OwsBYzHtX47CZftVhXKiTJ4UsQ=
 github.com/SaulDoesCode/air v0.0.0-20181104160344-c21617ff3238/go.mod h1:Cl+iUCHDfiUPSjGeK3F9xUgM45ct1CY5aP3uCuL77ys=
+github.com/SaulDoesCode/air v0.0.0-20181104175803-47708f10dd33 h1:fY193GCQsvRo8RL9EtxqdwGHDDIm5imXkZgMd2Xiq7I=
+github.com/SaulDoesCode/air v0.0.0-20181104175803-47708f10dd33/go.mod h1:Cl+iUCHDfiUPSjGeK3F9xUgM45ct1CY5aP3uCuL77ys=
 github.com/SaulDoesCode/mailyak v0.0.0-20181018150953-d080bea9f965 h1:5voFulayXOi8VfjPxxgMBLOeLceLTn2ANbsrzNzCRBM=
 github.com/SaulDoesCode/mailyak v0.0.0-20181018150953-d080bea9f965/go.mod h1:dJKpmWvdHaLWYNVTK/7dV0q8YVIQyJRAw5Tvtftl26w=
 github.com/arangodb/go-driver v0.0.0-20181029154412-d60f4a8520d3 h1:xJIAsR7WlIqIT+J4vdyDdjqmtduDqzH6sUFTuiQyqHY=

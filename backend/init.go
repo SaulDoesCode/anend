@@ -13,7 +13,6 @@ import (
 
 	"github.com/throttled/throttled"
 	"github.com/throttled/throttled/store/memstore"
-	"github.com/NYTimes/gziphandler"
 	"github.com/CrowdSurge/banner"
 	"github.com/logrusorgru/aurora"
 	"github.com/SaulDoesCode/air"
@@ -173,7 +172,7 @@ func Init() {
 	}
 	
 	air.TheServer.InterceptHandler = func(h http.Handler) http.Handler {
-		return httpRateLimiter.RateLimit(gziphandler.MustNewGzipLevelHandler(9)(h))
+		return httpRateLimiter.RateLimit(h)
 	}
 
 	go func() {
