@@ -4,18 +4,18 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
-	"net/http"
 	"time"
 
+	"github.com/CrowdSurge/banner"
+	"github.com/SaulDoesCode/air"
+	"github.com/logrusorgru/aurora"
 	"github.com/throttled/throttled"
 	"github.com/throttled/throttled/store/memstore"
-	"github.com/CrowdSurge/banner"
-	"github.com/logrusorgru/aurora"
-	"github.com/SaulDoesCode/air"
 )
 
 type obj = map[string]interface{}
@@ -50,8 +50,8 @@ var (
 	AppLocation string
 	// StartupDate when the app started running
 	StartupDate time.Time
-	// LogQ server logging 
-	LogQ = []obj{}
+	// LogQ server logging
+	LogQ = []LogEntry{}
 )
 
 // Init start the backend server
@@ -70,12 +70,18 @@ func Init() {
 	}
 
 	DevMode = air.DebugMode
-	
+
 	AppName = air.Config["app_name"].(string)
 	AppDomain = air.Config["domain"].(string)
 
 	AssetsFolder = air.AssetRoot
-	air.STATIC("/", air.AssetRoot)
+	air.STATIC("/", air.AssetRoot, func(next air.Handler) air.Handler {
+		return func(req *air.Request, res *air.Response) error {
+			res.SetHeader("cache-control", "private, must-revalidate")
+			return next(req, res)
+		}
+	})
+
 	air.FILE("/", "./assets/index.html")
 
 	if air.MaintainerEmail != "" {
@@ -108,7 +114,7 @@ func Init() {
 	dbobj := air.Config["db"].(obj)
 
 	addrs := interfaceSliceToStringSlice(dbobj["local_address"].([]interface{}))
-	
+
 	dbname := dbobj["name"].(string)
 	dbusername := dbobj["username"].(string)
 	dbpassword := dbobj["password"].(string)
@@ -148,7 +154,7 @@ func Init() {
 	secretsObj := air.Config["secrets"].(obj)
 	tokenSecret := secretsObj["token"].(string)
 	verifierSecret := secretsObj["verifier"].(string)
-	
+
 	Tokenator = NewBranca(tokenSecret)
 	Tokenator.SetTTL(86400 * 7)
 	Verinator = NewBranca(verifierSecret)
@@ -162,7 +168,7 @@ func Init() {
 		log.Fatal(err)
 	}
 
-	quota := throttled.RateQuota{MaxRate: throttled.PerMin(10), MaxBurst: 4}	
+	quota := throttled.RateQuota{MaxRate: throttled.PerMin(10), MaxBurst: 4}
 	rateLimiter, err := throttled.NewGCRARateLimiter(store, quota)
 	if err != nil {
 		log.Fatal(err)
@@ -172,7 +178,7 @@ func Init() {
 		RateLimiter: rateLimiter,
 		VaryBy:      &throttled.VaryBy{Path: true},
 	}
-	
+
 	air.TheServer.InterceptHandler = func(h http.Handler) http.Handler {
 		return httpRateLimiter.RateLimit(h)
 	}
@@ -184,43 +190,52 @@ func Init() {
 			endTime := time.Now()
 
 			latency := float64(endTime.Sub(startTime)) / float64(time.Millisecond)
-			extras := obj{
-				"method":       req.Method,
-				"status":       res.Status,
-				"latency":      latency,
-				"path":         req.Path,
-				"client": 			req.ClientAddress,
-				"start":     		startTime,
-				"end":       		endTime,
-				"bytes_out":    res.ContentLength,
-				"devmode": 			DevMode,
+			entry := LogEntry{
+				Method: req.Method,
+				Code: res.Status,
+				Latency: latency,
+				Path: req.Path,
+				Client: req.ClientAddress,
+				Start: startTime,
+				End: endTime,
+				BytesOut: res.ContentLength,
+				DevMode: DevMode,
 			}
 
 			if req.ClientAddress != req.RemoteAddress {
-				extras["remote_client"] = req.RemoteAddress
+				entry.Remote = req.RemoteAddress
 			}
-			
+
 			if req.ContentLength != 0 {
-				extras["bytes_in"] = req.ContentLength
+				entry.BytesIn = req.ContentLength
 			}
 
 			if err != nil {
-				extras["error"] = err.Error()
+				entry.Err = err.Error()
 			}
 
-			LogQ = append(LogQ, extras)
+			LogQ = append(LogQ, entry)
 
 			if DevMode {
-				fmt.Printf(
-					"\n%s | %d: | ms: %g | %s, client - %s",
-					req.Method,
-					res.Status,
-					latency,
-					req.Path,
-					req.ClientAddress,
-				)
 				if err != nil {
-					fmt.Println("err: ", err)
+					fmt.Printf(
+						"%s:%d %s %gms | client: %s | err: %s\n",
+						req.Method,
+						res.Status,
+						req.Path,
+						latency,
+						req.ClientAddress,
+						err.Error(),
+					)
+				} else {
+					fmt.Printf(
+						"%s:%d %s %gms | client: %s\n",
+						req.Method,
+						res.Status,
+						req.Path,
+						latency,
+						req.ClientAddress,
+					)
 				}
 			}
 
@@ -230,12 +245,13 @@ func Init() {
 
 	go func() {
 		time.Sleep(2 * time.Second)
-		fmt.Println("\n", aurora.Green("-------------------------"))
+		fmt.Printf("\n")
+		fmt.Println(aurora.Green("-------------------------"))
 		fmt.Println(aurora.Bold(aurora.Magenta(banner.PrintS(AppName))))
 		fmt.Println(aurora.Green("-------------------------"))
+		fmt.Printf("\n")
 	}()
 
-	
 	err = air.Serve()
 	if err != nil {
 		if time.Since(StartupDate) < time.Second*60 {
@@ -244,4 +260,20 @@ func Init() {
 			fmt.Println(aurora.Red("the server is shutting down now, it's been real: "), err)
 		}
 	}
+}
+
+// LogEntry is a struct containing request logging info
+type LogEntry struct {
+	Method string `json:"method,omitempty"`
+	Path string `json:"path,omitempty"`
+	Client string `json:"client,omitempty"`
+	Remote string `json:"remote,omitempty"`
+	Code int `json:"code,omitempty"`
+	Latency float64 `json:"latency,omitempty"`
+	Start time.Time `json:"start,omitempty"`
+	End time.Time `json:"end,omitempty"`
+	BytesOut int64 `json:"bytesOut,omitempty"`
+	BytesIn int64 `json:"bytesIn,omitempty"`
+	DevMode bool `json:"devmode,omitempty"`
+	Err string `json:"err,omitempty"`
 }
