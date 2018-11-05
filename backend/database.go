@@ -61,8 +61,25 @@ func setupDB(endpoints []string, dbname, username, password string) error {
 
 	db, err := client.Database(nil, dbname)
 	if err != nil {
-		fmt.Println("Could not get database object:")
-		return err
+		olderr := err
+		err = nil
+		db, err = client.CreateDatabase(nil, "app", &driver.CreateDatabaseOptions{
+			Users: []driver.CreateDatabaseUserOptions{
+				driver.CreateDatabaseUserOptions{
+					UserName: "root",
+					Password: password,
+				},
+			},
+		})
+
+		if err != nil {
+			if strings.Contains(err.Error(), "credentials") {
+				fmt.Println("db credentials error: ", username, password)
+				return err
+			}
+			fmt.Println("Could not get database object:", err, olderr)
+			return err
+		}
 	}
 
 	DB = db
@@ -140,8 +157,15 @@ func setupDB(endpoints []string, dbname, username, password string) error {
 
 	ratelimits, err := DB.Collection(nil, "ratelimits")
 	if err != nil {
-		fmt.Println("Could not get ratelimiting collection from db:")
-		return err
+		if strings.Contains(err.Error(), "not found") {
+			err = nil
+			logs, err = DB.CreateCollection(nil, "ratelimits", &driver.CreateCollectionOptions{})
+		}
+
+		if err != nil {
+			fmt.Println("Could not get ratelimiting collection from db:", err)
+			return err
+		}
 	}
 	RateLimits = ratelimits
 
@@ -221,7 +245,7 @@ func startDBHealthCheck() {
 						}
 					}
 				}
-				LogQ = []obj{}
+				LogQ = []LogEntry{}
 			}
 		}
 	}()
