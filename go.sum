@@ -6,6 +6,8 @@ github.com/Machiel/slugify v1.0.1 h1:EfWSlRWstMadsgzmiV7d0yVd2IFlagWH68Q+DcYCm4E
 github.com/Machiel/slugify v1.0.1/go.mod h1:fTFGn5uWEynW4CUMG7sWkYXOf1UgDxyTM3DbR6Qfg3k=
 github.com/SaulDoesCode/air v0.0.0-20181104181117-fac0d21a44ca h1:dzdlLCDFFPOVBwnwnuZS6Ol5E55a8++3lX1N9j7ez6Y=
 github.com/SaulDoesCode/air v0.0.0-20181104181117-fac0d21a44ca/go.mod h1:Cl+iUCHDfiUPSjGeK3F9xUgM45ct1CY5aP3uCuL77ys=
+github.com/SaulDoesCode/air v0.0.0-20181105122130-11f4841dbf8d h1:NhIl1JJr3/9osR/MS8hb8vKhe4yEuqDsoGPY3x5+URE=
+github.com/SaulDoesCode/air v0.0.0-20181105122130-11f4841dbf8d/go.mod h1:Cl+iUCHDfiUPSjGeK3F9xUgM45ct1CY5aP3uCuL77ys=
 github.com/SaulDoesCode/mailyak v0.0.0-20181018150953-d080bea9f965 h1:5voFulayXOi8VfjPxxgMBLOeLceLTn2ANbsrzNzCRBM=
 github.com/SaulDoesCode/mailyak v0.0.0-20181018150953-d080bea9f965/go.mod h1:dJKpmWvdHaLWYNVTK/7dV0q8YVIQyJRAw5Tvtftl26w=
 github.com/arangodb/go-driver v0.0.0-20181029154412-d60f4a8520d3 h1:xJIAsR7WlIqIT+J4vdyDdjqmtduDqzH6sUFTuiQyqHY=
