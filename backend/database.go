@@ -68,7 +68,7 @@ func setupDB(endpoints []string, dbname, username, password string) error {
 
 	users, err := DB.Collection(nil, "users")
 	if err != nil {
-		if driver.IsArangoErrorWithCode(err, 1203) || err.Error() == "collection not found" {
+		if driver.IsArangoErrorWithCode(err, 1203) || err.Error() == "collection or view not found" || err.Error() == "collection not found" {
 			err = nil
 			users, err = DB.CreateCollection(nil, "users", &driver.CreateCollectionOptions{
 				WaitForSync: true,
@@ -84,7 +84,7 @@ func setupDB(endpoints []string, dbname, username, password string) error {
 
 	writs, err := DB.Collection(nil, "writs")
 	if err != nil {
-		if driver.IsArangoErrorWithCode(err, 1203) || err.Error() == "collection not found" {
+		if driver.IsArangoErrorWithCode(err, 1203) || err.Error() == "collection or view not found" || err.Error() == "collection not found" {
 			err = nil
 			writs, err = DB.CreateCollection(nil, "writs", &driver.CreateCollectionOptions{})
 		}
@@ -98,7 +98,7 @@ func setupDB(endpoints []string, dbname, username, password string) error {
 
 	logs, err := DB.Collection(nil, "logs")
 	if err != nil {
-		if driver.IsArangoErrorWithCode(err, 1203) || err.Error() == "collection not found" {
+		if driver.IsArangoErrorWithCode(err, 1203) || err.Error() == "collection or view not found" || err.Error() == "collection not found" {
 			err = nil
 			logs, err = DB.CreateCollection(nil, "logs", &driver.CreateCollectionOptions{})
 		}
