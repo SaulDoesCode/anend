@@ -1,7 +1,7 @@
 package backend
 
 import (
-	"github.com/SaulDoesCode/air"
+	"github.com/aofei/air"
 )
 
 func initAdmin() {
