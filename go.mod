@@ -5,10 +5,12 @@ require (
 	github.com/Machiel/slugify v1.0.1
 	github.com/SaulDoesCode/air v0.0.0-20181106082427-7a6af9e92fb2
 	github.com/SaulDoesCode/mailyak v0.0.0-20181018150953-d080bea9f965
+	github.com/aofei/air v0.0.0-20181106144936-d487f8fac7a1
 	github.com/arangodb/go-driver v0.0.0-20181029154412-d60f4a8520d3
 	github.com/asaskevich/govalidator v0.0.0-20180720115003-f9ffefc3facf
 	github.com/driusan/dkim v0.0.0-20181021194700-dda260a68aa1
 	github.com/hashicorp/golang-lru v0.5.0 // indirect
+	github.com/integrii/flaggy v0.0.0-20181007032133-1056ce330646
 	github.com/kr/pty v1.1.3 // indirect
 	github.com/logrusorgru/aurora v0.0.0-20181002194514-a7b3b318ed4e
 	github.com/microcosm-cc/bluemonday v1.0.1

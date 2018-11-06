@@ -8,6 +8,8 @@ github.com/SaulDoesCode/air v0.0.0-20181106082427-7a6af9e92fb2 h1:9dYNKi3DB6D9Cz
 github.com/SaulDoesCode/air v0.0.0-20181106082427-7a6af9e92fb2/go.mod h1:jZO/wZlmqFfev8KAhpZ/VsV2KmbRvGzUIH++26nI8Ec=
 github.com/SaulDoesCode/mailyak v0.0.0-20181018150953-d080bea9f965 h1:5voFulayXOi8VfjPxxgMBLOeLceLTn2ANbsrzNzCRBM=
 github.com/SaulDoesCode/mailyak v0.0.0-20181018150953-d080bea9f965/go.mod h1:dJKpmWvdHaLWYNVTK/7dV0q8YVIQyJRAw5Tvtftl26w=
+github.com/aofei/air v0.0.0-20181106144936-d487f8fac7a1 h1:lH/4Jlmh+pHiJwK80xpKb/amFdvrkcH8G5IG+O9LAC8=
+github.com/aofei/air v0.0.0-20181106144936-d487f8fac7a1/go.mod h1:ZiW5mjXZwdWp48qWMwmbP5/wVM0VwHhgKNeJXJjPEgY=
 github.com/arangodb/go-driver v0.0.0-20181029154412-d60f4a8520d3 h1:xJIAsR7WlIqIT+J4vdyDdjqmtduDqzH6sUFTuiQyqHY=
 github.com/arangodb/go-driver v0.0.0-20181029154412-d60f4a8520d3/go.mod h1:NcDoR4f0FdFia/QizCc+B69DggPGLP3nCKg5IUtudm0=
 github.com/arangodb/go-velocypack v0.0.0-20180928134037-d177e3455691 h1:62SGGAvrKTXOrewra74du0H98Yg/eufQ/tO3RoIP8Bs=
@@ -71,6 +73,9 @@ golang.org/x/sync v0.0.0-20180314180146-1d60e4601c6f/go.mod h1:RxMgew5VJxzue5/jJ
 golang.org/x/sys v0.0.0-20181031143558-9b800f95dbbc/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
 golang.org/x/sys v0.0.0-20181106073832-7155702f2d47 h1:jpuvBuBQe3SontqHcH6FOLtHI+yUQ3d75Q9t38Bxp0w=
 golang.org/x/sys v0.0.0-20181106073832-7155702f2d47/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
+golang.org/x/sys v0.0.0-20181106135930-3a76605856fd h1:5lx5yH6109ClL0rlBzOj++ZkX/njUT+RVgTO2RMbmZo=
+golang.org/x/sys v0.0.0-20181106135930-3a76605856fd/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
+golang.org/x/text v0.3.0 h1:g61tztE5qeGQ89tm6NTjjM9VPIm088od1l6aSorWRWg=
 golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
 google.golang.org/appengine v1.3.0/go.mod h1:xpcJRLb0r/rnEns0DIKYYv+WjYCduHsrkT7/EB5XEv4=
 gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
