@@ -12,7 +12,8 @@ import (
 	"time"
 
 	"github.com/CrowdSurge/banner"
-	"github.com/SaulDoesCode/air"
+	"github.com/aofei/air"
+	"github.com/integrii/flaggy"
 	"github.com/logrusorgru/aurora"
 	"github.com/throttled/throttled"
 	"github.com/throttled/throttled/store/memstore"
@@ -68,8 +69,25 @@ func Init() {
 		(strings.Contains(AppLocation, "Temp") || strings.Contains(AppLocation, "temp")) {
 		fmt.Println("warning: self-management will not work with if you ran go run main.go")
 	}
+	
+	flaggy.Bool(&DevMode, "d", "dev", "launch app in devmode")
 
-	DevMode = air.DebugMode
+/*
+	var confloc string
+	flaggy.String(&confloc, "c", "conf", "set the configfile location")
+
+	if confloc == "" {
+		confloc = "./private/config.toml"
+	}
+*/
+
+	flaggy.Parse()
+	if !air.DebugMode && DevMode {
+			air.DebugMode = DevMode
+	} else {
+			DevMode = air.DebugMode
+	}
+
 
 	AppName = air.Config["app_name"].(string)
 	AppDomain = air.Config["domain"].(string)
@@ -179,69 +197,81 @@ func Init() {
 		VaryBy:      &throttled.VaryBy{Path: true},
 	}
 
-	air.TheServer.InterceptHandler = func(h http.Handler) http.Handler {
-		return httpRateLimiter.RateLimit(h)
-	}
+	air.Pregases = append(air.Pregases,
+		air.WrapHTTPMiddleware(func(h http.Handler) http.Handler {
+			return httpRateLimiter.RateLimit(h)
+		}),
+		func(next air.Handler) air.Handler {
+			return func(req *air.Request, res *air.Response) error {
+				startTime := time.Now()
+				err := next(req, res)
+				endTime := time.Now()
 
-	air.Gases = append(air.Gases, func(next air.Handler) air.Handler {
-		return func(req *air.Request, res *air.Response) error {
-			startTime := time.Now()
-			err := next(req, res)
-			endTime := time.Now()
-
-			latency := float64(endTime.Sub(startTime)) / float64(time.Millisecond)
-			entry := LogEntry{
-				Method: req.Method,
-				Code: res.Status,
-				Latency: latency,
-				Path: req.Path,
-				Client: req.ClientAddress,
-				Start: startTime,
-				End: endTime,
-				BytesOut: res.ContentLength,
-				DevMode: DevMode,
-			}
-
-			if req.ClientAddress != req.RemoteAddress {
-				entry.Remote = req.RemoteAddress
-			}
-
-			if req.ContentLength != 0 {
-				entry.BytesIn = req.ContentLength
-			}
-
-			if err != nil {
-				entry.Err = err.Error()
-			}
-
-			LogQ = append(LogQ, entry)
-
-			if DevMode {
-				if err != nil {
-					fmt.Printf(
-						"%s:%d %s %gms | client: %s | err: %s\n",
-						req.Method,
-						res.Status,
-						req.Path,
-						latency,
-						req.ClientAddress,
-						err.Error(),
-					)
-				} else {
-					fmt.Printf(
-						"%s:%d %s %gms | client: %s\n",
-						req.Method,
-						res.Status,
-						req.Path,
-						latency,
-						req.ClientAddress,
-					)
+				latency := float64(endTime.Sub(startTime)) / float64(time.Millisecond)
+				entry := LogEntry{
+					Method: req.Method,
+					Code: res.Status,
+					Latency: latency,
+					Path: req.Path,
+					Client: req.ClientAddress(),
+					Start: startTime,
+					End: endTime,
+					BytesOut: res.ContentLength,
+					DevMode: DevMode,
 				}
-			}
 
-			return err
-		}
-	})
+				remote := req.RemoteAddress()
+				if entry.Client != remote {
+					entry.Remote = remote
+				}
+
+				if req.ContentLength != 0 {
+					entry.BytesIn = req.ContentLength
+				}
+
+				if err != nil {
+					entry.Err = err.Error()
+				}
+
+				LogQ = append(LogQ, entry)
+
+				if DevMode {
+
+					authpath := strings.Contains(req.Path, "auth")
+					if authpath {
+						fmt.Println("\n\tAuth Path:\n\n\t")
+					}
+
+					if err != nil {
+						fmt.Printf(
+							"%s:%d %s %gms | client: %s | err: %s\n",
+							req.Method,
+							res.Status,
+							req.Path,
+							latency,
+							entry.Client,
+							err.Error(),
+						)
+					} else {
+						fmt.Printf(
+							"%s:%d %s %gms | client: %s\n",
+							req.Method,
+							res.Status,
+							req.Path,
+							latency,
+							entry.Client,
+						)
+					}
+
+					if strings.Contains(req.Path, "auth") {
+						fmt.Println("\n\t:Auth Path End\n\t")
+					}
+				}
+
+				return err
+			}
+	},
+)
 
 	go func() {
 		time.Sleep(2 * time.Second)

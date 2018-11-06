@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/SaulDoesCode/air"
+	"github.com/aofei/air"
 	"github.com/arangodb/go-driver"
 )
 
@@ -376,15 +376,15 @@ func ValidateAuthToken(token string) (User, bool) {
 
 // CredentialCheck get an authorized user from a route handler's context
 func CredentialCheck(req *air.Request, res *air.Response) (*User, error) {
-	cookie, ok := req.Cookie("Auth")
-	if !ok || len(cookie) < 5 {
+	cookie := req.Cookie("Auth")
+	if cookie == nil || len(cookie.Value) > 5 {
 		if DevMode {
 			fmt.Println("CredentialCheck cookie troubles: it's either missing or malformed")
 		}
 		return nil, ErrUnauthorized
 	}
 
-	tk, err := Tokenator.Decode(cookie)
+	tk, err := Tokenator.Decode(cookie.Value)
 	if err != nil {
 		if DevMode {
 			fmt.Println("CredentialCheck Decoding - error: ", err)
@@ -405,7 +405,13 @@ func CredentialCheck(req *air.Request, res *air.Response) (*User, error) {
 
 		newtoken, err := GenerateAuthToken(&user, true)
 		if err == nil {
-			res.SetCookie("Auth", newtoken, 60*60*24*7, "/", AppDomain, !DevMode, !DevMode)
+			res.SetCookie("Auth", &air.Cookie{
+				Value:    newtoken,
+				MaxAge:   60 * 60 * 24 * 7,
+				Path:     "/",
+				HTTPOnly: !DevMode,
+				Secure:   !DevMode,
+			})
 		} else {
 			if DevMode {
 				fmt.Println(`error Renewing Auth Token, it probably has something to do with the db`)
@@ -476,7 +482,9 @@ func initAuth() {
 	UnverifiedSubject = "Welcome to " + AppName
 
 	air.GET("/check-username/:username", func(req *air.Request, res *air.Response) error {
-		return res.WriteMsgPack(obj{"ok": IsUsernameAvailable(req.Param("username"))})
+		return res.WriteMsgpack(obj{
+			"ok": IsUsernameAvailable(req.Param("username").Value().String()),
+		})
 	})
 
 	air.POST("/auth", func(req *air.Request, res *air.Response) error {
@@ -520,12 +528,19 @@ func initAuth() {
 
 	air.GET("/auth-logout", func(req *air.Request, res *air.Response) error {
 		token := ""
-		cookie, ok := req.Cookie("Auth")
-		if ok {
-			token = cookie
+		cookie := req.Cookie("Auth")
+		if cookie == nil && cookie.Value != "" {
+			token = cookie.Value
 		}
 
-		res.SetCookie("Auth", "", 1, "/", AppDomain, true, true)
+		res.SetCookie("Auth", &air.Cookie{
+			Value:    "",
+			Path:     "/",
+			MaxAge:   2,
+			Domain:   AppDomain,
+			HTTPOnly: true,
+			Secure:   true,
+		})
 
 		if len(token) > 0 {
 			go func() {
@@ -549,7 +564,10 @@ func initAuth() {
 	})
 
 	air.GET("/auth/:verifier", func(req *air.Request, res *air.Response) error {
-		user, err := VerifyUser(req.Param("verifier"))
+		if DevMode {
+			fmt.Println("Auth Attempt - now trying this token: ", req.Param("verifier").Value().String())
+		}
+		user, err := VerifyUser(req.Param("verifier").Value().String())
 		if err != nil || user == nil {
 			if DevMode {
 				fmt.Println("Unable to Authenticate user: ", err)
@@ -559,7 +577,19 @@ func initAuth() {
 
 		newtoken, err := GenerateAuthToken(user, false)
 		if err == nil {
-			res.SetCookie("Auth", newtoken, 60*60*24*7, "/", AppDomain, !DevMode, !DevMode)
+			cookie := &air.Cookie{
+				Value:    newtoken,
+				Path:     "/",
+				MaxAge:   60 * 60 * 24 * 7,
+				HTTPOnly: !DevMode,
+				Secure:   !DevMode,
+			}
+
+			if !DevMode {
+				cookie.Domain = AppDomain
+			}
+
+			res.SetCookie("Auth", cookie)
 		} else {
 			if DevMode {
 				fmt.Println("error verifying (email) the user, GenerateAuthToken db problem: ", err)
