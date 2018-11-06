@@ -21,7 +21,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/SaulDoesCode/air"
+	"github.com/aofei/air"
 	"github.com/asaskevich/govalidator"
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/russross/blackfriday/v2"

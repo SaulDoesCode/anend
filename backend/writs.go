@@ -3,11 +3,10 @@ package backend
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/Machiel/slugify"
-	"github.com/SaulDoesCode/air"
+	"github.com/aofei/air"
 	"github.com/arangodb/go-driver"
 )
 
@@ -666,7 +665,7 @@ func notifySubscribers(writKey string) {
 
 func initWrits() {
 	air.GET("/writ/:slug", func(req *air.Request, res *air.Response) error {
-		slug := req.Param("slug")
+		slug := req.Param("slug").Value().String()
 
 		wq := WritQuery{
 			UpdateViews: true,
@@ -686,7 +685,7 @@ func initWrits() {
 		if driver.IsNotFound(err) {
 			wq.Slug = ""
 			// incase the slug/title changed but the key stayed the same
-			key := req.Query("writ")
+			key := req.Param("writ").Value().String()
 			if len(key) < 2 {
 				return NoSuchWrit.Send(res)
 			}
@@ -713,7 +712,7 @@ func initWrits() {
 		writdata["URL"] = writ.GetLink()
 
 		res.SetHeader("content-type", "text/html")
-		err = PostTemplate.Execute(res.Writer, &writdata)
+		err = PostTemplate.Execute(res.Body, &writdata)
 		if err != nil {
 			if DevMode {
 				fmt.Println("GET /writ/:slug - error executing the post template: ", err)
@@ -723,7 +722,7 @@ func initWrits() {
 	})
 
 	air.GET("/like-writ/:slug", AuthHandle(func(req *air.Request, res *air.Response, user *User) error {
-		slug := req.Param("slug")
+		slug := req.Param("slug").Value().String()
 		if len(slug) < 1 {
 			return BadRequestError.Send(res)
 		}
@@ -745,20 +744,20 @@ func initWrits() {
 				"msg": err.Error(),
 			})
 		}
-		return res.WriteMsgPack(obj{"msg": "success, writ liked!"})
+		return res.WriteMsgpack(obj{"msg": "success, writ liked!"})
 	}))
 
 	air.GET("/writs-by-tag/:tag/:page/:count", func(req *air.Request, res *air.Response) error {
-		tag := req.Param("tag")
+		tag := req.Param("tag").Value().String()
 		if len(tag) < 1 {
 			return BadRequestError.Send(res)
 		}
 
-		page, err := strconv.ParseInt(req.Param("page"), 10, 64)
+		page, err := req.Param("page").Value().Int64()
 		if err != nil {
 			return BadRequestError.Send(res)
 		}
-		count, err := strconv.ParseInt(req.Param("count"), 10, 64)
+		count, err := req.Param("count").Value().Int64()
 		if err != nil {
 			return BadRequestError.Send(res)
 		}
@@ -786,15 +785,15 @@ func initWrits() {
 		if err != nil {
 			return ServerDBError.Send(res)
 		}
-		return res.WriteMsgPack(writs)
+		return res.WriteMsgpack(writs)
 	})
 
 	air.GET("/writlist/:page/:count", func(req *air.Request, res *air.Response) error {
-		page, err := strconv.ParseInt(req.Param("page"), 10, 64)
+		page, err := req.Param("page").Value().Int64()
 		if err != nil {
 			return BadRequestError.Send(res)
 		}
-		count, err := strconv.ParseInt(req.Param("count"), 10, 64)
+		count, err := req.Param("count").Value().Int64()
 		if err != nil {
 			return BadRequestError.Send(res)
 		}
@@ -821,7 +820,7 @@ func initWrits() {
 		if err != nil {
 			return ServerDBError.Send(res)
 		}
-		return res.WriteMsgPack(writs)
+		return res.WriteMsgpack(writs)
 	})
 
 	air.POST("/writ", AdminHandle(func(req *air.Request, res *air.Response, user *User) error {
@@ -865,11 +864,11 @@ func initWrits() {
 		if err != nil {
 			return ServerDecodeError.Send(res)
 		}
-		return res.WriteMsgPack(output)
+		return res.WriteMsgpack(output)
 	}))
 
 	air.GET("/writ-delete/:key", AdminHandle(func(req *air.Request, res *air.Response, user *User) error {
-		key := req.Param("key")
+		key := req.Param("key").Value().String()
 		if len(key) < 1 {
 			return BadRequestError.Send(res)
 		}
@@ -879,7 +878,7 @@ func initWrits() {
 		if err != nil {
 			return DeleteWritError.Send(res)
 		}
-		return res.WriteMsgPack(obj{"msg": "writ deleted, it's gone"})
+		return res.WriteMsgpack(obj{"msg": "writ deleted, it's gone"})
 	}))
 
 	fmt.Println("Writ Service Started")
