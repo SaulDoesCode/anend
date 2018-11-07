@@ -233,12 +233,17 @@ func Init() {
 					entry.Err = err.Error()
 				}
 
-				LogQ = append(LogQ, entry)
-
 				if DevMode {
 
 					authpath := strings.Contains(req.Path, "auth")
 					if authpath {
+
+						headers := obj{}
+						for _, header := range req.Headers() {
+							headers[header.Name] = header.Value()
+						}
+						entry.Headers = headers
+
 						fmt.Println("\n\tAuth Path:\n\n\t")
 					}
 
@@ -267,6 +272,8 @@ func Init() {
 						fmt.Println("\n\t:Auth Path End\n\t")
 					}
 				}
+
+				LogQ = append(LogQ, entry)
 
 				return err
 			}
@@ -306,4 +313,5 @@ type LogEntry struct {
 	BytesIn int64 `json:"bytesIn,omitempty"`
 	DevMode bool `json:"devmode,omitempty"`
 	Err string `json:"err,omitempty"`
+	Headers obj `json:"headers,omitempty"`
 }

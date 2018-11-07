@@ -10,6 +10,8 @@ github.com/SaulDoesCode/mailyak v0.0.0-20181018150953-d080bea9f965 h1:5voFulayXO
 github.com/SaulDoesCode/mailyak v0.0.0-20181018150953-d080bea9f965/go.mod h1:dJKpmWvdHaLWYNVTK/7dV0q8YVIQyJRAw5Tvtftl26w=
 github.com/aofei/air v0.0.0-20181106144936-d487f8fac7a1 h1:lH/4Jlmh+pHiJwK80xpKb/amFdvrkcH8G5IG+O9LAC8=
 github.com/aofei/air v0.0.0-20181106144936-d487f8fac7a1/go.mod h1:ZiW5mjXZwdWp48qWMwmbP5/wVM0VwHhgKNeJXJjPEgY=
+github.com/aofei/air v0.0.0-20181107031106-d19103e75147 h1:WICWJ3UeS+OU3SpWBA1YYtsAOCJQLd9CrcoN+kx8p3w=
+github.com/aofei/air v0.0.0-20181107031106-d19103e75147/go.mod h1:4GKh47lT9HUm1wbJlUIIBPaMQxVka2ceDCOxa0SbiIM=
 github.com/arangodb/go-driver v0.0.0-20181029154412-d60f4a8520d3 h1:xJIAsR7WlIqIT+J4vdyDdjqmtduDqzH6sUFTuiQyqHY=
 github.com/arangodb/go-driver v0.0.0-20181029154412-d60f4a8520d3/go.mod h1:NcDoR4f0FdFia/QizCc+B69DggPGLP3nCKg5IUtudm0=
 github.com/arangodb/go-velocypack v0.0.0-20180928134037-d177e3455691 h1:62SGGAvrKTXOrewra74du0H98Yg/eufQ/tO3RoIP8Bs=
@@ -66,6 +68,8 @@ github.com/vmihailenco/msgpack v4.0.1+incompatible h1:RMF1enSPeKTlXrXdOcqjFUElyw
 github.com/vmihailenco/msgpack v4.0.1+incompatible/go.mod h1:fy3FlTQTDXWkZ7Bh6AcGMlsjHatGryHQYUTf1ShIgkk=
 golang.org/x/crypto v0.0.0-20181030102418-4d3f4d9ffa16 h1:y6ce7gCWtnH+m3dCjzQ1PCuwl28DDIc3VNnvY29DlIA=
 golang.org/x/crypto v0.0.0-20181030102418-4d3f4d9ffa16/go.mod h1:6SG95UA2DQfeDnfUPMdvaQW0Q7yPrPDi9nlGo2tz2b4=
+golang.org/x/crypto v0.0.0-20181106171534-e4dc69e5b2fd h1:VtIkGDhk0ph3t+THbvXHfMZ8QHgsBO39Nh52+74pq7w=
+golang.org/x/crypto v0.0.0-20181106171534-e4dc69e5b2fd/go.mod h1:6SG95UA2DQfeDnfUPMdvaQW0Q7yPrPDi9nlGo2tz2b4=
 golang.org/x/net v0.0.0-20180724234803-3673e40ba225/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
 golang.org/x/net v0.0.0-20181106065722-10aee1819953 h1:LuZIitY8waaxUfNIdtajyE/YzA/zyf0YxXG27VpLrkg=
 golang.org/x/net v0.0.0-20181106065722-10aee1819953/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
