@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"runtime"
 	"time"
-
-	"github.com/aofei/air"
 )
 
 func buildReplacement() error {
@@ -17,7 +15,7 @@ func replaceSelf() (error, error) {
 	if err != nil {
 		fmt.Println("could not build replacement, will run same old executable")
 	}
-	go air.Shutdown(5 * time.Second)
+	go Mak.TimelyStop(5*time.Second, nil)
 
 	return exeC(`nohup bash -c "(sleep 7 && cd ` + AppLocation + ` && sudo ./main) &" &`), err
 }
@@ -30,7 +28,7 @@ func startSelfManaging() {
 		return
 	}
 
-	air.GET("/_updateapp", AdminHandle(func(req *air.Request, res *air.Response, user *User) error {
+	Mak.GET("/_updateapp", AdminHandle(func(c ctx, user *User) error {
 		restartErr, rebuildErr := replaceSelf()
 
 		couldbuild := `<br>the rebuild went fine`
@@ -39,7 +37,7 @@ func startSelfManaging() {
 		}
 
 		if restartErr != nil {
-			return SendHTML(res, 503, `
+			return SendHTML(c, 503, `
 				<h3>it seems the update command has failed, you'll have to update manually</h3>
 				<time>`+time.Now().Format(time.RFC822)+`</time>
 				<p>the admin `+user.Username+` is responsible.</p>
@@ -48,7 +46,7 @@ func startSelfManaging() {
 			`)
 		}
 
-		return SendHTML(res, 200, `
+		return SendHTML(c, 200, `
 			<h3>attempting server update... see you soon.. or not."</h3>
 			<time>`+time.Now().Format(time.RFC822)+`</time>
 			<p>the admin `+user.Username+` is responsible.</p>

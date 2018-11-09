@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/aofei/air"
+	"github.com/SaulDoesCode/mak"
 	"github.com/arangodb/go-driver"
 )
 
@@ -230,7 +230,7 @@ func AuthenticateUser(email, username string) (User, error) {
 
 	link := "https://" + AppDomain + "/auth/" + user.Verifier
 	if DevMode {
-		link = "https://localhost:" + "/auth/" + user.Verifier
+		link = "https://" + AppDomain + Mak.RawConfig["address"].(string) + "/auth/" + user.Verifier
 	}
 
 	vars := obj{
@@ -375,16 +375,16 @@ func ValidateAuthToken(token string) (User, bool) {
 }
 
 // CredentialCheck get an authorized user from a route handler's context
-func CredentialCheck(req *air.Request, res *air.Response) (*User, error) {
-	cookie := req.Cookie("Auth")
-	if cookie == nil || len(cookie.Value) > 5 {
+func CredentialCheck(c ctx) (*User, error) {
+	cookie := c.Cookie("Auth")
+	if len(cookie) < 5 {
 		if DevMode {
 			fmt.Println("CredentialCheck cookie troubles: it's either missing or malformed")
 		}
 		return nil, ErrUnauthorized
 	}
 
-	tk, err := Tokenator.Decode(cookie.Value)
+	tk, err := Tokenator.Decode(cookie)
 	if err != nil {
 		if DevMode {
 			fmt.Println("CredentialCheck Decoding - error: ", err)
@@ -405,11 +405,12 @@ func CredentialCheck(req *air.Request, res *air.Response) (*User, error) {
 
 		newtoken, err := GenerateAuthToken(&user, true)
 		if err == nil {
-			res.SetCookie("Auth", &air.Cookie{
+			c.SetCookie("Auth", &mak.Cookie{
 				Value:    newtoken,
 				MaxAge:   60 * 60 * 24 * 7,
+				Expires:  time.Now().Add(time.Hour * (24 * 7)),
 				Path:     "/",
-				HTTPOnly: !DevMode,
+				HttpOnly: !DevMode,
 				Secure:   !DevMode,
 			})
 		} else {
@@ -423,36 +424,36 @@ func CredentialCheck(req *air.Request, res *air.Response) (*User, error) {
 }
 
 // AuthHandle create a GET route, accessible only to authenticated users
-func AuthHandle(handle func(*air.Request, *air.Response, *User) error) air.Handler {
-	return func(req *air.Request, res *air.Response) error {
-		user, err := CredentialCheck(req, res)
+func AuthHandle(handle func(ctx, *User) error) mak.Handler {
+	return func(c ctx) error {
+		user, err := CredentialCheck(c)
 		if err != nil || user == nil {
-			return UnauthorizedError.Send(res)
+			return UnauthorizedError.Send(c)
 		}
-		return handle(req, res, user)
+		return handle(c, user)
 	}
 }
 
 // AdminHandle create a GET route, accessible only to admin users
-func AdminHandle(handle func(*air.Request, *air.Response, *User) error) air.Handler {
-	return func(req *air.Request, res *air.Response) error {
-		user, err := CredentialCheck(req, res)
+func AdminHandle(handle func(ctx, *User) error) mak.Handler {
+	return func(c ctx) error {
+		user, err := CredentialCheck(c)
 		if err != nil || user == nil || !user.isAdmin() {
 			if DevMode {
 				fmt.Println(`AdminHandle for didn't go through: `, err)
 			}
-			return UnauthorizedError.Send(res)
+			return UnauthorizedError.Send(c)
 		}
-		return handle(req, res, user)
+		return handle(c, user)
 	}
 }
 
 // RoleHandle create a GET route, accessible only to users with certain Roles
-func RoleHandle(roles []Role, handle func(*air.Request, *air.Response, *User) error) air.Handler {
-	return func(req *air.Request, res *air.Response) error {
-		user, err := CredentialCheck(req, res)
+func RoleHandle(roles []Role, handle func(ctx, *User) error) mak.Handler {
+	return func(c ctx) error {
+		user, err := CredentialCheck(c)
 		if err != nil {
-			return UnauthorizedError.Send(res)
+			return UnauthorizedError.Send(c)
 		}
 
 		milestones := 0
@@ -465,9 +466,9 @@ func RoleHandle(roles []Role, handle func(*air.Request, *air.Response, *User) er
 		}
 
 		if milestones == len(roles) {
-			return handle(req, res, user)
+			return handle(c, user)
 		}
-		return UnauthorizedError.Send(res)
+		return UnauthorizedError.Send(c)
 	}
 }
 
@@ -481,29 +482,29 @@ func initAuth() {
 	VerifiedSubject = "Login to " + AppName
 	UnverifiedSubject = "Welcome to " + AppName
 
-	air.GET("/check-username/:username", func(req *air.Request, res *air.Response) error {
-		return res.WriteMsgpack(obj{
-			"ok": IsUsernameAvailable(req.Param("username").Value().String()),
+	Mak.GET("/check-username/:username", func(c ctx) error {
+		return c.WriteMsgpack(obj{
+			"ok": IsUsernameAvailable(c.Param("username").Value().String()),
 		})
 	})
 
-	air.POST("/auth", func(req *air.Request, res *air.Response) error {
-		if _, err := CredentialCheck(req, res); err == nil {
-			return AlreadyLoggedIn.Send(res)
+	Mak.POST("/auth", func(c ctx) error {
+		if _, err := CredentialCheck(c); err == nil {
+			return AlreadyLoggedIn.Send(c)
 		}
 
 		var authreq AuthRequest
-		err := req.Bind(&authreq)
+		err := c.Bind(&authreq)
 		if err != nil {
-			return BadRequestError.Send(res)
+			return BadRequestError.Send(c)
 		}
 
 		if !validEmail(authreq.Email) {
-			return BadEmailError.Send(res)
+			return BadEmailError.Send(c)
 		}
 
 		if !validUsername(authreq.Username) {
-			return BadUsernameError.Send(res)
+			return BadUsernameError.Send(c)
 		}
 
 		email := authreq.Email
@@ -511,7 +512,7 @@ func initAuth() {
 
 		user, err := AuthenticateUser(email, username)
 		if err == nil {
-			return SendMsgpack(res, 203, obj{
+			return SendMsgpack(c, 203, obj{
 				"msg": "Thanks" + user.Username + ", we sent you an authentication email.",
 				"ok":  true,
 			})
@@ -520,25 +521,22 @@ func initAuth() {
 		}
 
 		if err == ErrEmailRateLimit {
-			return RateLimitingError.Send(res)
+			return RateLimitingError.Send(c)
 		}
 
-		return UnauthorizedError.Send(res)
+		return UnauthorizedError.Send(c)
 	})
 
-	air.GET("/auth-logout", func(req *air.Request, res *air.Response) error {
-		token := ""
-		cookie := req.Cookie("Auth")
-		if cookie == nil && cookie.Value != "" {
-			token = cookie.Value
-		}
+	Mak.GET("/auth-logout", func(c ctx) error {
+		token := c.Cookie("Auth")
 
-		res.SetCookie("Auth", &air.Cookie{
+		c.SetCookie("Auth", &mak.Cookie{
 			Value:    "",
 			Path:     "/",
 			MaxAge:   2,
+			Expires:  time.Now().Add(time.Minute * 2),
 			Domain:   AppDomain,
-			HTTPOnly: true,
+			HttpOnly: true,
 			Secure:   true,
 		})
 
@@ -563,25 +561,26 @@ func initAuth() {
 		return nil
 	})
 
-	air.GET("/auth/:verifier", func(req *air.Request, res *air.Response) error {
+	Mak.GET("/auth/:verifier", func(c ctx) error {
 		if DevMode {
-			fmt.Println("Auth Attempt - now trying this token: ", req.Param("verifier").Value().String())
+			fmt.Println("Auth Attempt - now trying this token: ", c.Param("verifier").Value().String())
 		}
-		user, err := VerifyUser(req.Param("verifier").Value().String())
+		user, err := VerifyUser(c.Param("verifier").Value().String())
 		if err != nil || user == nil {
 			if DevMode {
 				fmt.Println("Unable to Authenticate user: ", err)
 			}
-			return UnauthorizedError.Send(res)
+			return UnauthorizedError.Send(c)
 		}
 
 		newtoken, err := GenerateAuthToken(user, false)
 		if err == nil {
-			cookie := &air.Cookie{
+			cookie := &mak.Cookie{
 				Value:    newtoken,
 				Path:     "/",
 				MaxAge:   60 * 60 * 24 * 7,
-				HTTPOnly: !DevMode,
+				Expires:  time.Now().Add(time.Hour * (24 * 7)),
+				HttpOnly: !DevMode,
 				Secure:   !DevMode,
 			}
 
@@ -589,7 +588,7 @@ func initAuth() {
 				cookie.Domain = AppDomain
 			}
 
-			res.SetCookie("Auth", cookie)
+			c.SetCookie("Auth", cookie)
 		} else {
 			if DevMode {
 				fmt.Println("error verifying (email) the user, GenerateAuthToken db problem: ", err)
@@ -597,12 +596,12 @@ func initAuth() {
 		}
 
 		if user.isAdmin() {
-			return res.Redirect("/admin")
+			return c.Redirect("/admin")
 		}
-		return res.Redirect("/")
+		return c.Redirect("/")
 	})
 
-	air.GET("/subscribe-toggle", AuthHandle(func(req *air.Request, res *air.Response, user *User) error {
+	Mak.GET("/subscribe-toggle", AuthHandle(func(c ctx, user *User) error {
 		err := user.Update("{subscriber: @subscriber}", obj{"subscriber": !user.Subscriber})
 		if err != nil {
 			mail := MakeEmail()
@@ -613,7 +612,7 @@ func initAuth() {
 				<p>err:<br>` + err.Error() + `</p>
 			`)
 			go SendEmail(mail)
-			return SendMsgpack(res, 203, obj{"msg": "something happened, don't worry, we'll figure it out", "ok": false})
+			return SendMsgpack(c, 203, obj{"msg": "something happened, don't worry, we'll figure it out", "ok": false})
 		}
 		msg := "success, you are "
 		if user.Subscriber {
@@ -621,7 +620,7 @@ func initAuth() {
 		} else {
 			msg += "unsubscribed and will no longer receive any (non auth related) emails from grimstack.io."
 		}
-		return SendMsgpack(res, 203, obj{"msg": msg, "ok": true})
+		return SendMsgpack(c, 203, obj{"msg": msg, "ok": true})
 	}))
 
 	fmt.Println("Authentication Services Started")

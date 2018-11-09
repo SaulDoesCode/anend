@@ -12,13 +12,14 @@ import (
 	"time"
 
 	"github.com/CrowdSurge/banner"
-	"github.com/aofei/air"
+	"github.com/SaulDoesCode/mak"
 	"github.com/integrii/flaggy"
 	"github.com/logrusorgru/aurora"
 	"github.com/throttled/throttled"
 	"github.com/throttled/throttled/store/memstore"
 )
 
+type ctx = *mak.Ctx
 type obj = map[string]interface{}
 
 const oneweek = 7 * 24 * time.Hour
@@ -45,14 +46,17 @@ var (
 	// MaintainerEmails the list of people to email if all hell breaks loose
 	MaintainerEmails []string
 	insecurePort     string
-	// AssetsFolder path to all the servable static assets
-	AssetsFolder string
+	// AssetsDir path to all the servable static assets
+	AssetsDir string
 	// AppLocation where this application lives, it's used for self management
 	AppLocation string
 	// StartupDate when the app started running
 	StartupDate time.Time
 	// LogQ server logging
 	LogQ = []LogEntry{}
+
+	// Mak App's mak instance
+	Mak *mak.Instance
 )
 
 // Init start the backend server
@@ -69,44 +73,35 @@ func Init() {
 		(strings.Contains(AppLocation, "Temp") || strings.Contains(AppLocation, "temp")) {
 		fmt.Println("warning: self-management will not work with if you ran go run main.go")
 	}
-	
+
 	flaggy.Bool(&DevMode, "d", "dev", "launch app in devmode")
 
-/*
 	var confloc string
 	flaggy.String(&confloc, "c", "conf", "set the configfile location")
 
 	if confloc == "" {
 		confloc = "./private/config.toml"
 	}
-*/
 
 	flaggy.Parse()
-	if !air.DebugMode && DevMode {
-			air.DebugMode = DevMode
-	} else {
-			DevMode = air.DebugMode
+
+	Mak = mak.MakeFromConf(confloc)
+
+	Mak.Config.DevMode = DevMode
+
+	AppName = Mak.Config.AppName
+	AppDomain = Mak.Config.Domain
+
+	AssetsDir = Mak.Config.Assets
+
+	if Mak.Config.MaintainerEmail != "" {
+		MaintainerEmails = append(MaintainerEmails, Mak.Config.MaintainerEmail)
 	}
 
+	fmt.Println("AppName: ", Mak.Config.AppName)
+	fmt.Println("Assets: ", AssetsDir)
 
-	AppName = air.Config["app_name"].(string)
-	AppDomain = air.Config["domain"].(string)
-
-	AssetsFolder = air.AssetRoot
-	air.STATIC("/", air.AssetRoot, func(next air.Handler) air.Handler {
-		return func(req *air.Request, res *air.Response) error {
-			res.SetHeader("cache-control", "private, must-revalidate")
-			return next(req, res)
-		}
-	})
-
-	air.FILE("/", "./assets/index.html")
-
-	if air.MaintainerEmail != "" {
-		MaintainerEmails = append(MaintainerEmails, air.MaintainerEmail)
-	}
-
-	mailerObj := air.Config["mailer"].(obj)
+	mailerObj := Mak.RawConfig["mailer"].(obj)
 	dkimLocation := mailerObj["dkim"].(string)
 
 	fmt.Println("DKIM location is ", dkimLocation, "\n\talways ensure your DNS records are up to date")
@@ -129,7 +124,7 @@ func Init() {
 	fmt.Println("Firing up: ", AppName+"...")
 	fmt.Println("\nDevMode: ", DevMode)
 
-	dbobj := air.Config["db"].(obj)
+	dbobj := Mak.RawConfig["db"].(obj)
 
 	addrs := interfaceSliceToStringSlice(dbobj["local_address"].([]interface{}))
 
@@ -169,7 +164,7 @@ func Init() {
 	AuthEmailTXT = template.Must(template.ParseFiles("./templates/authemail.txt"))
 	PostTemplate = template.Must(template.ParseFiles("./templates/post.html"))
 
-	secretsObj := air.Config["secrets"].(obj)
+	secretsObj := Mak.RawConfig["secrets"].(obj)
 	tokenSecret := secretsObj["token"].(string)
 	verifierSecret := secretsObj["verifier"].(string)
 
@@ -197,36 +192,37 @@ func Init() {
 		VaryBy:      &throttled.VaryBy{Path: true},
 	}
 
-	air.Pregases = append(air.Pregases,
-		air.WrapHTTPMiddleware(func(h http.Handler) http.Handler {
-			return httpRateLimiter.RateLimit(h)
-		}),
-		func(next air.Handler) air.Handler {
-			return func(req *air.Request, res *air.Response) error {
+	Mak.AddPreHTTPWare(func(h http.Handler) http.Handler {
+		return httpRateLimiter.RateLimit(h)
+	})
+
+	Mak.AddPreWare(
+		func(next mak.Handler) mak.Handler {
+			return func(c ctx) error {
 				startTime := time.Now()
-				err := next(req, res)
+				err := next(c)
 				endTime := time.Now()
 
 				latency := float64(endTime.Sub(startTime)) / float64(time.Millisecond)
 				entry := LogEntry{
-					Method: req.Method,
-					Code: res.Status,
-					Latency: latency,
-					Path: req.Path,
-					Client: req.ClientAddress(),
-					Start: startTime,
-					End: endTime,
-					BytesOut: res.ContentLength,
-					DevMode: DevMode,
+					Method:   c.R.Method,
+					Code:     c.Status,
+					Latency:  latency,
+					Path:     c.Path,
+					Client:   c.ClientAddress(),
+					Start:    startTime,
+					End:      endTime,
+					BytesOut: c.ContentLength,
+					DevMode:  DevMode,
 				}
 
-				remote := req.RemoteAddress()
+				remote := c.RemoteAddress()
 				if entry.Client != remote {
 					entry.Remote = remote
 				}
 
-				if req.ContentLength != 0 {
-					entry.BytesIn = req.ContentLength
+				if c.ContentLength != 0 {
+					entry.BytesIn = c.ContentLength
 				}
 
 				if err != nil {
@@ -235,12 +231,12 @@ func Init() {
 
 				if DevMode {
 
-					authpath := strings.Contains(req.Path, "auth")
+					authpath := strings.Contains(c.Path, "auth")
 					if authpath {
 
 						headers := obj{}
-						for _, header := range req.Headers() {
-							headers[header.Name] = header.Value()
+						for name, header := range c.R.Header {
+							headers[name] = header[0]
 						}
 						entry.Headers = headers
 
@@ -250,9 +246,9 @@ func Init() {
 					if err != nil {
 						fmt.Printf(
 							"%s:%d %s %gms | client: %s | err: %s\n",
-							req.Method,
-							res.Status,
-							req.Path,
+							c.R.Method,
+							c.Status,
+							c.Path,
 							latency,
 							entry.Client,
 							err.Error(),
@@ -260,15 +256,15 @@ func Init() {
 					} else {
 						fmt.Printf(
 							"%s:%d %s %gms | client: %s\n",
-							req.Method,
-							res.Status,
-							req.Path,
+							c.R.Method,
+							c.Status,
+							c.Path,
 							latency,
 							entry.Client,
 						)
 					}
 
-					if strings.Contains(req.Path, "auth") {
+					if strings.Contains(c.Path, "auth") {
 						fmt.Println("\n\t:Auth Path End\n\t")
 					}
 				}
@@ -277,8 +273,8 @@ func Init() {
 
 				return err
 			}
-	},
-)
+		},
+	)
 
 	go func() {
 		time.Sleep(2 * time.Second)
@@ -287,9 +283,15 @@ func Init() {
 		fmt.Println(aurora.Bold(aurora.Magenta(banner.PrintS(AppName))))
 		fmt.Println(aurora.Green("-------------------------"))
 		fmt.Printf("\n")
+
+		fmt.Println("AutoCert: ", Mak.Config.AutoCert)
+		fmt.Println("Server Address: ", Mak.Server.Addr)
+		fmt.Println("Secondary Server Address: ", Mak.SecondaryServer.Addr)
+
+		fmt.Printf("\n")
 	}()
 
-	err = air.Serve()
+	err = Mak.Run()
 	if err != nil {
 		if time.Since(StartupDate) < time.Second*60 {
 			fmt.Println(aurora.Red("unable to start app server, something must be misconfigured: "), err)
@@ -301,17 +303,17 @@ func Init() {
 
 // LogEntry is a struct containing request logging info
 type LogEntry struct {
-	Method string `json:"method,omitempty"`
-	Path string `json:"path,omitempty"`
-	Client string `json:"client,omitempty"`
-	Remote string `json:"remote,omitempty"`
-	Code int `json:"code,omitempty"`
-	Latency float64 `json:"latency,omitempty"`
-	Start time.Time `json:"start,omitempty"`
-	End time.Time `json:"end,omitempty"`
-	BytesOut int64 `json:"bytesOut,omitempty"`
-	BytesIn int64 `json:"bytesIn,omitempty"`
-	DevMode bool `json:"devmode,omitempty"`
-	Err string `json:"err,omitempty"`
-	Headers obj `json:"headers,omitempty"`
+	Method   string    `json:"method,omitempty"`
+	Path     string    `json:"path,omitempty"`
+	Client   string    `json:"client,omitempty"`
+	Remote   string    `json:"remote,omitempty"`
+	Code     int       `json:"code,omitempty"`
+	Latency  float64   `json:"latency,omitempty"`
+	Start    time.Time `json:"start,omitempty"`
+	End      time.Time `json:"end,omitempty"`
+	BytesOut int64     `json:"bytesOut,omitempty"`
+	BytesIn  int64     `json:"bytesIn,omitempty"`
+	DevMode  bool      `json:"devmode,omitempty"`
+	Err      string    `json:"err,omitempty"`
+	Headers  obj       `json:"headers,omitempty"`
 }

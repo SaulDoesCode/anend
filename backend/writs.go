@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/Machiel/slugify"
-	"github.com/aofei/air"
 	"github.com/arangodb/go-driver"
 )
 
@@ -664,15 +663,15 @@ func notifySubscribers(writKey string) {
 }
 
 func initWrits() {
-	air.GET("/writ/:slug", func(req *air.Request, res *air.Response) error {
-		slug := req.Param("slug").Value().String()
+	Mak.GET("/writ/:slug", func(c ctx) error {
+		slug := c.Param("slug").Value().String()
 
 		wq := WritQuery{
 			UpdateViews: true,
 			Slug:        slug,
 		}
 
-		user, err := CredentialCheck(req, res)
+		user, err := CredentialCheck(c)
 		if err == nil {
 			wq.Viewer = user.Key
 			wq.IncludeMembersOnly = true
@@ -685,18 +684,18 @@ func initWrits() {
 		if driver.IsNotFound(err) {
 			wq.Slug = ""
 			// incase the slug/title changed but the key stayed the same
-			key := req.Param("writ").Value().String()
+			key := c.Param("writ").Value().String()
 			if len(key) < 2 {
-				return NoSuchWrit.Send(res)
+				return NoSuchWrit.Send(c)
 			}
 
 			wq.Key = key
 			writ, err = wq.ExecOne()
 			if err != nil {
-				return NoSuchWrit.Send(res)
+				return NoSuchWrit.Send(c)
 			}
 		} else if err != nil {
-			return SendErr(res, 503, err.Error())
+			return SendErr(c, 503, err.Error())
 		}
 
 		writdata := writ.ToObj()
@@ -711,8 +710,8 @@ func initWrits() {
 
 		writdata["URL"] = writ.GetLink()
 
-		res.SetHeader("content-type", "text/html")
-		err = PostTemplate.Execute(res.Body, &writdata)
+		c.SetHeader("content-type", "text/html")
+		err = PostTemplate.Execute(c.Body, &writdata)
 		if err != nil {
 			if DevMode {
 				fmt.Println("GET /writ/:slug - error executing the post template: ", err)
@@ -721,10 +720,10 @@ func initWrits() {
 		return err
 	})
 
-	air.GET("/like-writ/:slug", AuthHandle(func(req *air.Request, res *air.Response, user *User) error {
-		slug := req.Param("slug").Value().String()
+	Mak.GET("/like-writ/:slug", AuthHandle(func(c ctx, user *User) error {
+		slug := c.Param("slug").Value().String()
 		if len(slug) < 1 {
-			return BadRequestError.Send(res)
+			return BadRequestError.Send(c)
 		}
 
 		ctx := driver.WithKeepNull(driver.WithWaitForSync(driver.WithQueryCount(context.Background())), false)
@@ -739,31 +738,31 @@ func initWrits() {
 			},
 		)
 		if err != nil {
-			return SendMsgpack(res, 500, obj{
+			return SendMsgpack(c, 500, obj{
 				"err": "liking this writ failed somehow",
 				"msg": err.Error(),
 			})
 		}
-		return res.WriteMsgpack(obj{"msg": "success, writ liked!"})
+		return c.WriteMsgpack(obj{"msg": "success, writ liked!"})
 	}))
 
-	air.GET("/writs-by-tag/:tag/:page/:count", func(req *air.Request, res *air.Response) error {
-		tag := req.Param("tag").Value().String()
+	Mak.GET("/writs-by-tag/:tag/:page/:count", func(c ctx) error {
+		tag := c.Param("tag").Value().String()
 		if len(tag) < 1 {
-			return BadRequestError.Send(res)
+			return BadRequestError.Send(c)
 		}
 
-		page, err := req.Param("page").Value().Int64()
+		page, err := c.Param("page").Value().Int64()
 		if err != nil {
-			return BadRequestError.Send(res)
+			return BadRequestError.Send(c)
 		}
-		count, err := req.Param("count").Value().Int64()
+		count, err := c.Param("count").Value().Int64()
 		if err != nil {
-			return BadRequestError.Send(res)
+			return BadRequestError.Send(c)
 		}
 
 		if count > 200 {
-			return RequestQueryOverLimitMembers.Send(res)
+			return RequestQueryOverLimitMembers.Send(c)
 		}
 
 		q := &WritQuery{
@@ -771,63 +770,63 @@ func initWrits() {
 			Tags:  []string{tag},
 		}
 
-		user, err := CredentialCheck(req, res)
+		user, err := CredentialCheck(c)
 		if err == nil && user != nil {
 			if count > 200 {
-				return RequestQueryOverLimitMembers.Send(res)
+				return RequestQueryOverLimitMembers.Send(c)
 			}
 			q.IncludeMembersOnly = true
 		} else if count > 50 {
-			return RequestQueryOverLimit.Send(res)
+			return RequestQueryOverLimit.Send(c)
 		}
 
 		writs, err := q.Exec()
 		if err != nil {
-			return ServerDBError.Send(res)
+			return ServerDBError.Send(c)
 		}
-		return res.WriteMsgpack(writs)
+		return c.WriteMsgpack(writs)
 	})
 
-	air.GET("/writlist/:page/:count", func(req *air.Request, res *air.Response) error {
-		page, err := req.Param("page").Value().Int64()
+	Mak.GET("/writlist/:page/:count", func(c ctx) error {
+		page, err := c.Param("page").Value().Int64()
 		if err != nil {
-			return BadRequestError.Send(res)
+			return BadRequestError.Send(c)
 		}
-		count, err := req.Param("count").Value().Int64()
+		count, err := c.Param("count").Value().Int64()
 		if err != nil {
-			return BadRequestError.Send(res)
+			return BadRequestError.Send(c)
 		}
 
 		if count > 200 {
-			return RequestQueryOverLimitMembers.Send(res)
+			return RequestQueryOverLimitMembers.Send(c)
 		}
 
 		q := &WritQuery{
 			Limit: []int64{page, count},
 		}
 
-		user, err := CredentialCheck(req, res)
+		user, err := CredentialCheck(c)
 		if err == nil && user != nil {
 			if count > 200 {
-				return RequestQueryOverLimitMembers.Send(res)
+				return RequestQueryOverLimitMembers.Send(c)
 			}
 			q.IncludeMembersOnly = true
 		} else if count > 50 {
-			return RequestQueryOverLimit.Send(res)
+			return RequestQueryOverLimit.Send(c)
 		}
 
 		writs, err := q.Exec()
 		if err != nil {
-			return ServerDBError.Send(res)
+			return ServerDBError.Send(c)
 		}
-		return res.WriteMsgpack(writs)
+		return c.WriteMsgpack(writs)
 	})
 
-	air.POST("/writ", AdminHandle(func(req *air.Request, res *air.Response, user *User) error {
+	Mak.POST("/writ", AdminHandle(func(c ctx, user *User) error {
 		var writ Writ
-		err := UnmarshalMsgpackBody(req, &writ)
+		err := c.Bind(&writ)
 		if err != nil {
-			return BadRequestError.Send(res)
+			return BadRequestError.Send(c)
 		}
 
 		if len(writ.Author) == 0 {
@@ -840,19 +839,19 @@ func initWrits() {
 		err = InitWrit(&writ)
 		if err != nil {
 			if !driver.IsNoMoreDocuments(err) {
-				return SendMsgpack(res, 503, obj{"ok": false, "error": err})
+				return SendMsgpack(c, 503, obj{"ok": false, "error": err})
 			}
 		}
 
 		fmt.Println(`Baking Writs! - `, writ.Title)
-		return SuccessMsg.Send(res)
+		return SuccessMsg.Send(c)
 	}))
 
-	air.POST("/writ-query", AdminHandle(func(req *air.Request, res *air.Response, user *User) error {
+	Mak.POST("/writ-query", AdminHandle(func(c ctx, user *User) error {
 		var q WritQuery
-		err := UnmarshalMsgpackBody(req, &q)
+		err := c.Bind(&q)
 		if err != nil {
-			return BadRequestError.Send(res)
+			return BadRequestError.Send(c)
 		}
 
 		var output interface{}
@@ -862,23 +861,23 @@ func initWrits() {
 			output, err = q.Exec()
 		}
 		if err != nil {
-			return ServerDecodeError.Send(res)
+			return ServerDecodeError.Send(c)
 		}
-		return res.WriteMsgpack(output)
+		return c.WriteMsgpack(output)
 	}))
 
-	air.GET("/writ-delete/:key", AdminHandle(func(req *air.Request, res *air.Response, user *User) error {
-		key := req.Param("key").Value().String()
+	Mak.GET("/writ-delete/:key", AdminHandle(func(c ctx, user *User) error {
+		key := c.Param("key").Value().String()
 		if len(key) < 1 {
-			return BadRequestError.Send(res)
+			return BadRequestError.Send(c)
 		}
 
 		ctx := driver.WithWaitForSync(context.Background(), true)
 		_, err := Writs.RemoveDocument(ctx, key)
 		if err != nil {
-			return DeleteWritError.Send(res)
+			return DeleteWritError.Send(c)
 		}
-		return res.WriteMsgpack(obj{"msg": "writ deleted, it's gone"})
+		return c.WriteMsgpack(obj{"msg": "writ deleted, it's gone"})
 	}))
 
 	fmt.Println("Writ Service Started")

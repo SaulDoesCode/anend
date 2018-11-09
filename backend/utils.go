@@ -21,7 +21,6 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/aofei/air"
 	"github.com/asaskevich/govalidator"
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/russross/blackfriday/v2"
@@ -105,33 +104,33 @@ func renderMarkdown(input []byte, sanitize bool) []byte {
 }
 
 // SendMsgpack send a msgpack encoded response with a status code
-func SendMsgpack(res *air.Response, code int, msg interface{}) error {
-	res.Status = code
-	res.SetHeader("content-type", "application/msgpack")
-	return msgpack.NewEncoder(res.Body).Encode(msg)
+func SendMsgpack(c ctx, code int, msg interface{}) error {
+	c.Status = code
+	c.SetHeader("content-type", "application/msgpack")
+	return msgpack.NewEncoder(c.Body).Encode(msg)
 }
 
 // SendJSON send a json encoded response with a status code
-func SendJSON(res *air.Response, code int, msg interface{}) error {
-	res.Status = code
-	res.SetHeader("content-type", "application/json")
-	return json.NewEncoder(res.Body).Encode(msg)
+func SendJSON(c ctx, code int, msg interface{}) error {
+	c.Status = code
+	c.SetHeader("content-type", "application/json")
+	return json.NewEncoder(c.Body).Encode(msg)
 }
 
 // SendHTML send an html string
-func SendHTML(res *air.Response, code int, html string) error {
-	res.Status = code
-	return res.WriteHTML(html)
+func SendHTML(c ctx, code int, html string) error {
+	c.Status = code
+	return c.WriteHTML(html)
 }
 
 // SendErr send a msgpack encoded error message with this structure {err: "msg"}
-func SendErr(res *air.Response, code int, err string) error {
-	return SendMsgpack(res, code, map[string]string{"err": err})
+func SendErr(c ctx, code int, err string) error {
+	return SendMsgpack(c, code, map[string]string{"err": err})
 }
 
 // SendErrJSON send a json encoded error message like {"err": "msg"}
-func SendErrJSON(res *air.Response, code int, err string) error {
-	return SendJSON(res, code, map[string]string{"err": err})
+func SendErrJSON(c ctx, code int, err string) error {
+	return SendJSON(c, code, map[string]string{"err": err})
 }
 
 // MakeCodedResponse easilly generate an CodedResponse
@@ -163,33 +162,17 @@ type CodedResponse struct {
 }
 
 // Send send off the error through an echo context as msgpack data with a status code
-func (e *CodedResponse) Send(res *air.Response) error {
-	res.Status = e.Code
-	res.SetHeader("content-type", "application/msgpack")
-	return res.WriteBlob(e.Msgpack)
+func (e *CodedResponse) Send(c ctx) error {
+	c.Status = e.Code
+	c.SetHeader("content-type", "application/msgpack")
+	return c.WriteBlob(e.Msgpack)
 }
 
 // SendJSON send off the error through an echo context as json data with a status code
-func (e *CodedResponse) SendJSON(res *air.Response) error {
-	res.Status = e.Code
-	res.SetHeader("content-type", "application/json")
-	return res.WriteBlob(e.JSON)
-}
-
-// UnmarshalJSONBody unmarshal json data straight to struct and such
-func UnmarshalJSONBody(req *air.Request, result interface{}) error {
-	if req.Body == nil {
-		return ErrBadBody
-	}
-	return json.NewDecoder(req.Body).Decode(result)
-}
-
-// UnmarshalMsgpackBody unmarshal msgpack data straight to struct and such
-func UnmarshalMsgpackBody(req *air.Request, result interface{}) error {
-	if req.Body == nil {
-		return ErrBadBody
-	}
-	return msgpack.NewDecoder(req.Body).Decode(result)
+func (e *CodedResponse) SendJSON(c ctx) error {
+	c.Status = e.Code
+	c.SetHeader("content-type", "application/json")
+	return c.WriteBlob(e.JSON)
 }
 
 // UnmarshalJSONFile read json files and go straight to unmarshalling
