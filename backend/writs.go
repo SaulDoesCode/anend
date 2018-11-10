@@ -711,7 +711,7 @@ func initWrits() {
 		writdata["URL"] = writ.GetLink()
 
 		c.SetHeader("content-type", "text/html")
-		err = PostTemplate.Execute(c.Body, &writdata)
+		err = PostTemplate.Execute(c, &writdata)
 		if err != nil {
 			if DevMode {
 				fmt.Println("GET /writ/:slug - error executing the post template: ", err)

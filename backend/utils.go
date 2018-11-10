@@ -107,14 +107,14 @@ func renderMarkdown(input []byte, sanitize bool) []byte {
 func SendMsgpack(c ctx, code int, msg interface{}) error {
 	c.Status = code
 	c.SetHeader("content-type", "application/msgpack")
-	return msgpack.NewEncoder(c.Body).Encode(msg)
+	return msgpack.NewEncoder(c).Encode(msg)
 }
 
 // SendJSON send a json encoded response with a status code
 func SendJSON(c ctx, code int, msg interface{}) error {
 	c.Status = code
 	c.SetHeader("content-type", "application/json")
-	return json.NewEncoder(c.Body).Encode(msg)
+	return json.NewEncoder(c).Encode(msg)
 }
 
 // SendHTML send an html string
