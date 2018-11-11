@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"text/template"
 	"time"
 
@@ -105,22 +106,16 @@ func renderMarkdown(input []byte, sanitize bool) []byte {
 
 // SendMsgpack send a msgpack encoded response with a status code
 func SendMsgpack(c ctx, code int, msg interface{}) error {
-	c.Status = code
-	c.SetHeader("content-type", "application/msgpack")
-	return msgpack.NewEncoder(c).Encode(msg)
+	c.Response().WriteHeader(code)
+	c.Response().Header().Set("Content-Type", "application/msgpack")
+	return msgpack.NewEncoder(c.Response()).Encode(msg)
 }
 
 // SendJSON send a json encoded response with a status code
 func SendJSON(c ctx, code int, msg interface{}) error {
-	c.Status = code
-	c.SetHeader("content-type", "application/json")
-	return json.NewEncoder(c).Encode(msg)
-}
-
-// SendHTML send an html string
-func SendHTML(c ctx, code int, html string) error {
-	c.Status = code
-	return c.WriteHTML(html)
+	c.Response().WriteHeader(code)
+	c.Response().Header().Set("Content-Type", "application/json")
+	return json.NewEncoder(c.Response()).Encode(msg)
 }
 
 // SendErr send a msgpack encoded error message with this structure {err: "msg"}
@@ -163,16 +158,12 @@ type CodedResponse struct {
 
 // Send send off the error through an echo context as msgpack data with a status code
 func (e *CodedResponse) Send(c ctx) error {
-	c.Status = e.Code
-	c.SetHeader("content-type", "application/msgpack")
-	return c.WriteBlob(e.Msgpack)
+	return c.Blob(e.Code, "application/msgpack", e.Msgpack)
 }
 
 // SendJSON send off the error through an echo context as json data with a status code
 func (e *CodedResponse) SendJSON(c ctx) error {
-	c.Status = e.Code
-	c.SetHeader("content-type", "application/json")
-	return c.WriteBlob(e.JSON)
+	return c.JSONBlob(e.Code, e.JSON)
 }
 
 // UnmarshalJSONFile read json files and go straight to unmarshalling
@@ -292,4 +283,16 @@ func interfaceSliceToStringSlice(islice []interface{}) []string {
 		out = append(out, v.(string))
 	}
 	return out
+}
+
+// stringsContainsCI reports whether the lists contains a match regardless of its case.
+func stringsContainsCI(list []string, match string) bool {
+	match = strings.ToLower(match)
+	for _, item := range list {
+		if strings.ToLower(item) == match {
+			return true
+		}
+	}
+
+	return false
 }
