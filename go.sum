@@ -4,10 +4,10 @@ github.com/CrowdSurge/banner v0.0.0-20140923200336-8c0e79dc5ff7 h1:O8iBqlhGQ/wRf
 github.com/CrowdSurge/banner v0.0.0-20140923200336-8c0e79dc5ff7/go.mod h1:29J++XOrAqvtNYrJHCnRWYDg/L4ttVMXCSfPdvOS0/c=
 github.com/Machiel/slugify v1.0.1 h1:EfWSlRWstMadsgzmiV7d0yVd2IFlagWH68Q+DcYCm4E=
 github.com/Machiel/slugify v1.0.1/go.mod h1:fTFGn5uWEynW4CUMG7sWkYXOf1UgDxyTM3DbR6Qfg3k=
+github.com/SaulDoesCode/echo v0.0.0-20181111105713-6f110d7e0e3f h1:MIJXzP/+53NEGjntjGeGt6jrVzRtOuoxoZhSMoMUk04=
+github.com/SaulDoesCode/echo v0.0.0-20181111105713-6f110d7e0e3f/go.mod h1:Cyt97xD/Fjzj+H/mRbOh2AcCD6dbTvafTbUTwDpu0OU=
 github.com/SaulDoesCode/mailyak v0.0.0-20181107214438-034a561f5162 h1:gAJQTXQ0bYoKNq5Zq0lsU2+qfi0veoh8j7qAzZEddRc=
 github.com/SaulDoesCode/mailyak v0.0.0-20181107214438-034a561f5162/go.mod h1:dJKpmWvdHaLWYNVTK/7dV0q8YVIQyJRAw5Tvtftl26w=
-github.com/SaulDoesCode/mak v0.0.0-20181110132310-d250b6a034d2 h1:eYhgVCOhU0R3Uxsij5Lgj7kY9+akWG4S7jWunijn78k=
-github.com/SaulDoesCode/mak v0.0.0-20181110132310-d250b6a034d2/go.mod h1:Pt+NymY0MDzHh8Jh1NCMZw/4NDH4QKmYjliHYzoRodE=
 github.com/arangodb/go-driver v0.0.0-20181029154412-d60f4a8520d3 h1:xJIAsR7WlIqIT+J4vdyDdjqmtduDqzH6sUFTuiQyqHY=
 github.com/arangodb/go-driver v0.0.0-20181029154412-d60f4a8520d3/go.mod h1:NcDoR4f0FdFia/QizCc+B69DggPGLP3nCKg5IUtudm0=
 github.com/arangodb/go-velocypack v0.0.0-20180928134037-d177e3455691 h1:62SGGAvrKTXOrewra74du0H98Yg/eufQ/tO3RoIP8Bs=
@@ -25,6 +25,7 @@ github.com/dgrijalva/jwt-go v3.2.0+incompatible/go.mod h1:E3ru+11k8xSBh+hMPgOLZm
 github.com/driusan/dkim v0.0.0-20180129030250-78ce6f46faf4/go.mod h1:/bBJOA45LKdUF1lYKzzxwudRzQHUUHqqwJp9FeOard0=
 github.com/driusan/dkim v0.0.0-20181021194700-dda260a68aa1 h1:qYRQI5o+VVe3DX0AnCgriqo2o1WaxyJAf4Ax8vNcxbE=
 github.com/driusan/dkim v0.0.0-20181021194700-dda260a68aa1/go.mod h1:/bBJOA45LKdUF1lYKzzxwudRzQHUUHqqwJp9FeOard0=
+github.com/fsnotify/fsnotify v1.4.7 h1:IXs+QLmnXW2CcXuY+8Mzv/fWEsPGWxqefPtCP5CnV9I=
 github.com/fsnotify/fsnotify v1.4.7/go.mod h1:jwhsz4b93w/PPRr/qN1Yymfu8t87LnFCMoQvtojpjFo=
 github.com/golang/protobuf v1.2.0 h1:P3YflyNX/ehuJFLhxviNdFxQPkGK5cDcApsge1SqnvM=
 github.com/golang/protobuf v1.2.0/go.mod h1:6lQm79b+lXiMfvg/cZm0SGofjICqVBUtrP5yJMmIC1U=
@@ -35,8 +36,15 @@ github.com/integrii/flaggy v0.0.0-20181007032133-1056ce330646 h1:TVhJwbh3Mq4cVda
 github.com/integrii/flaggy v0.0.0-20181007032133-1056ce330646/go.mod h1:3cpVUtAftUH2sUWSsXjFhC6o9aRkLEAuxGQV/qXbSOQ=
 github.com/json-iterator/go v1.1.5 h1:gL2yXlmiIo4+t+y32d4WGwOjKGYcGOuyrg46vadswDE=
 github.com/json-iterator/go v1.1.5/go.mod h1:+SdeFBvtyEkXs7REEP0seUULqWtbJapLOCVDaaPEHmU=
+github.com/labstack/gommon v0.2.7/go.mod h1:/tj9csK2iPSBvn+3NLM9e52usepMtrd5ilFYA+wQNJ4=
+github.com/labstack/gommon v0.2.8 h1:JvRqmeZcfrHC5u6uVleB4NxxNbzx6gpbJiQknDbKQu0=
+github.com/labstack/gommon v0.2.8/go.mod h1:/tj9csK2iPSBvn+3NLM9e52usepMtrd5ilFYA+wQNJ4=
 github.com/logrusorgru/aurora v0.0.0-20181002194514-a7b3b318ed4e h1:9MlwzLdW7QSDrhDjFlsEYmxpFyIoXmYRon3dt0io31k=
 github.com/logrusorgru/aurora v0.0.0-20181002194514-a7b3b318ed4e/go.mod h1:7rIyQOR62GCctdiQpZ/zOJlFyk6y+94wXzv6RNZgaR4=
+github.com/mattn/go-colorable v0.0.9 h1:UVL0vNpWh04HeJXV0KLcaT7r06gOH2l4OW6ddYRUIY4=
+github.com/mattn/go-colorable v0.0.9/go.mod h1:9vuHe8Xs5qXnSaW/c/ABM9alt+Vo+STaOChaDxuIBZU=
+github.com/mattn/go-isatty v0.0.4 h1:bnP0vzxcAdeI1zdubAl5PjU6zsERjGZb7raWodagDYs=
+github.com/mattn/go-isatty v0.0.4/go.mod h1:M+lRXTBqGeGNdLjl/ufCoiOlB5xdOkqRJdNxMWT7Zi4=
 github.com/microcosm-cc/bluemonday v1.0.1 h1:SIYunPjnlXcW+gVfvm0IlSeR5U3WZUOLfVmqg85Go44=
 github.com/microcosm-cc/bluemonday v1.0.1/go.mod h1:hsXNsILzKxV+sX77C5b8FSuKF00vh2OMYv+xgHpAMF4=
 github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd h1:TRLaZ9cD/w8PVh93nsPXa1VrQ6jlwL5oN8l14QlcNfg=
@@ -51,6 +59,10 @@ github.com/shurcooL/sanitized_anchor_name v0.0.0-20170918181015-86672fcb3f95/go.
 github.com/stretchr/testify v1.2.2/go.mod h1:a8OnRcib4nhh0OaRAV+Yts87kKdq0PP7pXfy6kDkUVs=
 github.com/throttled/throttled v2.2.2+incompatible h1:g/mbN7PVGTAACIETUnkIjWcBegrw079KVDCME9M97RY=
 github.com/throttled/throttled v2.2.2+incompatible/go.mod h1:0BjlrEGQmvxps+HuXLsyRdqpSRvJpq0PNIsOtqP9Nos=
+github.com/valyala/bytebufferpool v1.0.0 h1:GqA5TC/0021Y/b9FG4Oi9Mr3q7XYx6KllzawFIhcdPw=
+github.com/valyala/bytebufferpool v1.0.0/go.mod h1:6bBcMArwyJ5K/AmCkWv1jt77kVWyCJ6HpOuEn7z0Csc=
+github.com/valyala/fasttemplate v0.0.0-20170224212429-dcecefd839c4 h1:gKMu1Bf6QINDnvyZuTaACm9ofY+PRh+5vFz4oxBZeF8=
+github.com/valyala/fasttemplate v0.0.0-20170224212429-dcecefd839c4/go.mod h1:50wTf68f99/Zt14pr046Tgt3Lp2vLyFZKzbFXTOabXw=
 github.com/vmihailenco/msgpack v4.0.1+incompatible h1:RMF1enSPeKTlXrXdOcqjFUElywVZjjC6pqse21bKbEU=
 github.com/vmihailenco/msgpack v4.0.1+incompatible/go.mod h1:fy3FlTQTDXWkZ7Bh6AcGMlsjHatGryHQYUTf1ShIgkk=
 golang.org/x/crypto v0.0.0-20181106171534-e4dc69e5b2fd h1:VtIkGDhk0ph3t+THbvXHfMZ8QHgsBO39Nh52+74pq7w=
@@ -59,7 +71,3 @@ golang.org/x/net v0.0.0-20181108082009-03003ca0c849 h1:FSqE2GGG7wzsYUsWiQ8MZrvEd
 golang.org/x/net v0.0.0-20181108082009-03003ca0c849/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
 golang.org/x/sys v0.0.0-20181107165924-66b7b1311ac8 h1:YoY1wS6JYVRpIfFngRf2HHo9R9dAne3xbkGOQ5rJXjU=
 golang.org/x/sys v0.0.0-20181107165924-66b7b1311ac8/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
-gopkg.in/djherbis/atime.v1 v1.0.0 h1:eMRqB/JrLKocla2PBPKgQYg/p5UG4L6AUAs92aP7F60=
-gopkg.in/djherbis/atime.v1 v1.0.0/go.mod h1:hQIUStKmJfvf7xdh/wtK84qe+DsTV5LnA9lzxxtPpJ8=
-gopkg.in/djherbis/stream.v1 v1.2.0 h1:3tZuXO+RK8opjw8/BJr780h+eAPwOFfLHCKRKyYxk3s=
-gopkg.in/djherbis/stream.v1 v1.2.0/go.mod h1:aEV8CBVRmSpLamVJfM903Npic1IKmb2qS30VAZ+sssg=
