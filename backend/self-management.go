@@ -15,9 +15,9 @@ func replaceSelf() (error, error) {
 	if err != nil {
 		fmt.Println("could not build replacement, will run same old executable")
 	}
-	go Mak.TimelyStop(5*time.Second, nil)
+	go Server.ShutdownAfter(nil, 5*time.Second, nil)
 
-	return exeC(`nohup bash -c "(sleep 7 && cd ` + AppLocation + ` && sudo ./main) &" &`), err
+	return exeC(`nohup bash -c "(sleep 12 && cd ` + AppLocation + ` && sudo ./main) &" &`), err
 }
 
 func startSelfManaging() {
@@ -28,7 +28,7 @@ func startSelfManaging() {
 		return
 	}
 
-	Mak.GET("/_updateapp", AdminHandle(func(c ctx, user *User) error {
+	Server.GET("/_updateapp", AdminHandle(func(c ctx, user *User) error {
 		restartErr, rebuildErr := replaceSelf()
 
 		couldbuild := `<br>the rebuild went fine`
@@ -37,7 +37,7 @@ func startSelfManaging() {
 		}
 
 		if restartErr != nil {
-			return SendHTML(c, 503, `
+			return c.HTML(503, `
 				<h3>it seems the update command has failed, you'll have to update manually</h3>
 				<time>`+time.Now().Format(time.RFC822)+`</time>
 				<p>the admin `+user.Username+` is responsible.</p>
@@ -46,7 +46,7 @@ func startSelfManaging() {
 			`)
 		}
 
-		return SendHTML(c, 200, `
+		return c.HTML(200, `
 			<h3>attempting server update... see you soon.. or not."</h3>
 			<time>`+time.Now().Format(time.RFC822)+`</time>
 			<p>the admin `+user.Username+` is responsible.</p>
