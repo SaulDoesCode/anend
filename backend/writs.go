@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/Machiel/slugify"
@@ -663,8 +664,8 @@ func notifySubscribers(writKey string) {
 }
 
 func initWrits() {
-	Mak.GET("/writ/:slug", func(c ctx) error {
-		slug := c.Param("slug").Value().String()
+	Server.GET("/writ/:slug", func(c ctx) error {
+		slug := c.Param("slug")
 
 		wq := WritQuery{
 			UpdateViews: true,
@@ -684,7 +685,7 @@ func initWrits() {
 		if driver.IsNotFound(err) {
 			wq.Slug = ""
 			// incase the slug/title changed but the key stayed the same
-			key := c.Param("writ").Value().String()
+			key := c.Param("writ")
 			if len(key) < 2 {
 				return NoSuchWrit.Send(c)
 			}
@@ -710,8 +711,8 @@ func initWrits() {
 
 		writdata["URL"] = writ.GetLink()
 
-		c.SetHeader("content-type", "text/html")
-		err = PostTemplate.Execute(c, &writdata)
+		c.Response().Header().Set("Content-Type", "text/html")
+		err = PostTemplate.Execute(c.Response(), &writdata)
 		if err != nil {
 			if DevMode {
 				fmt.Println("GET /writ/:slug - error executing the post template: ", err)
@@ -720,8 +721,8 @@ func initWrits() {
 		return err
 	})
 
-	Mak.GET("/like-writ/:slug", AuthHandle(func(c ctx, user *User) error {
-		slug := c.Param("slug").Value().String()
+	Server.GET("/like-writ/:slug", AuthHandle(func(c ctx, user *User) error {
+		slug := c.Param("slug")
 		if len(slug) < 1 {
 			return BadRequestError.Send(c)
 		}
@@ -738,25 +739,25 @@ func initWrits() {
 			},
 		)
 		if err != nil {
-			return SendMsgpack(c, 500, obj{
+			return c.Msgpack(500, obj{
 				"err": "liking this writ failed somehow",
 				"msg": err.Error(),
 			})
 		}
-		return c.WriteMsgpack(obj{"msg": "success, writ liked!"})
+		return c.Msgpack(200, obj{"msg": "success, writ liked!"})
 	}))
 
-	Mak.GET("/writs-by-tag/:tag/:page/:count", func(c ctx) error {
-		tag := c.Param("tag").Value().String()
+	Server.GET("/writs-by-tag/:tag/:page/:count", func(c ctx) error {
+		tag := c.Param("tag")
 		if len(tag) < 1 {
 			return BadRequestError.Send(c)
 		}
 
-		page, err := c.Param("page").Value().Int64()
+		page, err := str2int64(c.Param("page"))
 		if err != nil {
 			return BadRequestError.Send(c)
 		}
-		count, err := c.Param("count").Value().Int64()
+		count, err := str2int64(c.Param("count"))
 		if err != nil {
 			return BadRequestError.Send(c)
 		}
@@ -784,15 +785,15 @@ func initWrits() {
 		if err != nil {
 			return ServerDBError.Send(c)
 		}
-		return c.WriteMsgpack(writs)
+		return c.Msgpack(200, writs)
 	})
 
-	Mak.GET("/writlist/:page/:count", func(c ctx) error {
-		page, err := c.Param("page").Value().Int64()
+	Server.GET("/writlist/:page/:count", func(c ctx) error {
+		page, err := str2int64(c.Param("page"))
 		if err != nil {
 			return BadRequestError.Send(c)
 		}
-		count, err := c.Param("count").Value().Int64()
+		count, err := str2int64(c.Param("count"))
 		if err != nil {
 			return BadRequestError.Send(c)
 		}
@@ -819,10 +820,10 @@ func initWrits() {
 		if err != nil {
 			return ServerDBError.Send(c)
 		}
-		return c.WriteMsgpack(writs)
+		return c.Msgpack(200, writs)
 	})
 
-	Mak.POST("/writ", AdminHandle(func(c ctx, user *User) error {
+	Server.POST("/writ", AdminHandle(func(c ctx, user *User) error {
 		var writ Writ
 		err := c.Bind(&writ)
 		if err != nil {
@@ -847,7 +848,7 @@ func initWrits() {
 		return SuccessMsg.Send(c)
 	}))
 
-	Mak.POST("/writ-query", AdminHandle(func(c ctx, user *User) error {
+	Server.POST("/writ-query", AdminHandle(func(c ctx, user *User) error {
 		var q WritQuery
 		err := c.Bind(&q)
 		if err != nil {
@@ -863,11 +864,11 @@ func initWrits() {
 		if err != nil {
 			return ServerDecodeError.Send(c)
 		}
-		return c.WriteMsgpack(output)
+		return c.Msgpack(200, output)
 	}))
 
-	Mak.GET("/writ-delete/:key", AdminHandle(func(c ctx, user *User) error {
-		key := c.Param("key").Value().String()
+	Server.GET("/writ-delete/:key", AdminHandle(func(c ctx, user *User) error {
+		key := c.Param("key")
 		if len(key) < 1 {
 			return BadRequestError.Send(c)
 		}
@@ -877,8 +878,13 @@ func initWrits() {
 		if err != nil {
 			return DeleteWritError.Send(c)
 		}
-		return c.WriteMsgpack(obj{"msg": "writ deleted, it's gone"})
+		return c.Msgpack(200, obj{"msg": "writ deleted, it's gone"})
 	}))
 
 	fmt.Println("Writ Service Started")
+}
+
+func str2int64(str string) (int64, error) {
+	i, err := strconv.Atoi(str)
+	return int64(i), err
 }

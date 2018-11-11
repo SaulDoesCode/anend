@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
-	"github.com/SaulDoesCode/mak"
 	"github.com/arangodb/go-driver"
 )
 
@@ -230,7 +230,7 @@ func AuthenticateUser(email, username string) (User, error) {
 
 	link := "https://" + AppDomain + "/auth/" + user.Verifier
 	if DevMode {
-		link = "https://" + AppDomain + Mak.RawConfig["address"].(string) + "/auth/" + user.Verifier
+		link = "https://" + Conf.Domain + Conf.DevAddress + "/auth/" + user.Verifier
 	}
 
 	vars := obj{
@@ -376,15 +376,15 @@ func ValidateAuthToken(token string) (User, bool) {
 
 // CredentialCheck get an authorized user from a route handler's context
 func CredentialCheck(c ctx) (*User, error) {
-	cookie := c.Cookie("Auth")
-	if len(cookie) < 5 {
+	cookie, err := c.Cookie("Auth")
+	if err != nil || len(cookie.Value) < 5 {
 		if DevMode {
-			fmt.Println("CredentialCheck cookie troubles: it's either missing or malformed")
+			fmt.Println("CredentialCheck cookie troubles: it's either missing or malformed", err)
 		}
 		return nil, ErrUnauthorized
 	}
 
-	tk, err := Tokenator.Decode(cookie)
+	tk, err := Tokenator.Decode(cookie.Value)
 	if err != nil {
 		if DevMode {
 			fmt.Println("CredentialCheck Decoding - error: ", err)
@@ -405,7 +405,8 @@ func CredentialCheck(c ctx) (*User, error) {
 
 		newtoken, err := GenerateAuthToken(&user, true)
 		if err == nil {
-			c.SetCookie("Auth", &mak.Cookie{
+			c.SetCookie(&http.Cookie{
+				Name:     "Auth",
 				Value:    newtoken,
 				MaxAge:   60 * 60 * 24 * 7,
 				Expires:  time.Now().Add(time.Hour * (24 * 7)),
@@ -424,7 +425,7 @@ func CredentialCheck(c ctx) (*User, error) {
 }
 
 // AuthHandle create a GET route, accessible only to authenticated users
-func AuthHandle(handle func(ctx, *User) error) mak.Handler {
+func AuthHandle(handle func(ctx, *User) error) func(ctx) error {
 	return func(c ctx) error {
 		user, err := CredentialCheck(c)
 		if err != nil || user == nil {
@@ -435,7 +436,7 @@ func AuthHandle(handle func(ctx, *User) error) mak.Handler {
 }
 
 // AdminHandle create a GET route, accessible only to admin users
-func AdminHandle(handle func(ctx, *User) error) mak.Handler {
+func AdminHandle(handle func(ctx, *User) error) func(ctx) error {
 	return func(c ctx) error {
 		user, err := CredentialCheck(c)
 		if err != nil || user == nil || !user.isAdmin() {
@@ -449,7 +450,7 @@ func AdminHandle(handle func(ctx, *User) error) mak.Handler {
 }
 
 // RoleHandle create a GET route, accessible only to users with certain Roles
-func RoleHandle(roles []Role, handle func(ctx, *User) error) mak.Handler {
+func RoleHandle(roles []Role, handle func(ctx, *User) error) func(ctx) error {
 	return func(c ctx) error {
 		user, err := CredentialCheck(c)
 		if err != nil {
@@ -482,13 +483,13 @@ func initAuth() {
 	VerifiedSubject = "Login to " + AppName
 	UnverifiedSubject = "Welcome to " + AppName
 
-	Mak.GET("/check-username/:username", func(c ctx) error {
-		return c.WriteMsgpack(obj{
-			"ok": IsUsernameAvailable(c.Param("username").Value().String()),
+	Server.GET("/check-username/:username", func(c ctx) error {
+		return c.Msgpack(200, obj{
+			"ok": IsUsernameAvailable(c.Param("username")),
 		})
 	})
 
-	Mak.POST("/auth", func(c ctx) error {
+	Server.POST("/auth", func(c ctx) error {
 		if _, err := CredentialCheck(c); err == nil {
 			return AlreadyLoggedIn.Send(c)
 		}
@@ -527,10 +528,15 @@ func initAuth() {
 		return UnauthorizedError.Send(c)
 	})
 
-	Mak.GET("/auth-logout", func(c ctx) error {
-		token := c.Cookie("Auth")
+	Server.GET("/auth-logout", func(c ctx) error {
+		cookie, err := c.Cookie("Auth")
+		var token string
+		if err == nil {
+			token = cookie.Value
+		}
 
-		c.SetCookie("Auth", &mak.Cookie{
+		c.SetCookie(&http.Cookie{
+			Name:     "Auth",
 			Value:    "",
 			Path:     "/",
 			MaxAge:   2,
@@ -540,7 +546,7 @@ func initAuth() {
 			Secure:   true,
 		})
 
-		if len(token) > 0 {
+		if len(token) > 5 {
 			go func() {
 				tk, err := Tokenator.Decode(token)
 				if err != nil {
@@ -561,11 +567,11 @@ func initAuth() {
 		return nil
 	})
 
-	Mak.GET("/auth/:verifier", func(c ctx) error {
+	Server.GET("/auth/:verifier", func(c ctx) error {
 		if DevMode {
-			fmt.Println("Auth Attempt - now trying this token: ", c.Param("verifier").Value().String())
+			fmt.Println("Auth Attempt - now trying this token: ", c.Param("verifier"))
 		}
-		user, err := VerifyUser(c.Param("verifier").Value().String())
+		user, err := VerifyUser(c.Param("verifier"))
 		if err != nil || user == nil {
 			if DevMode {
 				fmt.Println("Unable to Authenticate user: ", err)
@@ -575,7 +581,8 @@ func initAuth() {
 
 		newtoken, err := GenerateAuthToken(user, false)
 		if err == nil {
-			cookie := &mak.Cookie{
+			cookie := &http.Cookie{
+				Name:     "Auth",
 				Value:    newtoken,
 				Path:     "/",
 				MaxAge:   60 * 60 * 24 * 7,
@@ -588,7 +595,7 @@ func initAuth() {
 				cookie.Domain = AppDomain
 			}
 
-			c.SetCookie("Auth", cookie)
+			c.SetCookie(cookie)
 		} else {
 			if DevMode {
 				fmt.Println("error verifying (email) the user, GenerateAuthToken db problem: ", err)
@@ -596,12 +603,12 @@ func initAuth() {
 		}
 
 		if user.isAdmin() {
-			return c.Redirect("/admin")
+			return c.Redirect(302, "/admin")
 		}
-		return c.Redirect("/")
+		return c.Redirect(302, "/")
 	})
 
-	Mak.GET("/subscribe-toggle", AuthHandle(func(c ctx, user *User) error {
+	Server.GET("/subscribe-toggle", AuthHandle(func(c ctx, user *User) error {
 		err := user.Update("{subscriber: @subscriber}", obj{"subscriber": !user.Subscriber})
 		if err != nil {
 			mail := MakeEmail()

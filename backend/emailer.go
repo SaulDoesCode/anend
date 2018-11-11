@@ -54,22 +54,24 @@ func startEmailer() {
 		panic(err)
 	}
 
-	// Send a little test email
-	mail := MakeEmail()
-	mail.Subject(AppDomain + " server startup notification")
-	mail.To(MaintainerEmails...)
-	mail.HTML().Set(
-		"The " + AppName + " Server is starting up.\n\t" +
-			"Everything looks good so far.\n\t" +
-			"The startup may have been caused by a crash of some sort, so do check up on that.\n\t" +
-			"Other Wise the time of starting is " + time.Now().Format(time.RFC1123) +
-			"\n\n\tThat is all.\n\n" +
-			"Yours truly\nThe " + AppName + " Server.",
-	)
-	err = SendEmail(mail)
-	if err != nil {
-		fmt.Println("emails aren't sending, whats wrong?", err)
-		os.Exit(2)
+	if !DevMode {
+		// Send a little test email
+		mail := MakeEmail()
+		mail.Subject(AppDomain + " server startup notification")
+		mail.To(MaintainerEmails...)
+		mail.HTML().Set(
+			"The " + AppName + " Server is starting up.\n\t" +
+				"Everything looks good so far.\n\t" +
+				"The startup may have been caused by a crash of some sort, so do check up on that.\n\t" +
+				"Other Wise the time of starting is " + time.Now().Format(time.RFC1123) +
+				"\n\n\tThat is all.\n\n" +
+				"Yours truly\nThe " + AppName + " Server.",
+		)
+		err = SendEmail(mail)
+		if err != nil {
+			fmt.Println("emails aren't sending, whats wrong?", err)
+			os.Exit(2)
+		}
 	}
 
 	fmt.Println(`SMTP Emailer Started`)
