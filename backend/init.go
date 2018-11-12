@@ -306,9 +306,13 @@ func Init() {
 				if err != nil {
 					entry.Err = err.Error()
 				}
+				
+				if strings.Contains(entry.Err, "code=404") && entry.Code == 200 {
+					entry.Err = ""
+					err = nil
+				}
 
 				if DevMode {
-
 					authpath := strings.Contains(path, "auth")
 					if authpath {
 
