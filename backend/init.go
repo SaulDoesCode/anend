@@ -14,7 +14,6 @@ import (
 
 	"github.com/CrowdSurge/banner"
 	"github.com/SaulDoesCode/echo"
-	"github.com/SaulDoesCode/echo/middleware"
 	"github.com/integrii/flaggy"
 	"github.com/logrusorgru/aurora"
 	"github.com/throttled/throttled"
@@ -118,13 +117,7 @@ func Init() {
 		VaryBy:      &throttled.VaryBy{Path: true},
 	}
 		
-	if DevMode {
-		Server.Use(
-			middleware.LoggerWithConfig(middleware.LoggerConfig{
-				Format: "${method}:${status} uri=${uri} ${latency_human}\n",
-			}),
-		)
-	} else {
+	if !DevMode {
 		Server.Use(
 			echo.WrapMiddleware(func(h http.Handler) http.Handler {
 				return httpRateLimiter.RateLimit(h)
@@ -168,7 +161,7 @@ func Init() {
 			return func(c ctx) error {
 				req := c.Request()
 				err := next(c)
-				if err == nil || req.Method != "GET" {
+				if err == nil || req.Method[0] != 'G' {
 					return err
 				}
 
@@ -284,35 +277,33 @@ func Init() {
 	initAuth()
 	initWrits()
 
-/*
-
-	Mak.AddPreWare(
-		func(next mak.Handler) mak.Handler {
+	Server.Use(
+		func (next echo.HandlerFunc) echo.HandlerFunc {
 			return func(c ctx) error {
 				startTime := time.Now()
 				err := next(c)
 				endTime := time.Now()
 
+				req := c.Request()
+				res := c.Response()
+				path := c.Path()
+
 				latency := float64(endTime.Sub(startTime)) / float64(time.Millisecond)
 				entry := LogEntry{
-					Method:   c.R.Method,
-					Code:     c.Status,
+					Method:   req.Method,
+					Code:     res.Status,
 					Latency:  latency,
-					Path:     c.Path,
-					Client:   c.ClientAddress(),
+					Path:     path,
+					IP:   c.RealIP(),
 					Start:    startTime,
 					End:      endTime,
-					BytesOut: c.ContentLength,
+					BytesOut: res.Size,
 					DevMode:  DevMode,
 				}
 
-				remote := c.RemoteAddress()
-				if entry.Client != remote {
-					entry.Remote = remote
-				}
-
-				if c.ContentLength != 0 {
-					entry.BytesIn = c.ContentLength
+				if bytesin, err := str2int64(req.Header.Get(echo.HeaderContentLength));
+					err == nil && bytesin != 0 {
+					entry.BytesIn = bytesin
 				}
 
 				if err != nil {
@@ -321,11 +312,11 @@ func Init() {
 
 				if DevMode {
 
-					authpath := strings.Contains(c.Path, "auth")
+					authpath := strings.Contains(path, "auth")
 					if authpath {
 
 						headers := obj{}
-						for name, header := range c.R.Header {
+						for name, header := range req.Header {
 							headers[name] = header[0]
 						}
 						entry.Headers = headers
@@ -336,25 +327,25 @@ func Init() {
 					if err != nil {
 						fmt.Printf(
 							"%s:%s %s %gms | client: %s | err: %s\n",
-							aurora.Brown(c.R.Method).String(),
-							aurora.Blue(c.Status).String(),
-							c.Path,
+							aurora.Brown(req.Method).String(),
+							aurora.Green(res.Status).String(),
+							path,
 							latency,
-							entry.Client,
+							entry.IP,
 							aurora.Red(err.Error()),
 						)
 					} else {
 						fmt.Printf(
 							"%s:%s %s %gms | client: %s\n",
-							aurora.Brown(c.R.Method).String(),
-							aurora.Blue(c.Status).String(),
-							c.Path,
+							aurora.Brown(req.Method).String(),
+							aurora.Green(res.Status).String(),
+							path,
 							latency,
-							entry.Client,
+							entry.IP,
 						)
 					}
 
-					if strings.Contains(c.Path, "auth") {
+					if strings.Contains(path, "auth") {
 						fmt.Println("\n\t:Auth Path End\n\t")
 					}
 				}
@@ -365,7 +356,6 @@ func Init() {
 			}
 		},
 	)
-*/
 
 	go func() {
 		time.Sleep(2 * time.Second)
@@ -438,8 +428,7 @@ func Init() {
 type LogEntry struct {
 	Method   string    `json:"method,omitempty"`
 	Path     string    `json:"path,omitempty"`
-	Client   string    `json:"client,omitempty"`
-	Remote   string    `json:"remote,omitempty"`
+	IP   string    `json:"client,omitempty"`
 	Code     int       `json:"code,omitempty"`
 	Latency  float64   `json:"latency,omitempty"`
 	Start    time.Time `json:"start,omitempty"`
