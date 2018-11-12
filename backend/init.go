@@ -93,6 +93,9 @@ func Init() {
 		confloc = "./private/config.toml"
 	}
 
+	var donotRatelimit bool
+	flaggy.Bool(&donotRatelimit, "nr", "no-ratelimit", "should the server not ratelimit?")
+
 	flaggy.Parse()
 
 	Conf = digestConfig(confloc)
@@ -100,30 +103,30 @@ func Init() {
 	Conf.DevMode = DevMode
 
 	Server = echo.New()
+	
+	if !donotRatelimit && !DevMode {
+		store, err := memstore.New(65536)
+		if err != nil {
+			log.Fatal(err)
+		}
 
-	store, err := memstore.New(65536)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	quota := throttled.RateQuota{MaxRate: throttled.PerMin(10), MaxBurst: 4}
-	rateLimiter, err := throttled.NewGCRARateLimiter(store, quota)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	httpRateLimiter := throttled.HTTPRateLimiter{
-		RateLimiter: rateLimiter,
-		VaryBy:      &throttled.VaryBy{Path: true},
-	}
-		
-	if !DevMode {
+		quota := throttled.RateQuota{MaxRate: throttled.PerMin(10), MaxBurst: 4}
+		rateLimiter, err := throttled.NewGCRARateLimiter(store, quota)
+		if err != nil {
+			log.Fatal(err)
+		}
+	
+		httpRateLimiter := throttled.HTTPRateLimiter{
+			RateLimiter: rateLimiter,
+			VaryBy:      &throttled.VaryBy{Path: true},
+		}
 		Server.Use(
 			echo.WrapMiddleware(func(h http.Handler) http.Handler {
 				return httpRateLimiter.RateLimit(h)
 			}),
 		)
 	}
+	fmt.Println("\nratelimiting: ", !donotRatelimit)
 
 	if Conf.Assets != "" {
 		assets, err := filepath.Abs(Conf.Assets)
