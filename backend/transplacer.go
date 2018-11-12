@@ -287,19 +287,6 @@ func (as *Asset) ServeHTTP(res http.ResponseWriter, req *http.Request) error {
 		res.Header().Set("Strict-Transport-Security", "max-age=31536000")
 	}
 
-	match := req.Header.Get("If-None-Match")
-	if match == "" {
-		match = req.Header.Get("If-Match")
-	}
-	if match != "" {
-		if strings.Contains(match, as.Etag) ||
-			strings.Contains(match, as.EtagCompressed) {
-			res.WriteHeader(302)
-			_, err := res.Write(nil)
-			return err
-		}
-	}
-
 	res.Header().Set("Cache-Control", as.CacheControl)
 	if len(as.PushList) > 0 {
 		pushWithHeaders(res, req, as.PushList)
@@ -403,7 +390,10 @@ func pushWithHeaders(W http.ResponseWriter, R *http.Request, list []string) {
 				reqHeaders.Del(name)
 			}
 		}
-		HTTP2Push(W, target, reqHeaders)
+		err := HTTP2Push(W, target, reqHeaders)
+		if DevMode {
+			fmt.Println("http2 push Error: ", err)
+		}
 	}
 }
 
