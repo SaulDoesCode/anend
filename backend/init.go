@@ -14,6 +14,7 @@ import (
 
 	"github.com/CrowdSurge/banner"
 	"github.com/SaulDoesCode/echo"
+	tr "github.com/SaulDoesCode/transplacer"
 	"github.com/integrii/flaggy"
 	"github.com/logrusorgru/aurora"
 	"github.com/throttled/throttled"
@@ -66,7 +67,7 @@ var (
 	Conf *Config
 
 	// Cache serves memory cached (gzipped) static content
-	Cache *AssetCache
+	Cache *tr.AssetCache
 )
 
 // Init start the backend server
@@ -145,20 +146,18 @@ func Init() {
 			panic("the path of assets, leads to no folder sir, you best fix that now!")
 		}
 
-		cache, err := MakeAssetCache(
-			Conf.Assets, 
-			time.Minute * 10,
-			time.Minute * 1, 
-			!Conf.DoNotWatchAssets,
-		)
+		cache, err := tr.Make(&tr.AssetCache{
+			Dir: Conf.Assets,
+			Expire: time.Minute * 5,
+			Interval: time.Minute * 1,
+			Watch: !Conf.DoNotWatchAssets,
+		})
 		if err != nil {
 			panic("AssetCache setup failure: " + err.Error())
 		}
 		Cache = cache
 		Cache.DevMode = Conf.DevMode
 		defer Cache.Close()
-
-		indexPath := prepPath(Conf.Assets, "index.html")
 	
 		Server.Use(func (next echo.HandlerFunc) echo.HandlerFunc {
 			return func(c ctx) error {
@@ -168,12 +167,7 @@ func Init() {
 					return err
 				}
 
-				if req.RequestURI == "/"  || req.RequestURI == "" {
-					err = Cache.ServeFileDirect(c.Response().Writer, req, indexPath)
-				} else {
-					err = Cache.ServeFile(c.Response().Writer, req, req.RequestURI)
-				}
-
+				err = Cache.Serve(c.Response().Writer, req)
 				if Conf.DevMode && err != nil {
 					fmt.Println("Cache.ServeFile error: ", err)
 				}

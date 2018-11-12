@@ -6,10 +6,10 @@ require (
 	github.com/Machiel/slugify v1.0.1
 	github.com/SaulDoesCode/echo v0.0.0-20181112095143-0efb56e5b147
 	github.com/SaulDoesCode/mailyak v0.0.0-20181107214438-034a561f5162
+	github.com/SaulDoesCode/transplacer v0.0.0-20181112175015-fea253fea7d6
 	github.com/arangodb/go-driver v0.0.0-20181029154412-d60f4a8520d3
 	github.com/asaskevich/govalidator v0.0.0-20180720115003-f9ffefc3facf
 	github.com/cornelk/hashmap v0.0.0-20180818103603-a8997b175649
-	github.com/dchest/siphash v1.2.0 // indirect
 	github.com/driusan/dkim v0.0.0-20181021194700-dda260a68aa1
 	github.com/fsnotify/fsnotify v1.4.7
 	github.com/hashicorp/golang-lru v0.5.0 // indirect

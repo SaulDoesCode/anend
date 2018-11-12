@@ -8,6 +8,8 @@ github.com/SaulDoesCode/echo v0.0.0-20181112095143-0efb56e5b147 h1:sHZrpFm+NUaxQ
 github.com/SaulDoesCode/echo v0.0.0-20181112095143-0efb56e5b147/go.mod h1:Cyt97xD/Fjzj+H/mRbOh2AcCD6dbTvafTbUTwDpu0OU=
 github.com/SaulDoesCode/mailyak v0.0.0-20181107214438-034a561f5162 h1:gAJQTXQ0bYoKNq5Zq0lsU2+qfi0veoh8j7qAzZEddRc=
 github.com/SaulDoesCode/mailyak v0.0.0-20181107214438-034a561f5162/go.mod h1:dJKpmWvdHaLWYNVTK/7dV0q8YVIQyJRAw5Tvtftl26w=
+github.com/SaulDoesCode/transplacer v0.0.0-20181112175015-fea253fea7d6 h1:gELO159fKu2BUUBpqsZqZR1u3IWr9h2lZsvMffj11rg=
+github.com/SaulDoesCode/transplacer v0.0.0-20181112175015-fea253fea7d6/go.mod h1:+x3EszndZkjYM5qlNp3xZDlx02cbYaX/sAk5mpbOKP8=
 github.com/arangodb/go-driver v0.0.0-20181029154412-d60f4a8520d3 h1:xJIAsR7WlIqIT+J4vdyDdjqmtduDqzH6sUFTuiQyqHY=
 github.com/arangodb/go-driver v0.0.0-20181029154412-d60f4a8520d3/go.mod h1:NcDoR4f0FdFia/QizCc+B69DggPGLP3nCKg5IUtudm0=
 github.com/arangodb/go-velocypack v0.0.0-20180928134037-d177e3455691 h1:62SGGAvrKTXOrewra74du0H98Yg/eufQ/tO3RoIP8Bs=
