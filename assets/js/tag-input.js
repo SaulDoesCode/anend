@@ -88,8 +88,8 @@
         return el
       },
       clearTags(el, silent) {
-        el.eachTag((tag, name) => el.removeTag(name, true))
-        el.children.forEach(child => {
+        el.eachTag((_, name) => el.removeTag(name, true))
+        el.$children.forEach(child => {
           if (child.matches('.tag')) child.remove()
         })
         if (!silent) {
