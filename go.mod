@@ -4,7 +4,7 @@ require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/CrowdSurge/banner v0.0.0-20140923200336-8c0e79dc5ff7
 	github.com/Machiel/slugify v1.0.1
-	github.com/SaulDoesCode/echo v0.0.0-20181111105713-6f110d7e0e3f
+	github.com/SaulDoesCode/echo v0.0.0-20181112095143-0efb56e5b147
 	github.com/SaulDoesCode/mailyak v0.0.0-20181107214438-034a561f5162
 	github.com/arangodb/go-driver v0.0.0-20181029154412-d60f4a8520d3
 	github.com/asaskevich/govalidator v0.0.0-20180720115003-f9ffefc3facf
