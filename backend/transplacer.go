@@ -69,7 +69,7 @@ func MakeAssetCache(dir string, expire time.Duration, interval time.Duration, wa
 			for kv := range a.Cache.Iter() {
 				asset := kv.Value.(*Asset)
 				if asset.Loaded.Add(a.Expire).After(now) {
-					a.Cache.Del(kv.Key)
+					a.Del(kv.Key.(string))
 				}
 			}
 		}
@@ -243,10 +243,11 @@ var ErrAssetNotFound = errors.New(`no such asset to serve`)
 // ServeFileDirect takes a key/filename directly and serves it if it exists and returns an ErrAssetNotFound if it doesn't
 func (a *AssetCache) ServeFileDirect(res http.ResponseWriter, req *http.Request, file string) error {
 	asset, ok := a.Get(file)
-	if ok {
-		return asset.ServeHTTP(res, req)
+	if !ok {
+		return ErrAssetNotFound
 	}
-	return ErrAssetNotFound
+	asset.ServeHTTP(res, req)
+	return nil
 }
 
 // ServeFile parses a key/filename and serves it if it exists and returns an ErrAssetNotFound if it doesn't
@@ -280,7 +281,7 @@ type Asset struct {
 }
 
 // ServeHTTP an asset through c *Ctx
-func (as *Asset) ServeHTTP(res http.ResponseWriter, req *http.Request) error {
+func (as *Asset) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 	res.Header().Set("Content-Type", as.ContentType)
 
 	if req.TLS != nil && res.Header().Get("Strict-Transport-Security") == "" {
@@ -301,8 +302,6 @@ func (as *Asset) ServeHTTP(res http.ResponseWriter, req *http.Request) error {
 		res.Header().Set("Etag", as.Etag)
 		http.ServeContent(res, req, as.Name, as.ModTime, as.Content)
 	}
-
-	return nil
 }
 
 func gzipBytes(content []byte, level int) ([]byte, error) {
@@ -391,7 +390,7 @@ func pushWithHeaders(W http.ResponseWriter, R *http.Request, list []string) {
 			}
 		}
 		err := HTTP2Push(W, target, reqHeaders)
-		if DevMode {
+		if DevMode && err != nil {
 			fmt.Println("http2 push Error: ", err)
 		}
 	}

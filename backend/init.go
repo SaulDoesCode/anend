@@ -14,6 +14,7 @@ import (
 
 	"github.com/CrowdSurge/banner"
 	"github.com/SaulDoesCode/echo"
+	"github.com/SaulDoesCode/echo/middleware"
 	"github.com/integrii/flaggy"
 	"github.com/logrusorgru/aurora"
 	"github.com/throttled/throttled"
@@ -116,12 +117,20 @@ func Init() {
 		RateLimiter: rateLimiter,
 		VaryBy:      &throttled.VaryBy{Path: true},
 	}
-
-	Server.Use(
-		echo.WrapMiddleware(func(h http.Handler) http.Handler {
-			return httpRateLimiter.RateLimit(h)
-		}),
-	)
+		
+	if DevMode {
+		Server.Use(
+			middleware.LoggerWithConfig(middleware.LoggerConfig{
+				Format: "${method}:${status} uri=${uri} ${latency_human}\n",
+			}),
+		)
+	} else {
+		Server.Use(
+			echo.WrapMiddleware(func(h http.Handler) http.Handler {
+				return httpRateLimiter.RateLimit(h)
+			}),
+		)
+	}
 
 	if Conf.Assets != "" {
 		assets, err := filepath.Abs(Conf.Assets)
@@ -154,30 +163,29 @@ func Init() {
 		defer Cache.Close()
 
 		indexPath := prepPath(Conf.Assets, "index.html")
-
-		Server.Use(echo.WrapMiddleware(func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func (res http.ResponseWriter, req *http.Request) {
-				if req.Method != "GET" {
-					next.ServeHTTP(res, req)
-					return
-				}
-				var err error
-				if req.RequestURI == "/"  || req.RequestURI == "" {
-					err = Cache.ServeFileDirect(res, req, indexPath)
-				} else {
-					err = Cache.ServeFile(res, req, req.RequestURI)
-				}
-
-				if err != nil {
-					if Conf.DevMode {
-						fmt.Println("Cache.ServeFile error: ", err)
-					}
-					next.ServeHTTP(res, req)
-				}
-			})
-		}))
-	}
 	
+		Server.Use(func (next echo.HandlerFunc) echo.HandlerFunc {
+			return func(c ctx) error {
+				req := c.Request()
+				err := next(c)
+				if err == nil || req.Method != "GET" {
+					return err
+				}
+
+				if req.RequestURI == "/"  || req.RequestURI == "" {
+					err = Cache.ServeFileDirect(c.Response().Writer, req, indexPath)
+				} else {
+					err = Cache.ServeFile(c.Response().Writer, req, req.RequestURI)
+				}
+
+				if Conf.DevMode && err != nil {
+					fmt.Println("Cache.ServeFile error: ", err)
+				}
+				return err
+			}
+		})
+	}
+
 	if DevMode {
 		Conf.Domain = "localhost"
 		Conf.AutoCert = Conf.DevAutoCert
