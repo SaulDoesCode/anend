@@ -173,7 +173,8 @@ const populateWritlist = (page = 0, count = 15) => {
       li._key = w._key
     }
     if (!app.activeWrit) {
-      app.emit.activeWrit(app.activeWrit = app.writs[Object.keys(app.writs)[0]])
+      const keys = Object.keys(app.writs)
+      app.emit.activeWrit(app.activeWrit = app.writs[keys[keys.length - 1]])
     }
   }, count)
 }
