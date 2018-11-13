@@ -1,7 +1,7 @@
 const app = rilti.emitter()
 {
 const {dom, $} = rilti
-const {div, button, br, img, h1, h2, h3, h4, input, label, span, section, aside, article, header, footer, html} = dom
+const {a, div, button, br, img, h1, h2, h3, h4, input, label, span, section, aside, article, header, footer, html} = dom
 /*
 const converter = new showdown.Converter({openLinksInNewWindow: true, tasklists: true})
 const md2html = (md, plain) => plain ? converter.makeHtml(md) : html(converter.makeHtml(md))
@@ -180,5 +180,49 @@ const populateWritlist = (page = 0, count = 15) => {
 }
 
 populateWritlist(0)
+
+app.footer = footer({$: 'body'})
+
+const footerSection = (name, ...parts) => section['foot-section']({
+  $: app.footer,
+  cycle: {
+    mount: () => rilti.run(() => {
+      document.body.style.marginBottom = app.footer.offsetHeight + 'px'
+    })
+  }
+},
+  header(name),
+  div(
+    ...parts
+  )
+)
+
+footerSection('external', 
+    a.external.github({href: 'https://github.com/SaulDoesCode'},
+      span('Github'),
+      'SaulDoesCode'
+    ),
+    a.external.email({href: 'mailto:saul@grimstack.io'},
+      span('email'),
+      'saul@grimstack.io'
+    )
+)
+
+footerSection('support us',
+    div.supportus.digitalocean(
+      span(`
+        By signing up for your own servers/websites/blogs at DigitalOcean
+        using the `,
+        a({href: 'https://m.do.co/c/6564219d6c9a'}, 'referal link'),
+        `, you can keep this site running for a whole month.`
+      ),
+      a(
+        {href: 'https://m.do.co/c/6564219d6c9a'},
+        button('Get it')
+      )
+    )
+)
+
+
 }
 

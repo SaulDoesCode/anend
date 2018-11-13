@@ -1,17 +1,29 @@
 :root {
-  --primary: hsl(40, 24%, 39%);
+  --primary: hsl(40, 24%, 44%);
   --primary-grad: linear-gradient(to left top, #ffcc3d, #ffc645, #ffc04c, #ffbb52, #ffb659);
   --primary-grad-highlight: linear-gradient(to right bottom, #ffcc16, #fcc127, #f8b633, #f2ac3c, #f3ad52);
 }
 
-* {
+*, * * {
   position: relative;
   box-sizing: border-box;
 }
 
+html, body {
+  min-height: 100vh;
+  min-height: calc(100vh + 100px);
+}
+
 body {
+  display: flex;
+  justify-content: flex-start;
+  align-content: center;
+  align-items: center;
+  flex-flow: column wrap;
   font-family: Nunito, Arial, Helvetica, sans-serif;
   text-align: center;
+  margin-bottom: 180px;
+  padding-bottom: 1.5em;
 }
 
 header.hero {
@@ -23,6 +35,7 @@ header.hero {
   padding: 5px;
   background: var(--primary);
   min-height: 130px;
+  width: 100%;
 }
 
 section.authbtn {
@@ -213,6 +226,7 @@ body>main {
 .writdisplay>article {
   padding: .3em;
   margin: .3em;
+  text-align: left;
 }
 
 .writview>footer,
@@ -244,6 +258,49 @@ body>main {
   color: var(--primary);
   text-shadow: 0 1px 2px rgba(0, 0, 0, .12);
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .14));
+}
+
+body > footer {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  display: flex;
+  justify-content: space-around;
+  align-content: center;
+  align-items: flex-start;
+  flex-flow: row wrap;
+  background: var(--primary);
+  color: black;
+  width: 100%;
+  padding: .5em;
+  text-align: center;
+}
+
+.foot-section {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: min-content 1.5fr;
+  grid-template-areas: "." ".";
+  max-width: 250px;
+}
+
+.foot-section > header {
+  padding: .5em;
+  font-size: 1.15em;
+  text-decoration: underline;
+}
+
+.foot-section > div {
+  display: flex;
+  justify-content: space-around;
+  align-content: center;
+  align-items: center;
+  flex-flow: column wrap;
+}
+
+.foot-section a > span {
+  margin-left: .5em;
+  padding: .25em;
 }
 
 @media all and (max-width: 780px) {
