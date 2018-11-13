@@ -1,5 +1,6 @@
 :root {
-  --primary: hsl(40, 24%, 44%);
+  --primary: hsl(39, 30%, 66%);
+  --primary-dark: hsl(39, 30%, 44%);
   --primary-grad: linear-gradient(to left top, #ffcc3d, #ffc645, #ffc04c, #ffbb52, #ffb659);
   --primary-grad-highlight: linear-gradient(to right bottom, #ffcc16, #fcc127, #f8b633, #f2ac3c, #f3ad52);
 }
@@ -7,6 +8,22 @@
 *, * * {
   position: relative;
   box-sizing: border-box;
+}
+
+a, a:visited, a:active {
+  margin: .1em;
+  box-sizing: content-box;
+  overflow: hidden;
+  color: hsl(44, 11%, 33%);
+  font-weight: bolder;
+  text-decoration: none;
+  transition: all 120ms ease-in-out;
+}
+
+a:active, a:focus, a:hover { 
+  color: hsl(44, 14%, 22%);
+  text-decoration: underline;
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,.14));
 }
 
 html, body {
@@ -254,8 +271,8 @@ body>main {
   margin: .3em;
   padding: .3em;
   border-radius: 4px;
-  background: hsl(0, 0%, 95%);
-  color: var(--primary);
+  background: hsl(0, 0%, 96%);
+  color: var(--primary-dark);
   text-shadow: 0 1px 2px rgba(0, 0, 0, .12);
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .14));
 }

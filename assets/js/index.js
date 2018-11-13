@@ -208,17 +208,16 @@ footerSection('external',
     )
 )
 
-footerSection('support us',
+footerSection('support this',
     div.supportus.digitalocean(
       span(`
-        By signing up for your own servers/websites/blogs at DigitalOcean
-        using the `,
+        Sign up for your own servers at DigitalOcean using this `,
         a({href: 'https://m.do.co/c/6564219d6c9a'}, 'referal link'),
-        `, you can keep this site running for a whole month.`
+        `, it gives good discount and will keep this site running for a whole month.`
       ),
       a(
         {href: 'https://m.do.co/c/6564219d6c9a'},
-        button('Get it')
+        dom.img({src: '/media/DO_Powered_by_Badge_white.svg'})
       )
     )
 )
