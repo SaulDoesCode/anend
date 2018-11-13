@@ -104,6 +104,7 @@ func Init() {
 	Conf.DevMode = DevMode
 
 	Server = echo.New()
+	Server.Debug = DevMode
 	
 	if !donotRatelimit && !DevMode {
 		store, err := memstore.New(65536)
@@ -227,7 +228,15 @@ func Init() {
 	initAuth()
 	initWrits()
 
-	Server.Use(
+	Server.HTTPErrorHandler = func(err error, c ctx) {
+		if err == Err404NotFound {
+			Err404NotFound.Send(c)
+			return
+		}
+		Server.DefaultHTTPErrorHandler(err, c)
+	}
+
+	Server.Pre(
 		func (next echo.HandlerFunc) echo.HandlerFunc {
 			return func(c ctx) error {
 				startTime := time.Now()
@@ -236,7 +245,14 @@ func Init() {
 
 				req := c.Request()
 				res := c.Response()
-				path := c.Path()
+				path := req.RequestURI
+
+				if Cache != nil && req.Method[0] == 'G' && err != nil && !res.Committed {
+					err = Cache.Serve(res, req)
+					if Conf.DevMode && err != nil {
+						fmt.Println("Cache.ServeFile error: ", err)
+					}
+				}
 
 				latency := float64(endTime.Sub(startTime)) / float64(time.Millisecond)
 				entry := LogEntry{
@@ -244,7 +260,7 @@ func Init() {
 					Code:     res.Status,
 					Latency:  latency,
 					Path:     path,
-					IP:   c.RealIP(),
+					IP:  	    c.RealIP(),
 					Start:    startTime,
 					End:      endTime,
 					BytesOut: res.Size,
@@ -260,9 +276,9 @@ func Init() {
 					entry.Err = err.Error()
 				}
 				
-				if strings.Contains(entry.Err, "code=404") && entry.Code == 200 {
+				if (strings.Contains(entry.Err, "code=404") && entry.Code == 200) ||
+				strings.Contains(path, ".ico") {
 					entry.Err = ""
-					err = nil
 				}
 
 				if DevMode {
@@ -339,23 +355,13 @@ func Init() {
 		}
 		Cache = cache
 		Cache.DevMode = Conf.DevMode
-		defer Cache.Close()
 	
-		Server.Use(func (next echo.HandlerFunc) echo.HandlerFunc {
-			return func(c ctx) error {
-				req := c.Request()
-				err := next(c)
-				if err == nil || req.Method[0] != 'G' {
-					return err
-				}
+		Err404NotFound = MakePageErr(404, "Not Found", "/404.html")
 
-				err = Cache.Serve(c.Response().Writer, req)
-				if Conf.DevMode && err != nil {
-					fmt.Println("Cache.ServeFile error: ", err)
-				}
-				return err
-			}
-		})
+		Cache.NotFoundError = Err404NotFound
+		Cache.NotFoundHandler = nil
+
+		defer Cache.Close()
 	}
 
 	go func() {

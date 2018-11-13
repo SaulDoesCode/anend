@@ -1,6 +1,11 @@
 package backend
 
-import "errors"
+import (
+	"errors"
+	"io/ioutil"
+
+	tr "github.com/SaulDoesCode/transplacer"
+)
 
 // Errors for days
 var (
@@ -43,3 +48,37 @@ var (
 	// DeleteWritError there was trouble when attempting to delete a writ, prolly database/bad-input related
 	DeleteWritError = MakeCodedResponse(500, obj{"err": "could not delete writ, maybe it didn't exist in the first place"})
 )
+
+// PageError implements error but can send an .html file as a response
+type PageError struct {
+	Code    int
+	Path    string
+	Content []byte
+	Value   string
+}
+
+func (pe *PageError) Error() string {
+	return pe.Value
+}
+
+// Send responds to a request with an .html error page
+func (pe *PageError) Send(c ctx) error {
+	// See https://github.com/golang/go/issues/27139
+	// We can't set the status code to the error's
+	// Because http.ServeContent does this with no
+	// way to change it :(
+	return c.HTMLBlob(pe.Code, pe.Content)
+}
+
+// MakePageErr generates a new *PageError
+func MakePageErr(code int, value, path string) *PageError {
+	path = tr.PrepPath(Conf.Assets, path)
+	content, err := ioutil.ReadFile(path)
+	if err != nil {
+		panic("PageError needs a valid path to a servable error page: " + err.Error())
+	}
+	return &PageError{Code: code, Path: path, Content: content, Value: value}
+}
+
+// Err404NotFound is the standard 404 error response returned by Anend
+var Err404NotFound *PageError
