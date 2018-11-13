@@ -129,53 +129,6 @@ func Init() {
 	}
 	fmt.Println("\nratelimiting: ", !donotRatelimit)
 
-	if Conf.Assets != "" {
-		assets, err := filepath.Abs(Conf.Assets)
-		if err != nil {
-			fmt.Println("assets dir error, cannot get absolute path: ", err, assets)
-			panic("could not get an absolute path for the assets directory")
-		}
-		Conf.Assets = assets
-
-		stat, err := os.Stat(Conf.Assets)
-		if err != nil {
-			fmt.Println("assets dir err: ", err)
-			panic("something wrong with the Assets dir/path, best you check what's going on")
-		}
-		if !stat.IsDir() {
-			panic("the path of assets, leads to no folder sir, you best fix that now!")
-		}
-
-		cache, err := tr.Make(&tr.AssetCache{
-			Dir: Conf.Assets,
-			Expire: time.Minute * 5,
-			Interval: time.Minute * 1,
-			Watch: !Conf.DoNotWatchAssets,
-		})
-		if err != nil {
-			panic("AssetCache setup failure: " + err.Error())
-		}
-		Cache = cache
-		Cache.DevMode = Conf.DevMode
-		defer Cache.Close()
-	
-		Server.Use(func (next echo.HandlerFunc) echo.HandlerFunc {
-			return func(c ctx) error {
-				req := c.Request()
-				err := next(c)
-				if err == nil || req.Method[0] != 'G' {
-					return err
-				}
-
-				err = Cache.Serve(c.Response().Writer, req)
-				if Conf.DevMode && err != nil {
-					fmt.Println("Cache.ServeFile error: ", err)
-				}
-				return err
-			}
-		})
-	}
-
 	if DevMode {
 		Conf.Domain = "localhost"
 		Conf.AutoCert = Conf.DevAutoCert
@@ -357,6 +310,53 @@ func Init() {
 			}
 		},
 	)
+
+	if Conf.Assets != "" {
+		assets, err := filepath.Abs(Conf.Assets)
+		if err != nil {
+			fmt.Println("assets dir error, cannot get absolute path: ", err, assets)
+			panic("could not get an absolute path for the assets directory")
+		}
+		Conf.Assets = assets
+
+		stat, err := os.Stat(Conf.Assets)
+		if err != nil {
+			fmt.Println("assets dir err: ", err)
+			panic("something wrong with the Assets dir/path, best you check what's going on")
+		}
+		if !stat.IsDir() {
+			panic("the path of assets, leads to no folder sir, you best fix that now!")
+		}
+
+		cache, err := tr.Make(&tr.AssetCache{
+			Dir: Conf.Assets,
+			Expire: time.Minute * 45,
+			Interval: time.Minute * 2,
+			Watch: !Conf.DoNotWatchAssets,
+		})
+		if err != nil {
+			panic("AssetCache setup failure: " + err.Error())
+		}
+		Cache = cache
+		Cache.DevMode = Conf.DevMode
+		defer Cache.Close()
+	
+		Server.Use(func (next echo.HandlerFunc) echo.HandlerFunc {
+			return func(c ctx) error {
+				req := c.Request()
+				err := next(c)
+				if err == nil || req.Method[0] != 'G' {
+					return err
+				}
+
+				err = Cache.Serve(c.Response().Writer, req)
+				if Conf.DevMode && err != nil {
+					fmt.Println("Cache.ServeFile error: ", err)
+				}
+				return err
+			}
+		})
+	}
 
 	go func() {
 		time.Sleep(2 * time.Second)
