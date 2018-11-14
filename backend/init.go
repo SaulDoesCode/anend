@@ -55,6 +55,8 @@ var (
 	AssetsDir string
 	// AppLocation where this application lives, it's used for self management
 	AppLocation string
+	// LocalIP is the IP of the machine/env the app is running on
+	LocalIP string
 	// StartupDate when the app started running
 	StartupDate time.Time
 	// LogQ server logging
@@ -83,6 +85,13 @@ func Init() {
 	if strings.Contains(AppLocation, "go-build") &&
 		(strings.Contains(AppLocation, "Temp") || strings.Contains(AppLocation, "temp")) {
 		fmt.Println("warning: self-management will not work with if you ran go run main.go")
+	}
+
+	lip, err := checkIP()
+	if err == nil {
+		LocalIP = lip
+	} else {
+		fmt.Println(aurora.Brown("Warning: "), " could not determine external ip, that might cause a mess in the logs")
 	}
 
 	flaggy.Bool(&DevMode, "d", "dev", "launch app in devmode")
@@ -333,8 +342,9 @@ func Init() {
 						fmt.Println("\n\t:Auth Path End\n\t")
 					}
 				}
-
-				LogQ = append(LogQ, entry)
+				if entry.IP != LocalIP && !strings.Contains(entry.IP, "::1") && !strings.HasPrefix(entry.IP, "[::") {
+					LogQ = append(LogQ, entry)
+				}
 
 				return err
 			}
@@ -389,6 +399,9 @@ func Init() {
 		fmt.Println("AutoCert: ", Conf.AutoCert)
 		fmt.Println("Server Address: ", Server.TLSServer.Addr)
 		fmt.Println("Secondary Server Address: ", Server.Server.Addr)
+		if LocalIP != "" {
+			fmt.Println("App running on:", LocalIP)
+		}
 
 		fmt.Printf("\n")
 	}()
