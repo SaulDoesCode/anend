@@ -1,8 +1,8 @@
 :root {
-  --the-mood: hsl(44, 100%, 68%);
+  --primary: hsl(39, 30%, 66%);
+  --primary-dark: hsl(39, 30%, 44%);
+  --the-mood: hsl(39, 30%, 66%);
   --the-mood-overlays: hsl(0, 0%, 0%);
-  --the-mood-old: hsl(345, 97%, 59%);
-  --the-mood-highlight: hsl(355, 100%, 67%);
 }
 
 *,
@@ -69,7 +69,7 @@ body {
   justify-content: center;
   align-content: center;
   align-items: center;
-  background: hsl(0, 0%, 0%);
+  background: var(--primary-dark);
 }
 
 button,
