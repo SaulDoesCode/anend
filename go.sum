@@ -8,10 +8,12 @@ github.com/SaulDoesCode/echo v0.0.0-20181112095143-0efb56e5b147 h1:sHZrpFm+NUaxQ
 github.com/SaulDoesCode/echo v0.0.0-20181112095143-0efb56e5b147/go.mod h1:Cyt97xD/Fjzj+H/mRbOh2AcCD6dbTvafTbUTwDpu0OU=
 github.com/SaulDoesCode/mailyak v0.0.0-20181107214438-034a561f5162 h1:gAJQTXQ0bYoKNq5Zq0lsU2+qfi0veoh8j7qAzZEddRc=
 github.com/SaulDoesCode/mailyak v0.0.0-20181107214438-034a561f5162/go.mod h1:dJKpmWvdHaLWYNVTK/7dV0q8YVIQyJRAw5Tvtftl26w=
-github.com/SaulDoesCode/transplacer v1.1.2 h1:bZYgT5N6slKYRNhajdoSpWDcEn6e6kTrEnGZBv8A0P0=
-github.com/SaulDoesCode/transplacer v1.1.2/go.mod h1:+x3EszndZkjYM5qlNp3xZDlx02cbYaX/sAk5mpbOKP8=
-github.com/arangodb/go-driver v0.0.0-20181029154412-d60f4a8520d3 h1:xJIAsR7WlIqIT+J4vdyDdjqmtduDqzH6sUFTuiQyqHY=
-github.com/arangodb/go-driver v0.0.0-20181029154412-d60f4a8520d3/go.mod h1:NcDoR4f0FdFia/QizCc+B69DggPGLP3nCKg5IUtudm0=
+github.com/SaulDoesCode/transplacer v1.1.3-0.20181113205433-af36fb2eb8ad h1:IKGyHllqqT5ky+PgosC1ir1++K3l0YkA46lKY8uhggs=
+github.com/SaulDoesCode/transplacer v1.1.3-0.20181113205433-af36fb2eb8ad/go.mod h1:+x3EszndZkjYM5qlNp3xZDlx02cbYaX/sAk5mpbOKP8=
+github.com/SaulDoesCode/transplacer v1.1.3-0.20181113213019-16e867a97321 h1:mUaYLOJ66+8LMJ8fwIbSymg+SzNq9fw9jtbY1UPJVDw=
+github.com/SaulDoesCode/transplacer v1.1.3-0.20181113213019-16e867a97321/go.mod h1:+x3EszndZkjYM5qlNp3xZDlx02cbYaX/sAk5mpbOKP8=
+github.com/arangodb/go-driver v0.0.0-20181113155141-84ef160dfd53 h1:/sGog1uacsJUzQkb0ik6hms4gki8zMjecsEQMSpAE0Q=
+github.com/arangodb/go-driver v0.0.0-20181113155141-84ef160dfd53/go.mod h1:NcDoR4f0FdFia/QizCc+B69DggPGLP3nCKg5IUtudm0=
 github.com/arangodb/go-velocypack v0.0.0-20180928134037-d177e3455691 h1:62SGGAvrKTXOrewra74du0H98Yg/eufQ/tO3RoIP8Bs=
 github.com/arangodb/go-velocypack v0.0.0-20180928134037-d177e3455691/go.mod h1:7QCjpWXdB49P6fql1CxmsBWd8z/T4L4pqFLTnc10xNM=
 github.com/asaskevich/govalidator v0.0.0-20180720115003-f9ffefc3facf h1:eg0MeVzsP1G42dRafH3vf+al2vQIJU0YHX+1Tw87oco=
@@ -71,5 +73,7 @@ golang.org/x/crypto v0.0.0-20181106171534-e4dc69e5b2fd h1:VtIkGDhk0ph3t+THbvXHfM
 golang.org/x/crypto v0.0.0-20181106171534-e4dc69e5b2fd/go.mod h1:6SG95UA2DQfeDnfUPMdvaQW0Q7yPrPDi9nlGo2tz2b4=
 golang.org/x/net v0.0.0-20181108082009-03003ca0c849 h1:FSqE2GGG7wzsYUsWiQ8MZrvEd1EOyU3NCF0AW3Wtltg=
 golang.org/x/net v0.0.0-20181108082009-03003ca0c849/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
+golang.org/x/net v0.0.0-20181113165502-88d92db4c548 h1:lqFnrcY5rM6XXZ41MVa5mTlOBrBYultJDG1orIvlqPA=
+golang.org/x/net v0.0.0-20181113165502-88d92db4c548/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
 golang.org/x/sys v0.0.0-20181107165924-66b7b1311ac8 h1:YoY1wS6JYVRpIfFngRf2HHo9R9dAne3xbkGOQ5rJXjU=
 golang.org/x/sys v0.0.0-20181107165924-66b7b1311ac8/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
