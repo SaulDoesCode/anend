@@ -233,6 +233,13 @@ func Init() {
 			Err404NotFound.Send(c)
 			return
 		}
+
+		cmsg, ok := err.(*CodedResponse)
+		if ok {
+			cmsg.SendJSON(c)
+			return
+		}
+	
 		Server.DefaultHTTPErrorHandler(err, c)
 	}
 
@@ -248,9 +255,12 @@ func Init() {
 				path := req.RequestURI
 
 				if Cache != nil && req.Method[0] == 'G' && err != nil && !res.Committed {
-					err = Cache.Serve(res, req)
-					if Conf.DevMode && err != nil {
-						fmt.Println("Cache.ServeFile error: ", err)
+					_, ok := err.(*CodedResponse)
+					if !ok {
+						err = Cache.Serve(res.Writer, req)
+						if Conf.DevMode && err != nil {
+							fmt.Println("Cache.ServeFile error: ", err)
+						}
 					}
 				}
 
@@ -349,12 +359,12 @@ func Init() {
 			Expire: time.Minute * 45,
 			Interval: time.Minute * 2,
 			Watch: !Conf.DoNotWatchAssets,
+			DevMode: Conf.DevMode,
 		})
 		if err != nil {
 			panic("AssetCache setup failure: " + err.Error())
 		}
 		Cache = cache
-		Cache.DevMode = Conf.DevMode
 	
 		Err404NotFound = MakePageErr(404, "Not Found", "/404.html")
 
@@ -435,7 +445,7 @@ func Init() {
 type LogEntry struct {
 	Method   string    `json:"method,omitempty"`
 	Path     string    `json:"path,omitempty"`
-	IP   string    `json:"client,omitempty"`
+	IP       string    `json:"client,omitempty"`
 	Code     int       `json:"code,omitempty"`
 	Latency  float64   `json:"latency,omitempty"`
 	Start    time.Time `json:"start,omitempty"`
