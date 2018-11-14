@@ -6,8 +6,8 @@ require (
 	github.com/Machiel/slugify v1.0.1
 	github.com/SaulDoesCode/echo v0.0.0-20181112095143-0efb56e5b147
 	github.com/SaulDoesCode/mailyak v0.0.0-20181107214438-034a561f5162
-	github.com/SaulDoesCode/transplacer v1.1.3-0.20181114064643-8552712e6234
-	github.com/arangodb/go-driver v0.0.0-20181113155141-84ef160dfd53
+	github.com/SaulDoesCode/transplacer v1.1.3-0.20181114095549-05afc0e5dc1c
+	github.com/arangodb/go-driver v0.0.0-20181114150110-0bbfa1eae73a
 	github.com/asaskevich/govalidator v0.0.0-20180720115003-f9ffefc3facf
 	github.com/cornelk/hashmap v0.0.0-20180818103603-a8997b175649
 	github.com/driusan/dkim v0.0.0-20181021194700-dda260a68aa1
