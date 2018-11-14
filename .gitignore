@@ -11,6 +11,7 @@ Caddyfile
 .stignore
 .stfolder
 .toml
+google*
 
 # Runtime data
 pids
@@ -106,3 +107,4 @@ LOCK
 *.out
 .cache
 *.lock
+assets/googleb8218fe872fed5b7.html
