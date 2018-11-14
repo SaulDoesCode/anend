@@ -257,6 +257,10 @@ func Init() {
 				if Cache != nil && req.Method[0] == 'G' && err != nil && !res.Committed {
 					_, ok := err.(*CodedResponse)
 					if !ok {
+						ext := filepath.Ext(path)
+						if ext == ".png" || ext == ".webp" {
+							res.Header().Set("Cache-Control", "only-if-cached, public")
+						}
 						err = Cache.Serve(res.Writer, req)
 						if Conf.DevMode && err != nil {
 							fmt.Println("Cache.ServeFile error: ", err)
