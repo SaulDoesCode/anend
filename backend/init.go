@@ -259,7 +259,7 @@ func Init() {
 					if !ok {
 						ext := filepath.Ext(path)
 						if ext == ".png" || ext == ".webp" {
-							res.Header().Set("Cache-Control", "only-if-cached, public")
+							res.Header().Set("Cache-Control", "public, max-age=30672000")
 						}
 						err = Cache.Serve(res.Writer, req)
 						if Conf.DevMode && err != nil {
