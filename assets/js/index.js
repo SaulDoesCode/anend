@@ -108,7 +108,7 @@ const authform = section.auth(
 )
 
 const fetchWrits = (page = 0, fn, count = 15) => {
-  haal(`/writlist/${page}/${count}`)(res => {
+  haal(`/writs/${page}/${count}`)(res => {
     if (res.ok && res.out && !res.out.err) {
       fn(res.out)
     } else {

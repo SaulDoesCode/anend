@@ -788,7 +788,7 @@ func initWrits() {
 		return c.Msgpack(200, writs)
 	})
 
-	Server.GET("/writlist/:page/:count", func(c ctx) error {
+	Server.GET("/writs/:page/:count", func(c ctx) error {
 		page, err := str2int64(c.Param("page"))
 		if err != nil {
 			return BadRequestError.Send(c)

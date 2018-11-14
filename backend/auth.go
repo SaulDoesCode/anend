@@ -515,7 +515,7 @@ func initAuth() {
 		return UnauthorizedError
 	})
 
-	Server.GET("/auth-logout", func(c ctx) error {
+	Server.GET("/logout", func(c ctx) error {
 		cookie, err := c.Cookie("Auth")
 		var token string
 		if err == nil {
@@ -532,6 +532,8 @@ func initAuth() {
 			HttpOnly: true,
 			Secure:   true,
 		})
+
+		c.Response().Header().Set("Clear-Site-Data", "*")
 
 		if len(token) > 5 {
 			go func() {
