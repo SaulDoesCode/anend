@@ -1,7 +1,10 @@
+window.deps.whenDone(() => {
+dayjs.extend(dayjs_plugin_relativeTime)
 const app = rilti.emitter()
-{
+if (location.host.includes('localhost')) window.app = app
 const {dom, $} = rilti
 const {a, div, button, br, img, h1, h2, h3, h4, input, label, span, section, aside, article, header, footer, html} = dom
+
 /*
 const converter = new showdown.Converter({openLinksInNewWindow: true, tasklists: true})
 const md2html = (md, plain) => plain ? converter.makeHtml(md) : html(converter.makeHtml(md))
@@ -223,5 +226,5 @@ footerSection('support this',
 )
 
 
-}
 
+}, {once: true})
