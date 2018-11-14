@@ -43,6 +43,11 @@ body {
   padding-bottom: 1.5em;
 }
 
+h1, h2 {
+  font-family: 'Times New Roman', Times, serif;
+  color: hsl(0, 0%, 24%);
+}
+
 header.hero {
   display: flex;
   justify-content: space-around;
@@ -53,6 +58,12 @@ header.hero {
   background: var(--primary);
   min-height: 130px;
   width: 100%;
+}
+
+header.hero > h1 {
+  font-family: 'Righteous', 'Times New Roman', Times, serif;
+  font-size: 3.8em;
+  margin: .15em 1em;
 }
 
 section.authbtn {
@@ -201,11 +212,16 @@ body>main {
 }
 
 .writlist>.writ {
-  display: inline-flex;
+  width: 100%;
+  display: grid;
   justify-content: center;
   align-content: center;
   align-items: center;
   flex-flow: row wrap;
+  grid-template-columns: 1fr max-content;
+  grid-template-rows: auto;
+  grid-template-areas: ". .";
+
   background: #fff;
   border-radius: 4px;
   padding: .3em;
@@ -219,12 +235,12 @@ body>main {
 }
 
 .writlist>.writ>.title {
+  text-align: center;
   display: inline-block;
-  margin-right: .3em;
 }
 
 .writlist>.writ>.created {
-  font-size: .8em;
+  font-size: .7em;
 }
 
 .writdisplay,
