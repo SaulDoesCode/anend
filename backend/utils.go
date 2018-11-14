@@ -11,7 +11,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -31,11 +30,6 @@ import (
 var (
 	// RandomDictionary the character range of the randomBytes and randomString functions
 	RandomDictionary = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-)
-
-var (
-	// ErrBadBody a request is missing its body, the body is likely malformed or nil
-	ErrBadBody = errors.New(`request body is empty or malformed, cannot read`)
 )
 
 func validUsername(username string) bool {
@@ -128,9 +122,19 @@ func SendErrJSON(c ctx, code int, err string) error {
 	return SendJSON(c, code, map[string]string{"err": err})
 }
 
+// StaticErrorResponse generates a new error qua CodedResponse
+func StaticErrorResponse(code int, msg string) *CodedResponse {
+	return MakeCodedResponse(code, msg, obj{"err": msg})
+}
+
+// StaticResponse generates a new simple CodedResponse {msg: '...'}
+func StaticResponse(code int, msg string) *CodedResponse {
+	return MakeCodedResponse(code, msg, obj{"msg": msg})
+}
+
 // MakeCodedResponse easilly generate an CodedResponse
-func MakeCodedResponse(code int, primitive interface{}) CodedResponse {
-	cr := CodedResponse{
+func MakeCodedResponse(code int, msg string, primitive interface{}) *CodedResponse {
+	cr := &CodedResponse{
 		Code: code,
 	}
 	res, err := msgpack.Marshal(primitive)
@@ -143,7 +147,6 @@ func MakeCodedResponse(code int, primitive interface{}) CodedResponse {
 	if err != nil {
 		panic(err)
 	}
-
 	cr.JSON = res
 
 	return cr
@@ -154,6 +157,7 @@ type CodedResponse struct {
 	Code    int
 	Msgpack []byte
 	JSON    []byte
+	Msg     string
 }
 
 // Send send off the error through an echo context as msgpack data with a status code
@@ -164,6 +168,10 @@ func (e *CodedResponse) Send(c ctx) error {
 // SendJSON send off the error through an echo context as json data with a status code
 func (e *CodedResponse) SendJSON(c ctx) error {
 	return c.JSONBlob(e.Code, e.JSON)
+}
+
+func (e *CodedResponse) Error() string {
+	return e.Msg
 }
 
 // UnmarshalJSONFile read json files and go straight to unmarshalling

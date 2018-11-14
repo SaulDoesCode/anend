@@ -2,23 +2,11 @@ package backend
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/arangodb/go-driver"
-)
-
-var (
-	// ErrInvalidUsernameOrEmail bad username or email details
-	ErrInvalidUsernameOrEmail = errors.New("bad username and/or email")
-	// ErrUnauthorized what ever happened it was not authorized
-	ErrUnauthorized = errors.New("unauthorized request")
-	// ErrIncompleteUser user is half baked, best get them in the DB before doing funny stuff
-	ErrIncompleteUser = errors.New("cannot mutate a user that is incomplete or not in database")
-	// ErrEmailRateLimit too many send requests on a particular email
-	ErrEmailRateLimit = errors.New("too many emails sent to this address in a short time")
 )
 
 // Role auth roles/perms
@@ -149,7 +137,7 @@ func UserByKey(key string) (User, error) {
 func UserByUsername(username string) (User, error) {
 	var user User
 	if !validUsername(username) {
-		return user, ErrInvalidUsernameOrEmail
+		return user, BadUsernameError
 	}
 	err := QueryOne(FindUSERByUsername, obj{"username": username}, &user)
 	return user, err
@@ -159,7 +147,7 @@ func UserByUsername(username string) (User, error) {
 func UserByEmail(email string) (User, error) {
 	var user User
 	if !validEmail(email) {
-		return user, ErrInvalidUsernameOrEmail
+		return user, BadEmailError
 	}
 	err := QueryOne(FindUSERByEmail, obj{"email": email}, &user)
 	return user, err
@@ -169,7 +157,7 @@ func UserByEmail(email string) (User, error) {
 func UserByDetails(email, username string) (User, error) {
 	var user User
 	if !validEmail(email) || !validUsername(username) {
-		return user, ErrInvalidUsernameOrEmail
+		return user, InvalidDetailsError
 	}
 	err := QueryOne(FindUserByDetails, obj{
 		"email":    email,
@@ -196,7 +184,7 @@ func AuthenticateUser(email, username string) (User, error) {
 		}
 
 		if IsUsernameAvailable(username) && !validEmail(email) {
-			return user, ErrInvalidUsernameOrEmail
+			return user, InvalidDetailsError
 		}
 
 		user = User{}
@@ -217,7 +205,7 @@ func AuthenticateUser(email, username string) (User, error) {
 	}
 
 	if !ratelimitEmail(email, 2, time.Minute*5) {
-		return user, ErrEmailRateLimit
+		return user, RateLimitingError
 	}
 
 	err = user.SetupVerifier()
@@ -291,7 +279,7 @@ func VerifyUser(verifier string) (*User, error) {
 		if DevMode {
 			fmt.Println(`VerifyUser Decoding Error: `, err)
 		}
-		return user, ErrUnauthorized
+		return user, UnauthorizedError
 	}
 	usr, err := UserByKey(tk.Payload)
 	user = &usr
@@ -299,7 +287,7 @@ func VerifyUser(verifier string) (*User, error) {
 		if DevMode {
 			fmt.Println(`VerifyUser Error - either no such user or the verifier didn't match: `, err)
 		}
-		return user, ErrUnauthorized
+		return user, UnauthorizedError
 	}
 
 	if user.Verified() {
@@ -381,7 +369,7 @@ func CredentialCheck(c ctx) (*User, error) {
 		if DevMode {
 			fmt.Println("CredentialCheck cookie troubles: it's either missing or malformed", err)
 		}
-		return nil, ErrUnauthorized
+		return nil, UnauthorizedError
 	}
 
 	tk, err := Tokenator.Decode(cookie.Value)
@@ -389,7 +377,7 @@ func CredentialCheck(c ctx) (*User, error) {
 		if DevMode {
 			fmt.Println("CredentialCheck Decoding - error: ", err)
 		}
-		return nil, ErrUnauthorized
+		return nil, UnauthorizedError
 	}
 
 	user, err := UserByKey(tk.Payload)
@@ -397,7 +385,7 @@ func CredentialCheck(c ctx) (*User, error) {
 		if DevMode {
 			fmt.Println("CredentialCheck User retrieval - error: ", err)
 		}
-		return nil, ErrUnauthorized
+		return nil, UnauthorizedError
 	}
 
 	if tk.ExpiresBefore(time.Now().Add(time.Hour * 48)) {
@@ -429,7 +417,7 @@ func AuthHandle(handle func(ctx, *User) error) func(ctx) error {
 	return func(c ctx) error {
 		user, err := CredentialCheck(c)
 		if err != nil || user == nil {
-			return UnauthorizedError.Send(c)
+			return UnauthorizedError
 		}
 		return handle(c, user)
 	}
@@ -443,7 +431,7 @@ func AdminHandle(handle func(ctx, *User) error) func(ctx) error {
 			if DevMode {
 				fmt.Println(`AdminHandle for didn't go through: `, err)
 			}
-			return UnauthorizedError.Send(c)
+			return UnauthorizedError
 		}
 		return handle(c, user)
 	}
@@ -454,7 +442,7 @@ func RoleHandle(roles []Role, handle func(ctx, *User) error) func(ctx) error {
 	return func(c ctx) error {
 		user, err := CredentialCheck(c)
 		if err != nil {
-			return UnauthorizedError.Send(c)
+			return UnauthorizedError
 		}
 
 		milestones := 0
@@ -469,7 +457,7 @@ func RoleHandle(roles []Role, handle func(ctx, *User) error) func(ctx) error {
 		if milestones == len(roles) {
 			return handle(c, user)
 		}
-		return UnauthorizedError.Send(c)
+		return UnauthorizedError
 	}
 }
 
@@ -491,21 +479,21 @@ func initAuth() {
 
 	Server.POST("/auth", func(c ctx) error {
 		if _, err := CredentialCheck(c); err == nil {
-			return AlreadyLoggedIn.Send(c)
+			return AlreadyLoggedIn
 		}
 
 		var authreq AuthRequest
 		err := c.Bind(&authreq)
 		if err != nil {
-			return BadRequestError.Send(c)
+			return BadRequestError
 		}
 
 		if !validEmail(authreq.Email) {
-			return BadEmailError.Send(c)
+			return BadEmailError
 		}
 
 		if !validUsername(authreq.Username) {
-			return BadUsernameError.Send(c)
+			return BadUsernameError
 		}
 
 		email := authreq.Email
@@ -521,11 +509,10 @@ func initAuth() {
 			fmt.Println("\nAuthentication Problem: \n\tusername - ", username, "\n\temail - ", email, "\n\terror - ", err, "\n\t")
 		}
 
-		if err == ErrEmailRateLimit {
-			return RateLimitingError.Send(c)
+		if err == RateLimitingError {
+			return RateLimitingError
 		}
-
-		return UnauthorizedError.Send(c)
+		return UnauthorizedError
 	})
 
 	Server.GET("/auth-logout", func(c ctx) error {
@@ -576,7 +563,7 @@ func initAuth() {
 			if DevMode {
 				fmt.Println("Unable to Authenticate user: ", err)
 			}
-			return UnauthorizedError.Send(c)
+			return UnauthorizedError
 		}
 
 		newtoken, err := GenerateAuthToken(user, false)
@@ -619,7 +606,9 @@ func initAuth() {
 				<p>err:<br>` + err.Error() + `</p>
 			`)
 			go SendEmail(mail)
-			return SendMsgpack(c, 203, obj{"msg": "something happened, don't worry, we'll figure it out", "ok": false})
+			return c.Msgpack(500, obj{
+				"err": "something happened, don't worry, we'll figure it out",
+			})
 		}
 		msg := "success, you are "
 		if user.Subscriber {
@@ -627,7 +616,7 @@ func initAuth() {
 		} else {
 			msg += "unsubscribed and will no longer receive any (non auth related) emails from grimstack.io."
 		}
-		return SendMsgpack(c, 203, obj{"msg": msg, "ok": true})
+		return c.Msgpack(203, obj{"msg": msg})
 	}))
 
 	fmt.Println("Authentication Services Started")
