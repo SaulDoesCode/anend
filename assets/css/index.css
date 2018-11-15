@@ -180,10 +180,10 @@ section.auth>button:active {
 
 body>main {
   display: grid;
-  grid-template-columns: minmax(auto, 300px) 1fr;
+  grid-template-columns: 1fr minmax(auto, 300px);
   grid-template-rows: 1fr;
   grid-gap: .3em .3em;
-  grid-template-areas: "list view";
+  grid-template-areas: "view list";
   grid-auto-flow: row;
   flex-flow: column wrap;
   justify-content: center;
