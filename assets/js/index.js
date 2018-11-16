@@ -99,6 +99,7 @@ window.deps.whenDone(() => {
     },
     cycle: {
       mount(el) {
+        document.body.style.paddingBottom = '1.5em'
         rilti.run(el.resize)
         el.on({
           click: el.resize,
