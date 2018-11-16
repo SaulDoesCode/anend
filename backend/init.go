@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
-	"text/template"
 	"time"
 
 	"github.com/CrowdSurge/banner"
@@ -30,12 +29,6 @@ type obj = map[string]interface{}
 const oneweek = 7 * 24 * time.Hour
 
 var (
-	// AuthEmailHTML html template for authentication emails
-	AuthEmailHTML *template.Template
-	// AuthEmailTXT html template for authentication emails
-	AuthEmailTXT *template.Template
-	// PostTemplate html template for post pages
-	PostTemplate *template.Template
 	// AppName name of this application
 	AppName string
 	// AppDomain web domain of this application
@@ -214,16 +207,6 @@ func Init() {
 	EmailConf.Address = EmailConf.Server + ":" + EmailConf.Port
 
 	fmt.Println(EmailConf.Address, EmailConf.Email, EmailConf.FromName)
-	startEmailer()
-
-	startDBHealthCheck()
-	defer DBHealthTicker.Stop()
-
-	startSelfManaging()
-
-	AuthEmailHTML = template.Must(template.ParseFiles("./templates/authemail.html"))
-	AuthEmailTXT = template.Must(template.ParseFiles("./templates/authemail.txt"))
-	PostTemplate = template.Must(template.ParseFiles("./templates/post.html"))
 
 	secretsObj := Conf.Raw["secrets"].(obj)
 	tokenSecret := secretsObj["token"].(string)
@@ -233,6 +216,15 @@ func Init() {
 	Tokenator.SetTTL(86400 * 7)
 	Verinator = NewBranca(verifierSecret)
 	Verinator.SetTTL(925)
+
+	startEmailer()
+
+	startDBHealthCheck()
+	defer DBHealthTicker.Stop()
+
+	startSelfManaging()
+
+	startTemplating()
 
 	initAuth()
 	initWrits()
@@ -500,6 +492,8 @@ type Config struct {
 
 	TLSKey  string `json:"tls_key,omitempty" toml:"tls_key,omitempty"`
 	TLSCert string `json:"tls_cert,omitempty" toml:"tls_cert,omitempty"`
+
+	Templates string `json:"templates,omitempty" toml:"templates,omitempty"`
 
 	Assets           string `json:"assets,omitempty" toml:"assets,omitempty"`
 	DoNotWatchAssets bool   `json:"do_not_watch_assets,omitempty" toml:"do_not_watch_assets,omitempty"`

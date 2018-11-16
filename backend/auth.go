@@ -228,14 +228,14 @@ func AuthenticateUser(email, username string) (User, error) {
 		"Verifier": user.Verifier,
 		"Domain":   AppDomain,
 	}
-	emailtxt, err := execTemplate(AuthEmailTXT, vars)
+	emailtxt, err := Renderer.AsBytes("AuthEmailTXT", vars)
 	if err != nil {
 		if DevMode {
 			fmt.Println("Autentication email text template - error: ", err)
 		}
 		return user, err
 	}
-	emailhtml, err := execTemplate(AuthEmailHTML, vars)
+	emailhtml, err := Renderer.AsBytes("AuthEmail", vars)
 	if err != nil {
 		if DevMode {
 			fmt.Println("Autentication email html template - error: ", err)

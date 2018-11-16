@@ -693,10 +693,10 @@ func initWrits() {
 			wq.Key = key
 			writ, err = wq.ExecOne()
 			if err != nil {
-				return NoSuchWrit.Send(c)
+				return Err404NotFound
 			}
 		} else if err != nil {
-			return SendErr(c, 503, err.Error())
+			return ServerDBError.SendJSON(c)
 		}
 
 		writdata := writ.ToObj()
@@ -711,8 +711,7 @@ func initWrits() {
 
 		writdata["URL"] = writ.GetLink()
 
-		c.Response().Header().Set("Content-Type", "text/html")
-		err = PostTemplate.Execute(c.Response(), &writdata)
+		err = c.Render(200, "writ", writdata)
 		if err != nil {
 			if DevMode {
 				fmt.Println("GET /writ/:slug - error executing the post template: ", err)
