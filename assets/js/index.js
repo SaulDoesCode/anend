@@ -240,7 +240,5 @@ window.deps.whenDone(() => {
     }, 'Go')
   )
 
-  footerSection('auth',
-    authbtn
-  )
+  footerSection('auth', authbtn)
 }, {once: true})

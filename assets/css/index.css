@@ -39,8 +39,6 @@ body {
   flex-flow: column wrap;
   font-family: Nunito, Arial, Helvetica, sans-serif;
   text-align: center;
-  margin-bottom: 180px;
-  padding-bottom: 1.5em;
 }
 
 h1, h2 {
@@ -244,6 +242,7 @@ body>main {
 
 .writdisplay,
 .writview {
+  flex: 1 1 100%;
   grid-area: view;
   max-width: 700px;
   margin: .3em auto;
