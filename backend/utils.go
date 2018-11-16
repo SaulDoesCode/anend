@@ -16,9 +16,9 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
-	"text/template"
 	"time"
 
 	"github.com/asaskevich/govalidator"
@@ -188,12 +188,6 @@ func Int64ToString(n int64) string {
 	return strconv.FormatInt(n, 10)
 }
 
-func execTemplate(temp *template.Template, vars interface{}) ([]byte, error) {
-	var buf bytes.Buffer
-	err := temp.Execute(&buf, vars)
-	return buf.Bytes(), err
-}
-
 func unix2time(unix string) (time.Time, error) {
 	var tm time.Time
 	i, err := strconv.ParseInt(unix, 10, 64)
@@ -260,7 +254,7 @@ func generateDKIM(location string) error {
 		return err
 	}
 
-	f, err := os.Create(location + "/" + "dns.txt")
+	f, err := os.Create(filepath.Join(location, "dns.txt"))
 	if err != nil {
 		return err
 	}
@@ -269,7 +263,7 @@ func generateDKIM(location string) error {
 	fmt.Fprintf(f, "v=DKIM1; k=rsa; p=%s", b64)
 	f.Close()
 
-	f, err = os.Create(location + "/" + "private.pem")
+	f, err = os.Create(filepath.Join(location, "private.pem"))
 	if err != nil {
 		return err
 	}
