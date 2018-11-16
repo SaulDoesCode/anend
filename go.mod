@@ -4,10 +4,10 @@ require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/CrowdSurge/banner v0.0.0-20140923200336-8c0e79dc5ff7
 	github.com/Machiel/slugify v1.0.1
-	github.com/SaulDoesCode/echo v0.0.0-20181112095143-0efb56e5b147
+	github.com/SaulDoesCode/echo v0.0.0-20181116142023-e97a5f51f8a9
 	github.com/SaulDoesCode/mailyak v0.0.0-20181107214438-034a561f5162
 	github.com/SaulDoesCode/transplacer v1.1.3-0.20181114095549-05afc0e5dc1c
-	github.com/arangodb/go-driver v0.0.0-20181114150110-0bbfa1eae73a
+	github.com/arangodb/go-driver v0.0.0-20181116121332-65af12d6f124
 	github.com/asaskevich/govalidator v0.0.0-20180720115003-f9ffefc3facf
 	github.com/cornelk/hashmap v0.0.0-20180818103603-a8997b175649
 	github.com/driusan/dkim v0.0.0-20181021194700-dda260a68aa1
@@ -23,5 +23,4 @@ require (
 	github.com/throttled/throttled v2.2.2+incompatible
 	github.com/vmihailenco/msgpack v4.0.1+incompatible
 	golang.org/x/crypto v0.0.0-20181106171534-e4dc69e5b2fd
-	golang.org/x/net v0.0.0-20181113165502-88d92db4c548
 )
