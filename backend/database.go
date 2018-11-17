@@ -210,31 +210,29 @@ func startDBHealthCheck() {
 	DBHealthTicker = time.NewTicker(15 * time.Second)
 	go func() {
 		for range DBHealthTicker.C {
-			/*
-				for _, endpoint := range dbendpoints {
-					start := time.Now()
-					DBAlive = Ping(endpoint + "/ping")
+			for _, endpoint := range dbendpoints {
+				start := time.Now()
+				DBAlive = Ping(endpoint + "/ping")
 
-					if !DBAlive && !DevMode {
-						if time.Since(start) < 8*time.Millisecond {
-							go func() {
-								DBHealthTicker.Stop()
-								go air.Shutdown(time.Second * 5)
+				if !DBAlive && !DevMode {
+					if time.Since(start) < 8*time.Millisecond {
+						go func() {
+							DBHealthTicker.Stop()
+							go Server.ShutdownAfter(nil, time.Second*5, nil)
 
-								err := exeC(`nohup bash -c "nohup arangod -c /etc/arangodb3/arangod.conf &" && (sleep 10 && cd ` + AppLocation + ` && sudo ./main) & `)
-								if err != nil {
-									fmt.Println("could not redeem self in the face of hardship!: ", err)
-									dbdiedEmergencyEmail("unable to self recusitate! :(", true)
-								}
+							err := exeC(`nohup bash -c "sudo docker restart rango &" && (sleep 12 && cd ` + AppLocation + ` && sudo ./main) & `)
+							if err != nil {
+								fmt.Println("could not redeem self in the face of hardship!: ", err)
+								dbdiedEmergencyEmail("unable to self recusitate! :(", true)
+							}
 
-								dbdiedEmergencyEmail("something really bad happened with the db", true)
-							}()
-						} else {
-							dbdiedEmergencyEmail("it seems the DB is remote, only you can save us now!", true)
-						}
+							dbdiedEmergencyEmail("something really bad happened with the db", true)
+						}()
+					} else {
+						dbdiedEmergencyEmail("it seems the DB is remote, only you can save us now!", true)
 					}
 				}
-			*/
+			}
 			if len(LogQ) > 0 {
 				_, errs, err := Logs.CreateDocuments(nil, LogQ)
 				if err != nil {
@@ -265,8 +263,13 @@ func Query(query string, vars obj) ([]obj, error) {
 		for {
 			var doc obj
 			_, err = cursor.ReadDocument(ctx, &doc)
-			if driver.IsNoMoreDocuments(err) || err != nil {
+			if driver.IsNoMoreDocuments(err) {
+				if len(objects) != 0 {
+					err = nil
+				}
 				break
+			} else if err != nil {
+				return nil, err
 			}
 			objects = append(objects, doc)
 		}
