@@ -501,9 +501,8 @@ func initAuth() {
 
 		user, err := AuthenticateUser(email, username)
 		if err == nil {
-			return SendMsgpack(c, 203, obj{
+			return c.Msgpack(203, obj{
 				"msg": "Thanks" + user.Username + ", we sent you an authentication email.",
-				"ok":  true,
 			})
 		} else if DevMode {
 			fmt.Println("\nAuthentication Problem: \n\tusername - ", username, "\n\temail - ", email, "\n\terror - ", err, "\n\t")
