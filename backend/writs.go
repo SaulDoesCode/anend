@@ -208,8 +208,6 @@ func (q *WritQuery) Exec() ([]Writ, error) {
 
 	query += " RETURN "
 
-	final := "MERGE(writ, {likes: writ.likes + LENGTH(writ.likedby), views: writ.views + LENGTH(writ.viewedby)})"
-
 	if !q.EditorMode {
 		q.Omissions = append(q.Omissions, "markdown", "edits", "public", "roles", "authorkey")
 	} else {
@@ -222,10 +220,10 @@ func (q *WritQuery) Exec() ([]Writ, error) {
 
 	if len(q.Omissions) > 0 {
 		q.Vars["omissions"] = q.Omissions
-		final = "UNSET(" + final + ", @omissions)"
+		query += "UNSET(writ, @omissions)"
+	} else {
+		query += "writ"
 	}
-
-	query += final
 
 	if DevMode {
 		fmt.Println("\n You're trying this query now: \n", query, "\n\t")
@@ -391,8 +389,6 @@ func (q *WritQuery) ExecOne() (Writ, error) {
 
 	query += "RETURN "
 
-	final := "MERGE(writ, {likes: writ.likes + LENGTH(writ.likedby), views: writ.views + LENGTH(writ.viewedby)})"
-
 	if !q.EditorMode {
 		q.Omissions = append(q.Omissions, "markdown", "edits", "public", "roles", "authorkey")
 	} else {
@@ -405,10 +401,10 @@ func (q *WritQuery) ExecOne() (Writ, error) {
 
 	if len(q.Omissions) > 0 {
 		q.Vars["omissions"] = q.Omissions
-		final = "UNSET(" + final + ", @omissions)"
+		query += "UNSET(writ, @omissions)"
+	} else {
+		query += "writ"
 	}
-
-	query += final
 
 	if DevMode {
 		fmt.Println("\n You're trying this query now: \n", query, "\n\t")
