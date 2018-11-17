@@ -19,6 +19,13 @@ app.conf = new Proxy('conf' in localStorage ? msgpack.decode(Uint8Array.from(loc
   }
 })
 
+app.Query = (query, vars = {}) => new Promise((resolve, reject) => {
+  haal.post('/query', {body: {query, ...vars}})(res => {
+    if (!res.ok || !res.out || res.out.err) return reject(res)
+    resolve(res.out)
+  })
+})
+
 run(() => {
   const MSG = document.querySelector('nav > div.msg')
   app.error = msg => {
