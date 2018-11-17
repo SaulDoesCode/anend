@@ -159,13 +159,13 @@ window.deps.whenDone(() => {
   const authenticate = (email, username) => new Promise((resolve, reject) => {
     if (!isEmail(email)) return reject(new Error('email is malformed'))
     if (!isUsername(username)) return reject(new Error('username is malformed'))
+    if (authenticate.busy) return reject(new Error('authentication already in progress'))
     authenticate.busy = true
     checkUsername(username).then(out => {
       if (out.ok) console.log('returing user')
       console.log(`Awaiting Authentication for ${username}`)
       console.time('awaiting authentication')
       haal.post('/auth', { body: { email, username} })(res => {
-        console.log(`The verdict is: `, res.out, res)
         console.timeEnd('awaiting authentication')
         resolve(res)
         authenticate.busy = false
@@ -229,9 +229,9 @@ window.deps.whenDone(() => {
     authenticate.button = button.submit({
       onclick(e) {
         if (!authenticate.busy) {
-          authenticate(authenticate.email.value.trim(), authenticate.username.value.trim()).then(out => {
+          authenticate(authenticate.email.value.trim(), authenticate.username.value.trim()).then(res => {
             authform.remove()
-            console.log(`an email should have gone through: `, out)
+            console.log(`request/email should have gone through: `, res.out)
           }, res => {
             authform.remove()
             console.error(`authentication failed: `, res)
