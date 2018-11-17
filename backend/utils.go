@@ -11,12 +11,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -222,10 +224,16 @@ func Ping(endpoint string) bool {
 	}
 	res.Close = true
 	res.Body.Close()
-	return err == nil && http.StatusOK == res.StatusCode
+	return err == nil
 }
 
+var errWindowsIsNotLinux = errors.New(`windows cannot reliably run bash, so, commands don't work`)
+var isWindows = runtime.GOOS == "windows"
+
 func exeC(cmd string) error {
+	if isWindows {
+		return errWindowsIsNotLinux
+	}
 	fmt.Println(AppName+" trying to run this command -> ", cmd)
 	err := exec.Command("/bin/bash", "-c", cmd).Start()
 	if err != nil {
@@ -235,6 +243,10 @@ func exeC(cmd string) error {
 }
 
 func exeCC(cmd string) error {
+	if isWindows {
+		return errWindowsIsNotLinux
+	}
+
 	fmt.Println(AppName+" trying to run this command -> ", cmd)
 	err := exec.Command("/bin/bash", "-c", cmd).Run()
 	if err != nil {
