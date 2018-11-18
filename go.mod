@@ -6,10 +6,10 @@ require (
 	github.com/Machiel/slugify v1.0.1
 	github.com/SaulDoesCode/echo v0.0.0-20181116183411-2176afe2e938
 	github.com/SaulDoesCode/mailyak v0.0.0-20181107214438-034a561f5162
-	github.com/SaulDoesCode/transplacer v1.1.3-0.20181114095549-05afc0e5dc1c
+	github.com/SaulDoesCode/transplacer v1.1.5
 	github.com/arangodb/go-driver v0.0.0-20181116121332-65af12d6f124
 	github.com/asaskevich/govalidator v0.0.0-20180720115003-f9ffefc3facf
-	github.com/cornelk/hashmap v0.0.0-20180818103603-a8997b175649
+	github.com/cornelk/hashmap v1.0.0
 	github.com/driusan/dkim v0.0.0-20181021194700-dda260a68aa1
 	github.com/fsnotify/fsnotify v1.4.7
 	github.com/hashicorp/golang-lru v0.5.0 // indirect
@@ -22,7 +22,5 @@ require (
 	github.com/shurcooL/sanitized_anchor_name v0.0.0-20170918181015-86672fcb3f95 // indirect
 	github.com/throttled/throttled v2.2.2+incompatible
 	github.com/vmihailenco/msgpack v4.0.1+incompatible
-	golang.org/x/crypto v0.0.0-20181112202954-3d3f9f413869
-	golang.org/x/net v0.0.0-20181114220301-adae6a3d119a // indirect
-	golang.org/x/sys v0.0.0-20181116161606-93218def8b18 // indirect
+	golang.org/x/crypto v0.0.0-20181106171534-e4dc69e5b2fd
 )

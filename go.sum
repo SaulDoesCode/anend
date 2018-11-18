@@ -8,8 +8,8 @@ github.com/SaulDoesCode/echo v0.0.0-20181116183411-2176afe2e938 h1:1bvk9kpwRCT9x
 github.com/SaulDoesCode/echo v0.0.0-20181116183411-2176afe2e938/go.mod h1:O10MTgw7DnvDPOYGogjJq3l6fb93zDPQ4sOs/2OcEII=
 github.com/SaulDoesCode/mailyak v0.0.0-20181107214438-034a561f5162 h1:gAJQTXQ0bYoKNq5Zq0lsU2+qfi0veoh8j7qAzZEddRc=
 github.com/SaulDoesCode/mailyak v0.0.0-20181107214438-034a561f5162/go.mod h1:dJKpmWvdHaLWYNVTK/7dV0q8YVIQyJRAw5Tvtftl26w=
-github.com/SaulDoesCode/transplacer v1.1.3-0.20181114095549-05afc0e5dc1c h1:ZNfBUaadivW7yTKOHSo+BEenSbtPkzznIHSQTlRLpGc=
-github.com/SaulDoesCode/transplacer v1.1.3-0.20181114095549-05afc0e5dc1c/go.mod h1:+x3EszndZkjYM5qlNp3xZDlx02cbYaX/sAk5mpbOKP8=
+github.com/SaulDoesCode/transplacer v1.1.5 h1:HBkUPsg4WVEtT4SadMEQvDWqbUViaCxpkDRG4pVrwaU=
+github.com/SaulDoesCode/transplacer v1.1.5/go.mod h1:biHiNymKPYMw4OO19btNrM1Jzj7Jd+wh7oSzofloAGQ=
 github.com/arangodb/go-driver v0.0.0-20181116121332-65af12d6f124 h1:xiIjCOIwqji4NG4bg6/zkDcOHwSUl0hzKPi7f/zeOIA=
 github.com/arangodb/go-driver v0.0.0-20181116121332-65af12d6f124/go.mod h1:NcDoR4f0FdFia/QizCc+B69DggPGLP3nCKg5IUtudm0=
 github.com/arangodb/go-velocypack v0.0.0-20180928134037-d177e3455691 h1:62SGGAvrKTXOrewra74du0H98Yg/eufQ/tO3RoIP8Bs=
@@ -17,8 +17,8 @@ github.com/arangodb/go-velocypack v0.0.0-20180928134037-d177e3455691/go.mod h1:7
 github.com/asaskevich/govalidator v0.0.0-20180720115003-f9ffefc3facf h1:eg0MeVzsP1G42dRafH3vf+al2vQIJU0YHX+1Tw87oco=
 github.com/asaskevich/govalidator v0.0.0-20180720115003-f9ffefc3facf/go.mod h1:lB+ZfQJz7igIIfQNfa7Ml4HSf2uFQQRzpGGRXenZAgY=
 github.com/coreos/go-iptables v0.4.0/go.mod h1:/mVI274lEDI2ns62jHCDnCyBF9Iwsmekav8Dbxlm1MU=
-github.com/cornelk/hashmap v0.0.0-20180818103603-a8997b175649 h1:iiHqIatN0724Q/42ePeetAxh6lbEOFxImdgnzbp/CsU=
-github.com/cornelk/hashmap v0.0.0-20180818103603-a8997b175649/go.mod h1:8wbysTUDnwJGrPZ1Iwsou3m+An6sldFrJItjRhfegCw=
+github.com/cornelk/hashmap v1.0.0 h1:jNHWycAM10SO5Ig76HppMQ69jnbqaziRpqVTNvAxdJQ=
+github.com/cornelk/hashmap v1.0.0/go.mod h1:8wbysTUDnwJGrPZ1Iwsou3m+An6sldFrJItjRhfegCw=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dchest/siphash v1.1.0/go.mod h1:q+IRvb2gOSrUnYoPqHiyHXS0FOBBOdl6tONBlVnOnt4=
 github.com/dchest/siphash v1.2.0 h1:YWOShuhvg0GqbQpMa60QlCGtEyf7O7HC1Jf0VjdQ60M=
@@ -69,15 +69,9 @@ github.com/vmihailenco/msgpack v4.0.1+incompatible h1:RMF1enSPeKTlXrXdOcqjFUElyw
 github.com/vmihailenco/msgpack v4.0.1+incompatible/go.mod h1:fy3FlTQTDXWkZ7Bh6AcGMlsjHatGryHQYUTf1ShIgkk=
 golang.org/x/crypto v0.0.0-20181106171534-e4dc69e5b2fd h1:VtIkGDhk0ph3t+THbvXHfMZ8QHgsBO39Nh52+74pq7w=
 golang.org/x/crypto v0.0.0-20181106171534-e4dc69e5b2fd/go.mod h1:6SG95UA2DQfeDnfUPMdvaQW0Q7yPrPDi9nlGo2tz2b4=
-golang.org/x/crypto v0.0.0-20181112202954-3d3f9f413869 h1:kkXA53yGe04D0adEYJwEVQjeBppL01Exg+fnMjfUraU=
-golang.org/x/crypto v0.0.0-20181112202954-3d3f9f413869/go.mod h1:6SG95UA2DQfeDnfUPMdvaQW0Q7yPrPDi9nlGo2tz2b4=
 golang.org/x/net v0.0.0-20181108082009-03003ca0c849 h1:FSqE2GGG7wzsYUsWiQ8MZrvEd1EOyU3NCF0AW3Wtltg=
 golang.org/x/net v0.0.0-20181108082009-03003ca0c849/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
-golang.org/x/net v0.0.0-20181114220301-adae6a3d119a h1:gOpx8G595UYyvj8UK4+OFyY4rx037g3fmfhe5SasG3U=
-golang.org/x/net v0.0.0-20181114220301-adae6a3d119a/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
 golang.org/x/sys v0.0.0-20181107165924-66b7b1311ac8 h1:YoY1wS6JYVRpIfFngRf2HHo9R9dAne3xbkGOQ5rJXjU=
 golang.org/x/sys v0.0.0-20181107165924-66b7b1311ac8/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
-golang.org/x/sys v0.0.0-20181116161606-93218def8b18 h1:Wh+XCfg3kNpjhdq2LXrsiOProjtQZKme5XUx7VcxwAw=
-golang.org/x/sys v0.0.0-20181116161606-93218def8b18/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
 golang.org/x/text v0.3.0 h1:g61tztE5qeGQ89tm6NTjjM9VPIm088od1l6aSorWRWg=
 golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
