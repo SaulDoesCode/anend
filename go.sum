@@ -8,8 +8,8 @@ github.com/SaulDoesCode/echo v0.0.0-20181116183411-2176afe2e938 h1:1bvk9kpwRCT9x
 github.com/SaulDoesCode/echo v0.0.0-20181116183411-2176afe2e938/go.mod h1:O10MTgw7DnvDPOYGogjJq3l6fb93zDPQ4sOs/2OcEII=
 github.com/SaulDoesCode/mailyak v0.0.0-20181107214438-034a561f5162 h1:gAJQTXQ0bYoKNq5Zq0lsU2+qfi0veoh8j7qAzZEddRc=
 github.com/SaulDoesCode/mailyak v0.0.0-20181107214438-034a561f5162/go.mod h1:dJKpmWvdHaLWYNVTK/7dV0q8YVIQyJRAw5Tvtftl26w=
-github.com/SaulDoesCode/transplacer v1.1.5 h1:HBkUPsg4WVEtT4SadMEQvDWqbUViaCxpkDRG4pVrwaU=
-github.com/SaulDoesCode/transplacer v1.1.5/go.mod h1:biHiNymKPYMw4OO19btNrM1Jzj7Jd+wh7oSzofloAGQ=
+github.com/SaulDoesCode/transplacer v1.1.6-0.20181119065622-12359be6c295 h1:mhNR9yrm/CM6XKDwqAbjXPAraBhyfi4Y1zou2egZ1pA=
+github.com/SaulDoesCode/transplacer v1.1.6-0.20181119065622-12359be6c295/go.mod h1:biHiNymKPYMw4OO19btNrM1Jzj7Jd+wh7oSzofloAGQ=
 github.com/arangodb/go-driver v0.0.0-20181116121332-65af12d6f124 h1:xiIjCOIwqji4NG4bg6/zkDcOHwSUl0hzKPi7f/zeOIA=
 github.com/arangodb/go-driver v0.0.0-20181116121332-65af12d6f124/go.mod h1:NcDoR4f0FdFia/QizCc+B69DggPGLP3nCKg5IUtudm0=
 github.com/arangodb/go-velocypack v0.0.0-20180928134037-d177e3455691 h1:62SGGAvrKTXOrewra74du0H98Yg/eufQ/tO3RoIP8Bs=
@@ -71,6 +71,8 @@ golang.org/x/crypto v0.0.0-20181106171534-e4dc69e5b2fd h1:VtIkGDhk0ph3t+THbvXHfM
 golang.org/x/crypto v0.0.0-20181106171534-e4dc69e5b2fd/go.mod h1:6SG95UA2DQfeDnfUPMdvaQW0Q7yPrPDi9nlGo2tz2b4=
 golang.org/x/net v0.0.0-20181108082009-03003ca0c849 h1:FSqE2GGG7wzsYUsWiQ8MZrvEd1EOyU3NCF0AW3Wtltg=
 golang.org/x/net v0.0.0-20181108082009-03003ca0c849/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
+golang.org/x/net v0.0.0-20181114220301-adae6a3d119a h1:gOpx8G595UYyvj8UK4+OFyY4rx037g3fmfhe5SasG3U=
+golang.org/x/net v0.0.0-20181114220301-adae6a3d119a/go.mod h1:mL1N/T3taQHkDXs73rZJwtUhF3w3ftmwwsq0BUmARs4=
 golang.org/x/sys v0.0.0-20181107165924-66b7b1311ac8 h1:YoY1wS6JYVRpIfFngRf2HHo9R9dAne3xbkGOQ5rJXjU=
 golang.org/x/sys v0.0.0-20181107165924-66b7b1311ac8/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
 golang.org/x/text v0.3.0 h1:g61tztE5qeGQ89tm6NTjjM9VPIm088od1l6aSorWRWg=
