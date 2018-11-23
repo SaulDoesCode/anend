@@ -13,6 +13,8 @@ Caddyfile
 .toml
 google*
 
+alloy-editor
+
 # Runtime data
 pids
 *.pid
