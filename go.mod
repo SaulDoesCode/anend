@@ -6,7 +6,7 @@ require (
 	github.com/Machiel/slugify v1.0.1
 	github.com/SaulDoesCode/echo v0.0.0-20181116183411-2176afe2e938
 	github.com/SaulDoesCode/mailyak v0.0.0-20181107214438-034a561f5162
-	github.com/SaulDoesCode/transplacer v1.1.6-0.20181119065622-12359be6c295
+	github.com/SaulDoesCode/transplacer v1.2.0
 	github.com/arangodb/go-driver v0.0.0-20181116121332-65af12d6f124
 	github.com/asaskevich/govalidator v0.0.0-20180720115003-f9ffefc3facf
 	github.com/cornelk/hashmap v1.0.0
@@ -23,5 +23,4 @@ require (
 	github.com/throttled/throttled v2.2.2+incompatible
 	github.com/vmihailenco/msgpack v4.0.1+incompatible
 	golang.org/x/crypto v0.0.0-20181106171534-e4dc69e5b2fd
-	golang.org/x/net v0.0.0-20181114220301-adae6a3d119a // indirect
 )
