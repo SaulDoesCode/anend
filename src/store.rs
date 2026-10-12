@@ -3,7 +3,7 @@
 //! memories and search tables (see memory.rs); every note change updates those in the
 //! same transaction. Every write is a durable transaction.
 
-use redb::{Database, ReadableTable, TableDefinition};
+use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 use std::path::Path;
 
 use crate::note::Note;
@@ -18,11 +18,11 @@ fn err(e: impl std::fmt::Display) -> String {
 }
 
 /// bumped when what gets indexed changes, so existing databases are re-indexed
-/// 2: atbash is `n + 1 - v` per alphabet (Latin, Greek, Hebrew)
-const INDEX_VERSION: u64 = 2;
+const INDEX_VERSION: u64 = 1;
 
 pub struct Store {
     pub(crate) db: Database,
+    path: std::path::PathBuf,
 }
 
 impl Store {
@@ -36,9 +36,17 @@ impl Store {
         txn.open_table(META).map_err(err)?;
         crate::memory::create_tables(&txn)?;
         txn.commit().map_err(err)?;
-        let store = Store { db };
+        let store = Store {
+            db,
+            path: path.to_path_buf(),
+        };
         store.index_existing_notes()?;
         Ok(store)
+    }
+
+    /// where the database lives
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     /// indexes notes written before the search tables existed (or by an older version)
@@ -54,7 +62,6 @@ impl Store {
         }
         let notes = self.all()?;
         let txn = self.db.begin_write().map_err(err)?;
-        crate::memory::rebuild_atbash(&txn)?;
         for note in &notes {
             crate::memory::index_note(&txn, note, true)?;
         }

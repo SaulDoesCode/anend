@@ -14,7 +14,9 @@
 //! two never collide. Memory keys come from weum's allocator: one byte keys first, then two,
 //! three and four byte ones, reusing the keys of forgotten memories before minting new ones.
 
-use redb::{MultimapTableDefinition, ReadableMultimapTable, ReadableTable, TableDefinition, WriteTransaction};
+use redb::{
+    MultimapTableDefinition, ReadableDatabase, ReadableMultimapTable, ReadableTable, TableDefinition, WriteTransaction,
+};
 use std::collections::{HashMap, HashSet};
 
 use crate::note::Note;
@@ -212,21 +214,6 @@ pub(crate) fn index(
 pub(crate) fn index_note(txn: &WriteTransaction, note: &Note, add: bool) -> StoreResult<()> {
     let (gem, tokens) = note_texts(note);
     index(txn, &Ref::Note(note.key.clone()), &gem, &tokens, add)
-}
-
-/// files every memory under its atbash sum again (notes are refiled by the caller)
-pub(crate) fn rebuild_atbash(txn: &WriteTransaction) -> StoreResult<()> {
-    txn.delete_multimap_table(ATBASH).map_err(err)?;
-    let mut atbash = txn.open_multimap_table(ATBASH).map_err(err)?;
-    let memories = txn.open_table(MEMORIES).map_err(err)?;
-    for item in memories.iter().map_err(err)? {
-        let (k, v) = item.map_err(err)?;
-        let text = String::from_utf8_lossy(v.value());
-        if !text.trim().is_empty() {
-            atbash.insert(measure(&text).atbash, k.value()).map_err(err)?;
-        }
-    }
-    Ok(())
 }
 
 pub(crate) fn create_tables(txn: &WriteTransaction) -> StoreResult<()> {
@@ -848,12 +835,6 @@ mod tests {
         assert_eq!(s.remember(&Ref::Memory(k.clone())).unwrap().text, "שלום light");
         assert_ne!(s.saturate_new("other").unwrap(), k);
         assert!(s.restore_memory(&k, "again").is_err());
-
-        // refiling atbash keeps every memory findable
-        let txn = s.db.begin_write().unwrap();
-        rebuild_atbash(&txn).unwrap();
-        txn.commit().unwrap();
-        assert_eq!(s.gsearch(Bucket::Atbash, &BucketKey::Sum(atbash)).unwrap().len(), 1);
 
         s.set_setting("map:one", b"[]").unwrap();
         s.set_setting("map:two", b"[]").unwrap();
