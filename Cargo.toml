@@ -24,7 +24,11 @@ bevy = { version = "0.20", default-features = false, features = [
     "x11",
     "wayland",
     "system_font_discovery",
+    "bevy_pbr",
+    "bevy_light",
 ] }
+bevy_slugtext = { git = "https://github.com/SaulDoesCode/bevy_slugtext", rev = "1cfb7d5" }
+ttf-parser = "0.25"
 chrono = "0.4"
 redb = "2"
 serde = { version = "1", features = ["derive"] }

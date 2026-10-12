@@ -18,7 +18,8 @@ fn err(e: impl std::fmt::Display) -> String {
 }
 
 /// bumped when what gets indexed changes, so existing databases are re-indexed
-const INDEX_VERSION: u64 = 1;
+/// 2: atbash is `n + 1 - v` per alphabet (Latin, Greek, Hebrew)
+const INDEX_VERSION: u64 = 2;
 
 pub struct Store {
     pub(crate) db: Database,
@@ -53,6 +54,7 @@ impl Store {
         }
         let notes = self.all()?;
         let txn = self.db.begin_write().map_err(err)?;
+        crate::memory::rebuild_atbash(&txn)?;
         for note in &notes {
             crate::memory::index_note(&txn, note, true)?;
         }

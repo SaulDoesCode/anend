@@ -1,7 +1,7 @@
 //! anend notes: a desktop markdown note app with the look and workflow of the old anend
 //! blog admin panel, built on Bevy's feathers widgets. Notes live in a local redb file.
 
-#![allow(clippy::type_complexity)] // bevy queries are naturally verbose
+#![allow(clippy::type_complexity, clippy::too_many_arguments)] // bevy queries and systems are naturally verbose
 
 mod keys;
 mod markdown;
@@ -9,6 +9,9 @@ mod memory;
 mod memory_ui;
 mod note;
 mod simd;
+mod space;
+mod space_ui;
+mod spread;
 mod store;
 mod theme;
 mod ui;
@@ -46,6 +49,7 @@ struct Args {
     import: Vec<PathBuf>,
     import_weum: Vec<PathBuf>,
     screenshot: Option<PathBuf>,
+    space: bool,
 }
 
 fn parse_args() -> Args {
@@ -54,6 +58,7 @@ fn parse_args() -> Args {
         import: Vec::new(),
         import_weum: Vec::new(),
         screenshot: None,
+        space: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -63,6 +68,7 @@ fn parse_args() -> Args {
             "--import" => args.import.push(PathBuf::from(value("--import"))),
             "--import-weum" => args.import_weum.push(PathBuf::from(value("--import-weum"))),
             "--screenshot" => args.screenshot = Some(PathBuf::from(value("--screenshot"))),
+            "--space" => args.space = true,
             "-h" | "--help" => {
                 println!(
                     "anend: markdown notes\n\n\
@@ -70,8 +76,9 @@ fn parse_args() -> Args {
                      --db <file>       where the notes are stored (default {})\n  \
                      --import <file>   import notes, e.g. writs exported from the old anend server\n                    \
                      (a JSON array or one JSON document per line), then exit\n  \
-                     --import-weum <file>  import weum memories from its backup (all-of-it.json), then exit\n\n\
-                     ctrl+s save, ctrl+n new note, ctrl+e view/edit, ctrl+1..4 views; press k (or the keys button) to remap",
+                     --import-weum <file>  import weum memories from its backup (all-of-it.json), then exit\n  \
+                     --space           open in the space\n\n\
+                     ctrl+s save, ctrl+n new note, ctrl+e view/edit, ctrl+1..5 views; press k (or the keys button) to remap",
                     default_db_path().display()
                 );
                 std::process::exit(0);
@@ -166,6 +173,7 @@ fn main() {
             ..default()
         }),
         FeathersPlugins,
+        bevy_slugtext::SlugTextPlugin,
     ))
     .insert_resource(UiTheme(theme::sand_theme()))
     .insert_resource(ClearColor(theme::colors::MOOD_DARK))
@@ -173,6 +181,7 @@ fn main() {
     // start on the most recent note, like picking the top writ in the old editor
     .insert_resource(Session {
         active: notes.first().cloned().unwrap_or_default(),
+        route: if args.space { Route::Space } else { Route::Editor },
         ..default()
     })
     .insert_resource(Notes(notes))
@@ -182,9 +191,11 @@ fn main() {
     .init_resource::<memory_ui::SerifFont>()
     .init_resource::<memory_ui::MemoryState>()
     .init_resource::<keys::Remap>()
+    .init_resource::<space::SlugFont>()
+    .init_resource::<space::Space>()
     .insert_resource(keymap)
     .add_message::<keys::Fired>()
-    .add_systems(Startup, ui::scene.spawn())
+    .add_systems(Startup, (ui::scene.spawn(), space::setup))
     .add_systems(
         Update,
         (
@@ -212,6 +223,27 @@ fn main() {
             status_text,
         )
             .chain(),
+    )
+    .add_systems(
+        Update,
+        (
+            space::apply_space_route,
+            space::load_font,
+            space::space_enter,
+            space::space_input,
+            space::space_fly,
+            space::space_physics,
+            space::space_visuals,
+            space_ui::apply_term,
+            space_ui::space_panels,
+            space_ui::rebuild_help,
+            space_ui::rebuild_qline,
+            space_ui::rebuild_termrow,
+            space_ui::rebuild_metrics,
+            space_ui::build_opts,
+        )
+            .chain()
+            .after(ui::apply_route),
     );
     if let Some(path) = args.screenshot {
         app.insert_resource(ScreenshotPath(path))

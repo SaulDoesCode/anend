@@ -1,4 +1,4 @@
-//! The interface: a nav bar (editor / reader / stats plus a message box), the editor
+//! The interface: a nav bar (editor / reader / memory / stats / space plus a message box), the editor
 //! (note list on the left, the markdown editor card on the right) and the reader, which
 //! shows published notes the way the old site's front page showed writs.
 
@@ -14,6 +14,7 @@ use bevy::feathers::tokens;
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::input_focus::tab_navigation::{TabGroup, TabIndex};
 use bevy::input_focus::{FocusedInput, InputFocus};
+use bevy::picking::Pickable;
 use bevy::picking::cursor::EntityCursor;
 use bevy::prelude::*;
 use bevy::text::{
@@ -28,6 +29,7 @@ use crate::keys::{Action, Fired, Keymap, Remap};
 use crate::markdown::{self, Block, Span};
 use crate::memory_ui::MemoryView;
 use crate::note::{self, Note};
+use crate::space_ui::SpaceView;
 use crate::store::{Store, sort_newest_first};
 use crate::theme::colors;
 
@@ -47,6 +49,7 @@ pub enum Route {
     Reader,
     Memory,
     Stats,
+    Space,
 }
 
 #[derive(Resource, Default)]
@@ -279,12 +282,16 @@ pub struct NoteSearch;
 pub struct RemapMenu;
 #[derive(Component, Default, Clone)]
 pub struct RemapList;
+/// the window's root node; the space clears its background to show the 3D view
+#[derive(Component, Default, Clone)]
+pub struct AppRoot;
 
 // ------------------------------------------------------------------ layout
 
 pub fn scene() -> impl SceneList {
     bsn_list! {
         Camera2d
+        IsDefaultUiCamera
         --
         @root()
     }
@@ -302,6 +309,8 @@ fn root() -> impl Scene {
         }
         ThemeBackgroundColor(tokens::WINDOW_BG)
         TabGroup
+        AppRoot
+        Pickable::IGNORE
         Children [
             @nav()
             --
@@ -311,6 +320,7 @@ fn root() -> impl Scene {
                 display: Display::Flex,
                 flex_direction: FlexDirection::Row,
             }
+            Pickable::IGNORE
             Children [
                 @editor_view()
                 --
@@ -319,6 +329,8 @@ fn root() -> impl Scene {
                 @crate::memory_ui::view()
                 --
                 @stats_view()
+                --
+                @crate::space_ui::view()
             ]
             --
             @remap_menu()
@@ -365,6 +377,8 @@ fn nav() -> impl Scene {
             @nav_button("memory", Route::Memory)
             --
             @nav_button("stats", Route::Stats)
+            --
+            @nav_button("space", Route::Space)
             --
             @FeathersButton {
                 @caption: bsn! { @caption("keys") }
@@ -693,11 +707,12 @@ pub fn app_actions(mut fired: MessageReader<Fired>, mut ctx: Ctx, mut remap: Res
                 ctx.redraw.meta = true;
                 ctx.redraw.preview = true;
             }
-            Action::GotoEditor | Action::GotoReader | Action::GotoMemory | Action::GotoStats => {
+            Action::GotoEditor | Action::GotoReader | Action::GotoMemory | Action::GotoStats | Action::GotoSpace => {
                 let route = match action {
                     Action::GotoEditor => Route::Editor,
                     Action::GotoReader => Route::Reader,
                     Action::GotoMemory => Route::Memory,
+                    Action::GotoSpace => Route::Space,
                     _ => Route::Stats,
                 };
                 if route != Route::Editor && ctx.is_dirty() && !ctx.session.active.title.trim().is_empty() {
@@ -759,6 +774,7 @@ pub fn apply_route(
         Has<ReaderView>,
         Has<MemoryView>,
         Has<StatsView>,
+        Has<SpaceView>,
     )>,
     tabs: Query<(Entity, &NavTab)>,
     mut commands: Commands,
@@ -767,14 +783,15 @@ pub fn apply_route(
         return;
     }
     redraw.route = false;
-    for (mut node, editor, reader, memory, stats) in views.iter_mut() {
+    for (mut node, editor, reader, memory, stats, space) in views.iter_mut() {
         let shown = match session.route {
             Route::Editor => editor,
             Route::Reader => reader,
             Route::Memory => memory,
             Route::Stats => stats,
+            Route::Space => space,
         };
-        if editor || reader || memory || stats {
+        if editor || reader || memory || stats || space {
             node.display = if shown { Display::Flex } else { Display::None };
         }
     }
@@ -1159,7 +1176,14 @@ fn card_node() -> Node {
     }
 }
 
-fn text(commands: &mut Commands, parent: Entity, s: &str, font: &Handle<Font>, size: f32, color: Color) -> Entity {
+pub(crate) fn text(
+    commands: &mut Commands,
+    parent: Entity,
+    s: &str,
+    font: &Handle<Font>,
+    size: f32,
+    color: Color,
+) -> Entity {
     commands
         .spawn((
             Text::new(s),

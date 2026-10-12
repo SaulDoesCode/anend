@@ -12,6 +12,7 @@ embedded [redb](https://www.redb.org) database.
 ![the editor](docs/editor.png)
 ![the reader](docs/reader.png)
 ![the memory view](docs/memory.png)
+![the space](docs/space.png)
 
 ## Using it
 
@@ -25,10 +26,11 @@ embedded [redb](https://www.redb.org) database.
 | **stats** | counts of notes, words, saves and tags |
 | **memory** | weum's memory view: short texts ("memories") and your notes, searched by gematria or by words |
 | **search bar** | above the note list; filters notes to those with words starting with what you type |
-| **keys** | the key remap menu (also **K**) |
+| **space** | weum's spatial memory (remem): fly through a room where memory texts float, laid out by their sums |
+| **keys** | the key remap menu (also **K**, or **Ctrl+K** in the space) |
 
 Shortcuts: **Ctrl+S** save, **Ctrl+N** new note, **Ctrl+E** toggle view/edit,
-**Ctrl+1..4** editor / reader / memory / stats. All of them can be changed in **keys**.
+**Ctrl+1..5** editor / reader / memory / stats / space. All of them can be changed in **keys**.
 
 Unsaved changes (marked `•` in the list) are saved when you switch notes or close the
 window. A note needs a `# title` before it can be saved.
@@ -42,7 +44,7 @@ the bottom; the sidecar on the right shows the term's four gsearch keys:
 |---|---|
 | ordinal | a=1 .. z=26 |
 | reversed | a=26 .. z=1 |
-| atbash | the planks' top side: every letter on a plank with the alphabet in squares, slid so the letter sits on the reading line; the squares above it, a=25 .. z=0 (the squares below, the letter included, are the ordinal) |
+| atbash | every letter swapped for its mirror in its alphabet, `n + 1 − v`: a=26 .. z=1 for Latin (the reversed value), α=24 .. ω=1 for Greek, א=22 .. ת=1 for Hebrew |
 | frequency | the letter frequency table, so anagrams share a bucket (shown as the sorted letters, `eilnst`) |
 
 **Term bar**
@@ -82,6 +84,45 @@ They keep their keys, and new memories continue weum's key allocation (one byte 
 then two, three and four, reusing forgotten ones). Images and embedding search (esearch)
 from weum aren't part of the app.
 
+## The space
+
+The space is remem (kuis), weum's spatial memory, as a view of the app. Memory texts
+float in a warm room as camera-facing billboards, drawn as GPU vector text with
+[bevy_slugtext](https://github.com/SaulDoesCode/bevy_slugtext). A gsearch pulls its
+bucket's memories in and spread lays them out in front of you: each bucket (texts with
+the same reversed sum, or ordinal with **reversed** on) clusters on an Archimedean spiral
+by its sum, deeper the higher the sum, with texts repelling each other (more so when one
+isn't the other's atbash). Texts sharing a bucket are underlined in its colour.
+
+**Flying**: hold the right mouse button to look, **W A S D** move, **Space** / **C** up and
+down, **Q** / **E** roll, **Shift** fast, **[** **]** or the wheel over empty space change
+the speed, **R** levels the horizon, **Home** goes back to the start.
+
+**Texts**: drag one to move it (a spread text you move stays pinned, **U** toggles that),
+the wheel on a text pushes it away or pulls it near, click puts its text in the terminal,
+double click edits it (a memory text: its key into the terminal), double click on empty
+space or **N** makes a new text, **Enter** edits the selected one, **Delete** removes it,
+**Ctrl+C** copies it, **Ctrl+Z** undoes (a forget too). Ctrl+click picks a list candidate,
+Shift+click the list, Ctrl+right click gsearches ⌊√(s·r)⌋. Hovering shows its metrics
+card: s, r, their sums, product, roots and differences, vowels, consonants, words, its
+key and bucket, every number gsearching itself.
+
+**Terminal** (**/**, or **Enter** with nothing selected): a number gsearches that bucket,
+text gsearches its sum (with **gsearch** off, searches its words), **Ctrl+Enter**
+saturates the text and gsearches its sum, **Shift+Enter** recalls a key, **Delete**
+forgets the key typed, **↑** **↓** walk the history, **Esc** goes back to flying. `#123`,
+`#r123` and `#name` go to an ordinal bucket, a reversed one or a saved map. The words
+`Enlist` `List` `Delist` `Unlist` `Count` `Backup` `Clear` `ClearAll` `Settle` `Maps` and
+`Save name` are commands. The chips under it: **gsearch**, **reversed** (**F**),
+**saturate** (searches save new texts) and **keep** (new results join the spread instead
+of replacing it).
+
+**More keys**: **O** the spread's sliders, **P** pauses the physics, **K** settles it now,
+**←** **→** gsearch the terminal's sums, **X** exports every text to a JSON file in your
+Downloads, **Shift+X** saves the map in the database (**Maps** lists them), **H** help,
+**I** the position card. Every key can be remapped in **keys**. weum's esearch, speech
+and image memories aren't part of it.
+
 ## Building
 
 ```sh
@@ -98,7 +139,7 @@ runtime on x86_64, with scalar fallbacks elsewhere.
 
 ## Data
 
-Notes, memories, the search tables and your key bindings are kept in `notes.redb` under
+Notes, memories, the search tables, your key bindings and the space's maps and settings are kept in `notes.redb` under
 the platform data directory (`~/.local/share/anend` on Linux, `~/Library/Application Support/anend` on macOS,
 `%APPDATA%\anend` on Windows). Use `--db <file>` to choose another file.
 
@@ -127,3 +168,6 @@ This keeps their keys, titles, markdown, tags, dates, edit history and published
 | `src/weum.rs` | ports of memory.js helpers: pfR, the gsum line, the search variations |
 | `src/memory_ui.rs` | the memory view |
 | `src/keys.rs` | actions, bindings and the remap logic |
+| `src/spread.rs` | spread.js: the layout of memory texts by their sums, checked step by step against the original |
+| `src/space.rs` | the space: flying, the texts as slug billboards, picking, the terminal's memory commands, maps |
+| `src/space_ui.rs` | the space's panels: position card, help, metrics, sliders, terminal |
