@@ -276,8 +276,9 @@ pub struct ViewToggle;
 pub struct EditorPad;
 #[derive(Component, Default, Clone)]
 pub struct Preview;
+/// the top bar
 #[derive(Component, Default, Clone)]
-pub struct NoteSearch;
+pub struct NavBar;
 #[derive(Component, Default, Clone)]
 pub struct RemapMenu;
 #[derive(Component, Default, Clone)]
@@ -304,8 +305,8 @@ fn root() -> impl Scene {
             height: percent(100),
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
-            padding: UiRect::all(px(8)),
-            row_gap: px(8),
+            padding: UiRect::all(px(6)),
+            row_gap: px(6),
         }
         ThemeBackgroundColor(tokens::WINDOW_BG)
         TabGroup
@@ -332,6 +333,10 @@ fn root() -> impl Scene {
                 --
                 @crate::space_ui::view()
             ]
+            --
+            @crate::bar::bar()
+            --
+            @crate::settings::menu()
             --
             @remap_menu()
         ]
@@ -364,11 +369,13 @@ fn nav() -> impl Scene {
             display: Display::Flex,
             flex_direction: FlexDirection::Row,
             align_items: AlignItems::Center,
-            column_gap: px(8),
-            padding: UiRect::all(px(6)),
+            column_gap: px(6),
+            padding: UiRect::all(px(4)),
             border_radius: BorderRadius::all(px(4)),
         }
         BackgroundColor(colors::NAV)
+        NavBar
+        crate::zen::Chrome
         Children [
             @nav_button("editor", Route::Editor)
             --
@@ -380,32 +387,28 @@ fn nav() -> impl Scene {
             --
             @nav_button("space", Route::Space)
             --
-            @FeathersButton {
-                @caption: bsn! { @caption("keys") }
-            }
-            on(|_activate: On<Activate>, mut remap: ResMut<Remap>| {
-                remap.open = !remap.open;
-                remap.changed = true;
-            })
-            --
             Node {
                 flex_grow: 1.0,
                 min_height: px(24),
                 display: Display::Flex,
                 align_items: AlignItems::Center,
+                justify_content: JustifyContent::End,
                 padding: UiRect::axes(px(8), px(3)),
-                border_radius: BorderRadius::all(px(4)),
             }
-            BackgroundColor(colors::CARD)
             Children [
                 Text("")
                 StatusText
                 TextFont {
                     font: FontSourceTemplate::Handle(fonts::REGULAR),
-                    font_size: FontSize::Px(14.0),
+                    font_size: FontSize::Px(13.0),
                 }
-                TextColor(colors::TEXT)
+                TextColor({crate::bar::BAR_TEXT})
             ]
+            --
+            @FeathersButton {
+                @caption: bsn! { @caption("settings") }
+            }
+            on(|_activate: On<Activate>, mut settings: ResMut<crate::settings::Settings>| settings.toggle())
         ]
     }
 }
@@ -440,20 +443,13 @@ fn editor_view() -> impl Scene {
                 border_radius: BorderRadius::all(px(4)),
             }
             BackgroundColor(colors::CARD)
+            crate::zen::Chrome
             Children [
                 @FeathersButton {
                     @caption: bsn! { @caption("+ new") },
                     @variant: ButtonVariant::Primary,
                 }
                 on(|_activate: On<Activate>, mut ctx: Ctx| ctx.new_note())
-                --
-                @FeathersTextInputContainer
-                Node { flex_grow: 0.0 }
-                Children [
-                    @FeathersTextInput
-                    NoteSearch
-                    on(note_search_changed)
-                ]
                 --
                 Node {
                     flex_grow: 1.0,
@@ -486,6 +482,7 @@ fn editor_view() -> impl Scene {
                     align_items: AlignItems::Center,
                     column_gap: px(6),
                 }
+                crate::zen::Chrome
                 Children [
                     Node {
                         flex_grow: 1.0,
@@ -695,9 +692,18 @@ fn confirm_delete(activate: On<Activate>, mut commands: Commands, ctx: Ctx) {
 // ------------------------------------------------------------------ systems
 
 /// the editor's and the app's own key actions (the memory view handles its own)
-pub fn app_actions(mut fired: MessageReader<Fired>, mut ctx: Ctx, mut remap: ResMut<Remap>) {
+pub fn app_actions(
+    mut fired: MessageReader<Fired>,
+    mut ctx: Ctx,
+    mut remap: ResMut<Remap>,
+    mut settings: ResMut<crate::settings::Settings>,
+    bar: Single<Entity, With<crate::bar::Bar>>,
+    mut focus: ResMut<InputFocus>,
+) {
     for Fired(action) in fired.read() {
         match action {
+            Action::OpenSettings => settings.toggle(),
+            Action::FocusTerm if ctx.session.route != Route::Memory => crate::bar::focus_bar(&mut focus, *bar),
             Action::Save => {
                 ctx.save();
             }
@@ -727,22 +733,6 @@ pub fn app_actions(mut fired: MessageReader<Fired>, mut ctx: Ctx, mut remap: Res
             }
             _ => {}
         }
-    }
-}
-
-fn note_search_changed(change: On<TextEditChange>, inputs: Query<&EditableText, With<NoteSearch>>, mut ctx: Ctx) {
-    let Ok(input) = inputs.get(change.event_target()) else {
-        return;
-    };
-    let query = input.value().to_string();
-    let filter = if query.trim().is_empty() {
-        None
-    } else {
-        ctx.db.0.note_filter(&query).ok()
-    };
-    if filter != ctx.session.note_filter {
-        ctx.session.note_filter = filter;
-        ctx.redraw.list = true;
     }
 }
 
@@ -968,6 +958,7 @@ pub fn rebuild_reader(
         .iter()
         .filter(|n| n.published)
         .filter(|n| session.reader_tag.as_ref().is_none_or(|t| n.tags.contains(t)))
+        .filter(|n| session.note_filter.as_ref().is_none_or(|f| f.contains(&n.key)))
         .collect();
 
     if let Some(tag) = &session.reader_tag {
@@ -1513,9 +1504,8 @@ pub fn rebuild_remap(
         .spawn_scene(plain_scene_button("reset to defaults".into(), ButtonVariant::Normal))
         .insert(ChildOf(buttons))
         .observe(
-            |_activate: On<Activate>, mut keymap: ResMut<Keymap>, db: Res<Db>, mut remap: ResMut<Remap>| {
+            |_activate: On<Activate>, mut keymap: ResMut<Keymap>, mut remap: ResMut<Remap>| {
                 *keymap = Keymap::default();
-                let _ = db.0.set_setting("keymap", &keymap.to_json());
                 remap.changed = true;
             },
         );

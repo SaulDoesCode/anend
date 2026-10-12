@@ -1,5 +1,6 @@
 //! Rebindable keys. Every keyboard action has a binding (a key plus modifiers) that the
-//! remap menu can change; bindings are kept in the database's settings table.
+//! remap menu can change; bindings are kept in the app's settings file, so they stay the
+//! same whichever save is open.
 //!
 //! Bindings with Ctrl or Alt work everywhere. Plain keys only act while no text box has
 //! focus, the way weum's memory view ignored its single letter keys inside the term bar.
@@ -22,6 +23,7 @@ pub enum Action {
     GotoMemory,
     GotoStats,
     GotoSpace,
+    OpenSettings,
     FocusTerm,
     BucketOrdinal,
     BucketReversed,
@@ -118,7 +120,7 @@ const fn shift(key: KeyCode) -> Binding {
 }
 
 impl Action {
-    pub const ALL: [Action; 51] = [
+    pub const ALL: [Action; 52] = [
         Action::Save,
         Action::NewNote,
         Action::ToggleView,
@@ -127,6 +129,7 @@ impl Action {
         Action::GotoMemory,
         Action::GotoStats,
         Action::GotoSpace,
+        Action::OpenSettings,
         Action::FocusTerm,
         Action::BucketOrdinal,
         Action::BucketReversed,
@@ -175,7 +178,7 @@ impl Action {
     pub fn scope(self) -> Scope {
         use Action::*;
         match self {
-            GotoEditor | GotoReader | GotoMemory | GotoStats | GotoSpace => Scope::Global,
+            GotoEditor | GotoReader | GotoMemory | GotoStats | GotoSpace | OpenSettings => Scope::Global,
             Save | NewNote | ToggleView | FocusTerm | BucketOrdinal | BucketReversed | BucketAtbash
             | BucketFrequency | ToggleGsearch | ToggleSaturate | WhiteMode | SideOrdinal | SideReversed
             | SideAtbash | SideFrequency | OpenRemap => Scope::Notes,
@@ -203,6 +206,7 @@ impl Action {
             Action::GotoMemory => "goto_memory",
             Action::GotoStats => "goto_stats",
             Action::GotoSpace => "goto_space",
+            Action::OpenSettings => "open_settings",
             Action::FocusTerm => "focus_term",
             Action::BucketOrdinal => "bucket_ordinal",
             Action::BucketReversed => "bucket_reversed",
@@ -259,7 +263,8 @@ impl Action {
             Action::GotoMemory => "go to memory",
             Action::GotoStats => "go to stats",
             Action::GotoSpace => "go to the space",
-            Action::FocusTerm => "memory: focus the term bar",
+            Action::OpenSettings => "open the settings (saves, fonts, zen)",
+            Action::FocusTerm => "focus the command bar",
             Action::BucketOrdinal => "memory: ordinal bucket",
             Action::BucketReversed => "memory: reversed bucket (again: back to ordinal)",
             Action::BucketAtbash => "memory: atbash bucket",
@@ -315,6 +320,7 @@ impl Action {
             Action::GotoMemory => ctrl(KeyCode::Digit3),
             Action::GotoStats => ctrl(KeyCode::Digit4),
             Action::GotoSpace => ctrl(KeyCode::Digit5),
+            Action::OpenSettings => ctrl(KeyCode::Comma),
             Action::FocusTerm => plain(KeyCode::Slash),
             Action::BucketOrdinal => plain(KeyCode::KeyO),
             Action::BucketReversed => plain(KeyCode::KeyR),
@@ -536,6 +542,14 @@ impl Keymap {
     }
 }
 
+/// writes changed bindings to the settings file
+pub fn persist_keymap(keymap: Res<Keymap>, mut config: ResMut<crate::config::Config>) {
+    if keymap.is_changed() && !keymap.is_added() {
+        config.keymap = serde_json::from_slice(&keymap.to_json()).ok();
+        config.save();
+    }
+}
+
 /// fired for every action whose binding was pressed
 #[derive(Message, Clone, Copy, Debug)]
 pub struct Fired(pub Action);
@@ -568,7 +582,6 @@ pub fn read_keys(
     mut remap: ResMut<Remap>,
     focus: Res<InputFocus>,
     editables: Query<(), With<EditableText>>,
-    db: Res<crate::ui::Db>,
     session: Res<crate::ui::Session>,
     mut fired: MessageWriter<Fired>,
 ) {
@@ -590,7 +603,6 @@ pub fn read_keys(
                         alt,
                     },
                 );
-                let _ = db.0.set_setting("keymap", &keymap.to_json());
                 remap.listening = None;
                 remap.changed = true;
                 return;

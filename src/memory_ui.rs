@@ -1,6 +1,5 @@
-//! The memory view: weum's memory.html as a native view. A black page, the results area
-//! in the middle, the term bar at the bottom with the sidecar of the term's sums to its
-//! right, hover-revealed toggles to its left and toasts above it.
+//! The memory view: weum's memory.html as a native view. A black page with the results
+//! area in the middle and toasts under it.
 //!
 //! Term bar (Enter):
 //! * a number: gsearch it in the current bucket, under its prime factor reduction line
@@ -20,24 +19,20 @@
 //! underlined in a colour picked by its reversed sum (the hue, shared by all its matches)
 //! and its ordinal sum (the shade). A text alone with its reversed sum gets none.
 //!
-//! Escape leaves the term bar, so the single key controls (buckets, sidecar arrows, ...)
-//! can be used; `/` goes back to it. All of them can be remapped in the keys menu.
+//! The term bar is the app's command bar (see bar.rs), with the sidecar and the toggles
+//! at its right. Escape leaves it, so the single key controls (buckets, sidecar arrows,
+//! ...) can be used; `/` goes back to it. All of them can be remapped in the keys menu.
 
 use bevy::ecs::system::SystemParam;
 use bevy::input::keyboard::{Key, KeyboardInput};
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusedInput, InputFocus};
 use bevy::picking::Pickable;
-use bevy::picking::cursor::EntityCursor;
 use bevy::picking::events::{PointerClick, PointerEnter, PointerLeave};
 use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
-use bevy::text::{
-    EditableText, FontSource, GenericFontFamily, TextCursorStyle, TextEdit, TextEditChange, Underline, UnderlineColor,
-};
+use bevy::text::{EditableText, FontSource, GenericFontFamily, TextEdit, TextEditChange, Underline, UnderlineColor};
 use bevy::ui::UiTransform;
-use bevy::ui_widgets::{ScrollArea, TextInput};
-use bevy::window::SystemCursorIcon;
+use bevy::ui_widgets::ScrollArea;
 
 use crate::keys::{Action, Fired, modifiers};
 use crate::memory::{Bucket, BucketKey, Hit, Ref, measure};
@@ -70,7 +65,6 @@ pub struct MemoryState {
     pub hover: Option<String>,
     pub term: String,
     pub set_term: Option<String>,
-    pub checkers_hovered: bool,
     pub redraw_results: bool,
     pub redraw_chrome: bool,
     pub redraw_toasts: bool,
@@ -91,7 +85,6 @@ impl Default for MemoryState {
             hover: None,
             term: String::new(),
             set_term: None,
-            checkers_hovered: false,
             redraw_results: true,
             redraw_chrome: true,
             redraw_toasts: true,
@@ -304,10 +297,6 @@ pub struct MemMain;
 #[derive(Component, Default, Clone)]
 pub struct MemTerm;
 #[derive(Component, Default, Clone)]
-pub struct Sidecar;
-#[derive(Component, Default, Clone)]
-pub struct Checkers;
-#[derive(Component, Default, Clone)]
 pub struct Toasts;
 #[derive(Component, Default, Clone)]
 pub struct HoverLine;
@@ -350,6 +339,7 @@ pub fn view() -> impl Scene {
                 right: px(10),
             }
             HoverLine
+        crate::zen::Chrome
             --
             Node {
                 width: percent(97),
@@ -369,7 +359,7 @@ pub fn view() -> impl Scene {
             --
             Node {
                 position_type: PositionType::Absolute,
-                bottom: px(44),
+                bottom: px(8),
                 left: px(0),
                 right: px(0),
                 display: Display::Flex,
@@ -379,84 +369,21 @@ pub fn view() -> impl Scene {
                 column_gap: px(10),
             }
             Toasts
-            --
-            Node {
-                position_type: PositionType::Absolute,
-                bottom: px(4),
-                left: px(0),
-                right: px(0),
-                display: Display::Flex,
-                justify_content: JustifyContent::Center,
-            }
-            Children [
-                Node {
-                    width: px(586),
-                    height: px(30),
-                    border: UiRect::bottom(px(1)),
-                    padding: UiRect::horizontal(px(4)),
-                }
-                BorderColor::all(WHITE)
-                BackgroundColor(BLACK)
-                TextInput
-                EditableText
-                TextLayout {
-                    linebreak: LineBreak::NoWrap,
-                }
-                TextFont
-                TextColor(WHITE)
-                TextCursorStyle {
-                    color: WHITE,
-                }
-                TabIndex(0)
-                EntityCursor::System(SystemCursorIcon::Text)
-                MemTerm
-                on(term_key)
-                on(term_changed)
-            ]
-            --
-            Node {
-                position_type: PositionType::Absolute,
-                right: px(38),
-                bottom: px(38),
-                display: Display::Flex,
-                flex_direction: FlexDirection::Row,
-            }
-            Sidecar
-            --
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(10),
-                bottom: px(4),
-                display: Display::Flex,
-                flex_direction: FlexDirection::Column,
-                row_gap: px(3),
-                padding: UiRect::all(px(6)),
-                border: UiRect::top(px(1)),
-            }
-            BorderColor::all(Color::srgb(0x10 as f32 / 255.0, 0.0, 0x10 as f32 / 255.0))
-            Checkers
-            on(|_e: On<PointerEnter>, mut mem: ResMut<MemoryState>| {
-                mem.checkers_hovered = true;
-                mem.redraw_chrome = true;
-            })
-            on(|_e: On<PointerLeave>, mut mem: ResMut<MemoryState>| {
-                mem.checkers_hovered = false;
-                mem.redraw_chrome = true;
-            })
         ]
     }
 }
 
 // ------------------------------------------------------------------ term bar
 
-fn term_key(
+pub(crate) fn term_key(
     key: On<FocusedInput<KeyboardInput>>,
     keys: Res<ButtonInput<KeyCode>>,
     terms: Query<&EditableText, With<MemTerm>>,
     mut focus: ResMut<InputFocus>,
+    session: Res<Session>,
     mut mem: Mem,
 ) {
-    if !key.input.state.is_pressed() {
+    if !key.input.state.is_pressed() || session.route != Route::Memory {
         return;
     }
     let Ok(term) = terms.get(key.focused_entity) else {
@@ -473,7 +400,15 @@ fn term_key(
     }
 }
 
-fn term_changed(change: On<TextEditChange>, terms: Query<&EditableText, With<MemTerm>>, mut mem: ResMut<MemoryState>) {
+pub(crate) fn term_changed(
+    change: On<TextEditChange>,
+    terms: Query<&EditableText, With<MemTerm>>,
+    session: Res<Session>,
+    mut mem: ResMut<MemoryState>,
+) {
+    if session.route != Route::Memory {
+        return;
+    }
     if let Ok(term) = terms.get(change.event_target()) {
         let text = term.value().to_string();
         if text != mem.term {
@@ -485,16 +420,11 @@ fn term_changed(change: On<TextEditChange>, terms: Query<&EditableText, With<Mem
 
 pub fn apply_term(
     mut mem: ResMut<MemoryState>,
-    term: Single<(&mut EditableText, &mut TextFont), With<MemTerm>>,
-    serif: Res<SerifFont>,
+    mut term: Single<&mut EditableText, With<MemTerm>>,
+    session: Res<Session>,
 ) {
-    let (mut term, mut font) = term.into_inner();
-    if font.font != serif.0 {
-        *font = TextFont {
-            font: serif.0.clone(),
-            font_size: FontSize::Px(18.0),
-            ..default()
-        };
+    if session.route != Route::Memory {
+        return;
     }
     if let Some(t) = mem.set_term.take() {
         term.editor_mut().set_text(&t);
@@ -812,19 +742,19 @@ fn clickable_text(
     underline: bool,
     serif: &SerifFont,
 ) -> Entity {
-    let mut e = commands.spawn((serif_text(s, 16.0, color, serif), ChildOf(parent)));
+    let mut e = commands.spawn((serif_text(s, 15.0, color, serif), ChildOf(parent)));
     if underline {
         e.insert((Underline, UnderlineColor(color)));
     }
     e.id()
 }
 
-/// the sidecar, the toggles and the hover line
+/// the sidecar and the toggles (in the command bar) and the hover line
 pub fn rebuild_chrome(
     mut mem: ResMut<MemoryState>,
-    sidecar: Single<Entity, With<Sidecar>>,
-    checkers: Single<Entity, With<Checkers>>,
+    side: Single<Entity, With<crate::bar::BarSide>>,
     hover: Single<Entity, With<HoverLine>>,
+    session: Res<Session>,
     db: Res<Db>,
     serif: Res<SerifFont>,
     mut commands: Commands,
@@ -833,76 +763,75 @@ pub fn rebuild_chrome(
         return;
     }
     mem.redraw_chrome = false;
-    let color = fg(mem.white);
+
+    // hover line: what weum showed as an article's title
+    commands.entity(*hover).despawn_related::<Children>();
+    let line = mem.hover.clone().unwrap_or_else(|| {
+        let n = db.0.memory_count().unwrap_or(0);
+        format!("{} memories · {} bucket", n, mem.bucket.name())
+    });
+    commands.spawn((
+        serif_text(line, 13.0, fg(mem.white).with_alpha(0.7), &serif),
+        ChildOf(*hover),
+    ));
+
+    if session.route != Route::Memory {
+        return;
+    }
+    let side = *side;
+    commands.entity(side).despawn_related::<Children>();
+    let (color, dim) = (crate::bar::BAR_TEXT, crate::bar::BAR_DIM);
 
     // sidecar: (ordinal, reversed, atbash, letters), each one gsearches itself
-    commands.entity(*sidecar).despawn_related::<Children>();
     let term = mem.term.trim().to_string();
     if !term.is_empty() && term.parse::<u32>().is_err() {
+        let sc = commands
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    ..default()
+                },
+                ChildOf(side),
+            ))
+            .id();
         let m = measure(&term);
-        clickable_text(&mut commands, *sidecar, "(".into(), color, false, &serif);
+        clickable_text(&mut commands, sc, "(".into(), dim, false, &serif);
         for (i, bucket) in Bucket::ALL.into_iter().enumerate() {
             if i > 0 {
-                clickable_text(&mut commands, *sidecar, ", ".into(), color, false, &serif);
+                clickable_text(&mut commands, sc, ", ".into(), dim, false, &serif);
             }
             let shown = match m.key(bucket) {
                 BucketKey::Sum(n) => n.to_string(),
                 BucketKey::Frequency(f) => crate::simd::frequency_letters(&f),
             };
             let key = m.key(bucket);
-            let e = clickable_text(&mut commands, *sidecar, shown, color, bucket == mem.bucket, &serif);
+            let e = clickable_text(&mut commands, sc, shown, color, bucket == mem.bucket, &serif);
             commands
                 .entity(e)
                 .observe(move |_c: On<PointerClick>, mut mem: Mem| mem.envale(bucket, key.clone()));
         }
-        clickable_text(&mut commands, *sidecar, ")".into(), color, false, &serif);
+        clickable_text(&mut commands, sc, ")".into(), dim, false, &serif);
     }
 
-    // toggles, invisible until hovered like weum's .checkers
-    commands.entity(*checkers).despawn_related::<Children>();
-    let alpha = if mem.checkers_hovered { 1.0 } else { 0.0 };
-    let c = color.with_alpha(alpha);
-    let toggle = |commands: &mut Commands, label: &str, on: bool| {
-        clickable_text(
-            commands,
-            *checkers,
-            format!("{} {}", if on { "☑" } else { "☐" }, label),
-            c,
-            false,
-            &serif,
-        )
-    };
-    let g = toggle(&mut commands, "gsearch typed text", mem.gsearch_text);
-    commands
-        .entity(g)
-        .observe(|_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {
-            mem.gsearch_text = !mem.gsearch_text;
-            mem.redraw_chrome = true;
-        });
-    let s = toggle(&mut commands, "also saturate", mem.also_saturate);
-    commands
-        .entity(s)
-        .observe(|_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {
-            mem.also_saturate = !mem.also_saturate;
-            mem.redraw_chrome = true;
-        });
-    let row = commands
+    // the buckets, then the toggles
+    let buckets = commands
         .spawn((
             Node {
                 flex_direction: FlexDirection::Row,
-                column_gap: px(8),
+                column_gap: px(6),
                 ..default()
             },
-            ChildOf(*checkers),
+            ChildOf(side),
         ))
         .id();
     for bucket in Bucket::ALL {
+        let on = bucket == mem.bucket;
         let e = clickable_text(
             &mut commands,
-            row,
+            buckets,
             bucket.name().into(),
-            c,
-            bucket == mem.bucket,
+            if on { color } else { dim },
+            on,
             &serif,
         );
         commands
@@ -912,14 +841,32 @@ pub fn rebuild_chrome(
                 mem.redraw_chrome = true;
             });
     }
-
-    // hover line: what weum showed as an article's title
-    commands.entity(*hover).despawn_related::<Children>();
-    let line = mem.hover.clone().unwrap_or_else(|| {
-        let n = db.0.memory_count().unwrap_or(0);
-        format!("{} memories · {} bucket", n, mem.bucket.name())
-    });
-    commands.spawn((serif_text(line, 13.0, color.with_alpha(0.7), &serif), ChildOf(*hover)));
+    let toggle = |commands: &mut Commands, label: &str, on: bool| {
+        clickable_text(commands, side, label.into(), if on { color } else { dim }, on, &serif)
+    };
+    let g = toggle(&mut commands, "gsearch text", mem.gsearch_text);
+    commands
+        .entity(g)
+        .observe(|_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {
+            mem.gsearch_text = !mem.gsearch_text;
+            mem.redraw_chrome = true;
+        });
+    let s = toggle(&mut commands, "saturate", mem.also_saturate);
+    commands
+        .entity(s)
+        .observe(|_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {
+            mem.also_saturate = !mem.also_saturate;
+            mem.redraw_chrome = true;
+        });
+    let w = toggle(&mut commands, "white", mem.white);
+    commands
+        .entity(w)
+        .observe(|_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {
+            mem.white = !mem.white;
+            mem.redraw_results = true;
+            mem.redraw_toasts = true;
+            mem.redraw_chrome = true;
+        });
 }
 
 pub fn rebuild_toasts(

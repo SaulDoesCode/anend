@@ -29,6 +29,7 @@ bevy = { version = "0.20", default-features = false, features = [
 ] }
 bevy_slugtext = { git = "https://github.com/SaulDoesCode/bevy_slugtext", rev = "1cfb7d5" }
 ttf-parser = "0.25"
+fontique = "0.11"
 chrono = "0.4"
 redb = "4.3"
 serde = { version = "1", features = ["derive"] }

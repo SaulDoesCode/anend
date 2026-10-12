@@ -3,19 +3,24 @@
 
 #![allow(clippy::type_complexity, clippy::too_many_arguments)] // bevy queries and systems are naturally verbose
 
+mod bar;
+mod config;
 mod keys;
 mod markdown;
 mod memory;
 mod memory_ui;
 mod note;
+mod settings;
 mod simd;
 mod space;
 mod space_ui;
 mod spread;
 mod store;
 mod theme;
+mod typeface;
 mod ui;
 mod weum;
+mod zen;
 
 use bevy::feathers::FeathersPlugins;
 use bevy::feathers::theme::UiTheme;
@@ -28,24 +33,8 @@ use crate::note::Note;
 use crate::store::Store;
 use crate::ui::*;
 
-/// where notes are kept unless `--db` says otherwise
-fn default_db_path() -> PathBuf {
-    let base = if cfg!(target_os = "windows") {
-        std::env::var_os("APPDATA").map(PathBuf::from)
-    } else if cfg!(target_os = "macos") {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support"))
-    } else {
-        std::env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
-    };
-    base.unwrap_or_else(|| PathBuf::from("."))
-        .join("anend")
-        .join("notes.redb")
-}
-
 struct Args {
-    db: PathBuf,
+    db: Option<PathBuf>,
     import: Vec<PathBuf>,
     import_weum: Vec<PathBuf>,
     screenshot: Option<PathBuf>,
@@ -54,7 +43,7 @@ struct Args {
 
 fn parse_args() -> Args {
     let mut args = Args {
-        db: default_db_path(),
+        db: None,
         import: Vec::new(),
         import_weum: Vec::new(),
         screenshot: None,
@@ -64,7 +53,7 @@ fn parse_args() -> Args {
     while let Some(arg) = it.next() {
         let mut value = |name: &str| it.next().unwrap_or_else(|| fail(&format!("{} needs a value", name)));
         match arg.as_str() {
-            "--db" => args.db = PathBuf::from(value("--db")),
+            "--db" => args.db = Some(PathBuf::from(value("--db"))),
             "--import" => args.import.push(PathBuf::from(value("--import"))),
             "--import-weum" => args.import_weum.push(PathBuf::from(value("--import-weum"))),
             "--screenshot" => args.screenshot = Some(PathBuf::from(value("--screenshot"))),
@@ -73,13 +62,13 @@ fn parse_args() -> Args {
                 println!(
                     "anend: markdown notes\n\n\
                      usage: anend [--db <file>] [--import <file.json>]... [--import-weum <all-of-it.json>]...\n\n  \
-                     --db <file>       where the notes are stored (default {})\n  \
+                     --db <file>       the save to open (default: the last one, now {})\n  \
                      --import <file>   import notes, e.g. writs exported from the old anend server\n                    \
                      (a JSON array or one JSON document per line), then exit\n  \
                      --import-weum <file>  import weum memories from its backup (all-of-it.json), then exit\n  \
                      --space           open in the space\n\n\
-                     ctrl+s save, ctrl+n new note, ctrl+e view/edit, ctrl+1..5 views; press k (or the keys button) to remap",
-                    default_db_path().display()
+                     ctrl+s save, ctrl+n new note, ctrl+e view/edit, ctrl+1..5 views, ctrl+, settings (saves, fonts, zen, keys)",
+                    config::Config::load().current_save().display()
                 );
                 std::process::exit(0);
             }
@@ -131,7 +120,13 @@ fn screenshot(
 
 fn main() {
     let args = parse_args();
-    let store = Store::open(&args.db).unwrap_or_else(|e| fail(&format!("cannot open {}: {}", args.db.display(), e)));
+    let mut config = config::Config::load();
+    let db_path = args.db.clone().unwrap_or_else(|| config.current_save());
+    let store = Store::open(&db_path).unwrap_or_else(|e| fail(&format!("cannot open {}: {}", db_path.display(), e)));
+    if args.db.is_none() && config.current.is_none() {
+        config.current = Some(db_path.clone());
+        config.save();
+    }
 
     if !args.import.is_empty() || !args.import_weum.is_empty() {
         for path in &args.import {
@@ -148,11 +143,10 @@ fn main() {
         }
         return;
     }
-    let keymap = store
-        .setting("keymap")
-        .ok()
-        .flatten()
-        .map(|b| keys::Keymap::from_json(&b))
+    let keymap = config
+        .keymap
+        .as_ref()
+        .map(|v| keys::Keymap::from_json(v.to_string().as_bytes()))
         .unwrap_or_default();
 
     let notes = store
@@ -193,13 +187,18 @@ fn main() {
     .init_resource::<keys::Remap>()
     .init_resource::<space::SlugFont>()
     .init_resource::<space::Space>()
+    .init_resource::<bar::BarState>()
+    .init_resource::<settings::Settings>()
+    .init_resource::<typeface::Typeface>()
+    .init_resource::<zen::Zen>()
     .insert_resource(keymap)
+    .insert_resource(config)
     .add_message::<keys::Fired>()
     .add_systems(Startup, (ui::scene.spawn(), space::setup))
     .add_systems(
         Update,
         (
-            keys::read_keys,
+            (keys::read_keys, keys::persist_keymap).chain(),
             (app_actions, memory_ui::memory_actions),
             on_close,
             (
@@ -212,6 +211,7 @@ fn main() {
                 rebuild_stats,
                 rebuild_remap,
             ),
+            bar::bar_route,
             (
                 memory_ui::focus_on_open,
                 memory_ui::apply_term,
@@ -243,7 +243,20 @@ fn main() {
             space_ui::build_opts,
         )
             .chain()
-            .after(ui::apply_route),
+            .after(bar::bar_route),
+    )
+    .add_systems(
+        Update,
+        (
+            bar::notes_side,
+            settings::rebuild_settings,
+            typeface::apply_typeface,
+            typeface::apply_memory_font,
+            zen::zen_fade,
+            zen::nav_autohide,
+        )
+            .chain()
+            .after(space_ui::build_opts),
     );
     if let Some(path) = args.screenshot {
         app.insert_resource(ScreenshotPath(path))

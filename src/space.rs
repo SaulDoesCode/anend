@@ -237,6 +237,11 @@ pub struct Layout {
 }
 
 impl SlugFont {
+    /// forget the measured font, so it's read again (the font was swapped)
+    pub fn reset(&mut self) {
+        self.data = None;
+    }
+
     /// widths the way bevy_slugtext lays a line out: advances of the characters the font
     /// has a glyph for
     pub fn layout(&self, text: &str) -> Layout {

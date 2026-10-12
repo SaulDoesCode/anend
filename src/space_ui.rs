@@ -6,31 +6,31 @@
 use bevy::feathers::constants::fonts;
 use bevy::feathers::controls::{ButtonVariant, FeathersSlider};
 use bevy::input::keyboard::{Key, KeyboardInput};
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, FocusedInput, InputFocus};
 use bevy::picking::Pickable;
 use bevy::picking::cursor::EntityCursor;
 use bevy::picking::events::{PointerClick, PointerEnter, PointerLeave};
 use bevy::prelude::*;
-use bevy::text::{
-    EditableText, FontSource, FontSourceTemplate, GenericFontFamily, TextCursorStyle, TextEdit, TextEditChange,
-};
-use bevy::ui_widgets::{Activate, ScrollArea, SliderPrecision, SliderStep, SliderValue, TextInput, ValueChange};
+use bevy::text::{EditableText, FontSource, FontSourceTemplate, GenericFontFamily, TextEdit, TextEditChange};
+use bevy::ui_widgets::{Activate, ScrollArea, SliderPrecision, SliderStep, SliderValue, ValueChange};
 use bevy::window::SystemCursorIcon;
 
+use crate::bar::{BAR_DIM, BAR_TEXT, BarMode, BarSide};
 use crate::keys::{Action, Keymap, modifiers};
-use crate::space::{ACCENT, INK, Qline, SLIDERS, Sp, Space, SpaceText, bucket_color};
+use crate::space::{ACCENT, Qline, SLIDERS, Sp, Space, SpaceText, bucket_color};
+use crate::theme::colors;
+use crate::ui::{Route, Session};
+
+const INK: Color = colors::TEXT;
 use crate::spread;
 use crate::ui::{Fonts, plain_scene_button};
 use crate::weum::{self, Seg};
 
-const MILK: Color = Color::srgb(0xfb as f32 / 255.0, 0xf6 as f32 / 255.0, 0xee as f32 / 255.0);
-const COFFEE: Color = Color::srgb(0xa9 as f32 / 255.0, 0x83 as f32 / 255.0, 0x5d as f32 / 255.0);
-const DARK: Color = Color::srgb(0x7c as f32 / 255.0, 0x5c as f32 / 255.0, 0x3d as f32 / 255.0);
-const TERM_BG: Color = Color::srgb(0xff as f32 / 255.0, 0xf9 as f32 / 255.0, 0xf1 as f32 / 255.0);
+/// the app's white cards, a little see-through over the room
+const PANEL: Color = Color::srgba(1.0, 1.0, 1.0, 0.82);
+const DIM: Color = colors::TEXT_DIM;
 
-const HINT_TERM: &str = "Enter search · Ctrl+Enter save · Shift+Enter key · Esc fly";
-const HINT_EDIT: &str = "Enter done · Shift+Enter new line · Esc done · clearing the text deletes it";
+const HINT_EDIT: &str = "editing · Enter done · Shift+Enter new line";
 
 #[derive(Component, Default, Clone)]
 pub struct SpaceView;
@@ -54,8 +54,17 @@ pub struct SpOpts;
 pub struct SpQline;
 #[derive(Component, Default, Clone)]
 pub struct SpTerm;
-#[derive(Component, Default, Clone)]
-pub struct SpTermrow;
+
+fn panel() -> Node {
+    Node {
+        position_type: PositionType::Absolute,
+        display: Display::None,
+        flex_direction: FlexDirection::Column,
+        padding: UiRect::axes(px(10), px(6)),
+        border_radius: BorderRadius::all(px(4)),
+        ..default()
+    }
+}
 
 pub fn view() -> impl Scene {
     bsn! {
@@ -67,62 +76,57 @@ pub fn view() -> impl Scene {
         SpaceView
         Pickable::IGNORE
         Children [
-            // the position card
+            // the position line
             Node {
                 position_type: PositionType::Absolute,
-                top: px(4),
-                left: px(4),
-                padding: UiRect::axes(px(12), px(8)),
-                border: UiRect::all(px(1)),
+                top: px(0),
+                left: px(2),
+                padding: UiRect::axes(px(8), px(3)),
+                border_radius: BorderRadius::all(px(4)),
             }
-            BackgroundColor(MILK)
-            BorderColor::all(COFFEE)
+            BackgroundColor(PANEL)
+            Pickable::IGNORE
             SpHud
+            crate::zen::Chrome
             Children [
                 Text("")
                 TextFont {
-                    font: FontSourceTemplate::Handle(fonts::MONO),
-                    font_size: FontSize::Px(13.0),
+                    font: FontSourceTemplate::Handle(fonts::REGULAR),
+                    font_size: FontSize::Px(12.0),
                 }
-                TextColor(INK)
+                TextColor(DIM)
+                Pickable::IGNORE
                 SpHudText
             ]
             --
             // help
             Node {
-                position_type: PositionType::Absolute,
-                top: px(4),
-                right: px(4),
-                max_height: percent(96),
-                display: Display::None,
-                flex_direction: FlexDirection::Column,
-                padding: UiRect::axes(px(12), px(8)),
-                border: UiRect::all(px(1)),
+                top: px(0),
+                right: px(2),
+                max_height: percent(100),
                 overflow: Overflow::scroll_y(),
+                ..panel()
             }
-            BackgroundColor(MILK)
-            BorderColor::all(COFFEE)
+            BackgroundColor(PANEL)
             ScrollArea
             SpHelp
+            crate::zen::Chrome
             --
             // the first time's hint
             Node {
-                position_type: PositionType::Absolute,
                 top: percent(12),
-                left: percent(22),
-                display: Display::None,
-                padding: UiRect::axes(px(16), px(6)),
-                border: UiRect::all(px(1)),
+                left: percent(30),
+                padding: UiRect::axes(px(14), px(6)),
+                ..panel()
             }
-            BackgroundColor(MILK)
-            BorderColor::all(COFFEE)
+            BackgroundColor(PANEL)
             Pickable::IGNORE
             SpStart
             Children [
                 Text("Hold the right mouse button to look · H for help")
                 TextFont {
                     font: FontSourceTemplate::Handle(fonts::REGULAR),
-                    font_size: FontSize::Px(15.0),
+                    font_size: FontSize::Px(14.0),
                 }
                 TextColor(INK)
             ]
@@ -130,7 +134,7 @@ pub fn view() -> impl Scene {
             // the toast
             Node {
                 position_type: PositionType::Absolute,
-                top: px(4),
+                top: px(0),
                 left: px(0),
                 right: px(0),
                 display: Display::None,
@@ -141,11 +145,10 @@ pub fn view() -> impl Scene {
             GlobalZIndex(3)
             Children [
                 Node {
-                    padding: UiRect::axes(px(12), px(8)),
-                    border: UiRect::all(px(1)),
+                    padding: UiRect::axes(px(10), px(4)),
+                    border_radius: BorderRadius::all(px(4)),
                 }
-                BackgroundColor(MILK)
-                BorderColor::all(COFFEE)
+                BackgroundColor(PANEL)
                 Pickable::IGNORE
                 Children [
                     Text("")
@@ -161,109 +164,56 @@ pub fn view() -> impl Scene {
             --
             // metrics of the text under the pointer
             Node {
-                position_type: PositionType::Absolute,
-                bottom: px(14),
-                right: px(4),
-                width: px(300),
-                display: Display::None,
-                flex_direction: FlexDirection::Column,
-                padding: UiRect::axes(px(12), px(8)),
-                border: UiRect::all(px(1)),
+                bottom: px(0),
+                right: px(2),
+                width: px(268),
+                ..panel()
             }
-            BackgroundColor(MILK)
-            BorderColor::all(COFFEE)
+            BackgroundColor(PANEL)
             SpMetrics
+            crate::zen::Chrome
             --
             // the sliders
             Node {
-                position_type: PositionType::Absolute,
-                bottom: px(14),
-                left: px(4),
-                width: px(250),
-                max_height: percent(70),
-                display: Display::None,
-                flex_direction: FlexDirection::Column,
-                row_gap: px(2),
-                padding: UiRect::axes(px(12), px(8)),
-                border: UiRect::all(px(1)),
+                bottom: px(0),
+                left: px(2),
+                width: px(230),
+                max_height: percent(100),
+                row_gap: px(1),
                 overflow: Overflow::scroll_y(),
+                ..panel()
             }
-            BackgroundColor(MILK)
-            BorderColor::all(COFFEE)
+            BackgroundColor(PANEL)
             ScrollArea
             SpOpts
+            crate::zen::Chrome
             --
-            // the terminal
+            // what was searched, over the command bar
             Node {
                 position_type: PositionType::Absolute,
-                bottom: px(14),
+                bottom: px(0),
                 left: px(0),
                 right: px(0),
                 display: Display::Flex,
                 justify_content: JustifyContent::Center,
             }
             Pickable::IGNORE
-            GlobalZIndex(2)
             Children [
                 Node {
-                    width: px(720),
-                    max_width: percent(56),
-                    display: Display::Flex,
-                    flex_direction: FlexDirection::Column,
-                    row_gap: px(6),
-                    padding: UiRect::axes(px(12), px(8)),
-                    border: UiRect::all(px(1)),
+                    max_width: percent(50),
+                    display: Display::None,
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    align_items: AlignItems::Baseline,
+                    padding: UiRect::axes(px(10), px(3)),
+                    border_radius: BorderRadius::all(px(4)),
+                    max_height: px(64),
+                    overflow: Overflow::scroll_y(),
                 }
-                BackgroundColor(MILK)
-                BorderColor::all(COFFEE)
-                Children [
-                    Node {
-                        display: Display::Flex,
-                        flex_direction: FlexDirection::Row,
-                        flex_wrap: FlexWrap::Wrap,
-                        align_items: AlignItems::Baseline,
-                        max_height: px(90),
-                        overflow: Overflow::scroll_y(),
-                    }
-                    ScrollArea
-                    SpQline
-                    --
-                    Node {
-                        padding: UiRect::axes(px(10), px(6)),
-                        border: UiRect::all(px(1)),
-                        min_height: px(24),
-                    }
-                    BorderColor::all(COFFEE)
-                    BackgroundColor(TERM_BG)
-                    TextInput
-                    EditableText
-                    TextLayout {
-                        linebreak: LineBreak::WordBoundary,
-                    }
-                    TextFont {
-                        font: FontSourceTemplate::Handle(fonts::REGULAR),
-                        font_size: FontSize::Px(15.0),
-                    }
-                    TextColor(INK)
-                    TextCursorStyle {
-                        color: INK,
-                    }
-                    TabIndex(0)
-                    EntityCursor::System(SystemCursorIcon::Text)
-                    SpTerm
-                    on(term_key)
-                    on(term_changed)
-                    --
-                    Node {
-                        display: Display::Flex,
-                        flex_direction: FlexDirection::Row,
-                        flex_wrap: FlexWrap::Wrap,
-                        align_items: AlignItems::Center,
-                        column_gap: px(14),
-                        row_gap: px(4),
-                    }
-                    SpTermrow
-                ]
+                BackgroundColor(PANEL)
+                ScrollArea
+                SpQline
+            crate::zen::Chrome
             ]
         ]
     }
@@ -271,14 +221,15 @@ pub fn view() -> impl Scene {
 
 // ------------------------------------------------------------------ the terminal
 
-fn term_key(
+pub(crate) fn term_key(
     key: On<FocusedInput<KeyboardInput>>,
     keys: Res<ButtonInput<KeyCode>>,
     mut terms: Query<&mut EditableText, With<SpTerm>>,
     mut focus: ResMut<InputFocus>,
+    session: Res<Session>,
     mut sp: Sp,
 ) {
-    if !key.input.state.is_pressed() {
+    if !key.input.state.is_pressed() || session.route != Route::Space {
         return;
     }
     let Ok(mut term) = terms.get_mut(key.focused_entity) else {
@@ -304,7 +255,15 @@ fn term_key(
     }
 }
 
-fn term_changed(change: On<TextEditChange>, terms: Query<&EditableText, With<SpTerm>>, mut sp: Sp) {
+pub(crate) fn term_changed(
+    change: On<TextEditChange>,
+    terms: Query<&EditableText, With<SpTerm>>,
+    session: Res<Session>,
+    mut sp: Sp,
+) {
+    if session.route != Route::Space {
+        return;
+    }
     if let Ok(term) = terms.get(change.event_target()) {
         sp.box_input(term.value().to_string());
     }
@@ -313,10 +272,15 @@ fn term_changed(change: On<TextEditChange>, terms: Query<&EditableText, With<SpT
 /// puts text into the box, focuses and blurs it, and marks it while editing a text
 pub fn apply_term(
     mut st: ResMut<Space>,
-    term: Single<(Entity, &mut EditableText, &mut BorderColor), With<SpTerm>>,
+    term: Single<(Entity, &mut EditableText), With<SpTerm>>,
+    mode: Single<(&mut Text, &mut TextColor), With<BarMode>>,
     mut focus: ResMut<InputFocus>,
+    session: Res<Session>,
 ) {
-    let (entity, mut term, mut border) = term.into_inner();
+    if session.route != Route::Space {
+        return;
+    }
+    let (entity, mut term) = term.into_inner();
     if let Some(t) = st.set_term.take() {
         term.editor_mut().set_text(&t);
         term.queue_edit(TextEdit::TextEnd(false));
@@ -335,7 +299,11 @@ pub fn apply_term(
         focus.set(entity, FocusCause::Navigated);
     }
     if std::mem::take(&mut st.redraw.term_style) {
-        *border = BorderColor::all(if st.editing.is_some() { ACCENT } else { COFFEE });
+        // the bar has no border to mark editing with, so its name says it
+        let (mut text, mut color) = mode.into_inner();
+        let editing = st.editing.is_some();
+        text.0 = if editing { "editing" } else { "space" }.into();
+        color.0 = if editing { ACCENT } else { BAR_DIM };
         st.redraw.termrow = true;
     }
 }
@@ -500,15 +468,8 @@ pub fn space_panels(
             "moving"
         };
         let s = format!(
-            "x {:.2}\ny {:.2}\nz {:.2}\nspeed {:.1}\nroll {}\ntexts {}\nspread {} {}",
-            p.x,
-            p.y,
-            p.z,
-            st.speed,
-            roll,
-            n,
-            st.spread.nodes.len(),
-            state
+            "{:.1}  {:.1}  {:.1}   speed {:.1}   roll {}   {} texts   spread {}",
+            p.x, p.y, p.z, st.speed, roll, n, state
         );
         if hud.0 != s {
             hud.0 = s;
@@ -676,14 +637,16 @@ pub fn rebuild_help(
 /// the line over the terminal: what was searched, and how many texts and buckets
 pub fn rebuild_qline(
     mut st: ResMut<Space>,
-    qline: Single<Entity, With<SpQline>>,
+    qline: Single<(Entity, &mut Node), With<SpQline>>,
     fonts: Res<Fonts>,
     mut commands: Commands,
 ) {
     if !std::mem::take(&mut st.redraw.qline) {
         return;
     }
-    let q = *qline;
+    let (q, mut node) = qline.into_inner();
+    let empty = matches!(st.qline, Qline::None) && st.mem_index.is_empty();
+    node.display = if empty { Display::None } else { Display::Flex };
     commands.entity(q).despawn_related::<Children>();
     let count = format!(" · {} texts · {} buckets", st.mem_index.len(), st.spread.order.len());
     match st.qline.clone() {
@@ -749,72 +712,48 @@ pub fn rebuild_qline(
     }
 }
 
-/// the sidecar of the terminal's sums, the chips, the list state and the hint
+/// the space's side of the command bar: the terminal's sums, the chips, the list state
 pub fn rebuild_termrow(
     mut st: ResMut<Space>,
-    termrow: Single<Entity, With<SpTermrow>>,
+    side: Single<Entity, With<BarSide>>,
+    session: Res<Session>,
     fonts: Res<Fonts>,
     mut commands: Commands,
 ) {
-    if !std::mem::take(&mut st.redraw.termrow) {
+    if session.route != Route::Space || !std::mem::take(&mut st.redraw.termrow) {
         return;
     }
-    let t = *termrow;
+    let t = *side;
     commands.entity(t).despawn_related::<Children>();
-    let side = row(&mut commands, t);
-    let (s, r) = spread::sums(&st.term);
-    plain(&mut commands, side, "(", &fonts, INK);
-    for (i, v) in [s, r].into_iter().enumerate() {
-        if i == 1 {
-            plain(&mut commands, side, ", ", &fonts, INK);
-        }
-        link(&mut commands, side, v.to_string(), &fonts, 13.0).observe(move |_c: On<PointerClick>, mut sp: Sp| {
-            sp.set_reversed(i == 1);
-            sp.envale(v.clamp(0, u32::MAX as i64) as u32, i == 1);
-        });
-    }
-    plain(&mut commands, side, ")", &fonts, INK);
-
-    let chips = st.chips;
-    let chip = |commands: &mut Commands, label: &str, on: bool, f: fn(&mut crate::space::Chips)| {
-        let c = commands
-            .spawn((
-                Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: px(4),
-                    ..default()
-                },
-                EntityCursor::System(SystemCursorIcon::Pointer),
-                ChildOf(t),
-            ))
-            .observe(move |_c: On<PointerClick>, mut sp: Sp| {
-                let mut c = sp.st.chips;
-                f(&mut c);
-                sp.set_chips(c);
-            })
-            .id();
+    let bar_text = |commands: &mut Commands, parent: Entity, s: String, color: Color| {
         commands.spawn((
-            Node {
-                width: px(11),
-                height: px(11),
-                border: UiRect::all(px(1)),
-                ..default()
-            },
-            BackgroundColor(if on { DARK } else { TERM_BG }),
-            BorderColor::all(DARK),
+            Text::new(s),
+            text_font(&fonts, false, 13.0),
+            TextColor(color),
             Pickable::IGNORE,
-            ChildOf(c),
+            ChildOf(parent),
         ));
-        plain(commands, c, label, &fonts, INK);
     };
-    chip(&mut commands, "gsearch", chips.gsch, |c| c.gsch = !c.gsch);
-    chip(&mut commands, "reversed", chips.rtb, |c| c.rtb = !c.rtb);
-    chip(&mut commands, "saturate", chips.also_saturate, |c| {
-        c.also_saturate = !c.also_saturate
-    });
-    chip(&mut commands, "keep", chips.keep, |c| c.keep = !c.keep);
-
+    if st.editing.is_some() {
+        bar_text(&mut commands, t, HINT_EDIT.into(), BAR_DIM);
+        return;
+    }
+    let term = st.term.trim();
+    if !term.is_empty() && term.parse::<u32>().is_err() {
+        let sc = row(&mut commands, t);
+        let (s, r) = spread::sums(&st.term);
+        bar_text(&mut commands, sc, "(".into(), BAR_DIM);
+        for (i, v) in [s, r].into_iter().enumerate() {
+            if i == 1 {
+                bar_text(&mut commands, sc, ", ".into(), BAR_DIM);
+            }
+            bar_link(&mut commands, sc, v.to_string(), &fonts).observe(move |_c: On<PointerClick>, mut sp: Sp| {
+                sp.set_reversed(i == 1);
+                sp.envale(v.clamp(0, u32::MAX as i64) as u32, i == 1);
+            });
+        }
+        bar_text(&mut commands, sc, ")".into(), BAR_DIM);
+    }
     let list = match (&st.list_id, &st.list_candidate) {
         (Some(l), Some(c)) => format!("list {} · candidate {}", l.label(), c.label()),
         (Some(l), None) => format!("list {}", l.label()),
@@ -822,26 +761,53 @@ pub fn rebuild_termrow(
         (None, None) => String::new(),
     };
     if !list.is_empty() {
-        plain(&mut commands, t, list, &fonts, INK);
+        bar_text(&mut commands, t, list, BAR_DIM);
     }
-    let hint = commands
-        .spawn((
-            Text::new(if st.editing.is_some() { HINT_EDIT } else { HINT_TERM }),
-            TextFont {
-                font: (&fonts.regular).into(),
-                font_size: FontSize::Px(11.0),
-                ..default()
-            },
-            TextColor(INK.with_alpha(0.75)),
-            Node {
-                margin: UiRect::left(Val::Auto),
-                ..default()
-            },
-            Pickable::IGNORE,
-            ChildOf(t),
-        ))
-        .id();
-    let _ = hint;
+    let chips = st.chips;
+    let chip = |commands: &mut Commands, label: &str, on: bool, f: fn(&mut crate::space::Chips)| {
+        commands
+            .spawn((
+                Text::new(label),
+                text_font(&fonts, false, 13.0),
+                TextColor(if on { BAR_TEXT } else { BAR_DIM }),
+                EntityCursor::System(SystemCursorIcon::Pointer),
+                ChildOf(t),
+            ))
+            .insert_if(bevy::text::Underline, || on)
+            .observe(move |_c: On<PointerClick>, mut sp: Sp| {
+                let mut c = sp.st.chips;
+                f(&mut c);
+                sp.set_chips(c);
+            });
+    };
+    chip(&mut commands, "gsearch", chips.gsch, |c| c.gsch = !c.gsch);
+    chip(&mut commands, "reversed", chips.rtb, |c| c.rtb = !c.rtb);
+    chip(&mut commands, "saturate", chips.also_saturate, |c| {
+        c.also_saturate = !c.also_saturate
+    });
+    chip(&mut commands, "keep", chips.keep, |c| c.keep = !c.keep);
+}
+
+/// a clickable number in the bar
+fn bar_link<'a>(commands: &'a mut Commands, parent: Entity, s: String, fonts: &Fonts) -> EntityCommands<'a> {
+    let mut e = commands.spawn((
+        Text::new(s),
+        text_font(fonts, false, 13.0),
+        TextColor(BAR_TEXT),
+        EntityCursor::System(SystemCursorIcon::Pointer),
+        ChildOf(parent),
+    ));
+    e.observe(|e: On<PointerEnter>, mut colors: Query<&mut TextColor>| {
+        if let Ok(mut c) = colors.get_mut(e.event_target()) {
+            c.0 = ACCENT;
+        }
+    })
+    .observe(|e: On<PointerLeave>, mut colors: Query<&mut TextColor>| {
+        if let Ok(mut c) = colors.get_mut(e.event_target()) {
+            c.0 = BAR_TEXT;
+        }
+    });
+    e
 }
 
 /// remem's metrics card: the sums of the text under the pointer (or the selected one), its
@@ -961,7 +927,7 @@ pub fn rebuild_metrics(
                             ..default()
                         },
                         BackgroundColor(bucket_color(b.q)),
-                        BorderColor::all(COFFEE),
+                        BorderColor::all(colors::MOOD_DARK),
                         ChildOf(mem),
                     ));
                 }
