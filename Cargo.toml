@@ -1,0 +1,32 @@
+[package]
+name = "anend"
+version = "0.1.0"
+edition = "2024"
+description = "anend notes: a desktop markdown note app, grown out of the anend blog server"
+license-file = "LICENSE"
+publish = false
+
+[dependencies]
+bevy = { version = "0.20", default-features = false, features = [
+    "std",
+    "multi_threaded",
+    "default_app",
+    "ui_api",
+    "ui_bevy_render",
+    "scene",
+    "picking",
+    "bevy_ui_widgets",
+    "bevy_feathers",
+    "bevy_winit",
+    "bevy_clipboard",
+    "default_font",
+    "custom_cursor",
+    "x11",
+    "wayland",
+    "system_font_discovery",
+] }
+chrono = "0.4"
+redb = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+pulldown-cmark = { version = "0.13", default-features = false }
