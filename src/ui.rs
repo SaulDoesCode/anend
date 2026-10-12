@@ -24,7 +24,9 @@ use bevy::ui::Checked;
 use bevy::ui_widgets::{Activate, RequestClose, ScrollArea, TextInput, ValueChange};
 use bevy::window::{SystemCursorIcon, WindowCloseRequested};
 
+use crate::keys::{Action, Fired, Keymap, Remap};
 use crate::markdown::{self, Block, Span};
+use crate::memory_ui::MemoryView;
 use crate::note::{self, Note};
 use crate::store::{Store, sort_newest_first};
 use crate::theme::colors;
@@ -43,6 +45,7 @@ pub enum Route {
     #[default]
     Editor,
     Reader,
+    Memory,
     Stats,
 }
 
@@ -54,6 +57,8 @@ pub struct Session {
     pub view_mode: bool,
     /// the reader's tag filter
     pub reader_tag: Option<String>,
+    /// notes matching the note list's search bar, when it has text
+    pub note_filter: Option<std::collections::HashSet<String>>,
 }
 
 #[derive(Resource, Default)]
@@ -90,11 +95,11 @@ impl Default for Redraw {
 
 #[derive(Resource)]
 pub struct Fonts {
-    regular: Handle<Font>,
-    bold: Handle<Font>,
-    italic: Handle<Font>,
-    bold_italic: Handle<Font>,
-    mono: Handle<Font>,
+    pub regular: Handle<Font>,
+    pub bold: Handle<Font>,
+    pub italic: Handle<Font>,
+    pub bold_italic: Handle<Font>,
+    pub mono: Handle<Font>,
 }
 
 impl FromWorld for Fonts {
@@ -113,12 +118,12 @@ impl FromWorld for Fonts {
 /// everything the note actions need
 #[derive(SystemParam)]
 pub struct Ctx<'w> {
-    db: Res<'w, Db>,
-    notes: ResMut<'w, Notes>,
-    session: ResMut<'w, Session>,
-    status: ResMut<'w, Status>,
-    redraw: ResMut<'w, Redraw>,
-    time: Res<'w, Time>,
+    pub db: Res<'w, Db>,
+    pub notes: ResMut<'w, Notes>,
+    pub session: ResMut<'w, Session>,
+    pub status: ResMut<'w, Status>,
+    pub redraw: ResMut<'w, Redraw>,
+    pub time: Res<'w, Time>,
 }
 
 /// a note as the editor would show it, so stored and edited versions compare fairly
@@ -268,6 +273,12 @@ pub struct ViewToggle;
 pub struct EditorPad;
 #[derive(Component, Default, Clone)]
 pub struct Preview;
+#[derive(Component, Default, Clone)]
+pub struct NoteSearch;
+#[derive(Component, Default, Clone)]
+pub struct RemapMenu;
+#[derive(Component, Default, Clone)]
+pub struct RemapList;
 
 // ------------------------------------------------------------------ layout
 
@@ -305,8 +316,12 @@ fn root() -> impl Scene {
                 --
                 @reader_view()
                 --
+                @crate::memory_ui::view()
+                --
                 @stats_view()
             ]
+            --
+            @remap_menu()
         ]
     }
 }
@@ -347,7 +362,17 @@ fn nav() -> impl Scene {
             --
             @nav_button("reader", Route::Reader)
             --
+            @nav_button("memory", Route::Memory)
+            --
             @nav_button("stats", Route::Stats)
+            --
+            @FeathersButton {
+                @caption: bsn! { @caption("keys") }
+            }
+            on(|_activate: On<Activate>, mut remap: ResMut<Remap>| {
+                remap.open = !remap.open;
+                remap.changed = true;
+            })
             --
             Node {
                 flex_grow: 1.0,
@@ -407,6 +432,14 @@ fn editor_view() -> impl Scene {
                     @variant: ButtonVariant::Primary,
                 }
                 on(|_activate: On<Activate>, mut ctx: Ctx| ctx.new_note())
+                --
+                @FeathersTextInputContainer
+                Node { flex_grow: 0.0 }
+                Children [
+                    @FeathersTextInput
+                    NoteSearch
+                    on(note_search_changed)
+                ]
                 --
                 Node {
                     flex_grow: 1.0,
@@ -647,24 +680,54 @@ fn confirm_delete(activate: On<Activate>, mut commands: Commands, ctx: Ctx) {
 
 // ------------------------------------------------------------------ systems
 
-pub fn shortcuts(keys: Res<ButtonInput<KeyCode>>, mut ctx: Ctx) {
-    let ctrl = keys.any_pressed([
-        KeyCode::ControlLeft,
-        KeyCode::ControlRight,
-        KeyCode::SuperLeft,
-        KeyCode::SuperRight,
-    ]);
-    if !ctrl {
-        return;
+/// the editor's and the app's own key actions (the memory view handles its own)
+pub fn app_actions(mut fired: MessageReader<Fired>, mut ctx: Ctx, mut remap: ResMut<Remap>) {
+    for Fired(action) in fired.read() {
+        match action {
+            Action::Save => {
+                ctx.save();
+            }
+            Action::NewNote => ctx.new_note(),
+            Action::ToggleView if ctx.session.route == Route::Editor => {
+                ctx.session.view_mode = !ctx.session.view_mode;
+                ctx.redraw.meta = true;
+                ctx.redraw.preview = true;
+            }
+            Action::GotoEditor | Action::GotoReader | Action::GotoMemory | Action::GotoStats => {
+                let route = match action {
+                    Action::GotoEditor => Route::Editor,
+                    Action::GotoReader => Route::Reader,
+                    Action::GotoMemory => Route::Memory,
+                    _ => Route::Stats,
+                };
+                if route != Route::Editor && ctx.is_dirty() && !ctx.session.active.title.trim().is_empty() {
+                    ctx.save();
+                }
+                ctx.session.route = route;
+                ctx.redraw.route = true;
+            }
+            Action::OpenRemap => {
+                remap.open = !remap.open;
+                remap.changed = true;
+            }
+            _ => {}
+        }
     }
-    if keys.just_pressed(KeyCode::KeyS) {
-        ctx.save();
-    } else if keys.just_pressed(KeyCode::KeyN) {
-        ctx.new_note();
-    } else if keys.just_pressed(KeyCode::KeyE) && ctx.session.route == Route::Editor {
-        ctx.session.view_mode = !ctx.session.view_mode;
-        ctx.redraw.meta = true;
-        ctx.redraw.preview = true;
+}
+
+fn note_search_changed(change: On<TextEditChange>, inputs: Query<&EditableText, With<NoteSearch>>, mut ctx: Ctx) {
+    let Ok(input) = inputs.get(change.event_target()) else {
+        return;
+    };
+    let query = input.value().to_string();
+    let filter = if query.trim().is_empty() {
+        None
+    } else {
+        ctx.db.0.note_filter(&query).ok()
+    };
+    if filter != ctx.session.note_filter {
+        ctx.session.note_filter = filter;
+        ctx.redraw.list = true;
     }
 }
 
@@ -690,7 +753,13 @@ pub fn on_close(mut closes: MessageReader<WindowCloseRequested>, mut ctx: Ctx, m
 pub fn apply_route(
     mut redraw: ResMut<Redraw>,
     session: Res<Session>,
-    mut views: Query<(&mut Node, Has<EditorView>, Has<ReaderView>, Has<StatsView>)>,
+    mut views: Query<(
+        &mut Node,
+        Has<EditorView>,
+        Has<ReaderView>,
+        Has<MemoryView>,
+        Has<StatsView>,
+    )>,
     tabs: Query<(Entity, &NavTab)>,
     mut commands: Commands,
 ) {
@@ -698,13 +767,14 @@ pub fn apply_route(
         return;
     }
     redraw.route = false;
-    for (mut node, editor, reader, stats) in views.iter_mut() {
+    for (mut node, editor, reader, memory, stats) in views.iter_mut() {
         let shown = match session.route {
             Route::Editor => editor,
             Route::Reader => reader,
+            Route::Memory => memory,
             Route::Stats => stats,
         };
-        if editor || reader || stats {
+        if editor || reader || memory || stats {
             node.display = if shown { Display::Flex } else { Display::None };
         }
     }
@@ -715,7 +785,7 @@ pub fn apply_route(
     }
 }
 
-fn plain_scene_button(label: String, variant: ButtonVariant) -> impl Scene {
+pub(crate) fn plain_scene_button(label: String, variant: ButtonVariant) -> impl Scene {
     bsn! {
         @FeathersButton {
             @caption: bsn! { @caption(label) },
@@ -746,6 +816,9 @@ pub fn rebuild_list(list: Single<Entity, With<NoteList>>, mut ctx: Ctx, mut comm
     }
     for n in ctx.notes.0.iter() {
         let is_active = n.key == active.key;
+        if !is_active && ctx.session.note_filter.as_ref().is_some_and(|f| !f.contains(&n.key)) {
+            continue;
+        }
         let title = if is_active {
             active.display_title()
         } else {
@@ -1305,4 +1378,129 @@ fn quote_box(commands: &mut Commands, parent: Entity) -> Entity {
 
 fn plural(n: usize, word: &str) -> String {
     if n == 1 { word.to_string() } else { format!("{}s", word) }
+}
+
+// ------------------------------------------------------------------ key remap menu
+
+fn remap_menu() -> impl Scene {
+    bsn! {
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(0),
+            right: px(0),
+            top: px(0),
+            bottom: px(0),
+            display: Display::None,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+        }
+        BackgroundColor({Color::BLACK.with_alpha(0.55)})
+        GlobalZIndex(10)
+        RemapMenu
+        Children [
+            Node {
+                width: px(560),
+                max_height: percent(90),
+                display: Display::Flex,
+                flex_direction: FlexDirection::Column,
+                row_gap: px(6),
+                padding: UiRect::all(px(14)),
+                border_radius: BorderRadius::all(px(4)),
+                overflow: Overflow::scroll_y(),
+            }
+            BackgroundColor(colors::CARD)
+            ScrollArea
+            RemapList
+        ]
+    }
+}
+
+/// shows the remap menu and lists every action with its binding; clicking a binding waits
+/// for the next key (Escape cancels), taking a key from another action swaps the two
+pub fn rebuild_remap(
+    mut remap: ResMut<Remap>,
+    keymap: Res<Keymap>,
+    mut menu: Single<&mut Node, With<RemapMenu>>,
+    list: Single<Entity, With<RemapList>>,
+    fonts: Res<Fonts>,
+    mut commands: Commands,
+) {
+    if !remap.changed && !keymap.is_changed() {
+        return;
+    }
+    remap.changed = false;
+    menu.display = if remap.open { Display::Flex } else { Display::None };
+    commands.entity(*list).despawn_related::<Children>();
+    if !remap.open {
+        return;
+    }
+    text(&mut commands, *list, "keys", &fonts.bold, 22.0, colors::TEXT);
+    text(
+        &mut commands,
+        *list,
+        "click a binding, then press the new key (with Ctrl / Alt / Shift if you like). Escape cancels. \
+         Keys without Ctrl or Alt only act while you're not typing in a text box.",
+        &fonts.regular,
+        13.0,
+        colors::TEXT_DIM,
+    );
+    for action in Action::ALL {
+        let row = commands
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: px(8),
+                    ..default()
+                },
+                ChildOf(*list),
+            ))
+            .id();
+        let label = text(&mut commands, row, action.label(), &fonts.regular, 14.0, colors::TEXT);
+        commands.entity(label).insert(Node {
+            flex_grow: 1.0,
+            ..default()
+        });
+        let (caption, variant) = if remap.listening == Some(action) {
+            ("press a key…".to_string(), ButtonVariant::Primary)
+        } else {
+            (keymap.get(action).to_string(), ButtonVariant::Normal)
+        };
+        commands
+            .spawn_scene(plain_scene_button(caption, variant))
+            .insert(ChildOf(row))
+            .observe(move |_activate: On<Activate>, mut remap: ResMut<Remap>| {
+                remap.listening = Some(action);
+                remap.changed = true;
+            });
+    }
+    let buttons = commands
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                column_gap: px(8),
+                margin: UiRect::top(px(6)),
+                ..default()
+            },
+            ChildOf(*list),
+        ))
+        .id();
+    commands
+        .spawn_scene(plain_scene_button("reset to defaults".into(), ButtonVariant::Normal))
+        .insert(ChildOf(buttons))
+        .observe(
+            |_activate: On<Activate>, mut keymap: ResMut<Keymap>, db: Res<Db>, mut remap: ResMut<Remap>| {
+                *keymap = Keymap::default();
+                let _ = db.0.set_setting("keymap", &keymap.to_json());
+                remap.changed = true;
+            },
+        );
+    commands
+        .spawn_scene(plain_scene_button("close".into(), ButtonVariant::Primary))
+        .insert(ChildOf(buttons))
+        .observe(|_activate: On<Activate>, mut remap: ResMut<Remap>| {
+            remap.open = false;
+            remap.listening = None;
+            remap.changed = true;
+        });
 }

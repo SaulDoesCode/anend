@@ -1,13 +1,14 @@
 //! Note storage in an embedded redb database: one table of JSON documents keyed by the
-//! note's `_key`, plus a counter for handing out new keys. Every write is a durable
-//! transaction.
+//! note's `_key`, plus a counter for handing out new keys. The same database holds the
+//! memories and search tables (see memory.rs); every note change updates those in the
+//! same transaction. Every write is a durable transaction.
 
 use redb::{Database, ReadableTable, TableDefinition};
 use std::path::Path;
 
 use crate::note::Note;
 
-const NOTES: TableDefinition<&str, &[u8]> = TableDefinition::new("notes");
+pub(crate) const NOTES: TableDefinition<&str, &[u8]> = TableDefinition::new("notes");
 const META: TableDefinition<&str, u64> = TableDefinition::new("meta");
 
 pub type StoreResult<T> = Result<T, String>;
@@ -16,8 +17,11 @@ fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
+/// bumped when what gets indexed changes, so existing databases are re-indexed
+const INDEX_VERSION: u64 = 1;
+
 pub struct Store {
-    db: Database,
+    pub(crate) db: Database,
 }
 
 impl Store {
@@ -29,8 +33,34 @@ impl Store {
         let txn = db.begin_write().map_err(err)?;
         txn.open_table(NOTES).map_err(err)?;
         txn.open_table(META).map_err(err)?;
+        crate::memory::create_tables(&txn)?;
         txn.commit().map_err(err)?;
-        Ok(Store { db })
+        let store = Store { db };
+        store.index_existing_notes()?;
+        Ok(store)
+    }
+
+    /// indexes notes written before the search tables existed (or by an older version)
+    fn index_existing_notes(&self) -> StoreResult<()> {
+        let current = {
+            let txn = self.db.begin_read().map_err(err)?;
+            let meta = txn.open_table(META).map_err(err)?;
+
+            meta.get("index_version").map_err(err)?.map(|g| g.value())
+        };
+        if current == Some(INDEX_VERSION) {
+            return Ok(());
+        }
+        let notes = self.all()?;
+        let txn = self.db.begin_write().map_err(err)?;
+        for note in &notes {
+            crate::memory::index_note(&txn, note, true)?;
+        }
+        txn.open_table(META)
+            .map_err(err)?
+            .insert("index_version", INDEX_VERSION)
+            .map_err(err)?;
+        txn.commit().map_err(err)
     }
 
     /// every note, newest first
@@ -52,6 +82,16 @@ impl Store {
         let mut note = note.clone();
         let txn = self.db.begin_write().map_err(err)?;
         {
+            let previous = if note.key.is_empty() {
+                None
+            } else {
+                let table = txn.open_table(NOTES).map_err(err)?;
+                let found = table.get(note.key.as_str()).map_err(err)?;
+                found.and_then(|g| serde_json::from_slice::<Note>(g.value()).ok())
+            };
+            if let Some(previous) = &previous {
+                crate::memory::index_note(&txn, previous, false)?;
+            }
             if note.key.is_empty() {
                 let mut meta = txn.open_table(META).map_err(err)?;
                 let next = meta
@@ -72,17 +112,20 @@ impl Store {
             let bytes = serde_json::to_vec(&note).map_err(err)?;
             table.insert(note.key.as_str(), bytes.as_slice()).map_err(err)?;
         }
+        crate::memory::index_note(&txn, &note, true)?;
         txn.commit().map_err(err)?;
         Ok(note)
     }
 
     pub fn delete(&self, key: &str) -> StoreResult<()> {
         let txn = self.db.begin_write().map_err(err)?;
-        {
+        let removed = {
             let mut table = txn.open_table(NOTES).map_err(err)?;
-            if table.remove(key).map_err(err)?.is_none() {
-                return Err(format!("there is no note {:?}", key));
-            }
+            let removed = table.remove(key).map_err(err)?.map(|g| g.value().to_vec());
+            removed.ok_or_else(|| format!("there is no note {:?}", key))?
+        };
+        if let Ok(note) = serde_json::from_slice::<Note>(&removed) {
+            crate::memory::index_note(&txn, &note, false)?;
         }
         txn.commit().map_err(err)?;
         Ok(())
@@ -112,7 +155,14 @@ impl Store {
                     note.created = crate::note::now();
                 }
                 let bytes = serde_json::to_vec(&note).map_err(err)?;
-                table.insert(note.key.as_str(), bytes.as_slice()).map_err(err)?;
+                let old = table
+                    .insert(note.key.as_str(), bytes.as_slice())
+                    .map_err(err)?
+                    .map(|g| g.value().to_vec());
+                if let Some(old) = old.and_then(|o| serde_json::from_slice::<Note>(&o).ok()) {
+                    crate::memory::index_note(&txn, &old, false)?;
+                }
+                crate::memory::index_note(&txn, &note, true)?;
             }
             meta.insert("next_key", next).map_err(err)?;
         }

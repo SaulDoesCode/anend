@@ -23,6 +23,7 @@ bevy = { version = "0.20", default-features = false, features = [
     "custom_cursor",
     "x11",
     "wayland",
+    "system_font_discovery",
 ] }
 chrono = "0.4"
 redb = "2"
