@@ -2,12 +2,11 @@
 //! sum, plus the letter frequency table. Each kernel has an AVX2 path (picked at runtime)
 //! and a scalar path, which is also the reference the tests hold the AVX2 path to.
 //!
-//! Letter values: a=1 .. z=26 (ordinal), a=26 .. z=1 (reversed, 27 - v) and the Atbash
-//! measure, 26 - v. Picture every letter on a plank with the alphabet in squares, a at the
-//! bottom, slid so the letter sits on the reading line: the squares on the bottom side,
-//! the letter's own included, add up to the ordinal gematria, the squares on the top side
-//! add up to Atbash. Because ordinal + reversed = 27 per letter, one dual sum yields the
-//! letter count and from it Atbash, so the SIMD pass stays a two accumulator PSADBW loop.
+//! Letter values: a=1 .. z=26 (ordinal), a=26 .. z=1 (reversed, 27 - v) and Atbash: each
+//! letter swapped for its mirror in its own alphabet, `n + 1 - v` for an alphabet of n
+//! letters, counted over Latin (a..z), Greek (α..ω, 24 letters) and Hebrew (א..ת, 22
+//! letters). For Latin letters that is the reversed value, so the SIMD dual sum covers
+//! them and only text with Greek or Hebrew in it takes a scalar pass over its characters.
 
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
@@ -27,7 +26,7 @@ impl Sums {
         Sums {
             ordinal,
             reversed,
-            atbash: reversed - letters,
+            atbash: reversed,
             letters,
         }
     }
@@ -46,12 +45,44 @@ pub fn sums(data: &[u8]) -> Sums {
     if has_avx2() {
         // SAFETY: AVX2 support was just checked
         let (o, r) = unsafe { dual_sum_avx2(data) };
-        return Sums::from_dual(o, r);
+        return Sums::from_dual(o, r).with_other_alphabets(data);
     }
     sums_scalar(data)
 }
 
+pub const GREEK: &str = "αβγδεζηθικλμνξοπρστυφχψω";
+pub const HEBREW: &str = "אבגדהוזחטיכלמנסעפצקרשת";
+
+/// the Atbash sum of the Greek and Hebrew letters of a text: `n + 1 - v` in each alphabet,
+/// after lower-casing the whole text (so a word-final Σ becomes ς, which isn't one of the
+/// 24, and Hebrew final forms don't count either)
+pub fn other_alphabets_atbash(text: &str) -> u64 {
+    let lower = text.to_lowercase();
+    let mut sum = 0;
+    for c in lower.chars() {
+        for alphabet in [GREEK, HEBREW] {
+            if let Some(i) = alphabet.chars().position(|a| a == c) {
+                sum += (alphabet.chars().count() - i) as u64;
+            }
+        }
+    }
+    sum
+}
+
+impl Sums {
+    fn with_other_alphabets(mut self, data: &[u8]) -> Sums {
+        if !data.is_ascii() {
+            self.atbash += other_alphabets_atbash(&String::from_utf8_lossy(data));
+        }
+        self
+    }
+}
+
 pub fn sums_scalar(data: &[u8]) -> Sums {
+    sums_ascii_scalar(data).with_other_alphabets(data)
+}
+
+fn sums_ascii_scalar(data: &[u8]) -> Sums {
     let (mut o, mut r) = (0u64, 0u64);
     for &b in data {
         let lc = b | 0x20;
@@ -313,9 +344,14 @@ mod tests {
         assert_eq!(sums(b"The quick brown fox").reversed, 221);
         let abc = sums(b"abc xyz!");
         assert_eq!((abc.ordinal, abc.reversed, abc.letters), (81, 81, 6));
-        // plank top side: a=25 .. z=0
-        assert_eq!(sums(b"az").atbash, 25);
-        assert_eq!(sums(b"hello").atbash, 83 - 5);
+        // atbashSum: a=26 .. z=1 in Latin, ω=1 .. α=24 in Greek, ת=1 .. א=22 in Hebrew
+        assert_eq!(sums(b"az").atbash, 27);
+        assert_eq!(sums(b"hello").atbash, 83);
+        assert_eq!(sums("αω".as_bytes()).atbash, 24 + 1);
+        assert_eq!(sums("Λόγος".as_bytes()).atbash, (24 - 10) + (24 - 2) + (24 - 14));
+        assert_eq!(sums("אבת".as_bytes()).atbash, 22 + 21 + 1);
+        assert_eq!(sums("ab α".as_bytes()).atbash, 26 + 25 + 24);
+        assert_eq!(sums("שלום".as_bytes()).atbash, (23 - 21) + (23 - 12) + (23 - 6));
         // '@' and '`' are not letters
         assert_eq!(sums(b"@`[{"), Sums::default());
     }

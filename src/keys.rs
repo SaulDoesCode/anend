@@ -1,8 +1,11 @@
 //! Rebindable keys. Every keyboard action has a binding (a key plus modifiers) that the
-//! remap menu can change; bindings are kept in the database's settings table.
+//! remap menu can change; bindings are kept in the app's settings file, so they stay the
+//! same whichever save is open.
 //!
 //! Bindings with Ctrl or Alt work everywhere. Plain keys only act while no text box has
 //! focus, the way weum's memory view ignored its single letter keys inside the term bar.
+//! The space's keys only act in the space, and never while typing, the way remem left
+//! its terminal alone; the note and memory views' keys only act outside the space.
 
 use bevy::input::keyboard::KeyCode;
 use bevy::input_focus::InputFocus;
@@ -19,6 +22,8 @@ pub enum Action {
     GotoReader,
     GotoMemory,
     GotoStats,
+    GotoSpace,
+    OpenSettings,
     FocusTerm,
     BucketOrdinal,
     BucketReversed,
@@ -32,6 +37,51 @@ pub enum Action {
     SideAtbash,
     SideFrequency,
     OpenRemap,
+    FlyForward,
+    FlyBack,
+    FlyLeft,
+    FlyRight,
+    FlyUp,
+    FlyDown,
+    RollLeft,
+    RollRight,
+    Level,
+    BackToStart,
+    Slower,
+    Faster,
+    NewText,
+    EditText,
+    SpaceTerm,
+    DeleteText,
+    CopyText,
+    Undo,
+    Reversed,
+    Pin,
+    Sliders,
+    Pause,
+    Settle,
+    SideSum,
+    SideReversedSum,
+    Help,
+    Hud,
+    Export,
+    SaveMap,
+    SpaceKeys,
+}
+
+/// where an action's key works: everywhere, in the note and memory views, or in the space
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scope {
+    Global,
+    Notes,
+    Space,
+}
+
+impl Scope {
+    /// whether two actions can be pressed in the same place, so can't share a key
+    pub fn overlaps(self, other: Scope) -> bool {
+        self == other || self == Scope::Global || other == Scope::Global
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,8 +110,17 @@ const fn ctrl(key: KeyCode) -> Binding {
     }
 }
 
+const fn shift(key: KeyCode) -> Binding {
+    Binding {
+        key,
+        ctrl: false,
+        shift: true,
+        alt: false,
+    }
+}
+
 impl Action {
-    pub const ALL: [Action; 20] = [
+    pub const ALL: [Action; 52] = [
         Action::Save,
         Action::NewNote,
         Action::ToggleView,
@@ -69,6 +128,8 @@ impl Action {
         Action::GotoReader,
         Action::GotoMemory,
         Action::GotoStats,
+        Action::GotoSpace,
+        Action::OpenSettings,
         Action::FocusTerm,
         Action::BucketOrdinal,
         Action::BucketReversed,
@@ -82,7 +143,57 @@ impl Action {
         Action::SideAtbash,
         Action::SideFrequency,
         Action::OpenRemap,
+        Action::FlyForward,
+        Action::FlyBack,
+        Action::FlyLeft,
+        Action::FlyRight,
+        Action::FlyUp,
+        Action::FlyDown,
+        Action::RollLeft,
+        Action::RollRight,
+        Action::Level,
+        Action::BackToStart,
+        Action::Slower,
+        Action::Faster,
+        Action::NewText,
+        Action::EditText,
+        Action::SpaceTerm,
+        Action::DeleteText,
+        Action::CopyText,
+        Action::Undo,
+        Action::Reversed,
+        Action::Pin,
+        Action::Sliders,
+        Action::Pause,
+        Action::Settle,
+        Action::SideSum,
+        Action::SideReversedSum,
+        Action::Help,
+        Action::Hud,
+        Action::Export,
+        Action::SaveMap,
+        Action::SpaceKeys,
     ];
+
+    pub fn scope(self) -> Scope {
+        use Action::*;
+        match self {
+            GotoEditor | GotoReader | GotoMemory | GotoStats | GotoSpace | OpenSettings => Scope::Global,
+            Save | NewNote | ToggleView | FocusTerm | BucketOrdinal | BucketReversed | BucketAtbash
+            | BucketFrequency | ToggleGsearch | ToggleSaturate | WhiteMode | SideOrdinal | SideReversed
+            | SideAtbash | SideFrequency | OpenRemap => Scope::Notes,
+            _ => Scope::Space,
+        }
+    }
+
+    /// actions that act while their key is held rather than when it's pressed
+    pub fn held(self) -> bool {
+        use Action::*;
+        matches!(
+            self,
+            FlyForward | FlyBack | FlyLeft | FlyRight | FlyUp | FlyDown | RollLeft | RollRight
+        )
+    }
 
     /// stable name used in the settings table
     pub fn id(self) -> &'static str {
@@ -94,6 +205,8 @@ impl Action {
             Action::GotoReader => "goto_reader",
             Action::GotoMemory => "goto_memory",
             Action::GotoStats => "goto_stats",
+            Action::GotoSpace => "goto_space",
+            Action::OpenSettings => "open_settings",
             Action::FocusTerm => "focus_term",
             Action::BucketOrdinal => "bucket_ordinal",
             Action::BucketReversed => "bucket_reversed",
@@ -107,6 +220,36 @@ impl Action {
             Action::SideAtbash => "side_atbash",
             Action::SideFrequency => "side_frequency",
             Action::OpenRemap => "open_remap",
+            Action::FlyForward => "fly_forward",
+            Action::FlyBack => "fly_back",
+            Action::FlyLeft => "fly_left",
+            Action::FlyRight => "fly_right",
+            Action::FlyUp => "fly_up",
+            Action::FlyDown => "fly_down",
+            Action::RollLeft => "roll_left",
+            Action::RollRight => "roll_right",
+            Action::Level => "level",
+            Action::BackToStart => "back_to_start",
+            Action::Slower => "slower",
+            Action::Faster => "faster",
+            Action::NewText => "new_text",
+            Action::EditText => "edit_text",
+            Action::SpaceTerm => "space_term",
+            Action::DeleteText => "delete_text",
+            Action::CopyText => "copy_text",
+            Action::Undo => "undo",
+            Action::Reversed => "reversed",
+            Action::Pin => "pin",
+            Action::Sliders => "sliders",
+            Action::Pause => "pause",
+            Action::Settle => "settle",
+            Action::SideSum => "side_sum",
+            Action::SideReversedSum => "side_reversed_sum",
+            Action::Help => "help",
+            Action::Hud => "hud",
+            Action::Export => "export",
+            Action::SaveMap => "save_map",
+            Action::SpaceKeys => "space_keys",
         }
     }
 
@@ -119,7 +262,9 @@ impl Action {
             Action::GotoReader => "go to the reader",
             Action::GotoMemory => "go to memory",
             Action::GotoStats => "go to stats",
-            Action::FocusTerm => "memory: focus the term bar",
+            Action::GotoSpace => "go to the space",
+            Action::OpenSettings => "open the settings (saves, fonts, zen)",
+            Action::FocusTerm => "focus the command bar",
             Action::BucketOrdinal => "memory: ordinal bucket",
             Action::BucketReversed => "memory: reversed bucket (again: back to ordinal)",
             Action::BucketAtbash => "memory: atbash bucket",
@@ -132,6 +277,36 @@ impl Action {
             Action::SideAtbash => "memory: gsearch the term's atbash",
             Action::SideFrequency => "memory: gsearch the term's letters",
             Action::OpenRemap => "open this menu",
+            Action::FlyForward => "space: fly forward (hold)",
+            Action::FlyBack => "space: fly back (hold)",
+            Action::FlyLeft => "space: fly left (hold)",
+            Action::FlyRight => "space: fly right (hold)",
+            Action::FlyUp => "space: fly up (hold)",
+            Action::FlyDown => "space: fly down (hold)",
+            Action::RollLeft => "space: roll left (hold)",
+            Action::RollRight => "space: roll right (hold)",
+            Action::Level => "space: level the horizon",
+            Action::BackToStart => "space: back to start",
+            Action::Slower => "space: slower flight",
+            Action::Faster => "space: faster flight",
+            Action::NewText => "space: new text",
+            Action::EditText => "space: edit the selected text, or the terminal",
+            Action::SpaceTerm => "space: terminal",
+            Action::DeleteText => "space: remove the selected text",
+            Action::CopyText => "space: copy the selected text",
+            Action::Undo => "space: undo",
+            Action::Reversed => "space: reversed on/off",
+            Action::Pin => "space: pin / unpin the selected text",
+            Action::Sliders => "space: sliders",
+            Action::Pause => "space: pause physics",
+            Action::Settle => "space: settle now",
+            Action::SideSum => "space: gsearch the terminal's ordinal sum",
+            Action::SideReversedSum => "space: gsearch the terminal's reversed sum",
+            Action::Help => "space: help",
+            Action::Hud => "space: position card",
+            Action::Export => "space: export the texts to a file",
+            Action::SaveMap => "space: save the map",
+            Action::SpaceKeys => "space: open this menu",
         }
     }
 
@@ -144,6 +319,8 @@ impl Action {
             Action::GotoReader => ctrl(KeyCode::Digit2),
             Action::GotoMemory => ctrl(KeyCode::Digit3),
             Action::GotoStats => ctrl(KeyCode::Digit4),
+            Action::GotoSpace => ctrl(KeyCode::Digit5),
+            Action::OpenSettings => ctrl(KeyCode::Comma),
             Action::FocusTerm => plain(KeyCode::Slash),
             Action::BucketOrdinal => plain(KeyCode::KeyO),
             Action::BucketReversed => plain(KeyCode::KeyR),
@@ -157,6 +334,36 @@ impl Action {
             Action::SideAtbash => plain(KeyCode::ArrowUp),
             Action::SideFrequency => plain(KeyCode::ArrowDown),
             Action::OpenRemap => plain(KeyCode::KeyK),
+            Action::FlyForward => plain(KeyCode::KeyW),
+            Action::FlyBack => plain(KeyCode::KeyS),
+            Action::FlyLeft => plain(KeyCode::KeyA),
+            Action::FlyRight => plain(KeyCode::KeyD),
+            Action::FlyUp => plain(KeyCode::Space),
+            Action::FlyDown => plain(KeyCode::KeyC),
+            Action::RollLeft => plain(KeyCode::KeyQ),
+            Action::RollRight => plain(KeyCode::KeyE),
+            Action::Level => plain(KeyCode::KeyR),
+            Action::BackToStart => plain(KeyCode::Home),
+            Action::Slower => plain(KeyCode::BracketLeft),
+            Action::Faster => plain(KeyCode::BracketRight),
+            Action::NewText => plain(KeyCode::KeyN),
+            Action::EditText => plain(KeyCode::Enter),
+            Action::SpaceTerm => plain(KeyCode::Slash),
+            Action::DeleteText => plain(KeyCode::Delete),
+            Action::CopyText => ctrl(KeyCode::KeyC),
+            Action::Undo => ctrl(KeyCode::KeyZ),
+            Action::Reversed => plain(KeyCode::KeyF),
+            Action::Pin => plain(KeyCode::KeyU),
+            Action::Sliders => plain(KeyCode::KeyO),
+            Action::Pause => plain(KeyCode::KeyP),
+            Action::Settle => plain(KeyCode::KeyK),
+            Action::SideSum => plain(KeyCode::ArrowLeft),
+            Action::SideReversedSum => plain(KeyCode::ArrowRight),
+            Action::Help => plain(KeyCode::KeyH),
+            Action::Hud => plain(KeyCode::KeyI),
+            Action::Export => plain(KeyCode::KeyX),
+            Action::SaveMap => shift(KeyCode::KeyX),
+            Action::SpaceKeys => ctrl(KeyCode::KeyK),
         }
     }
 }
@@ -303,13 +510,14 @@ impl Keymap {
         self.0.get(&a).copied().unwrap_or_else(|| a.default_binding())
     }
 
-    /// binds `action`, handing its old binding to whichever action held the new one
+    /// binds `action`, handing its old binding to whichever action held the new one where
+    /// both can be pressed
     pub fn rebind(&mut self, action: Action, binding: Binding) {
         let old = self.get(action);
         if let Some(other) = Action::ALL
             .iter()
             .copied()
-            .find(|a| *a != action && self.get(*a) == binding)
+            .find(|a| *a != action && a.scope().overlaps(action.scope()) && self.get(*a) == binding)
         {
             self.0.insert(other, old);
         }
@@ -331,6 +539,14 @@ impl Keymap {
             }
         }
         keymap
+    }
+}
+
+/// writes changed bindings to the settings file
+pub fn persist_keymap(keymap: Res<Keymap>, mut config: ResMut<crate::config::Config>) {
+    if keymap.is_changed() && !keymap.is_added() {
+        config.keymap = serde_json::from_slice(&keymap.to_json()).ok();
+        config.save();
     }
 }
 
@@ -366,7 +582,7 @@ pub fn read_keys(
     mut remap: ResMut<Remap>,
     focus: Res<InputFocus>,
     editables: Query<(), With<EditableText>>,
-    db: Res<crate::ui::Db>,
+    session: Res<crate::ui::Session>,
     mut fired: MessageWriter<Fired>,
 ) {
     let (ctrl, shift, alt) = modifiers(&keys);
@@ -387,7 +603,6 @@ pub fn read_keys(
                         alt,
                     },
                 );
-                let _ = db.0.set_setting("keymap", &keymap.to_json());
                 remap.listening = None;
                 remap.changed = true;
                 return;
@@ -401,10 +616,22 @@ pub fn read_keys(
         return;
     }
     let typing = focus.get().is_some_and(|e| editables.contains(e));
+    let in_space = session.route == crate::ui::Route::Space;
     for key in keys.get_just_pressed() {
         for action in Action::ALL {
+            let active = match action.scope() {
+                Scope::Global => true,
+                Scope::Notes => !in_space,
+                Scope::Space => in_space && !typing && !action.held(),
+            };
             let b = keymap.get(action);
-            if b.key == *key && b.ctrl == ctrl && b.alt == alt && b.shift == shift && (b.is_chord() || !typing) {
+            if active
+                && b.key == *key
+                && b.ctrl == ctrl
+                && b.alt == alt
+                && b.shift == shift
+                && (b.is_chord() || !typing)
+            {
                 fired.write(Fired(action));
             }
         }
@@ -438,11 +665,21 @@ mod tests {
         let back = Keymap::from_json(&k.to_json());
         assert_eq!(back, k);
         assert_eq!(Keymap::from_json(b"garbage"), Keymap::default());
-        // every default is distinct and nameable
-        let defaults: Vec<Binding> = Action::ALL.iter().map(|a| a.default_binding()).collect();
-        for (i, a) in defaults.iter().enumerate() {
-            assert!(key_name(a.key).is_some());
-            assert!(!defaults[i + 1..].contains(a), "{:?} bound twice", a);
+        // every default is nameable and distinct where both can be pressed
+        for (i, a) in Action::ALL.iter().enumerate() {
+            assert!(key_name(a.default_binding().key).is_some());
+            for b in &Action::ALL[i + 1..] {
+                assert!(
+                    !(a.scope().overlaps(b.scope()) && a.default_binding() == b.default_binding()),
+                    "{:?} and {:?} share {}",
+                    a,
+                    b,
+                    a.default_binding()
+                );
+            }
         }
+        // the space's keys don't push the memory view's out
+        k.rebind(Action::Settle, plain(KeyCode::KeyG));
+        assert_eq!(k.get(Action::ToggleGsearch), plain(KeyCode::KeyG));
     }
 }

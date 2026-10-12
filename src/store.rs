@@ -3,7 +3,7 @@
 //! memories and search tables (see memory.rs); every note change updates those in the
 //! same transaction. Every write is a durable transaction.
 
-use redb::{Database, ReadableTable, TableDefinition};
+use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 use std::path::Path;
 
 use crate::note::Note;
@@ -22,6 +22,7 @@ const INDEX_VERSION: u64 = 1;
 
 pub struct Store {
     pub(crate) db: Database,
+    path: std::path::PathBuf,
 }
 
 impl Store {
@@ -35,9 +36,45 @@ impl Store {
         txn.open_table(META).map_err(err)?;
         crate::memory::create_tables(&txn)?;
         txn.commit().map_err(err)?;
-        let store = Store { db };
+        let store = Store {
+            db,
+            path: path.to_path_buf(),
+        };
         store.index_existing_notes()?;
         Ok(store)
+    }
+
+    /// how many notes and memories a save holds, read without taking it over (it can't be
+    /// the one that's open)
+    pub fn summary(path: &Path) -> Option<(u64, u64)> {
+        use redb::ReadableTableMetadata;
+        let db = redb::ReadOnlyDatabase::open(path).ok()?;
+        let txn = db.begin_read().ok()?;
+        let notes = txn.open_table(NOTES).ok().and_then(|t| t.len().ok()).unwrap_or(0);
+        let memories = txn
+            .open_table(crate::memory::MEMORIES)
+            .ok()
+            .and_then(|t| t.len().ok())
+            .unwrap_or(0);
+        Some((notes, memories))
+    }
+
+    /// how many notes and memories this one holds
+    pub fn counts(&self) -> (u64, u64) {
+        use redb::ReadableTableMetadata;
+        let Ok(txn) = self.db.begin_read() else { return (0, 0) };
+        let notes = txn.open_table(NOTES).ok().and_then(|t| t.len().ok()).unwrap_or(0);
+        let memories = txn
+            .open_table(crate::memory::MEMORIES)
+            .ok()
+            .and_then(|t| t.len().ok())
+            .unwrap_or(0);
+        (notes, memories)
+    }
+
+    /// where the database lives
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     /// indexes notes written before the search tables existed (or by an older version)

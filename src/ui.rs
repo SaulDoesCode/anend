@@ -1,4 +1,4 @@
-//! The interface: a nav bar (editor / reader / stats plus a message box), the editor
+//! The interface: a nav bar (editor / reader / memory / stats / space plus a message box), the editor
 //! (note list on the left, the markdown editor card on the right) and the reader, which
 //! shows published notes the way the old site's front page showed writs.
 
@@ -14,6 +14,7 @@ use bevy::feathers::tokens;
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::input_focus::tab_navigation::{TabGroup, TabIndex};
 use bevy::input_focus::{FocusedInput, InputFocus};
+use bevy::picking::Pickable;
 use bevy::picking::cursor::EntityCursor;
 use bevy::prelude::*;
 use bevy::text::{
@@ -28,6 +29,7 @@ use crate::keys::{Action, Fired, Keymap, Remap};
 use crate::markdown::{self, Block, Span};
 use crate::memory_ui::MemoryView;
 use crate::note::{self, Note};
+use crate::space_ui::SpaceView;
 use crate::store::{Store, sort_newest_first};
 use crate::theme::colors;
 
@@ -47,6 +49,7 @@ pub enum Route {
     Reader,
     Memory,
     Stats,
+    Space,
 }
 
 #[derive(Resource, Default)]
@@ -273,18 +276,23 @@ pub struct ViewToggle;
 pub struct EditorPad;
 #[derive(Component, Default, Clone)]
 pub struct Preview;
+/// the top bar
 #[derive(Component, Default, Clone)]
-pub struct NoteSearch;
+pub struct NavBar;
 #[derive(Component, Default, Clone)]
 pub struct RemapMenu;
 #[derive(Component, Default, Clone)]
 pub struct RemapList;
+/// the window's root node; the space clears its background to show the 3D view
+#[derive(Component, Default, Clone)]
+pub struct AppRoot;
 
 // ------------------------------------------------------------------ layout
 
 pub fn scene() -> impl SceneList {
     bsn_list! {
         Camera2d
+        IsDefaultUiCamera
         --
         @root()
     }
@@ -297,11 +305,13 @@ fn root() -> impl Scene {
             height: percent(100),
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
-            padding: UiRect::all(px(8)),
-            row_gap: px(8),
+            padding: UiRect::all(px(6)),
+            row_gap: px(6),
         }
         ThemeBackgroundColor(tokens::WINDOW_BG)
         TabGroup
+        AppRoot
+        Pickable::IGNORE
         Children [
             @nav()
             --
@@ -311,6 +321,7 @@ fn root() -> impl Scene {
                 display: Display::Flex,
                 flex_direction: FlexDirection::Row,
             }
+            Pickable::IGNORE
             Children [
                 @editor_view()
                 --
@@ -319,7 +330,13 @@ fn root() -> impl Scene {
                 @crate::memory_ui::view()
                 --
                 @stats_view()
+                --
+                @crate::space_ui::view()
             ]
+            --
+            @crate::bar::bar()
+            --
+            @crate::settings::menu()
             --
             @remap_menu()
         ]
@@ -352,11 +369,13 @@ fn nav() -> impl Scene {
             display: Display::Flex,
             flex_direction: FlexDirection::Row,
             align_items: AlignItems::Center,
-            column_gap: px(8),
-            padding: UiRect::all(px(6)),
+            column_gap: px(6),
+            padding: UiRect::all(px(4)),
             border_radius: BorderRadius::all(px(4)),
         }
         BackgroundColor(colors::NAV)
+        NavBar
+        crate::zen::Chrome
         Children [
             @nav_button("editor", Route::Editor)
             --
@@ -366,32 +385,30 @@ fn nav() -> impl Scene {
             --
             @nav_button("stats", Route::Stats)
             --
-            @FeathersButton {
-                @caption: bsn! { @caption("keys") }
-            }
-            on(|_activate: On<Activate>, mut remap: ResMut<Remap>| {
-                remap.open = !remap.open;
-                remap.changed = true;
-            })
+            @nav_button("space", Route::Space)
             --
             Node {
                 flex_grow: 1.0,
                 min_height: px(24),
                 display: Display::Flex,
                 align_items: AlignItems::Center,
+                justify_content: JustifyContent::End,
                 padding: UiRect::axes(px(8), px(3)),
-                border_radius: BorderRadius::all(px(4)),
             }
-            BackgroundColor(colors::CARD)
             Children [
                 Text("")
                 StatusText
                 TextFont {
                     font: FontSourceTemplate::Handle(fonts::REGULAR),
-                    font_size: FontSize::Px(14.0),
+                    font_size: FontSize::Px(13.0),
                 }
-                TextColor(colors::TEXT)
+                TextColor({crate::bar::BAR_TEXT})
             ]
+            --
+            @FeathersButton {
+                @caption: bsn! { @caption("settings") }
+            }
+            on(|_activate: On<Activate>, mut settings: ResMut<crate::settings::Settings>| settings.toggle())
         ]
     }
 }
@@ -426,20 +443,13 @@ fn editor_view() -> impl Scene {
                 border_radius: BorderRadius::all(px(4)),
             }
             BackgroundColor(colors::CARD)
+            crate::zen::Chrome
             Children [
                 @FeathersButton {
                     @caption: bsn! { @caption("+ new") },
                     @variant: ButtonVariant::Primary,
                 }
                 on(|_activate: On<Activate>, mut ctx: Ctx| ctx.new_note())
-                --
-                @FeathersTextInputContainer
-                Node { flex_grow: 0.0 }
-                Children [
-                    @FeathersTextInput
-                    NoteSearch
-                    on(note_search_changed)
-                ]
                 --
                 Node {
                     flex_grow: 1.0,
@@ -472,6 +482,7 @@ fn editor_view() -> impl Scene {
                     align_items: AlignItems::Center,
                     column_gap: px(6),
                 }
+                crate::zen::Chrome
                 Children [
                     Node {
                         flex_grow: 1.0,
@@ -681,9 +692,18 @@ fn confirm_delete(activate: On<Activate>, mut commands: Commands, ctx: Ctx) {
 // ------------------------------------------------------------------ systems
 
 /// the editor's and the app's own key actions (the memory view handles its own)
-pub fn app_actions(mut fired: MessageReader<Fired>, mut ctx: Ctx, mut remap: ResMut<Remap>) {
+pub fn app_actions(
+    mut fired: MessageReader<Fired>,
+    mut ctx: Ctx,
+    mut remap: ResMut<Remap>,
+    mut settings: ResMut<crate::settings::Settings>,
+    bar: Single<Entity, With<crate::bar::Bar>>,
+    mut focus: ResMut<InputFocus>,
+) {
     for Fired(action) in fired.read() {
         match action {
+            Action::OpenSettings => settings.toggle(),
+            Action::FocusTerm if ctx.session.route != Route::Memory => crate::bar::focus_bar(&mut focus, *bar),
             Action::Save => {
                 ctx.save();
             }
@@ -693,11 +713,12 @@ pub fn app_actions(mut fired: MessageReader<Fired>, mut ctx: Ctx, mut remap: Res
                 ctx.redraw.meta = true;
                 ctx.redraw.preview = true;
             }
-            Action::GotoEditor | Action::GotoReader | Action::GotoMemory | Action::GotoStats => {
+            Action::GotoEditor | Action::GotoReader | Action::GotoMemory | Action::GotoStats | Action::GotoSpace => {
                 let route = match action {
                     Action::GotoEditor => Route::Editor,
                     Action::GotoReader => Route::Reader,
                     Action::GotoMemory => Route::Memory,
+                    Action::GotoSpace => Route::Space,
                     _ => Route::Stats,
                 };
                 if route != Route::Editor && ctx.is_dirty() && !ctx.session.active.title.trim().is_empty() {
@@ -712,22 +733,6 @@ pub fn app_actions(mut fired: MessageReader<Fired>, mut ctx: Ctx, mut remap: Res
             }
             _ => {}
         }
-    }
-}
-
-fn note_search_changed(change: On<TextEditChange>, inputs: Query<&EditableText, With<NoteSearch>>, mut ctx: Ctx) {
-    let Ok(input) = inputs.get(change.event_target()) else {
-        return;
-    };
-    let query = input.value().to_string();
-    let filter = if query.trim().is_empty() {
-        None
-    } else {
-        ctx.db.0.note_filter(&query).ok()
-    };
-    if filter != ctx.session.note_filter {
-        ctx.session.note_filter = filter;
-        ctx.redraw.list = true;
     }
 }
 
@@ -759,6 +764,7 @@ pub fn apply_route(
         Has<ReaderView>,
         Has<MemoryView>,
         Has<StatsView>,
+        Has<SpaceView>,
     )>,
     tabs: Query<(Entity, &NavTab)>,
     mut commands: Commands,
@@ -767,14 +773,15 @@ pub fn apply_route(
         return;
     }
     redraw.route = false;
-    for (mut node, editor, reader, memory, stats) in views.iter_mut() {
+    for (mut node, editor, reader, memory, stats, space) in views.iter_mut() {
         let shown = match session.route {
             Route::Editor => editor,
             Route::Reader => reader,
             Route::Memory => memory,
             Route::Stats => stats,
+            Route::Space => space,
         };
-        if editor || reader || memory || stats {
+        if editor || reader || memory || stats || space {
             node.display = if shown { Display::Flex } else { Display::None };
         }
     }
@@ -951,6 +958,7 @@ pub fn rebuild_reader(
         .iter()
         .filter(|n| n.published)
         .filter(|n| session.reader_tag.as_ref().is_none_or(|t| n.tags.contains(t)))
+        .filter(|n| session.note_filter.as_ref().is_none_or(|f| f.contains(&n.key)))
         .collect();
 
     if let Some(tag) = &session.reader_tag {
@@ -1159,7 +1167,14 @@ fn card_node() -> Node {
     }
 }
 
-fn text(commands: &mut Commands, parent: Entity, s: &str, font: &Handle<Font>, size: f32, color: Color) -> Entity {
+pub(crate) fn text(
+    commands: &mut Commands,
+    parent: Entity,
+    s: &str,
+    font: &Handle<Font>,
+    size: f32,
+    color: Color,
+) -> Entity {
     commands
         .spawn((
             Text::new(s),
@@ -1489,9 +1504,8 @@ pub fn rebuild_remap(
         .spawn_scene(plain_scene_button("reset to defaults".into(), ButtonVariant::Normal))
         .insert(ChildOf(buttons))
         .observe(
-            |_activate: On<Activate>, mut keymap: ResMut<Keymap>, db: Res<Db>, mut remap: ResMut<Remap>| {
+            |_activate: On<Activate>, mut keymap: ResMut<Keymap>, mut remap: ResMut<Remap>| {
                 *keymap = Keymap::default();
-                let _ = db.0.set_setting("keymap", &keymap.to_json());
                 remap.changed = true;
             },
         );

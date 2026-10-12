@@ -14,7 +14,9 @@
 //! two never collide. Memory keys come from weum's allocator: one byte keys first, then two,
 //! three and four byte ones, reusing the keys of forgotten memories before minting new ones.
 
-use redb::{MultimapTableDefinition, ReadableMultimapTable, ReadableTable, TableDefinition, WriteTransaction};
+use redb::{
+    MultimapTableDefinition, ReadableDatabase, ReadableMultimapTable, ReadableTable, TableDefinition, WriteTransaction,
+};
 use std::collections::{HashMap, HashSet};
 
 use crate::note::Note;
@@ -581,6 +583,47 @@ impl Store {
         txn.commit().map_err(err)
     }
 
+    /// puts a forgotten memory back under its old key (undoing a forget)
+    pub fn restore_memory(&self, key: &[u8], text: &str) -> StoreResult<()> {
+        if self.remember(&Ref::Memory(key.to_vec())).is_ok() {
+            return Err(format!("{} is taken again", Ref::Memory(key.to_vec()).label()));
+        }
+        self.import_memories(vec![(text.to_string(), key.to_vec())])?;
+        let txn = self.db.begin_write().map_err(err)?;
+        txn.open_multimap_table(TO_REUSE)
+            .map_err(err)?
+            .remove(ALLOCATED, key)
+            .map_err(err)?;
+        txn.commit().map_err(err)
+    }
+
+    /// every memory as weum's backup has them, `[text, key]`
+    pub fn all_memories(&self) -> StoreResult<Vec<(String, Vec<u8>)>> {
+        let txn = self.db.begin_read().map_err(err)?;
+        let t = txn.open_table(MEMORIES).map_err(err)?;
+        let mut out = Vec::new();
+        for item in t.iter().map_err(err)? {
+            let (k, v) = item.map_err(err)?;
+            out.push((String::from_utf8_lossy(v.value()).into_owned(), k.value().to_vec()));
+        }
+        Ok(out)
+    }
+
+    /// the names of the settings starting with `prefix`, without it
+    pub fn setting_names(&self, prefix: &str) -> StoreResult<Vec<String>> {
+        let txn = self.db.begin_read().map_err(err)?;
+        let t = txn.open_table(SETTINGS).map_err(err)?;
+        let mut out = Vec::new();
+        for item in t.range(prefix..).map_err(err)? {
+            let (k, _) = item.map_err(err)?;
+            match k.value().strip_prefix(prefix) {
+                Some(name) => out.push(name.to_string()),
+                None => break,
+            }
+        }
+        Ok(out)
+    }
+
     /// imports weum's memory backup (`all-of-it.json`: `[[text, [key bytes]], ...]`),
     /// keeping the keys
     pub fn import_memories(&self, entries: Vec<(String, Vec<u8>)>) -> StoreResult<usize> {
@@ -774,6 +817,30 @@ mod tests {
         assert_eq!(s.remember(&Ref::Memory(vec![0, 9])).unwrap().text, "old saying");
         // new keys continue after the highest imported one
         assert_eq!(s.saturate_new("fresh").unwrap(), vec![0, 10]);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn restore_atbash_and_maps() {
+        let (s, path) = temp_store();
+        let k = s.saturate_new("שלום light").unwrap();
+        // Latin a=26 .. z=1, Hebrew א=22 .. ת=1
+        let atbash = 79 + 2 + 11 + 17;
+        assert_eq!(measure("שלום light").atbash, atbash);
+        assert_eq!(s.gsearch(Bucket::Atbash, &BucketKey::Sum(atbash)).unwrap().len(), 1);
+
+        // a forget undone gets its key back, and the key isn't handed out again
+        let text = s.forget(&k).unwrap();
+        s.restore_memory(&k, &text).unwrap();
+        assert_eq!(s.remember(&Ref::Memory(k.clone())).unwrap().text, "שלום light");
+        assert_ne!(s.saturate_new("other").unwrap(), k);
+        assert!(s.restore_memory(&k, "again").is_err());
+
+        s.set_setting("map:one", b"[]").unwrap();
+        s.set_setting("map:two", b"[]").unwrap();
+        s.set_setting("mapz", b"x").unwrap();
+        assert_eq!(s.setting_names("map:").unwrap(), vec!["one", "two"]);
+        assert_eq!(s.all_memories().unwrap().len(), 2);
         std::fs::remove_file(path).ok();
     }
 }
