@@ -405,6 +405,7 @@ fn saves_call(ws: &Workspace, open: &str, op: &str, args: &Value) -> Res {
         "saves.import" => {
             let b: bundle::Bundle =
                 serde_json::from_value(args.get("bundle").cloned().unwrap_or_default()).map_err(|e| format!("that bundle doesn't read: {e}"))?;
+            bundle::check(&b)?;
             if args.get("merge").and_then(Value::as_bool).unwrap_or(false) {
                 let w = bundle::merge(&ws.store()?.1, &b)?;
                 return Ok(json!({ "merged": true, "memories": w.memories, "notes": w.notes, "lists": w.lists }));
@@ -724,6 +725,9 @@ mod tests {
         assert_eq!(call(&ws, "saves.export", &json!({"name": "notes 2"})).unwrap()["memories"], b["memories"]);
         assert_eq!(call(&ws, "saves.import", &json!({"bundle": b, "merge": true})).unwrap()["memories"], 0);
         call(&ws, "saves.delete", &json!({"name": "notes 2"})).unwrap();
+        // a bundle it can't read leaves nothing behind
+        assert!(call(&ws, "saves.import", &json!({"bundle": {"anend": 2}, "name": "bad"})).is_err());
+        assert!(!ws.path("bad").unwrap().exists());
         call(&ws, "notes.delete", &json!({"key": key})).unwrap();
         call(&ws, "saves.rename", &json!({"name": "notes", "to": "renamed"})).unwrap();
         assert_eq!(call(&ws, "hello", &json!({})).unwrap()["save"], "renamed");

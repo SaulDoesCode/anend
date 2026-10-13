@@ -49,7 +49,8 @@ export const app = {
     if (Date.now() < (this.statusUntil || 0)) return;
     const s = $('status');
     s.classList.remove('bad');
-    s.textContent = this.save ? `${this.save}: ${this.counts.notes} notes, ${this.counts.memories} memories` : '';
+    const where = api.offline ? (api.kept ? ' · offline · in this browser' : ' · offline · not kept (no IndexedDB here)') : '';
+    s.textContent = this.save ? `${this.save}: ${this.counts.notes} notes, ${this.counts.memories} memories${where}` : where.slice(3);
   },
   fail(e) {
     app.status(e && e.message ? e.message : String(e), true);
@@ -224,8 +225,13 @@ for (const ev of ['mousemove', 'pointerdown', 'wheel', 'touchstart']) window.add
 
 // ------------------------------------------------------------------ connection
 
+// no hub behind the page: the saves live in this browser
+document.body.classList.toggle('offline', !!api.offline);
+if (api.offline) $('status').title = 'no hub served this page: the app runs here, its saves kept in this browser (IndexedDB)';
+
 api.addEventListener('state', (e) => {
-  if (e.detail === 'reconnecting') app.status('reconnecting…');
+  if (String(e.detail).startsWith('not kept')) app.status(`couldn’t keep that in this browser (${e.detail.slice(10)})`, true);
+  else if (e.detail === 'reconnecting') app.status('reconnecting…');
   else if (e.detail === 'offline') app.status("can't reach the hub", true);
   else if (e.detail === 'online') app.idleStatus();
 });

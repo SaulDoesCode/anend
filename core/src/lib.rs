@@ -2,6 +2,7 @@
 //! gematria search tables, lists, the forge, and weum's helpers. No user interface here.
 
 pub mod bundle;
+pub mod fmath;
 pub mod forge;
 pub mod lists;
 pub mod markdown;

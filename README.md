@@ -283,6 +283,14 @@ and colours. Each person who logs in gets their own workspace of saves in
 cargo run --release -p anend-hub -- --local     # just you: no logins, one workspace
 ```
 
+**Offline**: the same files work from any static web server (`python3 -m http.server -d
+hub/web`, a static host) with no hub at all. When no hub answers at load, the page runs the
+app's calls itself in JavaScript (`hub/web/local/`, the same results as the hub's down to
+the last bit; `node hub/web/test/parity.mjs` checks it against a live `--local` hub) and
+keeps its saves in the browser's IndexedDB. Only then: a page a hub serves always works on
+the hub. A save moves between the two as a bundle, a JSON file with every key kept
+(settings → export bundle, then import bundle on the other side).
+
 `--local` is for running it on your own machine; on a shared hub people log in and the
 app is theirs. The calls are listed in [the app API](docs/app-api.md), so anything that
 speaks WebSocket or JSON can drive a save. To keep it running as a service,
@@ -309,6 +317,8 @@ per address.
 | `core/src/weum.rs` | ports of memory.js helpers: pfR, the gsum line, the search variations |
 | `src/memory_ui.rs` | the memory view |
 | `src/keys.rs` | actions, bindings and the remap logic |
+| `core/src/fmath.rs` | sin, cos and hypot the same on every machine and in the browser |
+| `core/src/bundle.rs` | a save as JSON, keys and all |
 | `core/src/spread.rs` | spread.js: the layout of memory texts by their sums, checked step by step against the original |
 | `src/space.rs` | the space: flying, the texts as slug billboards, picking, the terminal's memory commands, maps |
 | `src/space_ui.rs` | the space's panels: position line, help, metrics, sliders, search line |

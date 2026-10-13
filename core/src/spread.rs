@@ -40,6 +40,7 @@
 //! Numbers are f64 like JavaScript's, so the port can be checked step by step against
 //! spread.js (see the tests).
 
+use crate::fmath;
 use std::collections::HashMap;
 use std::f64::consts::PI;
 
@@ -192,7 +193,7 @@ pub fn atb(a: &Node, b: &Node) -> f64 {
 pub fn home(rank: usize, ring: f64) -> (f64, f64) {
     let th = (4.0 * PI * rank as f64).sqrt();
     let rr = ring * (rank as f64 / PI).sqrt();
-    (rr * th.cos(), rr * th.sin())
+    (rr * fmath::cos(th), rr * fmath::sin(th))
 }
 
 /// FNV-1a over UTF-16 code units, as spread.js' `hash01`
@@ -403,8 +404,8 @@ impl Spread {
                 if !n.placed {
                     let a = hash01(&n.id, 7) * PI * 2.0;
                     let rr = spread_r * hash01(&n.id, 13).sqrt();
-                    n.x = cx + a.cos() * rr;
-                    n.y = cy + a.sin() * rr;
+                    n.x = cx + fmath::cos(a) * rr;
+                    n.y = cy + fmath::sin(a) * rr;
                     n.z = n.zt;
                     n.vx = 0.0;
                     n.vy = 0.0;
@@ -501,11 +502,11 @@ impl Spread {
                 for j in i + 1..g.len() {
                     let (c, e) = (&g[i], &g[j]);
                     let (mut dx, mut dy) = (e.cx - c.cx, e.cy - c.cy);
-                    let mut dd = dx.hypot(dy);
+                    let mut dd = fmath::hypot(dx, dy);
                     if dd < 1e-6 {
                         let ang = (c.q as f64 * 0.618 + e.q as f64) % (PI * 2.0);
-                        dx = ang.cos();
-                        dy = ang.sin();
+                        dx = fmath::cos(ang);
+                        dy = fmath::sin(ang);
                         dd = 1e-6;
                     } else {
                         dx /= dd;
@@ -543,14 +544,14 @@ impl Spread {
                 let (dx, dy) = (na.x - nb.x, na.y - nb.y);
                 let gx = dx.abs() - (na.hw * na.k + nb.hw * nb.k);
                 let gy = dy.abs() - (na.hh * na.k + nb.hh * nb.k);
-                let gap = gx.max(0.0).hypot(gy.max(0.0));
+                let gap = fmath::hypot(gx.max(0.0), gy.max(0.0));
                 if gap >= p.range {
                     return;
                 }
-                let len = dx.hypot(dy);
+                let len = fmath::hypot(dx, dy);
                 let (ux, uy) = if len < 1e-6 {
                     let ang = hash01(&format!("{}{}", na.id, nb.id), 3) * PI * 2.0;
-                    (ang.cos(), ang.sin())
+                    (fmath::cos(ang), fmath::sin(ang))
                 } else {
                     (dx / len, dy / len)
                 };
@@ -576,7 +577,7 @@ impl Spread {
             }
             n.vx = (n.vx + a * n.fx * dt) * keep;
             n.vy = (n.vy + a * n.fy * dt) * keep;
-            let sp = n.vx.hypot(n.vy);
+            let sp = fmath::hypot(n.vx, n.vy);
             if sp > p.vmax {
                 n.vx *= p.vmax / sp;
                 n.vy *= p.vmax / sp;

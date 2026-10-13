@@ -66,6 +66,15 @@ A save as plain JSON, keys and all (`core/src/bundle.rs`). The web app keeps one
 browser's IndexedDB when it runs without a hub, and moves saves between the browser and a
 workspace with `saves.export` and `saves.import`; a bundle is also a file you can keep.
 
+The app decides once, as it loads: it posts `api/hello` beside its page, and a JSON
+envelope back means a hub served it, so every call goes to the hub and IndexedDB is never
+opened. Anything else (a static server's 404 or 501, no server at all, or `?offline` in
+the address) and it runs offline: `hub/web/local` answers the same calls in the page,
+the way app.rs does, and keeps each save in IndexedDB as a bundle and the key allocator's
+state, written after every call that changes something. A hub that drops out later is
+still the hub; the app reconnects. `node hub/web/test/parity.mjs` holds the two to the
+same answers.
+
 ```json
 { "anend": 1, "name": "notes",
   "notes": [{ "_key": "1000000", "title": "a note", "markdown": "body", "tags": [], "created": "2026-10-13T09:00:00Z", "edits": [] }],

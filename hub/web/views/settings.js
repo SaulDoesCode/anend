@@ -1,5 +1,6 @@
 // settings: the saves (and moving them in and out), the forge, the hub, the colours
-// and the view's options, over whatever view is open
+// and the view's options, over whatever view is open. Bundles (a save as JSON, keys and
+// all) move saves between a browser running offline and a hub's workspace.
 
 import { el, clear, size, shortDate, debounce, confirmClick } from '../util.js';
 import * as theme from '../theme.js';
@@ -46,14 +47,70 @@ function savesSection() {
     }
   };
   nameInput.addEventListener('keydown', (e) => e.key === 'Enter' && create());
+  const offline = app.api.offline;
   const file = el('input', { type: 'file', accept: '.redb', hidden: true, onchange: () => upload(file) });
+  const bundle = el('input', { type: 'file', accept: '.json,application/json', hidden: true, onchange: () => importBundle(bundle) });
+  const pickBundle = (m) => {
+    bundle.dataset.merge = m ? '1' : '';
+    bundle.click();
+  };
   const rows = saves.map((s) => saveRow(s));
   return section(
     'saves',
-    el('p.dim.small', 'each save is a database of its own: notes, memories, lists. They live on this hub, in your workspace.'),
-    el('div.row', nameInput, el('button.primary', { type: 'button', onclick: create }, 'new save'), el('span.grow'), el('button', { type: 'button', onclick: () => file.click(), title: 'a .redb save from your computer' }, 'upload a save…'), file),
+    el(
+      'p.dim.small',
+      offline
+        ? 'each save holds notes, memories and lists. No hub served this page, so they live in this browser (IndexedDB), and only here: export a bundle to keep one, or to take it to a hub, whose app imports it with the same keys.'
+        : 'each save is a database of its own: notes, memories, lists. They live on this hub, in your workspace. A bundle exported from the app running offline in a browser imports here with its keys.',
+    ),
+    el(
+      'div.row',
+      nameInput,
+      el('button.primary', { type: 'button', onclick: create }, 'new save'),
+      el('span.grow'),
+      el('button', { type: 'button', onclick: () => pickBundle(false), title: 'a save bundle (.anend.json) in as a new save, keeping its keys' }, 'import bundle…'),
+      el('button', { type: 'button', onclick: () => pickBundle(true), title: `a save bundle merged into “${app.save}”: what’s new gets fresh keys` }, 'merge bundle…'),
+      offline ? null : el('button', { type: 'button', onclick: () => file.click(), title: 'a .redb save from your computer' }, 'upload a save…'),
+      file,
+      bundle,
+    ),
     el('div.saves', rows.length ? rows : el('p.dim', 'no saves yet')),
   );
+}
+
+// a file to save, made here
+function download(name, text, type = 'application/json') {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = el('a', { href: url, download: name, hidden: true });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+async function exportBundle(name) {
+  const b = await act('saves.export', { name });
+  if (!b || b === true) return;
+  download(`${b.name || name}.anend.json`, JSON.stringify(b));
+  app.status(`exported “${name}”: ${b.notes.length} notes, ${b.memories.length} memories, ${b.lists.length} list links`);
+}
+
+async function importBundle(input) {
+  const f = input.files && input.files[0];
+  const merge = input.dataset.merge === '1';
+  input.value = '';
+  if (!f) return;
+  let bundle;
+  try {
+    bundle = JSON.parse(await f.text());
+  } catch {
+    return app.status(`${f.name} isn’t JSON`, true);
+  }
+  const r = await act('saves.import', merge ? { bundle, merge: true } : { bundle }, (r) =>
+    r.merged ? `merged ${r.memories} memories, ${r.notes} notes, ${r.lists} lists into “${app.save}”` : `“${r.save}” is in your saves: ${r.memories} memories, ${r.notes} notes, ${r.lists} lists`,
+  );
+  if (r && r.merged) await app.saveChanged();
+  if (r) redraw();
 }
 
 function saveRow(s) {
@@ -111,7 +168,8 @@ function saveRow(s) {
         },
       }, 'copy'),
       rename,
-      el('a.btn.small', { href: `/app/saves/${encodeURIComponent(s.name)}`, download: `${s.name}.redb`, title: 'download this save' }, 'download'),
+      el('button.small', { type: 'button', onclick: () => exportBundle(s.name), title: 'this save as a bundle (.anend.json): keys and all, for a hub or a browser' }, 'export bundle'),
+      app.api.offline ? null : el('a.btn.small', { href: `saves/${encodeURIComponent(s.name)}`, download: `${s.name}.redb`, title: 'download this save' }, 'download'),
       del,
     ),
   );
@@ -125,7 +183,7 @@ async function upload(input) {
   form.append('name', f.name.replace(/\.redb$/i, ''));
   app.status(`uploading ${f.name}…`);
   try {
-    const r = await app.api.send('/app/saves', { method: 'POST', body: form });
+    const r = await app.api.send('saves', { method: 'POST', body: form });
     app.status(`“${r.save}” is in your saves`);
     redraw();
   } catch (e) {
@@ -278,7 +336,7 @@ function drawHub() {
                 title: 'into your saves, beside the others',
                 onclick: async () => {
                   try {
-                    const r = await app.api.send(`/app/hub/${encodeURIComponent(s.id)}`, { method: 'POST' });
+                    const r = await app.api.send(`hub/${encodeURIComponent(s.id)}`, { method: 'POST' });
                     app.status(`“${r.save}” is in your saves`);
                     redraw();
                   } catch (e) {
@@ -288,7 +346,7 @@ function drawHub() {
               }, 'take'),
               confirmClick(el('button.small', { type: 'button', title: 'into the open save' }, 'merge'), 'sure?', async () => {
                 try {
-                  const r = await app.api.send(`/app/hub/${encodeURIComponent(s.id)}?merge=1`, { method: 'POST' });
+                  const r = await app.api.send(`hub/${encodeURIComponent(s.id)}?merge=1`, { method: 'POST' });
                   app.status(`merged ${r.memories} memories, ${r.notes} notes, ${r.lists} lists into “${app.save}”`);
                   await app.saveChanged();
                   redraw();
@@ -306,6 +364,12 @@ function drawHub() {
 }
 
 function hubSection() {
+  if (app.api.offline) {
+    return section(
+      'the hub',
+      el('p.dim.small', 'browsing, sharing and taking saves from a hub, and .redb files, need the app served by a hub; here, export a bundle and import it in a hub’s app.'),
+    );
+  }
   const q = el('input', { type: 'search', placeholder: 'search the hub', value: hubState.q, 'aria-label': 'search the hub' });
   q.addEventListener('input', debounce(() => ((hubState.q = q.value), loadHub()), 250));
   const sort = el(
@@ -330,7 +394,7 @@ function hubSection() {
         type: 'button',
         onclick: async () => {
           try {
-            const r = await app.api.send('/app/share', {
+            const r = await app.api.send('share', {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ name: sName.value.trim(), description: sDesc.value.trim(), tags: sTags.value.trim() }),

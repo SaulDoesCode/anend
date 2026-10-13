@@ -1,11 +1,13 @@
 // the app's calls: {id, op, args} over the websocket, answers matched by id; posts to
-// /app/api/{op} while the socket can't open
+// api/{op} (beside the page) while the socket can't open. Without a hub behind the page
+// the same calls go to the engine in local/, which keeps its saves in IndexedDB.
 
 export class ApiError extends Error {}
 
 export class Api extends EventTarget {
-  constructor(base = '/app') {
+  constructor(base) {
     super();
+    this.offline = false;
     this.base = base;
     this.next = 1;
     this.waiting = new Map();
@@ -21,7 +23,7 @@ export class Api extends EventTarget {
   }
 
   connect() {
-    const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${this.base}/ws`;
+    const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${this.base}ws`;
     let ws;
     try {
       ws = new WebSocket(url);
@@ -101,7 +103,7 @@ export class Api extends EventTarget {
   async post(op, args) {
     let r;
     try {
-      r = await fetch(`${this.base}/api/${encodeURIComponent(op)}`, {
+      r = await fetch(`${this.base}api/${encodeURIComponent(op)}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(args ?? {}),
@@ -142,4 +144,26 @@ export class Api extends EventTarget {
   }
 }
 
-export const api = new Api();
+// where the page is: the hub serves it at /app/, a static copy can be anywhere
+export const base = new URL('.', location.href).pathname;
+
+// whether a hub answers beside the page. Only a page no hub served runs offline: a
+// static server refuses or misreads the post, or there's nothing there at all. A hub
+// that goes away later is still the hub (the socket reconnects), and ?offline forces it.
+async function hubBehind() {
+  if (new URLSearchParams(location.search).has('offline')) return false;
+  try {
+    const r = await fetch(`${base}api/hello`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+      credentials: 'same-origin',
+    });
+    const a = await r.json();
+    return !!a && typeof a === 'object' && 'ok' in a;
+  } catch {
+    return false;
+  }
+}
+
+export const api = (await hubBehind()) ? new Api(base) : await (await import('./local/index.js')).offline(ApiError);

@@ -69,7 +69,7 @@ pub fn export(store: &Store, name: &str) -> StoreResult<Bundle> {
     })
 }
 
-fn check(b: &Bundle) -> StoreResult<()> {
+pub fn check(b: &Bundle) -> StoreResult<()> {
     if b.anend == 0 || b.anend > VERSION {
         return Err(format!("that isn't an anend save bundle this version reads ({})", b.anend));
     }
