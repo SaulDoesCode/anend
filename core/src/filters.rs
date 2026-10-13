@@ -549,6 +549,9 @@ pub struct Results {
     pub untrained: Vec<String>,
 }
 
+/// a classifier read over a run's texts: its classes, threshold, and checked rows
+type Read = (Vec<String>, f32, Vec<(Row, Checked)>);
+
 /// the texts a run looks through, and what's worked out about them once
 struct Universe<'a> {
     store: &'a Store,
@@ -557,12 +560,12 @@ struct Universe<'a> {
     texts: Vec<String>,
     shown: Vec<String>,
     /// classifier -> (classes, threshold, checked rows) over the universe
-    checked: HashMap<String, Option<(Vec<String>, f32, Vec<(Row, Checked)>)>>,
+    checked: HashMap<String, Option<Read>>,
     notes: Option<HashMap<String, Vec<String>>>,
 }
 
 impl<'a> Universe<'a> {
-    fn classifier(&mut self, name: &str) -> StoreResult<Option<&(Vec<String>, f32, Vec<(Row, Checked)>)>> {
+    fn classifier(&mut self, name: &str) -> StoreResult<Option<&Read>> {
         if !self.checked.contains_key(name) {
             let stack = self.store.stack(name)?;
             let v = if stack.def().trained() {
