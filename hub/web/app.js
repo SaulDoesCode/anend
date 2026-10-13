@@ -10,10 +10,11 @@ import memory from './views/memory.js';
 import stats from './views/stats.js';
 import space from './views/space.js';
 import lists from './views/lists.js';
+import classifiers from './views/classify.js';
 import settings from './views/settings.js';
 
-const VIEWS = { editor, reader, memory, stats, space, lists };
-const ORDER = ['editor', 'reader', 'memory', 'stats', 'space', 'lists'];
+const VIEWS = { editor, reader, memory, stats, space, lists, classifiers };
+const ORDER = ['editor', 'reader', 'memory', 'stats', 'space', 'lists', 'classifiers'];
 
 const $ = (id) => document.getElementById(id);
 const barInput = $('bar-input');
@@ -191,7 +192,7 @@ window.addEventListener('keydown', (e) => {
     settings.toggle();
     return;
   }
-  if (ctrl && /^[1-6]$/.test(e.key)) {
+  if (ctrl && /^[1-7]$/.test(e.key)) {
     e.preventDefault();
     app.go(ORDER[+e.key - 1]);
     return;

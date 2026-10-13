@@ -152,7 +152,7 @@ pub const DEFAULT_PRESET: &str = "compact";
 pub fn preset(name: &str) -> Option<Config> {
     Some(match name {
         "tiny" => Config::tiny(),
-        // about 0.1M weights: seconds for a few lists of short memories
+        // 89k weights (with three classes): seconds for a few lists of short memories
         "compact" => Config {
             d_model: 48,
             head_dim: 24,

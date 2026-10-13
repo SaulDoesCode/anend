@@ -486,7 +486,7 @@ function viewSection() {
       }),
       'in the space, show the search line (the sums and their chain) in the top bar',
     ),
-    el('p.dim.small', 'shortcuts: Ctrl+S save · Ctrl+E view/edit · Ctrl+B the note list · Ctrl+1..6 the views · Ctrl+, settings · / the command bar · Esc leaves it'),
+    el('p.dim.small', 'shortcuts: Ctrl+S save · Ctrl+E view/edit · Ctrl+B the note list · Ctrl+1..7 the views · Ctrl+, settings · / the command bar · Esc leaves it'),
   );
 }
 

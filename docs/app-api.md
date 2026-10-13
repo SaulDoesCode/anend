@@ -86,7 +86,7 @@ a class name or its index. A text to judge is given as `key` (a memory or note) 
   meanwhile (feedback, another run) isn't written. It continues from the trained
   weights unless `fresh`. `rounds` above 1 trains that many rounds of `epochs`,
   deciding after each to widen, add attention heads, deepen or prune (growth events go
-  in the history). The presets: `tiny` (4 k weights, for tests), `compact` (about 0.1 M,
+  in the history). The presets: `tiny` (15 k weights, for tests), `compact` (89 k,
   the default: seconds for a few lists of short memories), `small` (0.9 M), `base`
   (5 M).
 - **Steering** is the player's: a bias per class (added to the logits after the
