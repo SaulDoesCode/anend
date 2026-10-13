@@ -4,6 +4,7 @@
 // their outputs written back as lists, and texts near each other by what they represent
 
 import { el, clear, confirmClick, debounce } from '../util.js';
+import { iconButton } from '../icons.js';
 
 let app, body, count;
 let selected = null; // the open classifier's name
@@ -164,14 +165,14 @@ function newCard() {
           ),
           el('div.row', not),
           ins.length ? [el('p.dim.small', 'builds on (their outputs as inputs)'), el('div.clf-checks', ins.map(({ c, box }) => el('label.check', box, ` ${c.name}`)))] : null,
-          el('div.row', preset, head, el('button.primary', { type: 'button', onclick: make }, 'make')),
+          el('div.row', preset, head, iconButton('new', 'make the classifier', { text: 'make', cls: 'primary', onclick: make })),
         ],
   );
 }
 
 function headCard() {
   const d = detail;
-  const del = confirmClick(el('button.small', { type: 'button' }, 'delete'), 'sure?', async () => {
+  const del = confirmClick(iconButton('delete', 'delete this classifier (click twice)', { small: true }), 'delete?', async () => {
     try {
       await app.call('classify.delete', { name: d.name });
       app.status(`deleted “${d.name}”`);
@@ -258,12 +259,12 @@ function trainCard() {
       el('h3', 'training'),
       el('span.grow'),
       running
-        ? el('button', { type: 'button', onclick: cancel }, 'cancel')
+        ? iconButton('close', 'stop the training', { text: 'stop', onclick: cancel })
         : [
             el('label.small.dim', 'epochs ', epochs),
             el('label.small.dim', 'rounds ', rounds),
             el('label.small.dim', fresh, ' from scratch'),
-            el('button.primary', { type: 'button', onclick: go }, d.trained ? 'train more' : 'train'),
+            iconButton('play', d.trained ? 'train it more (on top of what it learned)' : 'train it', { text: d.trained ? 'train more' : 'train', cls: 'primary', onclick: go }),
           ],
     ),
     job ? progress(job) : null,
@@ -408,7 +409,7 @@ function steerCard() {
   if (d.trained && !biasReport) send(false);
   return el(
     'div.card.clf-steer',
-    el('div.row', el('h3', 'steering'), el('span.dim.small', 'yours: training never touches it'), el('span.grow'), el('button.small', { type: 'button', onclick: reset }, 'reset')),
+    el('div.row', el('h3', 'steering'), el('span.dim.small', 'yours: training never touches it'), el('span.grow'), iconButton('undo', 'reset the steering', { small: true, onclick: reset })),
     el(
       'div.clf-sliders',
       el('div', el('h4', 'bias per class'), d.classes.map((c, i) => slider(c, -8, 8, 0.1, () => h.bias[i], (v) => (h.bias[i] = v), 'added to the class’s logit'))),
@@ -494,7 +495,7 @@ function searchCard() {
   const stacked = d.inputs.length > 0;
   return el(
     'div.card.clf-search',
-    el('div.row', el('h3', 'search by class'), cls, q, el('button.primary', { type: 'button', onclick: () => ((query = q.value), search()) }, 'search')),
+    el('div.row', el('h3', 'search by class'), cls, q, iconButton('search', 'search', { key: 'Enter', cls: 'primary', onclick: () => ((query = q.value), search()) })),
     !d.trained
       ? el('p.dim.small', 'train it first')
       : !results
@@ -511,9 +512,9 @@ function searchCard() {
                   el('span.text', { title: r.key }, r.note ? el('span.dim', 'note · ') : null, r.text),
                   r.top_class !== results.class ? el('span.dim.small', `(${r.top_class})`) : null,
                   el('span.grow'),
-                  el('button.small.yes', { type: 'button', title: `yes, it is ${results.class}`, onclick: () => judge(d.name, r.key, searchClass, true) }, 'yes'),
-                  el('button.small.no', { type: 'button', title: `no, it isn't ${results.class}`, onclick: () => judge(d.name, r.key, searchClass, false) }, 'no'),
-                  stacked ? el('button.small', { type: 'button', title: 'which classifiers had a part in this', onclick: () => explain(r) }, 'why') : null,
+                  iconButton('check', `yes, it is ${results.class}`, { small: true, cls: 'yes', onclick: () => judge(d.name, r.key, searchClass, true) }),
+                  iconButton('close', `no, it isn't ${results.class}`, { small: true, cls: 'no', onclick: () => judge(d.name, r.key, searchClass, false) }),
+                  stacked ? iconButton('help', 'why: which classifiers had a part in this', { small: true, onclick: () => explain(r) }) : null,
                 ),
                 w ? whyView(w, r) : null,
               );
@@ -535,15 +536,15 @@ function whyView(w, r) {
         el('b', c.name),
         el('span.dim', `says ${c.top_class} (${pct(c.probs[c.top])})`),
         el('span.grow'),
-        el('button.small.yes', { type: 'button', onclick: () => judge(c.name, r.key, c.judged ? searchClass : c.top, true) }, 'yes'),
-        el('button.small.no', { type: 'button', onclick: () => judge(c.name, r.key, c.judged ? searchClass : c.top, false) }, 'no'),
+        iconButton('check', `yes: ${c.name} was right`, { small: true, cls: 'yes', onclick: () => judge(c.name, r.key, c.judged ? searchClass : c.top, true) }),
+        iconButton('close', `no: ${c.name} was wrong`, { small: true, cls: 'no', onclick: () => judge(c.name, r.key, c.judged ? searchClass : c.top, false) }),
       ),
     ),
     el(
       'div.row.small',
       el('span.dim', 'end to end, through the couplings:'),
-      el('button.small', { type: 'button', onclick: () => judge(d.name, r.key, searchClass, true, true) }, 'yes'),
-      el('button.small', { type: 'button', onclick: () => judge(d.name, r.key, searchClass, false, true) }, 'no'),
+      iconButton('check', 'yes, end to end', { small: true, cls: 'yes', onclick: () => judge(d.name, r.key, searchClass, true, true) }),
+      iconButton('close', 'no, end to end', { small: true, cls: 'no', onclick: () => judge(d.name, r.key, searchClass, false, true) }),
     ),
   );
 }
@@ -567,7 +568,7 @@ function outputCard() {
   };
   return el(
     'div.card.clf-out',
-    el('div.row', el('h3', 'outputs as a list'), cls, el('label.small.dim', 'at least ', thr), el('button', { type: 'button', disabled: !d.trained, onclick: write }, 'write the list')),
+    el('div.row', el('h3', 'outputs as a list'), cls, el('label.small.dim', 'at least ', thr), iconButton('list', 'write the outputs as a list', { text: 'write the list', disabled: !d.trained, onclick: write })),
     el('p.dim.small', enlisted ? `“${enlisted.name}” (${enlisted.list}) holds ${enlisted.members} texts now: train another classifier on it` : 'the texts it counts in a class, as a list another classifier can learn from'),
   );
 }
@@ -588,7 +589,7 @@ function similarCard() {
   t.addEventListener('keydown', (e) => e.key === 'Enter' && go());
   return el(
     'div.card.clf-similar',
-    el('div.row', el('h3', 'near texts'), t, el('button', { type: 'button', disabled: !d.trained, onclick: go }, 'find')),
+    el('div.row', el('h3', 'near texts'), t, iconButton('search', 'find the nearest texts', { disabled: !d.trained, onclick: go })),
     similar
       ? el(
           'ol.clf-results',

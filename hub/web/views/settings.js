@@ -3,6 +3,7 @@
 // all) move saves between a browser running offline and a hub's workspace.
 
 import { el, clear, size, shortDate, debounce, confirmClick } from '../util.js';
+import { icon, iconButton, tip } from '../icons.js';
 import * as theme from '../theme.js';
 
 let app, overlay, panel;
@@ -66,11 +67,11 @@ function savesSection() {
     el(
       'div.row',
       nameInput,
-      el('button.primary', { type: 'button', onclick: create }, 'new save'),
+      iconButton('new', 'start a new, empty save', { text: 'new save', key: 'Enter', cls: 'primary', onclick: create }),
       el('span.grow'),
-      el('button', { type: 'button', onclick: () => pickBundle(false), title: 'a save bundle (.anend.json) in as a new save, keeping its keys' }, 'import bundle…'),
-      el('button', { type: 'button', onclick: () => pickBundle(true), title: `a save bundle merged into “${app.save}”: what’s new gets fresh keys` }, 'merge bundle…'),
-      offline ? null : el('button', { type: 'button', onclick: () => file.click(), title: 'a .redb save from your computer' }, 'upload a save…'),
+      iconButton('open', 'import a bundle (.anend.json) as a new save, keeping its keys', { text: 'import…', onclick: () => pickBundle(false) }),
+      iconButton('merge', `merge a bundle into “${app.save}”: what’s new gets fresh keys`, { text: 'merge…', onclick: () => pickBundle(true) }),
+      offline ? null : iconButton('upload', 'upload a .redb save from your computer', { text: 'upload…', onclick: () => file.click() }),
       file,
       bundle,
     ),
@@ -115,8 +116,8 @@ async function importBundle(input) {
 
 function saveRow(s) {
   const nameCell = el('div.name', el('b', s.name), s.open ? el('span.badge', 'open') : null);
-  const rename = el('button.small', {
-    type: 'button',
+  const rename = iconButton('rename', 'rename', {
+    small: true,
     onclick: () => {
       const input = el('input', { type: 'text', value: s.name, 'aria-label': 'new name' });
       const done = async () => {
@@ -137,10 +138,10 @@ function saveRow(s) {
       input.focus();
       input.select();
     },
-  }, 'rename');
+  });
   const del = s.open
     ? null
-    : confirmClick(el('button.small.bad', { type: 'button' }, 'delete'), 'sure?', async () => {
+    : confirmClick(iconButton('delete', `delete “${s.name}” (click twice)`, { small: true }), 'delete?', async () => {
         if (await act('saves.delete', { name: s.name }, `deleted “${s.name}”`)) redraw();
       });
   return el(
@@ -152,24 +153,26 @@ function saveRow(s) {
       'div.acts',
       s.open
         ? null
-        : el('button.small.primary', {
-            type: 'button',
+        : iconButton('open', `load “${s.name}”: the app works in it`, {
+            small: true,
+            text: 'load',
+            cls: 'primary',
             onclick: async () => {
               if (await act('saves.open', { name: s.name }, `opened “${s.name}”`)) {
                 await app.saveChanged();
                 redraw();
               }
             },
-          }, 'load'),
-      el('button.small', {
-        type: 'button',
+          }),
+      iconButton('copy', 'copy: a new save just like this one', {
+        small: true,
         onclick: async () => {
           if (await act('saves.copy', { name: s.name }, (r) => `copied to “${r.save}”`)) redraw();
         },
-      }, 'copy'),
+      }),
       rename,
-      el('button.small', { type: 'button', onclick: () => exportBundle(s.name), title: 'this save as a bundle (.anend.json): keys and all, for a hub or a browser' }, 'export bundle'),
-      app.api.offline ? null : el('a.btn.small', { href: `saves/${encodeURIComponent(s.name)}`, download: `${s.name}.redb`, title: 'download this save' }, 'download'),
+      iconButton('export', 'export a bundle (.anend.json): keys and all, for a hub or a browser', { small: true, onclick: () => exportBundle(s.name) }),
+      app.api.offline ? null : tip(el('a.btn.small.ibtn', { href: `saves/${encodeURIComponent(s.name)}`, download: `${s.name}.redb` }, icon('download')), 'download the .redb file'),
       del,
     ),
   );
@@ -270,7 +273,7 @@ function forgeSection() {
   const name = el('input', { type: 'text', placeholder: 'the new save’s name', 'aria-label': 'forged save name' });
   preview = el('div.preview');
   refreshPreview();
-  const pour = confirmClick(el('button', { type: 'button', title: 'add what comes out to the open save' }, 'pour into the open save'), 'sure?', async () => {
+  const pour = confirmClick(iconButton('merge', `pour what comes out into “${app.save}” (click twice)`, { text: 'pour in' }), 'pour it in?', async () => {
     const r = await act('forge.pour', forgeArgs(), (r) => `poured ${r.memories} memories, ${r.notes} notes, ${r.lists} lists into “${app.save}”`);
     if (r) {
       await app.saveChanged();
@@ -286,14 +289,15 @@ function forgeSection() {
     el(
       'div.row',
       name,
-      el('button.primary', {
-        type: 'button',
+      iconButton('forge', 'forge a new save from these', {
+        text: 'forge',
+        cls: 'primary',
         onclick: async () => {
           const n = name.value.trim();
           if (!n) return app.status('give the new save a name', true);
           if (await act('forge.make', { ...forgeArgs(), name: n }, (r) => `forged “${r.save}”: ${r.memories} memories, ${r.notes} notes, ${r.lists} lists`)) redraw();
         },
-      }, 'forge'),
+      }),
       pour,
     ),
   );
@@ -331,9 +335,10 @@ function drawHub() {
             el('div.dim.small', `${s.memories} memories · ${s.notes} notes · ${size(s.size)} · ★ ${s.stars} · ↓ ${s.downloads}`, s.tags.length ? ' · ' + s.tags.map((t) => '#' + t).join(' ') : ''),
             el(
               'div.acts',
-              el('button.small.primary', {
-                type: 'button',
-                title: 'into your saves, beside the others',
+              iconButton('download', 'take it: into your saves, beside the others', {
+                small: true,
+                text: 'take',
+                cls: 'primary',
                 onclick: async () => {
                   try {
                     const r = await app.api.send(`hub/${encodeURIComponent(s.id)}`, { method: 'POST' });
@@ -343,8 +348,8 @@ function drawHub() {
                     app.fail(e);
                   }
                 },
-              }, 'take'),
-              confirmClick(el('button.small', { type: 'button', title: 'into the open save' }, 'merge'), 'sure?', async () => {
+              }),
+              confirmClick(iconButton('merge', `merge it into “${app.save}” (click twice)`, { small: true }), 'merge?', async () => {
                 try {
                   const r = await app.api.send(`hub/${encodeURIComponent(s.id)}?merge=1`, { method: 'POST' });
                   app.status(`merged ${r.memories} memories, ${r.notes} notes, ${r.lists} lists into “${app.save}”`);
@@ -354,7 +359,7 @@ function drawHub() {
                   app.fail(e);
                 }
               }),
-              el('a.small', { href: `/saves/${encodeURIComponent(s.id)}`, target: '_blank', rel: 'noopener' }, 'its page'),
+              tip(el('a.btn.small.ibtn', { href: `/saves/${encodeURIComponent(s.id)}`, target: '_blank', rel: 'noopener' }, icon('link')), 'its page on the hub (a new tab)'),
             ),
           ),
         )
@@ -390,8 +395,9 @@ function hubSection() {
     el('div.share', sName, sDesc, sTags),
     el(
       'div.row',
-      el('button.primary', {
-        type: 'button',
+      iconButton('upload', 'share this save on the hub', {
+        text: 'share',
+        cls: 'primary',
         onclick: async () => {
           try {
             const r = await app.api.send('share', {
@@ -404,7 +410,7 @@ function hubSection() {
             app.fail(e);
           }
         },
-      }, 'share this save'),
+      }),
       el('span.dim.small', 'sends the open save to the hub under your name'),
     ),
   );
@@ -451,7 +457,7 @@ function coloursSection() {
     'colours',
     el('div.row', el('span.dim.small', 'start from'), presets),
     el('div.roles', roles),
-    el('div.row', el('span.dim.small', colourRole), pickColour, hex, el('button.small', { type: 'button', onclick: () => (theme.reset(colourRole), redraw()) }, 'reset')),
+    el('div.row', el('span.dim.small', colourRole), pickColour, hex, iconButton('undo', `reset ${colourRole} to the preset’s`, { small: true, onclick: () => (theme.reset(colourRole), redraw()) })),
     el('p.dim.small', 'the memory view keeps weum’s own colours'),
   );
 }
@@ -486,7 +492,22 @@ function viewSection() {
       }),
       'in the space, show the search line (the sums and their chain) in the top bar',
     ),
-    el('p.dim.small', 'shortcuts: Ctrl+S save · Ctrl+E view/edit · Ctrl+B the note list · Ctrl+1..7 the views · Ctrl+, settings · / the command bar · Esc leaves it'),
+    el('h4', 'shortcuts'),
+    el(
+      'dl.keys',
+      [
+        ['Ctrl+1 … 8', 'the views: editor, reader, memory, stats, space, lists, classifiers, tags'],
+        ['/', 'the command bar (Esc leaves it)'],
+        ['Ctrl+,', 'settings'],
+        ['Ctrl+S', 'save the note'],
+        ['Ctrl+N', 'a new note'],
+        ['Ctrl+E', 'view or edit the note'],
+        ['Ctrl+B', 'the note list'],
+        ['Tab', 'indents in the editor'],
+        ['O R A F', 'the memory view’s buckets'],
+        ['H', 'the space’s help'],
+      ].map(([k, what]) => [el('dt', el('kbd', k)), el('dd', what)]),
+    ),
   );
 }
 
@@ -498,7 +519,7 @@ async function redraw() {
   await loadSaves();
   clear(
     panel,
-    el('div.set-head', el('h2', 'settings'), el('span.grow'), el('button.small', { type: 'button', onclick: () => close(), title: 'close (Esc)' }, 'close')),
+    el('div.set-head', el('h2', 'settings'), el('span.grow'), iconButton('close', 'close', { key: 'Esc', cls: 'plain.set-close', onclick: () => close() })),
     savesSection(),
     forgeSection(),
     hubSection(),
@@ -508,15 +529,19 @@ async function redraw() {
   panel.scrollTop = scroll;
 }
 
-function open() {
+let before = null; // where the focus was, to go back to
+async function open() {
+  before = document.activeElement;
   overlay.hidden = false;
   document.body.classList.add('settings-open');
   document.getElementById('settings-button').classList.add('on');
-  redraw();
+  await redraw();
+  panel.querySelector('.set-close')?.focus({ preventScroll: true });
 }
 
 function close() {
   overlay.hidden = true;
+  if (before && before.isConnected) before.focus?.({ preventScroll: true });
   document.body.classList.remove('settings-open');
   document.getElementById('settings-button').classList.remove('on');
 }
@@ -525,7 +550,7 @@ export default {
   init(o, a) {
     app = a;
     overlay = o;
-    panel = el('div.panel.card', { role: 'dialog', 'aria-label': 'settings' });
+    panel = el('div.panel.card', { role: 'dialog', 'aria-modal': 'true', 'aria-label': 'settings' });
     overlay.append(panel);
     overlay.addEventListener('mousedown', (e) => e.target === overlay && close());
   },

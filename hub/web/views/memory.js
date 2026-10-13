@@ -2,11 +2,12 @@
 // the term bar at the bottom, its sidecar of the term's four keys at the right.
 
 import { el, clear, debounce, typing, underline, textOfOrdinal, KEY } from '../util.js';
+import { icon, tip } from '../icons.js';
 import { picks, pick, pickLine, listCommand, onPick } from '../picks.js';
 
 const BUCKETS = ['ordinal', 'reversed', 'atbash', 'frequency'];
 
-let app, root, head, band, toast, sidecar, toggles;
+let app, root, head, band, intro, toast, sidecar, toggles;
 const st = {
   bucket: 'ordinal',
   gsearchText: true,
@@ -35,7 +36,7 @@ function savePrefs() {
 
 function drawHead() {
   const p = pickLine();
-  clear(head, `${app.counts.memories} memories · ${st.bucket} bucket`, p ? el('span.picks', ` · ${p}`) : null);
+  clear(head, `${app.counts.memories} memories · `, tip(el('span.bucket', { tabindex: '0' }, icon('bucket'), st.bucket), `the ${st.bucket} bucket: what Enter gsearches (O R A F)`), p ? el('span.picks', ` · ${p}`) : null);
 }
 
 // the prime factor chain with its numbers clickable
@@ -55,8 +56,10 @@ function drawResults() {
   if (!st.header && !st.results.length) {
     clear(band);
     band.hidden = true;
+    intro.hidden = false;
     return;
   }
+  intro.hidden = true;
   band.hidden = false;
   // which texts share a reversed sum with another one here
   const by = new Map();
@@ -277,7 +280,12 @@ export default {
     head = el('div.mem-head');
     band = el('div.mem-band', { hidden: true });
     toast = el('div.mem-toast');
-    section.append(head, el('div.mem-main', band, toast));
+    intro = el(
+      'div.mem-intro',
+      el('p', 'Type a word below and press Enter: it is remembered, and everything sharing its sum comes up.'),
+      el('p', 'A number gsearches that bucket; a key (like 0,12) brings back one memory. Shift+click a text to head a list.'),
+    );
+    section.append(head, el('div.mem-main', intro, band, toast));
     sidecar = el('span.sidecar');
     toggles = el('span.toggles');
     this.barRight = el('div.mem-right', sidecar, toggles);

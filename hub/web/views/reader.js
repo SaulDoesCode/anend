@@ -3,6 +3,7 @@
 
 import { el, clear, debounce, longDate, relative } from '../util.js';
 import { render } from '../markdown.js';
+import { icon, tip } from '../icons.js';
 
 let app, list, count;
 let q = '';
@@ -41,7 +42,7 @@ async function draw() {
     const edited = n.edits && n.edits.length ? n.edits[n.edits.length - 1] : '';
     return el(
       'article.card.writ',
-      el('header', el('h2', n.title || 'untitled'), el('a.edit', { href: `#/editor/${encodeURIComponent(s.key)}` }, 'edit')),
+      el('header', el('h2', n.title || 'untitled'), tip(el('a.edit.btn.small.ibtn', { href: `#/editor/${encodeURIComponent(s.key)}` }, icon('edit')), `edit “${n.title || 'untitled'}”`)),
       el('div.date', longDate(n.created), edited ? el('span', ` · edited ${relative(edited)}`) : null),
       n.tags.length
         ? el(

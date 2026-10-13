@@ -2,6 +2,7 @@
 // its numbers and letters, and how alike every two lists' letters are (cosine)
 
 import { el, clear, confirmClick } from '../util.js';
+import { iconButton } from '../icons.js';
 import { pick, picks } from '../picks.js';
 
 const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
@@ -39,7 +40,7 @@ async function draw() {
     el(
       'div.card.lists-head',
       el('div.row', el('h2', 'lists'), el('span.dim.small', 'a list is a memory heading other memories; Shift+click a text in the memory view or the space to pick one')),
-      el('div.row', newInput, el('button.primary', { type: 'button', onclick: make }, 'new list')),
+      el('div.row', newInput, iconButton('new', 'make a new list headed by this text', { text: 'new list', key: 'Enter', cls: 'primary', onclick: make })),
     ),
     st.lists.length > 1 ? dotCard(st) : null,
     cards.length ? el('div.list-grid', cards) : el('div.card.dim', 'no lists yet'),
@@ -106,7 +107,7 @@ function listCard(l) {
       }, '×'),
     ),
   );
-  const unlist = confirmClick(el('button.small', { type: 'button', title: 'take the whole list apart (the memories stay)' }, 'unlist'), 'sure?', async () => {
+  const unlist = confirmClick(iconButton('delete', 'unlist: take the whole list apart (the memories stay; click twice)', { small: true }), 'unlist?', async () => {
     if (!l.count) {
       fresh.delete(l.list);
       draw();
@@ -128,15 +129,15 @@ function listCard(l) {
       el('h3', l.name),
       el('span.dim.small', `${l.count} member${l.count === 1 ? '' : 's'} · ${l.list}`),
       el('span.grow'),
-      el('button.small', {
-        type: 'button',
-        className: isPicked ? 'small on' : 'small',
-        title: 'the list the memory view and the space act on (Enlist, Delist)',
+      iconButton('pin', isPicked ? 'picked: the memory view and the space enlist into this list' : 'pick: the list the memory view and the space act on (Enlist, Delist)', {
+        small: true,
+        cls: isPicked ? 'on' : '',
+        'aria-pressed': isPicked ? 'true' : 'false',
         onclick: () => {
           pick('list', { key: l.list, text: l.name });
           draw();
         },
-      }, isPicked ? 'picked' : 'pick'),
+      }),
       unlist,
     ),
     w
@@ -156,7 +157,7 @@ function listCard(l) {
         ]
       : el('p.dim.small', 'no members yet'),
     el('div.members', members),
-    el('div.row', add, el('button', { type: 'button', onclick: enlist }, 'enlist')),
+    el('div.row', add, iconButton('new', 'enlist this text', { key: 'Enter', onclick: enlist })),
   );
 }
 

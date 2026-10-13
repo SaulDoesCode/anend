@@ -17,7 +17,7 @@ let asked = 0; // the newest notes.list call, so a slow answer can't land over a
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
 function route() {
-  const t = chosen.map((x) => encodeURIComponent(x).replace(/\+/g, '%2B')).join('+');
+  const t = chosen.map((x) => encodeURIComponent(x)).join('+');
   const want = t ? `#/tags/${t}${any && chosen.length > 1 ? '/any' : ''}` : '#/tags';
   if (location.hash !== want) history.replaceState(null, '', want);
 }
@@ -201,15 +201,16 @@ export default {
       el('button', { type: 'button', dataset: { mode: 'all' }, title: 'notes with every picked tag', onclick: () => setMode(false) }, 'all'),
       el('button', { type: 'button', dataset: { mode: 'any' }, title: 'notes with any picked tag', onclick: () => setMode(true) }, 'any'),
     );
-    sortEl = el('button.small.sort', {
-      type: 'button',
-      title: 'sort by name / by count',
+    sortEl = iconButton('sort', 'order: by count or by name', {
+      small: true,
+      text: 'count',
+      cls: 'plain.sort',
       onclick: () => {
         byName = !byName;
-        sortEl.textContent = byName ? 'a–z' : 'most';
+        sortEl.querySelector('.lab').textContent = byName ? 'a–z' : 'count';
         drawTags();
       },
-    }, 'most');
+    });
     side = el('aside.card.tags-side', el('div.row.tags-head', el('h2', 'tags'), el('span.grow'), modeEl, sortEl), picked, listEl);
     results = el('div.tags-results');
     section.append(el('div.tags-view', side, results));

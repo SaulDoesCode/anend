@@ -41,7 +41,7 @@ async function draw() {
             s.tags.map(([t, n]) =>
               el(
                 'a.tagbar',
-                { href: `#/reader/tag/${encodeURIComponent(t)}`, title: `${n} note${n === 1 ? '' : 's'}` },
+                { href: `#/tags/${encodeURIComponent(t)}`, title: `${n} note${n === 1 ? '' : 's'}: see them in the tags view` },
                 el('span.name', `#${t}`),
                 el('span.track', el('span.fill', { style: { width: `${(n / max) * 100}%` } })),
                 el('span.n', n),

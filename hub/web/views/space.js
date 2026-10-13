@@ -5,8 +5,9 @@ import { el, clear, typing, textOfOrdinal, KEY } from '../util.js';
 import { Space, triangle } from '../space.js';
 import { pick, listCommand, onPick, pickLine } from '../picks.js';
 import { colours } from '../theme.js';
+import { icon, iconButton, tip } from '../icons.js';
 
-let app, section, host, engine, pos, card, help, searchline, chips;
+let app, section, host, engine, pos, card, help, helpBtn, empty, searchline, chips;
 const st = { gsearch: true, reversed: false, saturate: true, keep: false };
 let texts = []; // [{id, text, hit}] in the spread now
 let term = null; // the last search: {n, bucket, pf, s, r, t, buckets}
@@ -177,6 +178,7 @@ async function triOf(t) {
 // ---------------------------------------------------------------- the search line
 
 function drawLine() {
+  if (empty) empty.hidden = texts.length > 0;
   searchline.hidden = app.view !== 'space' || !app.prefs.searchLine || !term;
   if (!term) {
     clear(searchline);
@@ -185,7 +187,8 @@ function drawLine() {
   clear(
     searchline,
     el('b', String(term.n)),
-    ` ${term.bucket} · ${texts.length} text${texts.length === 1 ? '' : 's'} · ${term.buckets} bucket${term.buckets === 1 ? '' : 's'}`,
+    ` ${term.bucket} · ${texts.length} text${texts.length === 1 ? '' : 's'} · `,
+    tip(el('span.buckets', { tabindex: '0' }, icon('bucket'), String(term.buckets)), `${term.buckets} bucket${term.buckets === 1 ? '' : 's'}: the spread's rings, by the ${st.reversed ? 'ordinal' : 'reversed'} sum`),
     term.pf ? el('span.pf', ` (${term.pf})`) : null,
     term.s && term.r ? triangle(term.s, term.r, term.t) : null,
   );
@@ -253,6 +256,11 @@ function drawPicks() {
     it.el.classList.toggle('is-candidate', it.hit.key === candKey());
   }
 }
+function toggleHelp() {
+  help.hidden = !help.hidden;
+  helpBtn.classList.toggle('on', !help.hidden);
+}
+
 let listKey = () => null;
 let candKey = () => null;
 
@@ -285,7 +293,13 @@ export default {
       el('b', 'terminal'),
       ' a number gsearches that bucket · text gsearches its sum · Shift+Enter a key · Delete forgets a key · ↑ ↓ history · Enlist Delist List Unlist Clear Count',
     );
-    section.append(host, pos, card, help);
+    helpBtn = iconButton('help', 'how to fly and search', { key: 'H', cls: 'plain.space-helpbtn', onclick: () => toggleHelp() });
+    empty = el(
+      'div.space-empty',
+      el('p', 'The room is empty.'),
+      el('p.dim', 'Type a word, a number or a key in the bar below and press Enter: its bucket spreads out here. Right-drag to look around, W A S D to fly.'),
+    );
+    section.append(host, pos, card, help, empty, helpBtn);
     searchline = document.getElementById('searchline');
     chips = el('span.toggles');
     this.barRight = chips;
@@ -372,7 +386,7 @@ export default {
       return true;
     }
     if (e.key === 'h' || e.key === 'H') {
-      help.hidden = !help.hidden;
+      toggleHelp();
       return true;
     }
     if (e.key === 'f' || e.key === 'F') {
