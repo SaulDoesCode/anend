@@ -55,7 +55,7 @@ export const app = {
     const s = $('status');
     s.classList.remove('bad');
     const where = api.offline ? (api.kept ? ' · offline · in this browser' : ' · offline · not kept (no IndexedDB here)') : '';
-    s.textContent = this.save ? `${this.save}: ${this.counts.notes} notes, ${this.counts.memories} memories${where}` : where.slice(3);
+    s.textContent = this.save ? `${this.save} · ${this.counts.notes} notes · ${this.counts.memories} memories${where}` : where.slice(3);
   },
   fail(e) {
     app.status(e && e.message ? e.message : String(e), true);

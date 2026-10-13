@@ -225,13 +225,15 @@ export default {
     loadNotes();
   },
 
-  barInput: debounce((text) => {
-    find = text;
+  // (reads the bar when it fires: Enter may have cleared it meanwhile)
+  barInput: debounce(() => {
+    find = app.bar.get();
     drawTags();
   }, 60),
 
   barKey(e) {
     if (e.key === 'Enter') {
+      find = app.bar.get(); // what's typed, even before the filter caught up
       const first = shown().find((t) => !chosen.includes(t.tag));
       if (first) {
         toggle(first.tag, true);

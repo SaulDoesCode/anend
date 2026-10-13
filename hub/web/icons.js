@@ -66,7 +66,7 @@ function show(target) {
   const name = target.dataset.tip;
   if (!name) return;
   at = target;
-  box.replaceChildren(el('span', name), target.dataset.key ? el('kbd', target.dataset.key) : null);
+  box.replaceChildren(el('span', name), ...(target.dataset.key ? [el('kbd', target.dataset.key)] : []));
   box.hidden = false;
   box.classList.remove('in');
   place(target);
