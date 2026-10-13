@@ -52,7 +52,7 @@ pub enum Item {
     Note(String),
 }
 
-fn note_id(n: &Note) -> String {
+pub(crate) fn note_id(n: &Note) -> String {
     format!("{}\u{0}{}", n.title, n.markdown)
 }
 

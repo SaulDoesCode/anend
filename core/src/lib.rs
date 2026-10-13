@@ -1,6 +1,7 @@
 //! anend's saves, shared by the desktop app and the hub: notes, memories and their
 //! gematria search tables, lists, the forge, and weum's helpers. No user interface here.
 
+pub mod bundle;
 pub mod forge;
 pub mod lists;
 pub mod markdown;

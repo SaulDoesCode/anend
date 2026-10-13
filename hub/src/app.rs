@@ -5,6 +5,7 @@
 //! `{"id", "op", "args"}` and every answer `{"id", "ok": true, "data"}` or
 //! `{"id", "ok": false, "error"}`; docs/app-api.md lists the operations.
 
+use anend_core::bundle;
 use anend_core::forge::{self, Effect, Filter};
 use anend_core::memory::{self, Bucket, BucketKey, Hit, Ref};
 use anend_core::note::Note;
@@ -385,6 +386,45 @@ fn saves_call(ws: &Workspace, open: &str, op: &str, args: &Value) -> Res {
             Ok(Value::Null)
         }
 
+        "saves.export" => {
+            let name = match s(args, "name") {
+                "" => open.to_string(),
+                n => n.to_string(),
+            };
+            let b = if name.eq_ignore_ascii_case(open) {
+                bundle::export(&ws.store()?.1, open)?
+            } else {
+                let path = ws.path(&name)?;
+                if !path.exists() {
+                    return Err("there's no save by that name".into());
+                }
+                bundle::export(&Store::open(&path)?, &name)?
+            };
+            serde_json::to_value(b).map_err(|e| e.to_string())
+        }
+        "saves.import" => {
+            let b: bundle::Bundle =
+                serde_json::from_value(args.get("bundle").cloned().unwrap_or_default()).map_err(|e| format!("that bundle doesn't read: {e}"))?;
+            if args.get("merge").and_then(Value::as_bool).unwrap_or(false) {
+                let w = bundle::merge(&ws.store()?.1, &b)?;
+                return Ok(json!({ "merged": true, "memories": w.memories, "notes": w.notes, "lists": w.lists }));
+            }
+            let want = match s(args, "name") {
+                "" if b.name.is_empty() => "imported",
+                "" => b.name.as_str(),
+                n => n,
+            };
+            let mut n = clean(want)?;
+            let mut i = 2;
+            while ws.path(&n)?.exists() {
+                n = clean(&format!("{want} {i}"))?;
+                i += 1;
+            }
+            std::fs::create_dir_all(&ws.dir).map_err(|e| e.to_string())?;
+            let w = bundle::import(&Store::open(&ws.path(&n)?)?, &b)?;
+            Ok(json!({ "save": n, "memories": w.memories, "notes": w.notes, "lists": w.lists }))
+        }
+
         _ => Err(format!("there's no {op:?} here")),
     }
 }
@@ -677,6 +717,13 @@ mod tests {
             "the open one stays"
         );
         call(&ws, "saves.open", &json!({"name": "notes"})).unwrap();
+        let b = call(&ws, "saves.export", &json!({})).unwrap();
+        assert_eq!(b["anend"], 1);
+        let got = call(&ws, "saves.import", &json!({"bundle": b})).unwrap();
+        assert_eq!(got["save"], "notes 2");
+        assert_eq!(call(&ws, "saves.export", &json!({"name": "notes 2"})).unwrap()["memories"], b["memories"]);
+        assert_eq!(call(&ws, "saves.import", &json!({"bundle": b, "merge": true})).unwrap()["memories"], 0);
+        call(&ws, "saves.delete", &json!({"name": "notes 2"})).unwrap();
         call(&ws, "notes.delete", &json!({"key": key})).unwrap();
         call(&ws, "saves.rename", &json!({"name": "notes", "to": "renamed"})).unwrap();
         assert_eq!(call(&ws, "hello", &json!({})).unwrap()["save"], "renamed");

@@ -92,7 +92,7 @@ async fn run(owner: Result<String, String>, op: String, args: Value) -> app::Res
 #[handler]
 pub async fn api(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     let op = req.param::<String>("op").unwrap_or_default();
-    let args: Value = req.parse_json_with_max_size(8 << 20).await.unwrap_or(Value::Null);
+    let args: Value = req.parse_json_with_max_size(64 << 20).await.unwrap_or(Value::Null);
     let who = owner(me(depot));
     let r = run(who, op, args).await;
     if r.is_err() {
@@ -118,7 +118,7 @@ pub async fn socket(req: &mut Request, depot: &mut Depot, res: &mut Response) ->
     }
     let who = owner(me(depot));
     WebSocketUpgrade::new()
-        .max_message_size(16 << 20)
+        .max_message_size(64 << 20)
         .upgrade(req, res, move |ws| async move {
             let (mut tx, mut rx) = ws.split();
             while let Some(Ok(msg)) = rx.next().await {

@@ -24,6 +24,8 @@ A key is a memory's bytes joined by commas, or `note:<key>` for a note.
 | `saves.copy` | `{name, to?}` | `{save}` |
 | `saves.rename` | `{name, to}` | `{save}` |
 | `saves.delete` | `{name}` (not the open one) | `null` |
+| `saves.export` | `{name?}` (the open save if left out) | the save as a [bundle](#bundles) |
+| `saves.import` | `{bundle, name?, merge?}`: a new save keeping the bundle's keys (named after it, or `name`, with a number when taken), or with `merge: true` into the open save, where what's new gets fresh keys | `{save, memories, notes, lists}` or `{merged: true, memories, notes, lists}` |
 | `notes.list` | `{q?}` (words the notes must have) | `[{key, title, tags, created, modified, edits, preview, words}]`, newest first |
 | `notes.get` | `{key}` | the note: `{_key, title, markdown, tags, created, edits}` |
 | `notes.save` | `{note, text?}`: `text` is the editor's `# title` + markdown | the stored note (new notes get a key) |
@@ -57,3 +59,20 @@ A spread node goes into the world in front of a camera at the origin, looking do
 | `POST /app/saves` | multipart `file` (and `name`): a save from your computer into the workspace |
 | `POST /app/hub/{id}` | an approved hub save into the workspace; `?merge=1` merges it into the open save instead |
 | `POST /app/share` | JSON `{name?, description, tags}`: the open save onto the hub |
+
+## Bundles
+
+A save as plain JSON, keys and all (`core/src/bundle.rs`). The web app keeps one in the
+browser's IndexedDB when it runs without a hub, and moves saves between the browser and a
+workspace with `saves.export` and `saves.import`; a bundle is also a file you can keep.
+
+```json
+{ "anend": 1, "name": "notes",
+  "notes": [{ "_key": "1000000", "title": "a note", "markdown": "body", "tags": [], "created": "2026-10-13T09:00:00Z", "edits": [] }],
+  "memories": [["listen", [0]], ["silent", [1]]],
+  "lists": [["0", "1"], ["0", "note:1000000"]],
+  "settings": { "space map: home": "7b2278223a317d" } }
+```
+
+`memories` are weum's `[text, key bytes]` (1 to 4 bytes); `lists` are `[list, member]`
+labels (a memory's key bytes comma separated, or `note:<key>`); `settings` values are hex.
