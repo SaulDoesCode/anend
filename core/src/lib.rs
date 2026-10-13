@@ -4,10 +4,13 @@
 pub mod bundle;
 pub mod classifiers;
 pub mod classify;
+pub mod clsmodule;
+pub mod filters;
 pub mod fmath;
 pub mod forge;
 pub mod lists;
 pub mod markdown;
+pub mod memo;
 pub mod memory;
 pub mod note;
 pub mod simd;

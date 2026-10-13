@@ -146,6 +146,23 @@ impl Graph {
         self.outputs(node, text).swap_remove(node).expect("computed")
     }
 
+    /// `node`'s steered outputs and its pooled vector (what `Classifier::represent`
+    /// gives: the trunk never sees the extra inputs) from one pass, its upstream run first
+    pub fn read_node(&self, node: usize, text: &str) -> (Vec<Output>, Vec<f32>) {
+        let need = self.needed(node);
+        let mut outs: Vec<Option<Vec<Output>>> = vec![None; self.nodes.len()];
+        for i in 0..node {
+            if need[i] {
+                let x = self.extra_from(i, &outs);
+                outs[i] = Some(self.nodes[i].clf.predict(text, &x));
+            }
+        }
+        let x = self.extra_from(node, &outs);
+        let clf = &self.nodes[node].clf;
+        let r = clf.run(text, &x, &clf.gains(), None);
+        (clf.read(&r.logits), r.pooled)
+    }
+
     /// the extra inputs `node` gets for a text
     pub fn extra(&self, node: usize, text: &str) -> Vec<f32> {
         let outs = self.outputs(node, text);

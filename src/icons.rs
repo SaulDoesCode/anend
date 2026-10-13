@@ -11,6 +11,7 @@
 
 use bevy::asset::RenderAssetUsages;
 use bevy::feathers::controls::{ButtonVariant, FeathersButton};
+use bevy::feathers::theme::ThemedText;
 use bevy::image::{CompressedImageFormats, ImageSampler, ImageType};
 use bevy::picking::Pickable;
 use bevy::picking::hover::HoverMap;
@@ -173,6 +174,7 @@ pub fn icon_button(icon: Icon, tip: &'static str) -> impl Scene {
             @caption: bsn! {
                 IconImg(icon)
                 Node { width: px(16), height: px(16), flex_shrink: 0.0 }
+                ThemedText
                 Pickable::IGNORE
             }
         }
@@ -188,6 +190,7 @@ pub fn icon_scene_button(icon: Icon, tip: String, variant: ButtonVariant) -> imp
             @caption: bsn! {
                 IconImg(icon)
                 Node { width: px(16), height: px(16), flex_shrink: 0.0 }
+                ThemedText
                 Pickable::IGNORE
             },
             @variant: variant,
@@ -204,6 +207,7 @@ pub fn icon_label_button(icon: Icon, label: String, variant: ButtonVariant) -> i
             @caption: bsn_list! {
                 IconImg(icon)
                 Node { width: px(15), height: px(15), flex_shrink: 0.0, margin: UiRect::right(px(5)) }
+                ThemedText
                 Pickable::IGNORE
                 --
                 @bevy::feathers::display::caption(label)
@@ -237,11 +241,28 @@ pub fn attach_icons(
     }
 }
 
-/// an icon takes its text colour: a button's (propagated to it), or its own
-pub fn tint_icons(mut q: Query<(&TextColor, &mut ImageNode), (With<IconImg>, Or<(Changed<TextColor>, Added<ImageNode>)>)>) {
-    for (c, mut img) in &mut q {
-        if img.color != c.0 {
-            img.color = c.0;
+/// an icon takes its text colour: a button's (propagated to it), or its own; checked
+/// every frame (there are few icons), since zen and the palette change colours in place.
+/// A button's propagated colour is put back over zen's fade, so an icon in the chrome
+/// fades here, with zen
+pub fn tint_icons(
+    mut q: Query<(Entity, Option<&TextColor>, &mut ImageNode), With<IconImg>>,
+    parents: Query<&ChildOf>,
+    chrome: Query<(), With<crate::zen::Chrome>>,
+    zen: Res<crate::zen::Zen>,
+) {
+    for (e, c, mut img) in &mut q {
+        let Some(c) = c else { continue };
+        let mut want = c.0;
+        // its own colour was faded by zen already; a propagated one comes back whole
+        if zen.fade < 1.0
+            && want.alpha() > zen.fade + 0.01
+            && parents.iter_ancestors(e).any(|a| chrome.contains(a))
+        {
+            want = want.with_alpha(want.alpha() * zen.fade);
+        }
+        if img.color != want {
+            img.color = want;
         }
     }
 }

@@ -614,7 +614,10 @@ impl Store {
             let mut f = txn.open_table(FEEDBACK).map_err(err)?;
             f.retain_in((name, 0)..=(name, u64::MAX), |_, _| false).map_err(err)?;
         }
-        txn.commit().map_err(err)
+        txn.commit().map_err(err)?;
+        self.memo_clear(name)?;
+        self.unindex_classifier(name)?;
+        self.drop_validators_of(name)
     }
 
     /// the classifier as stored (untrained weights when it has none yet), its steering
@@ -1095,6 +1098,9 @@ pub struct Bundled {
     pub weights: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub feedback: Vec<FeedbackEntry>,
+    /// the classifiers that validate it (`filters::Validator`)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub validators: Vec<crate::filters::Validator>,
 }
 
 impl Store {
@@ -1105,6 +1111,7 @@ impl Store {
                 Ok(Bundled {
                     weights: self.classifier_weights(&d.name)?.map(|w| base64(&w)),
                     feedback: self.classifier_feedback(&d.name)?,
+                    validators: self.validators(&d.name)?,
                     definition: d,
                 })
             })
@@ -1134,6 +1141,13 @@ impl Store {
             }
         }
         txn.commit().map_err(err)?;
+        for b in all {
+            self.memo_clear(&b.definition.name)?;
+        }
+        // validators after every classifier is in, since they name each other
+        for b in all.iter().filter(|b| !b.validators.is_empty()) {
+            self.set_validators(&b.definition.name, &b.validators)?;
+        }
         Ok(all.len())
     }
 }

@@ -45,6 +45,9 @@ pub struct Bundle {
     pub settings: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub classifiers: Vec<crate::classifiers::Bundled>,
+    /// saved filters (`filters::Preset`), left out when there are none
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filters: Vec<crate::filters::Preset>,
 }
 
 fn hex(b: &[u8]) -> String {
@@ -76,6 +79,7 @@ pub fn export(store: &Store, name: &str) -> StoreResult<Bundle> {
         lists: store.all_lists()?.iter().map(|(l, m)| (l.label(), m.label())).collect(),
         settings,
         classifiers: store.export_classifiers()?,
+        filters: store.filter_presets()?,
     })
 }
 
@@ -103,6 +107,7 @@ pub fn import(store: &Store, b: &Bundle) -> StoreResult<Written> {
         }
     }
     store.import_classifiers(&b.classifiers)?;
+    store.import_filters(&b.filters)?;
     Ok(Written {
         memories,
         notes,
