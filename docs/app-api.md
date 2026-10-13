@@ -51,6 +51,65 @@ The forge's `filter` takes `{words, ordinal_from, ordinal_to, reversed_from, rev
 A spread node goes into the world in front of a camera at the origin, looking down
 -z, as `(x·k, y·k, -(d + z))` with `k = (d + z) / d`.
 
+## Classifiers
+
+A save's classifiers (`core/src/classifiers.rs`; the engine is `core/src/classify/`):
+each is trained on lists, one class per list, the members' texts as examples (a note
+reads as its title and markdown). `name` picks the classifier in every call. A `class` is
+a class name or its index. A text to judge is given as `key` (a memory or note) or
+`text`. Without a hub, the web app answers these with "classifiers need a hub for now".
+
+| op | args | data |
+|---|---|---|
+| `classify.list` | | `[summary]`: `{name, classes, lists, not, head, preset, inputs, trained, version, accuracy, macro_f1, examples, outputs, modified, training}` |
+| `classify.create` | `{name, classes: [list keys], not?: list key, preset?: tiny\|compact\|small\|base (compact), head?: single\|multi, inputs?: [name or {from, coupling}]}` | details (below) |
+| `classify.get` | `{name}` | details: the summary and `{steer, history, train, created, feedback_count, feedback: [latest 50], size: {weights, d_model, layers, blocks, max_len, steps, growth}, job}` |
+| `classify.delete` | `{name}` (not while it trains, nor while another builds on it) | `null` |
+| `classify.couple` | `{name, from, coupling}` (0 to 10; 0 keeps end-to-end feedback out of `from`) | summary |
+| `classify.train` | `{name, epochs?, lr?, batch?, max_steps?, threads?, rounds?, fresh?, wait?}` | the job: `{name, state: running\|done\|failed\|cancelled, round, rounds, epoch, step, steps, loss, lr, tokens_per_sec, losses: [[step, loss]], evals: [{step, round, loss, accuracy, macro_f1}], seconds, examples, error?, summary?}` |
+| `classify.job` | `{name}` | the job, or `{name, state: "idle"}` |
+| `classify.cancel` | `{name}` | the job (it ends `cancelled`, writing nothing) |
+| `classify.predict` | `{name, texts?: [text], keys?: [key]}` | `{classes, trained, results: [{key, text, probs, top, class, members}]}` |
+| `classify.search` | `{name, class, q?, limit?: 50}` | `{classes, class, stack: [names], trained, scanned, results: [{key, text, note, prob, top, top_class, member}]}`, most likely first |
+| `classify.contributions` | `{name, key or text, class?}` (the top class if left out) | `{class, text, results: [{name, share, input_share, grad_norm, classes, probs, top, top_class, judged}]}` |
+| `classify.steer` | `{name, steer: {bias?: [..] or {class: value}, temperature?, threshold?, gains?: {letter, word, side, extra}, reset?}, save?: true}` | `{steer, classes, saved, bias: {texts, mean_kl, max_kl, flipped, shift, prior, prior_skew, imbalance}}` (`bias` null until trained) |
+| `classify.feedback` | `{name, key or text, class, yes, weight?: 1}` | `{entry: {classifier, key, text, class, yes, weight, time, stack, before, after}}` |
+| `classify.feedback_stack` | the same | `{entry, report: {before, after, grad_norms, losses}, touched: [names]}` |
+| `classify.enlist` | `{name, class, threshold?}` (the steered threshold if left out) | `{list, name, members}` |
+| `classify.represent` | `{name, key or text}` | `{vector}` |
+| `classify.similar` | `{name, key or text, limit?: 20}` | `{text, results: [{key, text, note, cosine}]}` |
+
+- **Training** runs on a thread of its own: `classify.train` reads the lists then and
+  answers at once with the running job (`wait: true` answers when it's done). The
+  weights are written when it finishes, so the save stays usable meanwhile; feedback
+  on a classifier that's training is refused, and a run whose classifier changed
+  meanwhile (feedback, another run) isn't written. It continues from the trained
+  weights unless `fresh`. `rounds` above 1 trains that many rounds of `epochs`,
+  deciding after each to widen, add attention heads, deepen or prune (growth events go
+  in the history). The presets: `tiny` (4 k weights, for tests), `compact` (about 0.1 M,
+  the default: seconds for a few lists of short memories), `small` (0.9 M), `base`
+  (5 M).
+- **Steering** is the player's: a bias per class (added to the logits after the
+  temperature), the temperature, the threshold for membership, and gains on the input
+  channels. Training never changes it. `save: false` measures without keeping it. The
+  bias report compares steered with unsteered predictions over the classifier's own
+  training texts (up to 300).
+- **Feedback** on one classifier (`classify.feedback`) changes that classifier's weights
+  only: a few small steps on the text, replaying its earlier feedback and some of its
+  training texts. `classify.feedback_stack` goes end to end through the classifiers it
+  builds on (`inputs`), each link scaled by its coupling, and writes every classifier it
+  reached. `classify.contributions` names the classifiers that had a part in a result,
+  so each can be told yes or no on its own.
+- **Outputs as lists:** `classify.enlist` writes the texts at or above the threshold for a
+  class as a list headed by the memory `"<classifier>: <class>"` (replacing what that list
+  held), which other classifiers can be trained on.
+- Search, enlist and similar look through up to 20 000 memories and notes.
+
+In a [bundle](#bundles), `classifiers` carries each classifier as `{definition, weights?,
+feedback?}`, the weights base64 (the `ANENDCLS` file). It is left out when there are none,
+so older bundles read as before. Merging a bundle into a save leaves its classifiers out
+(their lists get new keys there), and so does the forge.
+
 ## Saves in and out
 
 | | |

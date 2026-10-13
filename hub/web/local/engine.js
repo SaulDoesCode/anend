@@ -161,6 +161,9 @@ const EFFECTS = { 'take away': 'take away', take_away: 'take away', '-': 'take a
 const i64 = (v) => (Number.isInteger(v) ? v : null);
 const flag = (v) => (typeof v === 'boolean' ? v : true);
 
+/// what every classify.* call answers without a hub
+export const CLASSIFIERS_NEED_A_HUB = 'classifiers need a hub for now';
+
 export class Engine {
   /// `kept`: {saves: [{name, bundle, allocator, modified}], open}
   constructor(kept = {}) {
@@ -260,6 +263,8 @@ export class Engine {
   call(op, args = {}) {
     args = args ?? {};
     if (op.startsWith('saves.')) return this.savesCall(this.store()[0], op, args);
+    // the classifiers' engine (core/src/classify) isn't ported to the browser yet
+    if (op.startsWith('classify.')) throw new Error(CLASSIFIERS_NEED_A_HUB);
     const [open, save] = this.store();
     switch (op) {
       case 'hello':

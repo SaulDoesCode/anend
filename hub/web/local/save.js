@@ -213,6 +213,8 @@ export class Save {
     this.frequency = new Multimap();
     this.lists = new Multimap();
     this.settings = new Map(); // name -> hex
+    // a hub's classifiers, carried as they came (bundle.rs `classifiers`): kept, not run
+    this.classifiers = [];
     this.version = 0; // bumped by every change, for the write-through
     this.modified = now();
   }
@@ -508,6 +510,7 @@ export class Save {
       memories: memories.map(([t, k]) => [t, bytesOf(k)]),
       lists: this.allLists().map(([l, m]) => [label(l), label(m)]),
       settings,
+      ...(this.classifiers.length ? { classifiers: this.classifiers } : {}),
     };
   }
 
@@ -573,6 +576,10 @@ export function readBundle(v) {
     if (!v.settings || typeof v.settings !== 'object' || Array.isArray(v.settings) || !Object.values(v.settings).every(isStr)) no('settings are names to hex');
     b.settings = { ...v.settings };
   }
+  if ('classifiers' in v) {
+    if (!Array.isArray(v.classifiers) || !v.classifiers.every((c) => c && typeof c === 'object' && c.definition && typeof c.definition === 'object')) no('classifiers are {definition, weights?, feedback?}');
+    b.classifiers = v.classifiers;
+  }
   return b;
 }
 
@@ -594,6 +601,7 @@ export function importBundle(s, b) {
     if (a !== null && c !== null) pairs.push([a, c]);
   }
   s.enlistMany(pairs);
+  s.classifiers = b.classifiers || [];
   for (const [n, v] of Object.entries(b.settings)) {
     const h = unhex(v);
     if (h !== null) s.settings.set(n, h);
