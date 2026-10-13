@@ -19,6 +19,12 @@ To pick up:
 4. Then item 5 (the guide) and item 6 (the review pass).
 5. Then the backlog under "Not started".
 
+- **Shortcuts differ between the apps:** the desktop has tags on Ctrl+7, while the web
+  app has classifiers on Ctrl+7 and tags on Ctrl+8. Match them when the desktop
+  classifiers view lands: classifiers on Ctrl+7 and tags on Ctrl+8 in both.
+- **Desktop to check:** the editor doesn't scroll with the mouse wheel (bevy's editable
+  text), and a long note once showed every note-list row filled in.
+
 Checks to run before every push:
 - `cargo clippy -p anend -p anend-core -p anend-hub`
 - `cargo test -p anend -p anend-core -p anend-hub`
