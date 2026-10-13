@@ -32,11 +32,12 @@ browses and shares straight from its settings. See [the hub](#the-hub).
 | **stats** | counts of notes, words, saves and tags |
 | **memory** | weum's memory view: short texts ("memories") and your notes, searched by gematria or by words |
 | **command bar** | the line at the bottom, one for every view (see below) |
-| **space** | weum's spatial memory (remem): fly through a room where memory texts float, laid out by their sums |
-| **settings** | saves, fonts, colours, sizes, zen mode and the bars (also **Ctrl+,**); the key remap menu is in there too (also **K**, or **Ctrl+K** in the space) |
+| **space** | weum's spatial memory (remem): fly through a room where memory texts float, laid out by their sums. **Ctrl+right click** a text and the search line in the top bar ends with its triangle: sides s (ordinal), r (reversed) and ⌊√(s·r)⌋, drawn small, with its angles (or "don't close" when the three can't make one) |
+| **lists** | every list in the save, side by side: its members (× takes one out), its figures (members, the sums of the whole list, its means, its gsum and pfR chain), its 26 letter frequencies drawn as a vector, and a grid of how alike every two lists are (the cosine of those vectors, as if each list were an entry in a learning system). Type in the bar and press Enter to put the text into the chosen list, or start a new one |
+| **settings** | saves, fonts, colours, sizes, zen mode and the bars: the top bar and the command bar can swap places, and the note list can sit on the right (also **Ctrl+,**); the key remap menu is in there too (also **K**, or **Ctrl+K** in the space) |
 
 Shortcuts: **Ctrl+S** save, **Ctrl+N** new note, **Ctrl+E** toggle view/edit, **Ctrl+B** the note list,
-**Ctrl+1..5** editor / reader / memory / stats / space, **Ctrl+,** settings, **/** the
+**Ctrl+1..6** editor / reader / memory / stats / space / lists, **Ctrl+,** settings, **/** the
 command bar. All of them can be changed in **keys**.
 
 Unsaved changes (marked `•` in the list) are saved when you switch notes or close the
@@ -261,8 +262,31 @@ redb database (people, sessions, saves' details, stars) and the save files in
 **Options**: `--addr` where it listens, `--url` the address people reach it at (for login
 links, and https cookies when it starts with `https://`), `--data` its folder, `--name` and
 `--about` what it calls itself, `--open`, `--max-upload` in MB (64), `--behind-proxy` to
-trust `X-Forwarded-For`, `--no-ratelimit`. It speaks plain http: put it behind a reverse
-proxy (Caddy, nginx) for https.
+trust `X-Forwarded-For`, `--no-ratelimit`, `--local` (below), and `--tls-cert` /
+`--tls-key` (PEM files) to speak https itself. Those two can also be set on
+**admin → server settings**, a page that only opens from the machine the hub runs on; they
+take effect at the next start. Without them it speaks plain http, and a reverse proxy
+(Caddy, nginx) can do the https.
+
+### The app in a browser
+
+The hub is also the app's daemon: **/app/** is the app as a web page (plain HTML, CSS and
+JavaScript in `hub/web/`, built into the binary, with [three.js](https://threejs.org) for the
+space), talking to the hub over a WebSocket (`/app/ws`, falling back to `POST
+/app/api/{op}`). It has the desktop app's views: the editor, reader, stats, the memory
+view, the space (the texts as crisp CSS3D labels in a WebGL room, the search line with its
+triangle), lists, and settings with saves (download and upload too), the forge, the hub
+and colours. Each person who logs in gets their own workspace of saves in
+`hub-data/users/<name>/saves`.
+
+```sh
+cargo run --release -p anend-hub -- --local     # just you: no logins, one workspace
+```
+
+`--local` is for running it on your own machine; on a shared hub people log in and the
+app is theirs. The calls are listed in [the app API](docs/app-api.md), so anything that
+speaks WebSocket or JSON can drive a save. To keep it running as a service,
+`hub/anend-hub.service` is a systemd unit (its comments say where to put things).
 
 Passwords are hashed with argon2; sessions and tokens are random and stored only as
 hashes; forms posted from other sites are refused; logins, joins and uploads are limited
@@ -272,18 +296,20 @@ per address.
 
 | file | what |
 |---|---|
+| `core/` | `anend-core`, what the app and the hub share: the note model, redb storage, markdown, the SIMD sums, the memory tables, weum, the spread layout and the triangle, list figures, the forge |
 | `src/main.rs` | startup, command line, window |
+| `src/lists_ui.rs` | the lists view |
 | `src/ui.rs` | the interface: layout scenes, actions, rebuild systems, markdown rendering |
 | `src/theme.rs` | the sand palette from `admin.css` as a feathers theme |
-| `src/note.rs` | the note model, title/body splitting, dates |
-| `src/store.rs` | redb storage |
-| `src/markdown.rs` | markdown to styled text blocks |
-| `src/simd.rs` | AVX2 tokenizer, gematria dual sum (ordinal, reversed, atbash) and letter frequencies |
-| `src/memory.rs` | the memory and search tables: weum's allocator, token index, the four gsearch buckets, lists |
-| `src/weum.rs` | ports of memory.js helpers: pfR, the gsum line, the search variations |
+| `core/src/note.rs` | the note model, title/body splitting, dates |
+| `core/src/store.rs` | redb storage |
+| `core/src/markdown.rs` | markdown to styled text blocks |
+| `core/src/simd.rs` | AVX2 tokenizer, gematria dual sum (ordinal, reversed, atbash) and letter frequencies |
+| `core/src/memory.rs` | the memory and search tables: weum's allocator, token index, the four gsearch buckets, lists |
+| `core/src/weum.rs` | ports of memory.js helpers: pfR, the gsum line, the search variations |
 | `src/memory_ui.rs` | the memory view |
 | `src/keys.rs` | actions, bindings and the remap logic |
-| `src/spread.rs` | spread.js: the layout of memory texts by their sums, checked step by step against the original |
+| `core/src/spread.rs` | spread.js: the layout of memory texts by their sums, checked step by step against the original |
 | `src/space.rs` | the space: flying, the texts as slug billboards, picking, the terminal's memory commands, maps |
 | `src/space_ui.rs` | the space's panels: position line, help, metrics, sliders, search line |
 | `src/bar.rs` | the command bar every view shares |
@@ -303,3 +329,7 @@ per address.
 | `hub/src/auth.rs` | passwords, sessions, tokens, login links, rate limits |
 | `hub/src/web.rs`, `hub/templates/` | the pages |
 | `hub/src/api.rs` | the JSON API |
+| `hub/src/app.rs` | the app's calls on a workspace of saves (the daemon) |
+| `hub/src/appweb.rs` | the web app's files, its WebSocket and posts, moving saves in and out |
+| `hub/src/server.rs`, `hub/templates/server.html` | the https settings page |
+| `hub/web/` | the web app: `app.js` (routes, bars, keys), `api.js` (the socket), `space.js` (three.js), `views/` |

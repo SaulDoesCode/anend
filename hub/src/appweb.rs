@@ -40,10 +40,14 @@ pub async fn files(req: &mut Request, res: &mut Response) {
     } else {
         rest
     };
-    match Files::get(&path) {
+    serve(res, &path);
+}
+
+fn serve(res: &mut Response, path: &str) {
+    match Files::get(path) {
         Some(f) => {
             res.headers_mut()
-                .insert(CONTENT_TYPE, HeaderValue::from_static(kind(&path)));
+                .insert(CONTENT_TYPE, HeaderValue::from_static(kind(path)));
             res.headers_mut()
                 .insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
             res.write_body(f.data.into_owned()).ok();
@@ -55,9 +59,15 @@ pub async fn files(req: &mut Request, res: &mut Response) {
     }
 }
 
+/// `/app` goes to `/app/` (so the page's own links resolve), and `/app/` is the page:
+/// the router matches both here
 #[handler]
-pub async fn app_root(res: &mut Response) {
-    res.render(Redirect::found("/app/"));
+pub async fn app_root(req: &mut Request, res: &mut Response) {
+    if req.uri().path().ends_with('/') {
+        serve(res, "index.html");
+    } else {
+        res.render(Redirect::found("/app/"));
+    }
 }
 
 fn envelope(id: &Value, r: app::Res) -> Value {

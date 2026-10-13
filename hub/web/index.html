@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#404040">
+<title>anend</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<script>
+  // the colours before the first paint, so the page doesn't flash sand under night
+  try {
+    const s = JSON.parse(localStorage.getItem('anend.colours') || 'null');
+    if (s && s.preset === 'night') document.documentElement.dataset.dark = 'dark';
+  } catch {}
+</script>
+</head>
+<body>
+<header id="top" class="bar">
+  <nav id="tabs"></nav>
+  <div id="searchline" hidden></div>
+  <span class="grow"></span>
+  <span id="status" role="status" aria-live="polite"></span>
+  <button id="settings-button" type="button" title="settings (Ctrl+,)">settings</button>
+</header>
+<main id="views"></main>
+<footer id="bar" class="bar">
+  <label id="bar-name" for="bar-input">notes</label>
+  <input id="bar-input" type="text" autocomplete="off" spellcheck="false" aria-label="command bar">
+  <div id="bar-right"></div>
+</footer>
+<div id="settings" class="overlay" hidden></div>
+<noscript><p style="padding:20px">the app needs javascript</p></noscript>
+<script type="module" src="app.js"></script>
+</body>
+</html>
