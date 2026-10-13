@@ -113,7 +113,7 @@ fn inv_fact() -> &'static [Dd; 31] {
     })
 }
 
-const PIO2: [f64; 3] = [1.5707963267948966, 6.123233995736766e-17, -1.4973849048591698e-33];
+const PIO2: [f64; 3] = [std::f64::consts::FRAC_PI_2, 6.123233995736766e-17, -1.4973849048591698e-33];
 
 /// x − n·π/2 for |x| up to a few thousand (the spread's angles are far smaller)
 fn reduce(x: f64) -> (i64, Dd) {
