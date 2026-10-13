@@ -16,6 +16,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use crate::config::{Config, save_name};
 use crate::hub::{self, HubInfo, HubSave, Me, SavesPage, Sort, Uploaded};
 use crate::settings::{Settings, human_size, keep_note};
+use crate::icons::Icon;
 use crate::theme::colors;
 use crate::ui::{Ctx, Db, Fonts, Status, plain_scene_button, text};
 
@@ -370,7 +371,7 @@ pub fn section() -> impl Scene {
                     on(enter_field)
                 ]
                 --
-                @plain_scene_button("connect".into(), ButtonVariant::Primary)
+                @crate::icons::icon_label_button(Icon::Hub, "connect".into(), ButtonVariant::Primary)
                 on(|_a: On<Activate>, mut hub: ResMut<HubState>, mut config: ResMut<Config>| {
                     hub.connect(&mut config);
                 })
@@ -396,7 +397,7 @@ pub fn section() -> impl Scene {
                     on(enter_field)
                 ]
                 --
-                @plain_scene_button("search".into(), ButtonVariant::Normal)
+                @crate::icons::icon_button(Icon::Search, "search the hub")
                 on(|_a: On<Activate>, mut hub: ResMut<HubState>| hub.browse(0))
             ]
             --
@@ -462,7 +463,8 @@ pub fn section() -> impl Scene {
                     on(edit_field)
                 ]
                 --
-                @plain_scene_button("upload".into(), ButtonVariant::Primary)
+                @crate::icons::icon_label_button(Icon::Upload, "upload".into(), ButtonVariant::Primary)
+                crate::icons::Tip({"share this save on the hub".to_string()})
                 on(upload)
             ]
             --
@@ -611,6 +613,17 @@ fn plural(n: u64, one: &str, many: &str) -> String {
     format!("{} {}", n, if n == 1 { one } else { many })
 }
 
+/// an icon button, or "…" while what it started is under way
+fn icon_or_wait(commands: &mut Commands, parent: Entity, busy: bool, icon: Icon, tip: &str) -> Entity {
+    if busy {
+        return button(commands, parent, "…", ButtonVariant::Normal);
+    }
+    commands
+        .spawn_scene(crate::icons::icon_scene_button(icon, tip.to_string(), ButtonVariant::Normal))
+        .insert(ChildOf(parent))
+        .id()
+}
+
 fn button(commands: &mut Commands, parent: Entity, label: &str, variant: ButtonVariant) -> Entity {
     commands
         .spawn_scene(plain_scene_button(label.to_string(), variant))
@@ -756,25 +769,30 @@ pub fn rebuild_hub(
             ))
             .id();
         let busy = hub.downloading.as_ref() == Some(&save.id);
-        let b = button(
-            &mut commands,
-            foot,
-            if busy { "…" } else { "download" },
-            ButtonVariant::Normal,
-        );
-        let stats = format!(
-            "{} · {}",
-            plural(save.stars, "star", "stars"),
-            plural(save.downloads, "download", "downloads")
-        );
+        let b = icon_or_wait(&mut commands, foot, busy, Icon::Download, "download as a new save");
         let merging = hub.merging.as_ref() == Some(&save.id);
-        let m = button(
-            &mut commands,
-            foot,
-            if merging { "…" } else { "merge" },
-            ButtonVariant::Normal,
-        );
-        text(&mut commands, foot, &stats, &fonts.regular, 12.0, colors::TEXT_DIM);
+        let m = icon_or_wait(&mut commands, foot, merging, Icon::Merge, "merge into the open save");
+        commands.spawn((Node { flex_grow: 1.0, ..default() }, ChildOf(foot)));
+        // its stars and downloads, as counts beside their icons
+        for (icon, n, one, many) in [
+            (Icon::Star, save.stars, "star", "stars"),
+            (Icon::Download, save.downloads, "download", "downloads"),
+        ] {
+            let stat = commands
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: px(3),
+                        ..default()
+                    },
+                    crate::icons::Tip(plural(n, one, many)),
+                    ChildOf(foot),
+                ))
+                .id();
+            crate::icons::spawn_icon(&mut commands, stat, icon, 13.0, colors::TEXT_DIM);
+            text(&mut commands, stat, &n.to_string(), &fonts.regular, 12.0, colors::TEXT_DIM);
+        }
         let for_merge = save.clone();
         let save = save.clone();
         commands.entity(b).observe(

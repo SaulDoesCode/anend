@@ -309,6 +309,44 @@ fn plain(commands: &mut Commands, parent: Entity, s: impl Into<String>, fonts: &
         .id()
 }
 
+/// how many texts and buckets the space holds, as counts beside their icons
+fn counts(commands: &mut Commands, parent: Entity, texts: usize, buckets: usize, dot: bool, fonts: &Fonts) {
+    let row = commands
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                align_self: AlignSelf::Center,
+                column_gap: px(4),
+                margin: UiRect::left(px(if dot { 8.0 } else { 0.0 })),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            ChildOf(parent),
+        ))
+        .id();
+    for (icon, n, one, many) in [
+        (crate::icons::Icon::Text, texts, "text", "texts"),
+        (crate::icons::Icon::Bucket, buckets, "bucket", "buckets"),
+    ] {
+        let item = commands
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: px(2),
+                    margin: UiRect::right(px(4)),
+                    ..default()
+                },
+                crate::icons::Tip(format!("{} {} in the space", n, if n == 1 { one } else { many })),
+                ChildOf(row),
+            ))
+            .id();
+        crate::icons::spawn_icon(commands, item, icon, 13.0, BAR_TEXT);
+        bold_in(commands, item, n.to_string(), fonts, BAR_TEXT);
+    }
+}
+
 fn bold_in(commands: &mut Commands, parent: Entity, s: impl Into<String>, fonts: &Fonts, ink: Color) -> Entity {
     commands
         .spawn((
@@ -651,11 +689,11 @@ pub fn rebuild_qline(
         return;
     }
     commands.entity(q).despawn_related::<Children>();
-    let count = format!(" · {} texts · {} buckets", st.mem_index.len(), st.spread.order.len());
+    let (n_texts, n_buckets) = (st.mem_index.len(), st.spread.order.len());
     match st.qline.clone() {
         Qline::None => {
             if !st.mem_index.is_empty() {
-                plain(&mut commands, q, count.trim_start_matches(" · "), &fonts, BAR_TEXT);
+                counts(&mut commands, q, n_texts, n_buckets, false, &fonts);
             }
         }
         Qline::Gsearch { n, rev } => {
@@ -663,10 +701,11 @@ pub fn rebuild_qline(
             plain(
                 &mut commands,
                 q,
-                format!(" {}{}", if rev { "reversed" } else { "ordinal" }, count),
+                format!(" {}", if rev { "reversed" } else { "ordinal" }),
                 &fonts,
                 BAR_TEXT,
             );
+            counts(&mut commands, q, n_texts, n_buckets, true, &fonts);
             if n > 1 {
                 let holder = commands
                     .spawn((
@@ -688,10 +727,11 @@ pub fn rebuild_qline(
             };
             plain(&mut commands, q, word, &fonts, BAR_TEXT);
             bold_in(&mut commands, q, k, &fonts, BAR_TEXT);
-            plain(&mut commands, q, count, &fonts, BAR_TEXT);
+            counts(&mut commands, q, n_texts, n_buckets, true, &fonts);
         }
         Qline::Search(v) => {
-            plain(&mut commands, q, format!("search “{}”{}", v, count), &fonts, BAR_TEXT);
+            plain(&mut commands, q, format!("search “{}”", v), &fonts, BAR_TEXT);
+            counts(&mut commands, q, n_texts, n_buckets, true, &fonts);
         }
         Qline::Maps(names) => {
             plain(

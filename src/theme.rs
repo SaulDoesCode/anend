@@ -7,6 +7,7 @@
 use bevy::color::{Alpha, Color, Luminance, Mix};
 use bevy::feathers::dark_theme::create_dark_theme;
 use bevy::feathers::theme::ThemeProps;
+use bevy::feathers::controls::ButtonVariant;
 use bevy::feathers::tokens::semantic;
 
 pub mod colors {
@@ -48,13 +49,14 @@ pub fn sand_theme(p: &Palette) -> ThemeProps {
         p.get(Role::Dim),
         p.get(Role::Accent),
     );
-    // text on a button: dark on a light one, light on a dark one
+    // text on a button: dark or light, whichever stands out more from it
+    let light = Color::hsl(0.0, 0.0, 0.94);
     let on = |c: Color| {
-        if crate::palette::brightness(c) > 0.2 {
-            near_black
-        } else {
-            Color::hsl(0.0, 0.0, 0.94)
-        }
+        let ratio = |a: Color, b: Color| {
+            let (la, lb) = (crate::palette::brightness(a), crate::palette::brightness(b));
+            (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+        };
+        if ratio(near_black, c) >= ratio(light, c) { near_black } else { light }
     };
     // feathers puts every button's text in this one colour, plain and accent buttons alike
     let on_accent = on(mood.mix(&accent, 0.5));
@@ -91,4 +93,46 @@ pub fn sand_theme(p: &Palette) -> ThemeProps {
         theme.semantic_base.insert(token, color);
     }
     theme
+}
+
+/// Feathers gives every button the same text colour, the one that reads on a filled
+/// button. A plain button has no fill until it's hovered, so on a dark card its text
+/// would vanish: its text takes the card's text colour instead.
+#[allow(clippy::type_complexity)]
+pub fn plain_button_text(
+    palette: bevy::prelude::Res<Palette>,
+    all: bevy::prelude::Query<(bevy::prelude::Entity, &ButtonVariant, bevy::prelude::Has<bevy::ui::InteractionDisabled>)>,
+    changed: bevy::prelude::Query<
+        bevy::prelude::Entity,
+        bevy::prelude::Or<(
+            bevy::prelude::Changed<bevy::feathers::theme::InheritableThemeTextColor>,
+            bevy::prelude::Changed<ButtonVariant>,
+        )>,
+    >,
+    mut commands: bevy::prelude::Commands,
+) {
+    use bevy::prelude::DetectChanges;
+    let text = p_text(&palette);
+    let mut fix = |e, v: &ButtonVariant, disabled: bool| {
+        if *v == ButtonVariant::Plain && !disabled {
+            commands
+                .entity(e)
+                .try_insert(bevy::app::Propagate(bevy::prelude::TextColor(text)));
+        }
+    };
+    if palette.is_changed() {
+        for (e, v, d) in &all {
+            fix(e, v, d);
+        }
+    } else {
+        for e in &changed {
+            if let Ok((e, v, d)) = all.get(e) {
+                fix(e, v, d);
+            }
+        }
+    }
+}
+
+fn p_text(p: &Palette) -> Color {
+    p.get(Role::Text)
 }

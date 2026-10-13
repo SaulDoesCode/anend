@@ -1094,7 +1094,11 @@ pub fn rebuild_reader(
         );
         let key = n.key.clone();
         commands
-            .spawn_scene(plain_scene_button("edit".into(), ButtonVariant::Plain))
+            .spawn_scene(crate::icons::icon_scene_button(
+                Icon::Edit,
+                "edit this note".into(),
+                ButtonVariant::Plain,
+            ))
             .insert(ChildOf(title_row))
             .observe(move |_activate: On<Activate>, mut ctx: Ctx| ctx.open(&key));
 
@@ -1188,19 +1192,38 @@ pub fn rebuild_stats(
                 note::long_date(&first),
                 note::relative(&last)
             ),
-            _ => "no notes yet, press \"+ new\" in the editor".into(),
+            _ => "no notes yet: start one with \"new note\" in the editor".into(),
         },
     ] {
         text(&mut commands, card, &line, &fonts.regular, 15.0, colors::TEXT);
     }
     if !tags.is_empty() {
         text(&mut commands, card, "tags", &fonts.bold, 18.0, colors::TEXT);
-        let list = tags
-            .iter()
-            .map(|(t, c)| format!("#{} ({})", t, c))
-            .collect::<Vec<_>>()
-            .join("   ");
-        text(&mut commands, card, &list, &fonts.regular, 15.0, colors::TEXT);
+        let row = commands
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: px(4),
+                    row_gap: px(4),
+                    ..default()
+                },
+                ChildOf(card),
+            ))
+            .id();
+        // each tag opens the tags view with it chosen
+        for (t, c) in tags {
+            commands
+                .spawn_scene(plain_scene_button(format!("#{}  {}", t, c), ButtonVariant::Normal))
+                .insert((ChildOf(row), Tip(format!("see the {} {} with #{}", c, plural(c, "note"), t))))
+                .observe(
+                    move |_a: On<Activate>, mut ctx: Ctx, mut st: ResMut<crate::tags_ui::TagsState>| {
+                        st.chosen = vec![t.clone()];
+                        st.redraw = true;
+                        go_to(&mut ctx, Route::Tags);
+                    },
+                );
+        }
     }
 }
 

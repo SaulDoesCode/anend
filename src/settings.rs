@@ -290,19 +290,20 @@ pub fn menu() -> impl Scene {
                     TextColor(colors::TEXT)
                     Node { flex_grow: 1.0 }
                     --
-                    @crate::ui::plain_scene_button("forge".into(), ButtonVariant::Normal)
+                    @crate::icons::icon_button(crate::icons::Icon::Forge, "the forge: build a save from lists and texts")
                     on(|_a: On<Activate>, mut forge: ResMut<crate::forge_ui::ForgeState>, mut s: ResMut<Settings>| {
                         s.toggle();
                         forge.toggle();
                     })
                     --
-                    @crate::ui::plain_scene_button("keys".into(), ButtonVariant::Normal)
+                    @crate::icons::icon_button(crate::icons::Icon::Keys, "keys: rebind any action")
+                    crate::icons::TipKey({crate::keys::Action::OpenRemap})
                     on(|_a: On<Activate>, mut remap: ResMut<crate::keys::Remap>| {
                         remap.open = true;
                         remap.changed = true;
                     })
                     --
-                    @crate::ui::plain_scene_button("close".into(), ButtonVariant::Primary)
+                    @crate::icons::icon_button(crate::icons::Icon::Close, "close the settings (Escape)")
                     on(|_a: On<Activate>, mut s: ResMut<Settings>| s.toggle())
                 ]
                 --
@@ -798,6 +799,19 @@ fn button(
     f(&mut e);
 }
 
+/// an icon button, its name in a tooltip
+fn icon_btn(
+    commands: &mut Commands,
+    parent: Entity,
+    icon: crate::icons::Icon,
+    tip: &str,
+    f: impl FnOnce(&mut EntityCommands),
+) {
+    let mut e = commands.spawn_scene(crate::icons::icon_scene_button(icon, tip.to_string(), ButtonVariant::Normal));
+    e.insert(ChildOf(parent));
+    f(&mut e);
+}
+
 /// a toggle: a little box and its label
 fn toggle(commands: &mut Commands, parent: Entity, label: &str, on: bool, fonts: &Fonts) -> Entity {
     let r = commands
@@ -1007,14 +1021,14 @@ pub fn rebuild_settings(
             });
         }
         let p = path.clone();
-        button(&mut commands, card, "copy", ButtonVariant::Normal, |e| {
+        icon_btn(&mut commands, card, crate::icons::Icon::Copy, "copy this save", |e| {
             e.observe(move |_a: On<Activate>, mut commands: Commands| {
                 let p = p.clone();
                 commands.queue(move |w: &mut World| duplicate(w, p));
             });
         });
         let p = path.clone();
-        button(&mut commands, card, "rename", ButtonVariant::Normal, |e| {
+        icon_btn(&mut commands, card, crate::icons::Icon::Rename, "rename this save", |e| {
             e.observe(move |_a: On<Activate>, mut s: ResMut<Settings>| {
                 s.renaming = Some(p.clone());
                 s.confirm_delete = None;
@@ -1023,7 +1037,7 @@ pub fn rebuild_settings(
         });
         if !save.current {
             let p = path.clone();
-            button(&mut commands, card, "delete", ButtonVariant::Normal, |e| {
+            icon_btn(&mut commands, card, crate::icons::Icon::Delete, "delete this save", |e| {
                 e.observe(move |_a: On<Activate>, mut s: ResMut<Settings>| {
                     s.confirm_delete = Some(p.clone());
                     s.renaming = None;

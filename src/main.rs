@@ -315,7 +315,7 @@ fn run(args: Args) {
             zen::nav_autohide,
             zen::list_autohide,
             zen::apply_placement,
-            (icons::attach_icons, icons::tint_icons, icons::tooltips).chain(),
+            (theme::plain_button_text, icons::attach_icons, icons::tint_icons, icons::tooltips).chain(),
         )
             .chain()
             .after(space_ui::build_opts),
