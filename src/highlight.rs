@@ -657,7 +657,7 @@ mod tests {
 
     #[test]
     fn code_links_and_tags() {
-        assert_eq!(show("a `b*c*` d"), "..mcccm..");
+        assert_eq!(show("a `b*c*` d"), "..mccccm..");
         assert_eq!(show("[t](u)"), "mLmmum");
         assert_eq!(show("see #rust."), "....ggggg.");
         assert_eq!(show("x https://a.b y"), "..uuuuuuuuuuu..");
@@ -668,7 +668,7 @@ mod tests {
     fn blocks() {
         assert_eq!(show("- item"), "l.....");
         assert_eq!(show("12. x"), "lll..");
-        assert_eq!(show("> q *e*"), "qqqqmEm");
+        assert_eq!(show("> q *e*"), "q.qqmEm");
         assert_eq!(show("|a|b|\n|-|-|"), "t.t.t.ttttt");
         assert_eq!(show("---"), "rrr");
         assert_eq!(show("    code"), "cccccccc");
