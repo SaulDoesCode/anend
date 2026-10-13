@@ -35,6 +35,7 @@ impl Store {
         txn.open_table(NOTES).map_err(err)?;
         txn.open_table(META).map_err(err)?;
         crate::memory::create_tables(&txn)?;
+        crate::classifiers::create_tables(&txn)?;
         txn.commit().map_err(err)?;
         let store = Store {
             db,

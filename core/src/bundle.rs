@@ -11,6 +11,13 @@
 //!
 //! Memories are weum's `[text, key bytes]`, list links are pairs of labels (`Ref::label`:
 //! a memory's key bytes comma separated, or `note:<key>`), and settings are hex.
+//!
+//! `classifiers` is optional and left out when a save has none, so bundles from before
+//! classifiers read as they did and the version stays 1: each is
+//! `{definition, weights?, feedback?}` (`classifiers::Bundled`), the weights being the
+//! `ANENDCLS` file in standard padded base64 (a third smaller than hex, and weights are
+//! the one big thing in a bundle). `merge` (and the forge) leave classifiers out: their
+//! classes are lists by key, and merged lists get fresh keys.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -36,6 +43,8 @@ pub struct Bundle {
     pub lists: Vec<(String, String)>,
     #[serde(default)]
     pub settings: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub classifiers: Vec<crate::classifiers::Bundled>,
 }
 
 fn hex(b: &[u8]) -> String {
@@ -66,6 +75,7 @@ pub fn export(store: &Store, name: &str) -> StoreResult<Bundle> {
         memories,
         lists: store.all_lists()?.iter().map(|(l, m)| (l.label(), m.label())).collect(),
         settings,
+        classifiers: store.export_classifiers()?,
     })
 }
 
@@ -92,6 +102,7 @@ pub fn import(store: &Store, b: &Bundle) -> StoreResult<Written> {
             store.set_setting(n, &v)?;
         }
     }
+    store.import_classifiers(&b.classifiers)?;
     Ok(Written {
         memories,
         notes,
