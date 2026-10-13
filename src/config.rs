@@ -36,6 +36,10 @@ pub struct Config {
     /// slide the note list away until the pointer comes to the left edge
     pub hide_list: bool,
     pub keymap: Option<serde_json::Value>,
+    /// the anend hub saves are shared on, e.g. `http://localhost:8080`
+    pub hub_url: String,
+    /// an app token made on the hub's profile page
+    pub hub_token: String,
 }
 
 impl Default for Config {
@@ -55,6 +59,8 @@ impl Default for Config {
             space_sums: true,
             hide_list: false,
             keymap: None,
+            hub_url: String::new(),
+            hub_token: String::new(),
         }
     }
 }
@@ -146,5 +152,6 @@ mod tests {
         let c: Config = serde_json::from_str(r#"{"zen": true}"#).unwrap();
         assert!(c.zen && !c.hide_bar);
         assert_eq!(c.zen_delay, 2.5);
+        assert!(c.hub_url.is_empty() && c.hub_token.is_empty());
     }
 }

@@ -7,6 +7,8 @@
 
 mod bar;
 mod config;
+mod hub;
+mod hub_ui;
 mod keys;
 mod markdown;
 mod memory;
@@ -194,6 +196,7 @@ fn main() {
     .init_resource::<space::Space>()
     .init_resource::<bar::BarState>()
     .init_resource::<settings::Settings>()
+    .init_resource::<hub_ui::HubState>()
     .init_resource::<typeface::Typeface>()
     .init_resource::<zen::Zen>()
     .insert_resource(keymap)
@@ -255,6 +258,7 @@ fn main() {
         (
             bar::notes_side,
             settings::rebuild_settings,
+            (hub_ui::poll_hub, hub_ui::rebuild_hub),
             typeface::apply_typeface,
             typeface::apply_memory_font,
             palette::tag_paints,

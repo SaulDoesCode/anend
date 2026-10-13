@@ -1,6 +1,6 @@
 name: release
 
-# Push a tag like v0.2.0 to build the app and the server for Linux and Windows and
+# Push a tag like v0.2.0 to build the app and the hub for Linux and Windows and
 # attach them to a GitHub release of that name. "Run workflow" on the Actions tab
 # builds them too, as downloadable artifacts, without making a release.
 on:
@@ -36,14 +36,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev libfontconfig1-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - name: build the app
-        run: cargo build --release --locked
-      - name: build the server
-        run: go build -trimpath -ldflags "-s -w" -o anend-server${{ matrix.exe }} .
+      - name: build the app and the hub
+        run: cargo build --release --locked --workspace
 
       - name: package
         shell: bash
@@ -51,7 +45,7 @@ jobs:
           dir=anend-${{ github.ref_name }}-${{ matrix.name }}
           dir=${dir//\//-}
           mkdir "$dir"
-          cp target/release/anend${{ matrix.exe }} anend-server${{ matrix.exe }} README.md LICENSE "$dir"/
+          cp target/release/anend${{ matrix.exe }} target/release/anend-hub${{ matrix.exe }} README.md LICENSE "$dir"/
           if [ "$RUNNER_OS" = "Windows" ]; then
             7z a "$dir.zip" "$dir" >/dev/null
             echo "ASSET=$dir.zip" >> "$GITHUB_ENV"

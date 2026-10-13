@@ -1,6 +1,6 @@
 //! The settings menu: the saves (each database is a save you can load, start, copy,
-//! rename or delete, like a game's), where they're kept, the fonts, zen mode and the top
-//! bar. Opened from the top bar or with Ctrl+, ; Escape closes it.
+//! rename or delete, like a game's), where they're kept, a hub to share them on (see
+//! hub_ui.rs), the fonts, zen mode and the top bar. Opened from the top bar or with Ctrl+, ; Escape closes it.
 
 use bevy::feathers::controls::{
     ButtonVariant, ColorChannel, ColorSlider, FeathersColorSlider, FeathersTextInput, FeathersTextInputContainer,
@@ -223,7 +223,7 @@ pub fn sync_color_editor(
     }
 }
 
-fn heading(label: &'static str) -> impl Scene {
+pub(crate) fn heading(label: &'static str) -> impl Scene {
     bsn! {
         Text(label)
         TextFont {
@@ -389,6 +389,10 @@ pub fn menu() -> impl Scene {
                     font_size: FontSize::Px(12.0),
                 }
                 TextColor(colors::TEXT_DIM)
+                --
+                @heading("hub")
+                --
+                @crate::hub_ui::section()
                 --
                 @heading("fonts")
                 --
@@ -563,7 +567,7 @@ fn same(a: &Path, b: &Path) -> bool {
     a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y)
 }
 
-fn human_size(n: u64) -> String {
+pub(crate) fn human_size(n: u64) -> String {
     if n >= 1 << 20 {
         format!("{:.1} MB", n as f64 / (1u64 << 20) as f64)
     } else {
@@ -584,7 +588,7 @@ fn say(world: &mut World, msg: impl Into<String>) {
 }
 
 /// saves the open note if it can be, before the database changes under it
-fn keep_note(ctx: &mut Ctx) {
+pub(crate) fn keep_note(ctx: &mut Ctx) {
     if ctx.is_dirty() && !ctx.session.active.title.trim().is_empty() {
         ctx.save();
     }
@@ -672,7 +676,8 @@ fn shellexpand(p: &str) -> String {
     }
 }
 
-fn unique(dir: &Path, name: &str) -> PathBuf {
+/// `name.redb` in `dir`, or `name 2.redb` and on if that's taken
+pub(crate) fn unique(dir: &Path, name: &str) -> PathBuf {
     let mut p = dir.join(format!("{}.redb", name));
     let mut i = 2;
     while p.exists() {
@@ -708,22 +713,9 @@ fn rename(world: &mut World, path: PathBuf, name: String) {
     }
     let moved = std::fs::rename(&path, &to);
     if current {
-        let reopen = if moved.is_ok() { &to } else { &path };
-        match Store::open(reopen) {
-            Ok(store) => {
-                world.insert_resource(Db(store));
-                let mut config = world.resource_mut::<Config>();
-                config.current = Some(reopen.clone());
-                config.save();
-            }
-            Err(e) => {
-                // nothing to fall back on: start an empty save so the app keeps working
-                let fresh = unique(&world.resource::<Config>().saves_dir.clone(), "recovered");
-                if let Ok(store) = Store::open(&fresh) {
-                    install(world, store);
-                }
-                return say(world, format!("couldn't reopen the save: {}", e));
-            }
+        let path = if moved.is_ok() { &to } else { &path };
+        if let Err(e) = reopen(world, path) {
+            return say(world, e);
         }
     }
     world.resource_mut::<Settings>().renaming = None;
@@ -731,6 +723,40 @@ fn rename(world: &mut World, path: PathBuf, name: String) {
         Ok(()) => say(world, format!("renamed to {}", name)),
         Err(e) => say(world, format!("couldn't rename: {}", e)),
     }
+}
+
+/// opens a closed save again; with nothing to fall back on, starts an empty save so the
+/// app keeps working
+fn reopen(world: &mut World, path: &Path) -> Result<(), String> {
+    match Store::open(path) {
+        Ok(store) => {
+            world.insert_resource(Db(store));
+            let mut config = world.resource_mut::<Config>();
+            config.current = Some(path.to_path_buf());
+            config.save();
+            Ok(())
+        }
+        Err(e) => {
+            let fresh = unique(&world.resource::<Config>().saves_dir.clone(), "recovered");
+            if let Ok(store) = Store::open(&fresh) {
+                install(world, store);
+            }
+            Err(format!("couldn't reopen the save: {}", e))
+        }
+    }
+}
+
+/// the open save's name and bytes; it's closed for the read, since redb holds the file
+/// (and marks it unfinished) while it's open, then opened again
+pub(crate) fn read_open_save(world: &mut World, max: u64) -> Result<(String, Vec<u8>), String> {
+    let path = world.resource::<Db>().0.path().to_path_buf();
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > max) {
+        return Err(format!("this save is over {}", human_size(max)));
+    }
+    drop(world.remove_resource::<Db>());
+    let bytes = std::fs::read(&path).map_err(|e| format!("couldn't read the save: {}", e));
+    reopen(world, &path)?;
+    bytes.map(|b| (save_name(&path), b))
 }
 
 fn delete(world: &mut World, path: PathBuf) {

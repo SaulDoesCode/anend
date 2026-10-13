@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}admin · {% endblock %}
+{% block main %}
+<section class="card">
+  <h2>saves waiting ({{ waiting_saves.len() }})</h2>
+  {% if waiting_saves.is_empty() %}<p class="dim">Nothing to look at.</p>{% else %}
+  <table>
+    <tr><th>save</th><th>by</th><th>inside</th><th>sent</th><th></th></tr>
+    {% for s in waiting_saves %}
+    <tr>
+      <td><a href="/saves/{{ s.id }}">{{ s.name }}</a>{% if s.version > 1 %} <span class="dim small">v{{ s.version }}</span>{% endif %}</td>
+      <td><a href="/u/{{ s.author }}">{{ s.author }}</a></td>
+      <td class="small">{{ s.memories }} memories · {{ s.notes }} notes · {{ s.size }}</td>
+      <td class="dim small">{{ s.ago }}</td>
+      <td><form class="row" method="post" action="/admin/saves/{{ s.id }}">
+        <button class="small primary" name="action" value="approve">let in</button>
+        <input type="text" name="note" placeholder="why not (for reject)" style="width: 160px">
+        <button class="small bad" name="action" value="reject">turn down</button>
+      </form></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</section>
+<section class="card">
+  <h2>people applying ({{ applied.len() }})</h2>
+  {% if applied.is_empty() %}<p class="dim">Nobody waiting.{% if open %} (Joining is open: new accounts don't wait.){% endif %}</p>{% else %}
+  <table>
+    <tr><th>name</th><th>email</th><th>why they want in</th><th>applied</th><th></th></tr>
+    {% for u in applied %}
+    <tr><td>{{ u.name }}</td><td class="small">{{ u.email }}</td><td class="small" style="max-width: 360px">{{ u.why }}</td><td class="dim small">{{ u.ago }}</td>
+      <td><form class="row" method="post" action="/admin/users/{{ u.name }}"><button class="small primary" name="action" value="approve">let in</button><button class="small bad" name="action" value="reject">turn down</button></form></td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</section>
+<section class="card">
+  <h2>everyone ({{ users.len() }})</h2>
+  <table>
+    <tr><th>name</th><th>role</th><th>standing</th><th>points</th><th>email</th><th></th></tr>
+    {% for u in users %}
+    <tr><td><a href="/u/{{ u.name }}">{{ u.name }}</a></td><td>{{ u.role }}</td><td><span class="pill {{ u.standing }}">{{ u.standing }}</span></td><td>{{ u.points }}</td><td class="small">{{ u.email }}</td>
+      <td><form class="row" method="post" action="/admin/users/{{ u.name }}">
+        <select name="action">
+          <option value="">…</option>
+          <option value="member">make member</option>
+          <option value="trusted">make trusted (no review)</option>
+          <option value="admin">make admin</option>
+          {% if u.standing == "banned" %}<option value="unban">unban</option>{% else %}<option value="ban">ban</option>{% endif %}
+          <option value="link">make a login link</option>
+        </select>
+        <button class="small">do</button>
+      </form></td></tr>
+    {% endfor %}
+  </table>
+</section>
+<section class="card">
+  <h2>all saves ({{ all_saves.len() }})</h2>
+  <table>
+    <tr><th>save</th><th>by</th><th>status</th><th>★</th><th>↓</th><th></th></tr>
+    {% for s in all_saves %}
+    <tr><td><a href="/saves/{{ s.id }}">{{ s.name }}</a>{% if s.featured %} <span class="pill">featured</span>{% endif %}</td><td>{{ s.author }}</td><td><span class="pill {{ s.status }}">{{ s.status }}</span></td><td>{{ s.stars }}</td><td>{{ s.downloads }}</td>
+      <td><form class="row" method="post" action="/admin/saves/{{ s.id }}">
+        <select name="action"><option value="">…</option><option value="approve">approve</option><option value="reject">turn down</option><option value="feature">feature</option><option value="unfeature">unfeature</option><option value="remove">remove for good</option></select>
+        <button class="small">do</button></form></td></tr>
+    {% endfor %}
+  </table>
+</section>
+{% endblock %}

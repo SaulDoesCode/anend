@@ -109,12 +109,10 @@ LOCK
 *.out
 .cache
 *.lock
-assets/googleb8218fe872fed5b7.html
 
 # Rust
 target/
 !Cargo.lock
 
-# Go server
-/anend-server
-/data/
+# the hub's data when run from here
+/hub-data/

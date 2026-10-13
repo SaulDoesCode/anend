@@ -1,15 +1,18 @@
 # anend
 
 anend started out as a Go blog server: posts ("writs") in ArangoDB, magic-link email
-logins, and a sand-coloured admin panel for writing markdown. That server still lives
-here (`main.go`, `backend/`, `assets/`, `templates/`), now on modern Go with an embedded
-database; see [the old server](#the-old-server).
+logins, and a sand-coloured admin panel for writing markdown. Both halves are Rust now.
 
 **anend notes** is its Rust successor: a desktop markdown note app with no server. It
 keeps the admin panel's look and workflow, and is built with
 [Bevy 0.20](https://bevy.org)'s feathers widgets. Notes are stored locally in an
 embedded [redb](https://www.redb.org) (4.3) database, and you can keep several of them
 as saves and swap between them like a game's.
+
+**anend hub** is what became of the server: a self-hosted place to share saves, the way a
+game has a workshop or a mod hub. People join, share their saves, star and download each
+other's, and earn points, levels and badges when others use what they made; the app
+browses and shares straight from its settings. See [the hub](#the-hub).
 
 ![the editor](docs/editor.png)
 ![the reader](docs/reader.png)
@@ -73,6 +76,12 @@ Also in settings:
 | **hide the top bar** | it slides up out of the way and back down when the pointer comes to the top edge |
 | **slide the note list away** | the same as **Ctrl+B**: it stays away until the pointer comes to the left edge |
 | **the space's search line** | in the space, what was searched, its counts and its sum's prime factor chain sit in the top bar (fading with it under zen); this turns that off |
+
+**hub**, in settings, under the saves: give it a hub's address and an app token (made on
+your page on the hub) and connect. Browse the hub's saves (search, and sort by new, stars,
+downloads or featured) and **download** one: it's checked, then lands in your saves
+folder, ready to load. **Share this save** sends the open one with a name, description and
+tags. The app only ever talks to the hub you give it, on a background thread.
 
 These settings and your key bindings live in `config.json` in the platform config folder
 (`~/.config/anend` on Linux, `~/Library/Application Support/anend` on macOS,
@@ -172,7 +181,7 @@ and image memories aren't part of it.
 
 Builds for Linux and Windows are on the repository's
 [releases page](https://github.com/SaulDoesCode/anend/releases), each with the app
-(`anend`) and the old server (`anend-server`). On Linux the app needs the Wayland or X11
+(`anend`) and the hub (`anend-hub`). On Linux the app needs the Wayland or X11
 libraries a desktop already has.
 
 They're made by GitHub Actions (`.github/workflows/release.yml`). To make a release, tag a
@@ -183,7 +192,7 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-The workflow builds both programs on Linux and Windows and attaches a `.tar.gz` and a
+The workflow builds both on Linux and Windows and attaches a `.tar.gz` and a
 `.zip` to a new release named after the tag, with notes listing the merged pull requests.
 **Run workflow** on the repository's Actions tab (release) builds the same packages as
 downloadable artifacts without making a release. `.github/workflows/ci.yml` checks
@@ -220,55 +229,44 @@ anend --import writs.json
 
 This keeps their keys, titles, markdown, tags, dates and edit history.
 
-## The old server
+## The hub
 
-The Go server still runs: the front page, writ pages, the admin panel and its editor,
-looking the way they did. ArangoDB is gone; everything sits in one
-[bbolt](https://github.com/etcd-io/bbolt) file. It needs Go 1.26 or newer (an older `go`
-fetches a newer toolchain by itself).
+![the hub](docs/hub.png)
 
-```sh
-go build -o anend-server .
-./anend-server -admin you@example.com
-```
-
-That makes you an admin (creating the user if needed, with a username taken from the
-email, or `-admin-name`) and prints a login link. Open it and you land in `/admin`. The
-site is at `http://localhost:8080`; `-addr` changes where it listens and `-url` the
-address put in links, when it sits behind a proxy.
-
-Logging in works like before, with a username and email in the form on the front page,
-but the magic link is printed in the server's terminal instead of emailed:
-
-```
-2026/10/13 04:18:32 login link for saul <saul@example.com> (good for 15m0s, once):
-
-    http://localhost:8080/auth/Xq3v...a-long-random-token...k9E
-```
-
-A link works once, within 15 minutes, and logs you in for a week. Run with
-`-admin you@example.com` again whenever you need a fresh one. To email links instead, give
-it an SMTP server: `-smtp mail.example.com:587 -smtp-user you -smtp-from you@example.com`,
-with the password in `ANEND_SMTP_PASSWORD`. If sending fails the link is printed anyway.
-
-The data lives in `data/anend.db` (`-db` puts it elsewhere): writs, users, and
-sessions, the last stored only as hashes of the cookies. Back it up by copying the file
-while the server is stopped.
-
-To bring writs over from the ArangoDB days, use the same export as for the app:
+`anend-hub` (in `hub/`, built with [Salvo](https://salvo.rs)) is a website and an API for
+sharing saves. Start one and make yourself its admin:
 
 ```sh
-./anend-server -import writs.json
+cargo run --release -p anend-hub -- --admin yourname
 ```
 
-It reads arangoexport's json or jsonl, keeps keys, slugs, dates, edit history, views and
-the `public` flag, renders the markdown again and exits. Importing twice replaces rather
-than duplicates.
+It prints a login link (good once, within an hour); open it and set a password on your
+page. The hub listens on `127.0.0.1:8080` and keeps everything in `./hub-data`: its own
+redb database (people, sessions, saves' details, stars) and the save files in
+`hub-data/saves/`. Back it up by copying the folder while the hub is stopped.
 
-Other flags: `-dev` reads `assets/` and `templates/` from disk (otherwise they're built
-into the binary) and logs every request, `-tls-cert`/`-tls-key` serve https directly,
-`-no-ratelimit` turns off the login request limits. `go test ./...` runs the store tests
-and a login-to-published-writ run through the http api.
+**What's in it**
+
+| | |
+|---|---|
+| **the grid** | every shared save as a card, headed by its name's ordinal and reversed sums in a colour taken from them; search by words, author or `#tag`, sort by new, stars, downloads or featured |
+| **a save's page** | its description and tags, some of its memories with their sums, its notes' titles, stars, downloads, and the download |
+| **joining** | name and password (email optional). By default it's an application an admin answers; `--open` lets people straight in |
+| **sharing** | upload a `.redb` save with a name, description and tags. The hub opens its own copy to check it's a save the app made (a copy of an open save is fine) and reads its counts and memories. It waits for an admin unless you're trusted; a new version keeps its stars and downloads |
+| **the game** | points when others use what you share: 50 when a save is let in, 5 a star, 1 for each person who downloads it, 100 when it's featured, and 1 for each save you star. Levels go seeker, reader, scribe, counter, cipherer, numerologist, gematrian, archivist, palace keeper, sage; badges for milestones (first save, prolific, beloved, well read, library, memory palace, curator, founder...). Stars and downloads count once per person, and your own don't count |
+| **people** | a page each, with level, badges, saves and a bio; the leaderboard ranks them, and the most starred saves |
+| **admin** | saves waiting (let in, or turn down with a reason), people applying, everyone (member, trusted (no review), admin, ban, make a login link), and every save (approve, turn down, feature, remove) |
+| **app tokens** | made on your page and pasted into the app (settings → hub), which uses them to share (see [the API](docs/hub-api.md)) |
+
+**Options**: `--addr` where it listens, `--url` the address people reach it at (for login
+links, and https cookies when it starts with `https://`), `--data` its folder, `--name` and
+`--about` what it calls itself, `--open`, `--max-upload` in MB (64), `--behind-proxy` to
+trust `X-Forwarded-For`, `--no-ratelimit`. It speaks plain http: put it behind a reverse
+proxy (Caddy, nginx) for https.
+
+Passwords are hashed with argon2; sessions and tokens are random and stored only as
+hashes; forms posted from other sites are refused; logins, joins and uploads are limited
+per address.
 
 ## Layout
 
@@ -295,3 +293,13 @@ and a login-to-published-writ run through the http api.
 | `src/zen.rs` | zen's fade, the hiding top bar and the sliding note list |
 | `src/palette.rs` | the colours the settings change, and repainting the interface with them |
 | `src/sizing.rs` | the interface scale and the bars' heights |
+| `src/hub.rs` | talking to a hub: its API, downloads, uploads |
+| `src/hub_ui.rs` | the hub section of the settings |
+| `hub/src/main.rs` | the hub: command line and routes |
+| `hub/src/hub.rs` | taking uploads in, finding saves, stars, downloads, reviews |
+| `hub/src/store.rs` | the hub's redb tables |
+| `hub/src/inspect.rs` | reading an uploaded save |
+| `hub/src/game.rs` | points, levels and badges |
+| `hub/src/auth.rs` | passwords, sessions, tokens, login links, rate limits |
+| `hub/src/web.rs`, `hub/templates/` | the pages |
+| `hub/src/api.rs` | the JSON API |

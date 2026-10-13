@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}leaderboard · {% endblock %}
+{% block main %}
+<div class="cols">
+  <section class="card">
+    <h2>the most points</h2>
+    <table>
+      <tr><th></th><th>who</th><th>level</th><th>points</th><th>saves</th><th>stars</th></tr>
+      {% for r in people %}
+      <tr><td class="rank">{{ loop.index }}</td><td><span class="row"><span class="avatar small" style="--h: {{ r.hue }}">{{ r.initial }}</span><a href="/u/{{ r.name }}">{{ r.name }}</a></span></td><td>{{ r.level }} <span class="dim small">{{ r.title }}</span></td><td>{{ r.points }}</td><td>{{ r.saves }}</td><td>{{ r.stars }}</td></tr>
+      {% endfor %}
+    </table>
+  </section>
+  <section class="card">
+    <h2>the most starred</h2>
+    <table>
+      {% for c in top %}<tr><td class="rank">{{ loop.index }}</td><td><a href="/saves/{{ c.id }}">{{ c.name }}</a><br><span class="dim small">by {{ c.author }}</span></td><td>★ {{ c.stars }}</td></tr>{% endfor %}
+    </table>
+    <h3 style="margin-top: 16px">levels</h3>
+    <table>{% for l in levels %}<tr><td>{{ l.0 }}</td><td>{{ l.1 }}</td><td class="dim small">{{ l.2 }} points</td></tr>{% endfor %}</table>
+  </section>
+</div>
+{% endblock %}

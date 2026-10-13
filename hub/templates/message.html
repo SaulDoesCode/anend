@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }} · {% endblock %}
+{% block main %}
+<section class="card narrow">
+  <h2>{{ heading }}</h2>
+  <p>{{ text }}</p>
+  <p><a class="btn" href="{{ back }}">{{ back_label }}</a></p>
+</section>
+{% endblock %}
