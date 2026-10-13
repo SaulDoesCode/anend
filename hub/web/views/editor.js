@@ -3,9 +3,11 @@
 
 import { el, clear, debounce, confirmClick } from '../util.js';
 import { render } from '../markdown.js';
+import { lines as hlLines } from '../highlight.js';
+import { icon, iconButton, tip } from '../icons.js';
 
 let app;
-let wrap, listEl, chips, tagInput, pad, rendered, toggleBtn, saveBtn, deleteBtn, count, hint;
+let wrap, listEl, chips, tagInput, pad, padWrap, mirror, rendered, toggleBtn, saveBtn, deleteBtn, count, hint;
 let notes = [];
 let q = '';
 let mode = 'edit';
@@ -64,7 +66,7 @@ function drawTags() {
   clear(
     chips,
     (cur?.tags || []).map((t) =>
-      el('button.chip', { type: 'button', title: 'remove this tag', onclick: () => removeTag(t) }, t, el('span.x', '×')),
+      el('button.chip', { type: 'button', title: `remove #${t}`, 'aria-label': `remove the tag ${t}`, onclick: () => removeTag(t) }, `#${t}`, el('span.x', '×')),
     ),
   );
 }
@@ -89,13 +91,16 @@ function touch() {
     drawList();
   } else if (!cur.note._key) drawList();
   hint.textContent = 'unsaved';
+  saveBtn.classList.add('dirty');
 }
 
 function drawBody() {
   const viewing = mode === 'view';
-  pad.hidden = viewing;
+  padWrap.hidden = viewing;
   rendered.hidden = !viewing;
-  toggleBtn.textContent = viewing ? 'edit' : 'view';
+  toggleBtn.replaceChildren(icon(viewing ? 'edit' : 'view'));
+  tip(toggleBtn, viewing ? 'edit' : 'view', 'Ctrl+E');
+  if (!viewing) paint();
   if (viewing) {
     const title = titleOf(cur.text);
     const body = cur.text.replace(/^\s*#\s+.*(\n|$)/, '');
@@ -103,10 +108,72 @@ function drawBody() {
   }
 }
 
+// ---------------------------------------------------------------- highlighting
+
+// past this the text is shown plainly (highlighting it would slow typing down)
+const PLAIN_PAST = 250_000;
+let painted = []; // the highlighted lines in the mirror now
+let paintFrame = 0;
+
+function paintSoon() {
+  if (!paintFrame) paintFrame = requestAnimationFrame(paint);
+}
+
+// the mirror catches up with the textarea: only the lines that changed are redrawn
+function paint() {
+  cancelAnimationFrame(paintFrame);
+  paintFrame = 0;
+  const text = pad.value;
+  const plain = text.length > PLAIN_PAST;
+  padWrap.classList.toggle('plain', plain);
+  const next = plain ? [] : hlLines(text);
+  let a = 0;
+  while (a < next.length && a < painted.length && next[a] === painted[a]) a++;
+  let b = 0;
+  while (b < next.length - a && b < painted.length - a && next[next.length - 1 - b] === painted[painted.length - 1 - b]) b++;
+  const kids = mirror.children;
+  // lines changed in place (typing within a line): their divs are kept
+  const same = Math.min(painted.length - b, next.length - b) - a;
+  for (let i = a; i < a + same; i++) {
+    const l = next[i];
+    const k = kids[i];
+    k.className = l.cls ? `ln ${l.cls}` : 'ln';
+    k.innerHTML = l.html;
+  }
+  a += same;
+  for (let i = painted.length - b - 1; i >= a; i--) kids[i].remove();
+  if (next.length - b > a) {
+    const tpl = document.createElement('template');
+    tpl.innerHTML = next
+      .slice(a, next.length - b)
+      .map((l) => `<div class="ln${l.cls ? ' ' + l.cls : ''}">${l.html}</div>`)
+      .join('');
+    mirror.insertBefore(tpl.content, kids[a] || null);
+  }
+  painted = next;
+  mirror.scrollTop = pad.scrollTop;
+}
+
+// the same width for the text as the textarea has beside its scrollbar (its gutter is
+// kept whether it scrolls or not, so this only changes when the pad's size does)
+let gutter = -1;
+function fitMirror() {
+  const bar = pad.offsetWidth - pad.clientWidth;
+  if (bar !== gutter) {
+    gutter = bar;
+    mirror.style.paddingRight = `${10 + bar}px`;
+  }
+  mirror.scrollTop = pad.scrollTop;
+  mirror.scrollLeft = pad.scrollLeft;
+}
+
 function show_(state) {
   cur = state;
   pad.value = cur.text;
+  pad.scrollTop = 0;
+  paint();
   hint.textContent = cur.dirty ? 'unsaved' : '';
+  saveBtn.classList.toggle('dirty', cur.dirty);
   deleteBtn.disabled = !cur.note._key;
   drawTags();
   drawBody();
@@ -164,7 +231,8 @@ async function save(quiet = false) {
     if (cur === was) {
       cur.note = stored;
       cur.dirty = pad.value !== cur.text ? true : false;
-      hint.textContent = '';
+      hint.textContent = cur.dirty ? 'unsaved' : '';
+      saveBtn.classList.toggle('dirty', cur.dirty);
       deleteBtn.disabled = false;
       if (isNew) history.replaceState(null, '', `#/editor/${encodeURIComponent(stored._key)}`);
     }
@@ -221,7 +289,7 @@ export default {
     listEl = el('ul.notes');
     const side = el(
       'aside.card.notelist',
-      el('button.primary.new', { type: 'button', title: 'new note (Ctrl+N)', onclick: () => newNote() }, '+ new'),
+      iconButton('new', 'new note', { key: 'Ctrl+N', text: 'new note', cls: 'primary.new', onclick: () => newNote() }),
       listEl,
     );
     chips = el('div.chips');
@@ -243,9 +311,9 @@ export default {
         }
       },
     });
-    toggleBtn = el('button', { type: 'button', title: 'view / edit (Ctrl+E)', onclick: toggleMode }, 'view');
-    saveBtn = el('button', { type: 'button', title: 'save (Ctrl+S)', onclick: () => save() }, 'save');
-    deleteBtn = confirmClick(el('button', { type: 'button', title: 'delete this note' }, 'delete'), 'sure?', remove);
+    toggleBtn = iconButton('view', 'view', { key: 'Ctrl+E', onclick: toggleMode });
+    saveBtn = iconButton('save', 'save', { key: 'Ctrl+S', onclick: () => save() });
+    deleteBtn = confirmClick(iconButton('delete', 'delete this note (click twice)'), 'delete?', remove);
     hint = el('span.hint');
     pad = el('textarea.pad', {
       spellcheck: true,
@@ -253,32 +321,42 @@ export default {
       oninput: () => {
         cur.text = pad.value;
         touch();
+        paintSoon();
+      },
+      onscroll: () => {
+        mirror.scrollTop = pad.scrollTop;
+        mirror.scrollLeft = pad.scrollLeft;
       },
       onkeydown: (e) => {
-        // tab indents instead of leaving
-        if (e.key === 'Tab' && !e.ctrlKey && !e.altKey) {
+        // tab indents instead of leaving (as an edit the browser can undo)
+        if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
           e.preventDefault();
-          pad.setRangeText('  ', pad.selectionStart, pad.selectionEnd, 'end');
-          cur.text = pad.value;
-          touch();
+          if (!document.execCommand('insertText', false, '  ')) {
+            pad.setRangeText('  ', pad.selectionStart, pad.selectionEnd, 'end');
+            pad.dispatchEvent(new Event('input'));
+          }
         }
       },
     });
+    // the highlighted copy of the text under the (see-through) textarea
+    mirror = el('div.pad-mirror', { 'aria-hidden': 'true' });
+    padWrap = el('div.pad-wrap', mirror, pad);
+    new ResizeObserver(() => fitMirror()).observe(pad);
     rendered = el('article.rendered.md', { hidden: true });
     const card = el(
       'div.card.editor-card',
       el(
         'div.editor-head',
-        el('button.slide', { type: 'button', title: 'the note list (Ctrl+B)', onclick: toggleList }, '‹'),
+        iconButton('sidebar', 'the note list', { key: 'Ctrl+B', cls: 'plain.slide', onclick: toggleList }),
         chips,
         el('span.grow'),
         hint,
-        tagInput,
+        el('label.tagbox', { title: 'add tags: Enter or a comma after each' }, icon('tag'), tagInput),
         toggleBtn,
         saveBtn,
         deleteBtn,
       ),
-      el('div.editor-body', pad, rendered),
+      el('div.editor-body', padWrap, rendered),
     );
     const edge = el('div.edge', { onmouseenter: () => wrap.classList.add('peek') });
     side.addEventListener('mouseleave', () => wrap.classList.remove('peek'));

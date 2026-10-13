@@ -171,15 +171,60 @@ ul.notes li.empty { cursor: default; }
 .editor-wrap.collapsed .slide { transform: scaleX(-1); }
 .editor-card { display: flex; flex-direction: column; gap: 8px; padding: 8px; min-height: 0; min-width: 0; }
 .editor-head { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.editor-head .slide { width: 22px; padding: 0; }
+.editor-head .slide { width: 26px; }
+button.ibtn.dirty { background: var(--accent); }
+label.tagbox { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 2px 0 7px; background: var(--pad); border-radius: var(--radius); color: var(--dim); }
+label.tagbox:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+label.tagbox svg.icon { width: 14px; height: 14px; }
+label.tagbox .tag-input { background: none; padding-left: 0; outline: 0; }
+.notelist button.new { justify-content: center; }
 .chips { display: flex; gap: 4px; flex-wrap: wrap; }
 .tag-input { width: 94px; }
 .hint { font-size: 12px; color: var(--dim); }
 .editor-body { flex: 1; min-height: 0; display: flex; }
-textarea.pad {
-  flex: 1; height: auto; resize: none; padding: 10px; border-radius: var(--radius);
-  background: var(--pad); color: var(--text); font: 15px/1.2 var(--mono); tab-size: 2;
+/* the pad: a see-through textarea over its highlighted mirror, letter for letter */
+/* (the mirror sits apart from the textarea's layout, so redrawing a line of it never
+   makes the browser lay out the whole textarea again) */
+.pad-wrap { flex: 1; min-width: 0; min-height: 0; display: flex; overflow: hidden; position: relative; background: var(--pad); border-radius: var(--radius); }
+.pad-wrap > textarea { flex: 1; min-width: 0; min-height: 0; }
+textarea.pad, .pad-mirror {
+  margin: 0; border: 0; padding: 10px; font: 15px/1.35 var(--mono); tab-size: 2; letter-spacing: 0;
+  white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; font-variant-ligatures: none;
 }
+textarea.pad {
+  height: auto; resize: none; border-radius: var(--radius); outline-offset: -2px;
+  background: transparent; color: transparent; caret-color: var(--text); overflow: auto; scrollbar-gutter: stable;
+  position: relative; z-index: 1;
+}
+textarea.pad::selection { background: color-mix(in srgb, var(--accent) 45%, transparent); color: transparent; }
+textarea.pad::placeholder { color: var(--dim); }
+.pad-mirror { position: absolute; inset: 0; overflow: hidden; color: var(--text); padding-bottom: 60vh; pointer-events: none; contain: strict; }
+.pad-wrap.plain textarea.pad { color: var(--text); }
+.pad-wrap.plain .pad-mirror { visibility: hidden; }
+.pad-mirror .ln:empty::after { content: "\200b"; }
+/* the colours: from the palette, so sand, night and your own all have them */
+.pad-mirror .hl-mark, .pad-mirror .hl-quote-mark, .pad-mirror .hl-rule, .pad-mirror .hl-table-sep, .pad-mirror .hl-fence { color: color-mix(in srgb, var(--dim) 80%, var(--pad)); }
+.pad-mirror .hl-h { color: var(--link); font-weight: 700; }
+.pad-mirror .hl-hline1 .hl-mark, .pad-mirror .hl-hline2 .hl-mark { color: color-mix(in srgb, var(--link) 55%, var(--pad)); }
+.pad-mirror .hl-strong { font-weight: 700; }
+.pad-mirror .hl-em { font-style: italic; }
+.pad-mirror .hl-strike { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--text) 55%, transparent); }
+.pad-mirror .hl-code { background: var(--code); border-radius: 3px; color: color-mix(in srgb, var(--link) 45%, var(--text)); }
+.pad-mirror .ln.hl-block { background: var(--code); color: color-mix(in srgb, var(--link) 35%, var(--text)); }
+.pad-mirror .ln.hl-block-start { border-radius: var(--radius) var(--radius) 0 0; }
+.pad-mirror .ln.hl-block-end { border-radius: 0 0 var(--radius) var(--radius); }
+.pad-mirror .hl-lang { color: var(--hl-accent); }
+.pad-mirror .hl-link .hl-ltext { color: var(--link); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--link) 45%, transparent); text-underline-offset: 2px; }
+.pad-mirror .hl-url { color: color-mix(in srgb, var(--link) 60%, var(--dim)); }
+.pad-mirror .hl-auto { text-decoration: underline; text-underline-offset: 2px; }
+.pad-mirror .hl-bullet, .pad-mirror .hl-pipe { color: var(--hl-accent); font-weight: 700; }
+.pad-mirror .hl-box { color: var(--hl-accent); }
+.pad-mirror .hl-done-text { color: var(--dim); }
+.pad-mirror .hl-quote { color: var(--dim); font-style: italic; }
+.pad-mirror .hl-quote-mark { color: var(--hl-accent); }
+.pad-mirror .hl-tag { color: var(--link); background: color-mix(in srgb, var(--accent) 30%, transparent); border-radius: 3px; }
+.pad-mirror { --hl-accent: color-mix(in srgb, var(--accent) 50%, var(--link)); }
+:root[data-dark="dark"] .pad-mirror { --hl-accent: color-mix(in srgb, var(--accent) 70%, var(--text)); }
 .rendered { flex: 1; overflow: auto; padding: 4px 10px; }
 
 /* markdown, the reader's and the editor's view */
