@@ -63,12 +63,7 @@ impl Workspaces {
     pub fn get(&self, owner: &str) -> Arc<Workspace> {
         let mut all = self.all.lock().unwrap_or_else(|e| e.into_inner());
         all.entry(owner.to_string())
-            .or_insert_with(|| {
-                Arc::new(Workspace {
-                    dir: self.root.join(owner).join("saves"),
-                    open: Mutex::new(None),
-                })
-            })
+            .or_insert_with(|| Arc::new(Workspace::new(self.root.join(owner).join("saves"))))
             .clone()
     }
 }
@@ -95,6 +90,13 @@ pub fn clean(name: &str) -> Result<String, String> {
 }
 
 impl Workspace {
+    pub fn new(dir: PathBuf) -> Workspace {
+        Workspace {
+            dir,
+            open: Mutex::new(None),
+        }
+    }
+
     pub fn path(&self, name: &str) -> Result<PathBuf, String> {
         Ok(self.dir.join(format!("{}.redb", clean(name)?)))
     }
@@ -437,6 +439,9 @@ pub fn call(ws: &Workspace, op: &str, args: &Value) -> Res {
         return saves_call(ws, &open, op, args);
     }
     let (open, store) = ws.store()?;
+    if op.starts_with("classify.") {
+        return crate::classify::call(store, op, args);
+    }
     let store: &Store = &store;
     match op {
         "hello" => Ok(json!({

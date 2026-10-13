@@ -6,6 +6,7 @@ mod api;
 mod app;
 mod appweb;
 mod auth;
+mod classify;
 mod game;
 mod hub;
 mod inspect;
