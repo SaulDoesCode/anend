@@ -1226,7 +1226,7 @@ mod tests {
     fn definitions_weights_feedback_and_bundles() {
         let (s, path) = temp_store("store");
         let (f, r) = lists(&s);
-        assert!(s.create_classifier("x", &[f.clone()], None, HeadKind::Single, "tiny", vec![]).is_err());
+        assert!(s.create_classifier("x", std::slice::from_ref(&f), None, HeadKind::Single, "tiny", vec![]).is_err());
         let def = s
             .create_classifier("kind", &[f.clone(), r.clone()], None, HeadKind::Single, "tiny", vec![])
             .unwrap();
