@@ -3,6 +3,40 @@
 Where the work stands, for picking it up in a new session. Branch:
 `claude/adoring-pascal-5nk7o1`.
 
+## The queue (asked for on 13 Oct, in this order)
+
+Overall aim, in the user's words: "sensibilization, ergonomics, visual appeal of the app,
+feature security"; the game for players; every feature properly supported in the
+interface, not stubs.
+
+1. **Classifiers phase 2** (running): storage in saves, the hub's `classify.*` calls,
+   the web app's classifiers view.
+2. **Desktop polish** (`src/`):
+   - icon buttons with hover titles in place of large or common text buttons (e.g. a
+     bucket icon for "2 buckets")
+   - a tags view: type tags to find what's tagged, scroll all tags with counts, click
+     and multi-select to see the results
+   - markdown syntax highlighting in the editor
+   - the window icon (`assets/icon.png`)
+3. **Web polish** (`hub/web/`), the same items: icons with titles, the tags view, editor
+   highlighting. The favicon is done.
+4. **Classifiers phase 3:**
+   - **Classifier buckets:** memoized classifier outputs per memory and note, kept with
+     the classifier's version, giving similarity search by classifier and buckets beside
+     ordinal, reversed, atbash and frequency.
+   - **Colouring:** a classifier-based colour scheme in the memory and space views.
+   - **Boolean filters:** hierarchical include/exclude filters over classifiers (A and
+     not B...), and classifiers that validate or invalidate other classifiers.
+   - **Indexing a note:** a view where a note picks which classifiers to index it on;
+     search memoizes what's checked.
+   - **Sharing:** baked classifiers export on their own; the hub shares classifier
+     weights as modules beside saves (browse, upload, download into a save).
+   - **Desktop classifiers view.**
+5. **Guide:** `docs/guide.md` on what the app does and how to use it, linked from the
+   README and the apps' help.
+6. **Review pass:** security (hub upload and op limits, classifier file checks),
+   ergonomics, visual consistency, and no stubs.
+
 ## In progress: classifiers (`core/src/classify/`)
 
 A deterministic transformer encoder written from scratch, trained on lists. Its own
