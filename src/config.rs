@@ -39,6 +39,8 @@ pub struct Config {
     pub bars_swapped: bool,
     /// the note list on the right of the editor
     pub list_right: bool,
+    /// colour the editor's markdown
+    pub highlight: bool,
     pub keymap: Option<serde_json::Value>,
     /// the anend hub saves are shared on, e.g. `http://localhost:8080`
     pub hub_url: String,
@@ -64,6 +66,7 @@ impl Default for Config {
             hide_list: false,
             bars_swapped: false,
             list_right: false,
+            highlight: true,
             keymap: None,
             hub_url: String::new(),
             hub_token: String::new(),

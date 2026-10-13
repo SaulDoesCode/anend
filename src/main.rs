@@ -12,6 +12,7 @@ pub use anend_core::{forge, lists, markdown, memory, note, simd, spread, store, 
 mod config;
 mod forge_ui;
 mod hub;
+mod highlight;
 mod hub_ui;
 mod icons;
 mod keys;
@@ -318,6 +319,11 @@ fn run(args: Args) {
         )
             .chain()
             .after(space_ui::build_opts),
+    );
+    // the highlighting copies the pad's glyphs once they're laid out, before they're drawn
+    app.add_systems(Update, highlight::setup_overlay).add_systems(
+        PostUpdate,
+        highlight::paint_overlay.after(bevy::ui::UiSystems::PostLayout),
     );
     if let Some(path) = args.screenshot {
         app.insert_resource(ScreenshotPath(path))

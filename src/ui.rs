@@ -272,6 +272,9 @@ pub struct NoteListPanel;
 pub struct ListToggle;
 #[derive(Component, Default, Clone)]
 pub struct EditorPad;
+/// the pad with its highlighting
+#[derive(Component, Default, Clone)]
+pub struct PadBox;
 #[derive(Component, Default, Clone)]
 pub struct Preview;
 /// the top bar
@@ -557,9 +560,17 @@ fn editor_view() -> impl Scene {
                     on(confirm_delete)
                 ]
                 --
-                // the writing pad
+                // the writing pad, and the highlighting painted over it
                 Node {
                     flex_grow: 1.0,
+                    min_height: px(0),
+                    display: Display::Flex,
+                }
+                PadBox
+                Children [
+                Node {
+                    flex_grow: 1.0,
+                    min_width: px(0),
                     min_height: px(0),
                     padding: UiRect::all(px(10)),
                     border_radius: BorderRadius::all(px(5)),
@@ -579,11 +590,18 @@ fn editor_view() -> impl Scene {
                     font_size: FontSize::Px(15.0),
                 }
                 TextColor(colors::TEXT)
-                TextCursorStyle
+                TextCursorStyle {
+                    color: colors::TEXT,
+                    selection_color: {colors::ACCENT.with_alpha(0.45)},
+                    unfocused_selection_color: {colors::ACCENT.with_alpha(0.25)},
+                }
                 TabIndex(0)
                 EntityCursor::System(SystemCursorIcon::Text)
                 EditorPad
                 on(pad_changed)
+                --
+                @crate::highlight::overlay_scene()
+                ]
                 --
                 // the rendered view
                 Node {
@@ -949,8 +967,8 @@ pub fn rebuild_meta(
 pub fn rebuild_preview(
     mut redraw: ResMut<Redraw>,
     session: Res<Session>,
-    preview: Single<(Entity, &mut Node), (With<Preview>, Without<EditorPad>)>,
-    mut pad: Single<&mut Node, With<EditorPad>>,
+    preview: Single<(Entity, &mut Node), (With<Preview>, Without<PadBox>)>,
+    mut pad: Single<&mut Node, With<PadBox>>,
     fonts: Res<Fonts>,
     mut commands: Commands,
     mut focus: ResMut<InputFocus>,
