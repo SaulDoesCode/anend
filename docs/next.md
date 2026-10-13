@@ -66,7 +66,13 @@ interface, not stubs.
      and button text picks dark or light by contrast, so dark palettes read; the
      editor's selection and cursor follow the palette instead of a stock blue; the
      memory view says how to start instead of showing an empty page; the note list
-     toggle's setting names the right edge too; stats' "+ new" hint updated.
+     toggle's setting names the right edge too; stats' "+ new" hint updated; icons in
+     buttons take the button's text colour (ThemedText) and fade with zen.
+   - left for later: the memory view's and space's text toggles in the bar stay words
+     (they carry state); the lists view's "choose"/"unlist" stay words; IME composition
+     was checked only by code (colour class `Compose`), not with a real input method;
+     the pad doesn't scroll with the mouse wheel (bevy's EditableText; the overlay
+     follows whatever offset it has).
 3. **Web polish** (`hub/web/`): done.
    - icons: the shared set (`assets/icons/`, copied into `hub/web/iconset.js` by
      `node hub/web/tools/icons.mjs`; `classifier.svg` added) for the top bar's views and
