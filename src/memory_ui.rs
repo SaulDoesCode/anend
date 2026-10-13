@@ -539,7 +539,14 @@ pub fn rebuild_results(
     mem.state.redraw_results = false;
     let white = mem.state.white;
     let (main, mut main_bg) = main.into_inner();
-    main_bg.0 = if white { WHITE } else { MAIN_BG };
+    let empty = mem.state.header.is_none() && mem.state.results.is_empty();
+    main_bg.0 = if empty {
+        Color::NONE
+    } else if white {
+        WHITE
+    } else {
+        MAIN_BG
+    };
     view.0 = if white { WHITE } else { BLACK };
     commands.entity(main).despawn_related::<Children>();
 
@@ -601,7 +608,7 @@ pub fn rebuild_results(
     }
 
     // nothing searched yet: say how to start, rather than show an empty page
-    if mem.state.header.is_none() && mem.state.results.is_empty() {
+    if empty {
         let dim = fg(white).with_alpha(0.55);
         for (line, size) in [
             ("type in the bar below", 20.0),
@@ -615,7 +622,7 @@ pub fn rebuild_results(
                 serif_text(line, size, dim, &serif),
                 Node {
                     width: percent(100),
-                    margin: UiRect::top(px(if size > 15.0 { 120.0 } else { 6.0 })),
+                    margin: UiRect::top(px(if size > 15.0 { 0.0 } else { 6.0 })),
                     ..default()
                 },
                 TextLayout::justify(Justify::Center),
