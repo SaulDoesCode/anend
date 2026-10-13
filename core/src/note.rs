@@ -113,6 +113,100 @@ pub fn normalize_tag(tag: &str) -> Option<String> {
     (!t.is_empty()).then(|| t.to_string())
 }
 
+/// every tag with how many notes carry it, the most used first (then by name)
+pub fn tag_counts(notes: &[Note]) -> Vec<(String, usize)> {
+    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for n in notes {
+        // a tag listed twice on one note counts once
+        let mut seen: Vec<&str> = Vec::new();
+        for t in &n.tags {
+            if !seen.contains(&t.as_str()) {
+                seen.push(t);
+                *counts.entry(t).or_default() += 1;
+            }
+        }
+    }
+    let mut v: Vec<(String, usize)> = counts.into_iter().map(|(t, c)| (t.to_string(), c)).collect();
+    v.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase())).then(a.0.cmp(&b.0)));
+    v
+}
+
+/// whether a note carries all (or, with `all` false, any) of `tags`; no tags match nothing
+pub fn has_tags(note: &Note, tags: &[String], all: bool) -> bool {
+    if tags.is_empty() {
+        return false;
+    }
+    if all {
+        tags.iter().all(|t| note.tags.contains(t))
+    } else {
+        tags.iter().any(|t| note.tags.contains(t))
+    }
+}
+
+/// the start of a note's body as plain text on one line, for previews: markdown's marks
+/// dropped, at most `max` characters, ending in an ellipsis when cut
+pub fn preview(markdown: &str, max: usize) -> String {
+    let mut out = String::new();
+    let mut in_code = false;
+    for line in markdown.lines() {
+        let l = line.trim();
+        if l.starts_with("```") || l.starts_with("~~~") {
+            in_code = !in_code;
+            continue;
+        }
+        if l.is_empty() || (!in_code && l.chars().all(|c| matches!(c, '-' | '|' | ':' | ' ' | '*' | '_' | '='))) {
+            continue;
+        }
+        let l = if in_code {
+            l
+        } else {
+            l.trim_start_matches(['#', '>', ' '])
+                .trim_start_matches("- ")
+                .trim_start_matches("* ")
+                .trim_start_matches("+ ")
+        };
+        let cleaned: String = if in_code {
+            l.to_string()
+        } else {
+            // links keep their text: [text](url) -> text
+            let mut s = String::new();
+            let mut chars = l.chars().peekable();
+            while let Some(c) = chars.next() {
+                match c {
+                    '*' | '_' | '`' | '[' => {}
+                    '|' => s.push(' '),
+                    ']' if chars.peek() == Some(&'(') => {
+                        for c in chars.by_ref() {
+                            if c == ')' {
+                                break;
+                            }
+                        }
+                    }
+                    ']' => {}
+                    c => s.push(c),
+                }
+            }
+            s.split_whitespace().collect::<Vec<_>>().join(" ")
+        };
+        if cleaned.is_empty() {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&cleaned);
+        if out.chars().count() > max {
+            break;
+        }
+    }
+    if out.chars().count() > max {
+        let cut: String = out.chars().take(max.saturating_sub(1)).collect();
+        format!("{}…", cut.trim_end())
+    } else {
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,5 +245,32 @@ mod tests {
     fn tags() {
         assert_eq!(normalize_tag("  rust, "), Some("rust".into()));
         assert_eq!(normalize_tag(" , "), None);
+    }
+
+    #[test]
+    fn tag_counts_and_matching() {
+        let n = |tags: &[&str]| Note {
+            tags: tags.iter().map(|t| t.to_string()).collect(),
+            ..Default::default()
+        };
+        let notes = vec![n(&["rust", "meta"]), n(&["rust"]), n(&["Art", "rust", "rust"]), n(&[])];
+        assert_eq!(
+            tag_counts(&notes),
+            vec![("rust".into(), 3), ("Art".into(), 1), ("meta".into(), 1)]
+        );
+        let sel = vec!["rust".to_string(), "meta".to_string()];
+        assert_eq!(notes.iter().filter(|x| has_tags(x, &sel, true)).count(), 1);
+        assert_eq!(notes.iter().filter(|x| has_tags(x, &sel, false)).count(), 3);
+        assert!(!has_tags(&notes[0], &[], false));
+    }
+
+    #[test]
+    fn previews() {
+        assert_eq!(
+            preview("## Head\n\nSome **bold** and a [link](http://x.y).\n\n- item\n\n|a|b|\n|---|---|", 200),
+            "Head Some bold and a link. item a b"
+        );
+        assert_eq!(preview("abcdefghij", 5), "abcd…");
+        assert_eq!(preview("", 5), "");
     }
 }

@@ -57,7 +57,7 @@ impl BarState {
 }
 
 fn notes_route(r: Route) -> bool {
-    !matches!(r, Route::Memory | Route::Space | Route::Lists)
+    !matches!(r, Route::Memory | Route::Space | Route::Lists | Route::Tags)
 }
 
 pub fn bar() -> impl Scene {
@@ -114,6 +114,8 @@ pub fn bar() -> impl Scene {
             on(crate::space_ui::term_key)
             on(crate::space_ui::term_changed)
             on(crate::lists_ui::bar_key)
+            on(crate::tags_ui::bar_key)
+            on(crate::tags_ui::bar_changed)
             --
             Node {
                 display: Display::Flex,
@@ -190,6 +192,7 @@ pub fn bar_route(
     mut mode: Single<&mut Text, With<BarMode>>,
     mut mem: ResMut<MemoryState>,
     mut space: ResMut<Space>,
+    mut tags: ResMut<crate::tags_ui::TagsState>,
     serif: Res<SerifFont>,
     fonts: Res<Fonts>,
     mut focus: ResMut<InputFocus>,
@@ -219,6 +222,7 @@ pub fn bar_route(
             None => space.term.clone(),
         },
         Route::Lists => String::new(),
+        Route::Tags => tags.query.clone(),
         _ => bar.notes.clone(),
     };
     input.editor_mut().set_text(&text);
@@ -232,6 +236,7 @@ pub fn bar_route(
         Route::Memory => "memory",
         Route::Space => "space",
         Route::Lists => "lists",
+        Route::Tags => "tags",
         _ => "notes",
     }
     .into();
@@ -243,6 +248,7 @@ pub fn bar_route(
     bar.notes_side.clear();
     mem.redraw_chrome = true;
     space.redraw.termrow = true;
+    tags.redraw = true;
 }
 
 /// the note views' side of the bar: how many notes there are, or match

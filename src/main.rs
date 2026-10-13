@@ -13,6 +13,7 @@ mod config;
 mod forge_ui;
 mod hub;
 mod hub_ui;
+mod icons;
 mod keys;
 mod lists_ui;
 mod memory_ui;
@@ -21,6 +22,7 @@ mod settings;
 mod sizing;
 mod space;
 mod space_ui;
+mod tags_ui;
 mod theme;
 mod typeface;
 mod ui;
@@ -71,7 +73,7 @@ fn parse_args() -> Args {
                      (a JSON array or one JSON document per line), then exit\n  \
                      --import-weum <file>  import weum memories from its backup (all-of-it.json), then exit\n  \
                      --space           open in the space\n\n\
-                     ctrl+s save, ctrl+n new note, ctrl+e view/edit, ctrl+1..5 views, ctrl+, settings (saves, fonts, zen, keys)",
+                     ctrl+s save, ctrl+n new note, ctrl+e view/edit, ctrl+1..7 views, ctrl+, settings (saves, fonts, zen, keys)",
                     config::Config::load().current_save().display()
                 );
                 std::process::exit(0);
@@ -120,6 +122,37 @@ fn screenshot(
     if *frames == 45 {
         exit.write(AppExit::Success);
     }
+}
+
+/// the window's icon, from the embedded assets/icon.png; winit wants it on the main thread
+fn window_icon(_main_thread: bevy::ecs::system::NonSendMarker, mut done: Local<bool>) {
+    if *done {
+        return;
+    }
+    let Ok(img) = bevy::image::Image::from_buffer(
+        include_bytes!("../assets/icon.png"),
+        bevy::image::ImageType::Extension("png"),
+        bevy::image::CompressedImageFormats::NONE,
+        true,
+        bevy::image::ImageSampler::Default,
+        bevy::asset::RenderAssetUsages::MAIN_WORLD,
+    ) else {
+        *done = true;
+        return;
+    };
+    let (w, h) = (img.width(), img.height());
+    let Some(rgba) = img.data.clone() else {
+        *done = true;
+        return;
+    };
+    bevy::winit::WINIT_WINDOWS.with_borrow(|windows| {
+        for window in windows.windows.values() {
+            if let Ok(icon) = winit::window::Icon::from_rgba(rgba.clone(), w, h) {
+                window.set_window_icon(Some(icon));
+                *done = true;
+            }
+        }
+    });
 }
 
 fn main() {
@@ -200,12 +233,15 @@ fn run(args: Args) {
     .init_resource::<forge_ui::ForgeState>()
     .init_resource::<lists_ui::ListsState>()
     .init_resource::<hub_ui::HubState>()
+    .init_resource::<tags_ui::TagsState>()
     .init_resource::<typeface::Typeface>()
     .init_resource::<zen::Zen>()
+    .init_resource::<icons::Icons>()
     .insert_resource(keymap)
     .insert_resource(config)
     .add_message::<keys::Fired>()
-    .add_systems(Startup, (ui::scene.spawn(), space::setup))
+    .add_systems(Startup, (ui::scene.spawn(), space::setup, icons::spawn_tooltip))
+    .add_systems(Update, window_icon)
     .add_systems(
         Update,
         (
@@ -261,6 +297,7 @@ fn run(args: Args) {
         Update,
         (
             bar::notes_side,
+            tags_ui::rebuild_tags,
             settings::rebuild_settings,
             forge_ui::rebuild_forge,
             forge_ui::pour,
@@ -277,6 +314,7 @@ fn run(args: Args) {
             zen::nav_autohide,
             zen::list_autohide,
             zen::apply_placement,
+            (icons::attach_icons, icons::tint_icons, icons::tooltips).chain(),
         )
             .chain()
             .after(space_ui::build_opts),

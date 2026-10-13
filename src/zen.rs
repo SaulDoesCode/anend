@@ -201,8 +201,6 @@ pub fn list_autohide(
     time: Res<Time>,
     window: Single<&Window, With<PrimaryWindow>>,
     list: Single<(&mut Node, &ComputedNode), With<crate::ui::NoteListPanel>>,
-    toggle: Single<&Children, With<crate::ui::ListToggle>>,
-    mut texts: Query<&mut Text>,
     settings: Res<crate::settings::Settings>,
 ) {
     let (mut node, computed) = list.into_inner();
@@ -223,18 +221,6 @@ pub fn list_autohide(
     if node.margin.left != left || node.margin.right != right {
         node.margin.left = left;
         node.margin.right = right;
-    }
-    // the arrow points the way the list goes
-    let glyph = match (config.hide_list, config.list_right) {
-        (false, false) | (true, true) => "‹",
-        _ => "›",
-    };
-    for c in toggle.iter() {
-        if let Ok(mut t) = texts.get_mut(c)
-            && t.0 != glyph
-        {
-            t.0 = glyph.into();
-        }
     }
 }
 

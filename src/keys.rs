@@ -13,8 +13,9 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use std::collections::HashMap;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Action {
+    #[default]
     Save,
     NewNote,
     ToggleView,
@@ -25,6 +26,7 @@ pub enum Action {
     GotoStats,
     GotoSpace,
     GotoLists,
+    GotoTags,
     OpenSettings,
     FocusTerm,
     BucketOrdinal,
@@ -122,7 +124,7 @@ const fn shift(key: KeyCode) -> Binding {
 }
 
 impl Action {
-    pub const ALL: [Action; 54] = [
+    pub const ALL: [Action; 55] = [
         Action::Save,
         Action::NewNote,
         Action::ToggleView,
@@ -133,6 +135,7 @@ impl Action {
         Action::GotoStats,
         Action::GotoSpace,
         Action::GotoLists,
+        Action::GotoTags,
         Action::OpenSettings,
         Action::FocusTerm,
         Action::BucketOrdinal,
@@ -182,7 +185,9 @@ impl Action {
     pub fn scope(self) -> Scope {
         use Action::*;
         match self {
-            GotoEditor | GotoReader | GotoMemory | GotoStats | GotoSpace | GotoLists | OpenSettings => Scope::Global,
+            GotoEditor | GotoReader | GotoMemory | GotoStats | GotoSpace | GotoLists | GotoTags | OpenSettings => {
+                Scope::Global
+            },
             Save | NewNote | ToggleView | ToggleList | FocusTerm | BucketOrdinal | BucketReversed | BucketAtbash
             | BucketFrequency | ToggleGsearch | ToggleSaturate | WhiteMode | SideOrdinal | SideReversed
             | SideAtbash | SideFrequency | OpenRemap => Scope::Notes,
@@ -212,6 +217,7 @@ impl Action {
             Action::GotoStats => "goto_stats",
             Action::GotoSpace => "goto_space",
             Action::GotoLists => "goto_lists",
+            Action::GotoTags => "goto_tags",
             Action::OpenSettings => "open_settings",
             Action::FocusTerm => "focus_term",
             Action::BucketOrdinal => "bucket_ordinal",
@@ -271,6 +277,7 @@ impl Action {
             Action::GotoStats => "go to stats",
             Action::GotoSpace => "go to the space",
             Action::GotoLists => "go to the lists",
+            Action::GotoTags => "go to the tags",
             Action::OpenSettings => "open the settings (saves, fonts, zen)",
             Action::FocusTerm => "focus the command bar",
             Action::BucketOrdinal => "memory: ordinal bucket",
@@ -330,6 +337,7 @@ impl Action {
             Action::GotoStats => ctrl(KeyCode::Digit4),
             Action::GotoSpace => ctrl(KeyCode::Digit5),
             Action::GotoLists => ctrl(KeyCode::Digit6),
+            Action::GotoTags => ctrl(KeyCode::Digit7),
             Action::OpenSettings => ctrl(KeyCode::Comma),
             Action::FocusTerm => plain(KeyCode::Slash),
             Action::BucketOrdinal => plain(KeyCode::KeyO),
