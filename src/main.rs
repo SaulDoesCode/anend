@@ -7,6 +7,8 @@
 
 mod bar;
 mod config;
+mod forge;
+mod forge_ui;
 mod hub;
 mod hub_ui;
 mod keys;
@@ -196,6 +198,7 @@ fn main() {
     .init_resource::<space::Space>()
     .init_resource::<bar::BarState>()
     .init_resource::<settings::Settings>()
+    .init_resource::<forge_ui::ForgeState>()
     .init_resource::<hub_ui::HubState>()
     .init_resource::<typeface::Typeface>()
     .init_resource::<zen::Zen>()
@@ -258,6 +261,9 @@ fn main() {
         (
             bar::notes_side,
             settings::rebuild_settings,
+            forge_ui::rebuild_forge,
+            forge_ui::pour,
+            hub_ui::merge_into_open,
             (hub_ui::poll_hub, hub_ui::rebuild_hub),
             typeface::apply_typeface,
             typeface::apply_memory_font,

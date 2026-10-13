@@ -290,6 +290,12 @@ pub fn menu() -> impl Scene {
                     TextColor(colors::TEXT)
                     Node { flex_grow: 1.0 }
                     --
+                    @crate::ui::plain_scene_button("forge".into(), ButtonVariant::Normal)
+                    on(|_a: On<Activate>, mut forge: ResMut<crate::forge_ui::ForgeState>, mut s: ResMut<Settings>| {
+                        s.toggle();
+                        forge.toggle();
+                    })
+                    --
                     @crate::ui::plain_scene_button("keys".into(), ButtonVariant::Normal)
                     on(|_a: On<Activate>, mut remap: ResMut<crate::keys::Remap>| {
                         remap.open = true;
@@ -595,6 +601,13 @@ pub(crate) fn keep_note(ctx: &mut Ctx) {
 }
 
 /// closes the open save and opens another; everything that came from the old one goes
+/// reads the open save again from scratch (after something was poured into it)
+pub(crate) fn reload_open(world: &mut World) {
+    if let Some(Db(store)) = world.remove_resource::<Db>() {
+        install(world, store);
+    }
+}
+
 pub fn switch_save(world: &mut World, path: PathBuf) {
     if same(world.resource::<Db>().0.path(), &path) {
         return;

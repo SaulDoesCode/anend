@@ -48,8 +48,19 @@ impl Store {
     /// the one that's open)
     pub fn summary(path: &Path) -> Option<(u64, u64)> {
         use redb::ReadableTableMetadata;
-        let db = redb::ReadOnlyDatabase::open(path).ok()?;
-        let txn = db.begin_read().ok()?;
+        // a save the app didn't close cleanly needs redb's repair, which only a writable
+        // open does; it's not open anywhere else, so repair it the way loading it would
+        let (ro, rw);
+        let txn = match redb::ReadOnlyDatabase::open(path) {
+            Ok(db) => {
+                ro = db;
+                ro.begin_read().ok()?
+            }
+            Err(_) => {
+                rw = Database::open(path).ok()?;
+                rw.begin_read().ok()?
+            }
+        };
         let notes = txn.open_table(NOTES).ok().and_then(|t| t.len().ok()).unwrap_or(0);
         let memories = txn
             .open_table(crate::memory::MEMORIES)

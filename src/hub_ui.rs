@@ -28,6 +28,8 @@ enum Reply {
         result: Result<SavesPage, String>,
     },
     Downloaded(Result<PathBuf, String>),
+    /// downloaded to be merged into the open save
+    Fetched(Result<PathBuf, String>),
     Uploaded(Result<Uploaded, String>),
 }
 
@@ -55,6 +57,9 @@ pub struct HubState {
     connecting: bool,
     browsing: bool,
     downloading: Option<String>,
+    merging: Option<String>,
+    /// a downloaded save waiting to be merged in (`merge_into_open` does it)
+    merge_ready: Option<PathBuf>,
     uploading: bool,
     tx: Sender<Reply>,
     rx: Mutex<Receiver<Reply>>,
@@ -84,6 +89,8 @@ impl Default for HubState {
             connecting: false,
             browsing: false,
             downloading: None,
+            merging: None,
+            merge_ready: None,
             uploading: false,
             tx,
             rx: Mutex::new(rx),
@@ -158,6 +165,54 @@ impl HubState {
         self.changed = true;
         self.run(move || Reply::Downloaded(hub::download(&url, &save, &dir)));
     }
+
+    /// fetches a save into a hidden folder, to merge it into the open one
+    fn merge(&mut self, save: HubSave, saves_dir: PathBuf) {
+        if self.merging.is_some() || self.merge_ready.is_some() {
+            return;
+        }
+        let url = self.url.trim().to_string();
+        self.merging = Some(save.id.clone());
+        self.browse_note.clear();
+        self.changed = true;
+        let dir = saves_dir.join(".merging");
+        self.run(move || Reply::Fetched(hub::download(&url, &save, &dir)));
+    }
+}
+
+/// merges a fetched hub save into the open one: what it has that the open save hasn't
+/// goes in, nothing is taken out
+pub fn merge_into_open(world: &mut World) {
+    let Some(path) = world.resource_mut::<HubState>().merge_ready.take() else {
+        return;
+    };
+    let name = save_name(&path);
+    let result = crate::store::Store::open(&path)
+        .and_then(|src| crate::forge::read(&src))
+        .and_then(|c| crate::forge::write_into(&world.resource::<Db>().0, &c));
+    let _ = std::fs::remove_file(&path);
+    let msg = match result {
+        Ok(w) => {
+            crate::settings::reload_open(world);
+            format!(
+                "merged {name} in: {} new memories, {} notes, {} list links",
+                w.memories, w.notes, w.lists
+            )
+        }
+        Err(e) => format!("couldn't merge {name}: {e}"),
+    };
+    let until = world.resource::<Time>().elapsed_secs_f64() + 6.0;
+    {
+        let mut status = world.resource_mut::<Status>();
+        status.text = msg.clone();
+        status.until = until;
+    }
+    let mut hub = world.resource_mut::<HubState>();
+    hub.browse_note = msg;
+    hub.changed = true;
+    let mut s = world.resource_mut::<Settings>();
+    s.rescan = true;
+    s.changed = true;
 }
 
 /// which of the section's text boxes this is
@@ -516,6 +571,13 @@ pub fn poll_hub(mut hub: ResMut<HubState>, mut s: ResMut<Settings>, mut status: 
                 status.until = time.elapsed_secs_f64() + 5.0;
                 hub.browse_note = msg;
             }
+            Reply::Fetched(r) => {
+                hub.merging = None;
+                match r {
+                    Ok(path) => hub.merge_ready = Some(path),
+                    Err(e) => hub.browse_note = e,
+                }
+            }
             Reply::Uploaded(r) => {
                 hub.uploading = false;
                 hub.share_note = match r {
@@ -699,11 +761,24 @@ pub fn rebuild_hub(
             plural(save.stars, "star", "stars"),
             plural(save.downloads, "download", "downloads")
         );
+        let merging = hub.merging.as_ref() == Some(&save.id);
+        let m = button(
+            &mut commands,
+            foot,
+            if merging { "…" } else { "merge" },
+            ButtonVariant::Normal,
+        );
         text(&mut commands, foot, &stats, &fonts.regular, 12.0, colors::TEXT_DIM);
+        let for_merge = save.clone();
         let save = save.clone();
         commands.entity(b).observe(
             move |_a: On<Activate>, mut hub: ResMut<HubState>, config: Res<Config>| {
                 hub.download(save.clone(), config.saves_dir.clone());
+            },
+        );
+        commands.entity(m).observe(
+            move |_a: On<Activate>, mut hub: ResMut<HubState>, config: Res<Config>| {
+                hub.merge(for_merge.clone(), config.saves_dir.clone());
             },
         );
     }

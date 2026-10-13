@@ -235,6 +235,42 @@ pub(crate) fn create_tables(txn: &WriteTransaction) -> StoreResult<()> {
 
 /// the key after `b` in weum's allocation order: 0..=255, then [0,0]..=[255,255], then
 /// three bytes, then four
+/// stores a text under the next free key, reusing a forgotten one first
+fn add_memory(txn: &WriteTransaction, text: &str) -> StoreResult<Vec<u8>> {
+    let key = {
+        let mut reuse = txn.open_multimap_table(TO_REUSE).map_err(err)?;
+        let mut state = txn.open_table(STATE).map_err(err)?;
+        let reusable = reuse
+            .get(ALLOCATED)
+            .map_err(err)?
+            .next()
+            .transpose()
+            .map_err(err)?
+            .map(|g| g.value().to_vec());
+        match reusable {
+            Some(k) => {
+                reuse.remove(ALLOCATED, k.as_slice()).map_err(err)?;
+                k
+            }
+            None => {
+                let last = state.get(ALLOCATED).map_err(err)?.map(|g| g.value().to_vec());
+                let k = match last {
+                    Some(b) => next_key(&b)?,
+                    None => vec![0],
+                };
+                state.insert(ALLOCATED, k.as_slice()).map_err(err)?;
+                k
+            }
+        }
+    };
+    txn.open_table(MEMORIES)
+        .map_err(err)?
+        .insert(key.as_slice(), text.as_bytes())
+        .map_err(err)?;
+    index(txn, &Ref::Memory(key.clone()), text, text, true)?;
+    Ok(key)
+}
+
 fn next_key(b: &[u8]) -> StoreResult<Vec<u8>> {
     Ok(match b.len() {
         1 => {
@@ -308,40 +344,20 @@ impl Store {
     /// stores a text as a new memory under the next free key (weum's `saturate`)
     pub fn saturate_new(&self, text: &str) -> StoreResult<Vec<u8>> {
         let txn = self.db.begin_write().map_err(err)?;
-        let key = {
-            let mut reuse = txn.open_multimap_table(TO_REUSE).map_err(err)?;
-            let mut state = txn.open_table(STATE).map_err(err)?;
-            let reusable = reuse
-                .get(ALLOCATED)
-                .map_err(err)?
-                .next()
-                .transpose()
-                .map_err(err)?
-                .map(|g| g.value().to_vec());
-            let key = match reusable {
-                Some(k) => {
-                    reuse.remove(ALLOCATED, k.as_slice()).map_err(err)?;
-                    k
-                }
-                None => {
-                    let last = state.get(ALLOCATED).map_err(err)?.map(|g| g.value().to_vec());
-                    let k = match last {
-                        Some(b) => next_key(&b)?,
-                        None => vec![0],
-                    };
-                    state.insert(ALLOCATED, k.as_slice()).map_err(err)?;
-                    k
-                }
-            };
-            txn.open_table(MEMORIES)
-                .map_err(err)?
-                .insert(key.as_slice(), text.as_bytes())
-                .map_err(err)?;
-            key
-        };
-        index(&txn, &Ref::Memory(key.clone()), text, text, true)?;
+        let key = add_memory(&txn, text)?;
         txn.commit().map_err(err)?;
         Ok(key)
+    }
+
+    /// stores many texts as new memories in one go; returns their keys in order
+    pub fn saturate_many(&self, texts: &[String]) -> StoreResult<Vec<Vec<u8>>> {
+        let txn = self.db.begin_write().map_err(err)?;
+        let mut keys = Vec::with_capacity(texts.len());
+        for t in texts {
+            keys.push(add_memory(&txn, t)?);
+        }
+        txn.commit().map_err(err)?;
+        Ok(keys)
     }
 
     /// the key of a memory with exactly this text, if there is one
@@ -533,6 +549,34 @@ impl Store {
             .insert(list.bytes().as_slice(), member.bytes().as_slice())
             .map_err(err)?;
         txn.commit().map_err(err)
+    }
+
+    /// adds many list members in one go
+    pub fn enlist_many(&self, pairs: &[(Ref, Ref)]) -> StoreResult<()> {
+        let txn = self.db.begin_write().map_err(err)?;
+        {
+            let mut t = txn.open_multimap_table(LISTS).map_err(err)?;
+            for (list, member) in pairs {
+                t.insert(list.bytes().as_slice(), member.bytes().as_slice())
+                    .map_err(err)?;
+            }
+        }
+        txn.commit().map_err(err)
+    }
+
+    /// every list and its members, as stored
+    pub fn all_lists(&self) -> StoreResult<Vec<(Ref, Ref)>> {
+        let txn = self.db.begin_read().map_err(err)?;
+        let t = txn.open_multimap_table(LISTS).map_err(err)?;
+        let mut out = Vec::new();
+        for item in t.iter().map_err(err)? {
+            let (k, vs) = item.map_err(err)?;
+            let list = Ref::from_bytes(k.value());
+            for v in vs {
+                out.push((list.clone(), Ref::from_bytes(v.map_err(err)?.value())));
+            }
+        }
+        Ok(out)
     }
 
     pub fn delist(&self, list: &Ref, member: &Ref) -> StoreResult<()> {

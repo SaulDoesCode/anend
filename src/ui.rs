@@ -333,6 +333,8 @@ fn root() -> impl Scene {
             --
             @crate::settings::menu()
             --
+            @crate::forge_ui::menu()
+            --
             @remap_menu()
         ]
     }
