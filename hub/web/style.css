@@ -73,6 +73,31 @@ input[type=text], input[type=search], input[type=number], select, textarea {
 input[type=number] { width: 9em; }
 input::placeholder, textarea::placeholder { color: var(--dim); opacity: .8; }
 
+/* icons: the shared set, drawn in the text's colour */
+svg.icon { width: 16px; height: 16px; flex: none; display: block; }
+button.ibtn { width: 26px; padding: 0; }
+button.ibtn.small { width: 22px; }
+button.ibtn.small svg.icon { width: 14px; height: 14px; }
+button.ibtn.with-text { width: auto; padding: 0 9px 0 7px; gap: 5px; }
+button.ibtn.small.with-text { padding: 0 7px 0 5px; }
+button.ibtn.armed { width: auto; padding: 0 8px; }
+button.ibtn.plain { background: none; color: var(--dim); }
+button.ibtn.plain:hover { background: color-mix(in srgb, var(--buttons) 40%, transparent); color: var(--text); }
+
+/* the tooltip: a control's name and its shortcut */
+.tip {
+  position: fixed; left: 0; top: 0; z-index: 100; pointer-events: none;
+  display: flex; align-items: center; gap: 8px; max-width: min(340px, calc(100vw - 8px));
+  padding: 3px 8px; border-radius: var(--radius);
+  background: var(--bars); color: var(--bar-text); font-size: 12.5px; line-height: 1.35;
+  box-shadow: 0 3px 12px rgb(0 0 0 / .28); opacity: 0; transition: opacity .12s;
+}
+.tip.in { opacity: 1; }
+.tip kbd {
+  font: 11px var(--mono); color: var(--bar-dim); white-space: nowrap;
+  border: 1px solid color-mix(in srgb, var(--bar-dim) 50%, transparent); border-radius: 3px; padding: 0 4px;
+}
+
 /* ------------------------------------------------------------------ the bars */
 .bar {
   display: flex; align-items: center; gap: 6px; min-width: 0;
@@ -80,8 +105,14 @@ input::placeholder, textarea::placeholder { color: var(--dim); opacity: .8; }
   transition: opacity .6s;
 }
 #top { overflow: hidden; }
-#tabs { display: flex; gap: 6px; flex: none; }
-#tabs button, #settings-button { height: 24px; padding: 0 8px; font-size: 14px; }
+#mark { display: flex; align-items: center; flex: none; padding: 0 4px 0 2px; border-radius: var(--radius); }
+#mark img { display: block; width: 22px; height: 22px; }
+#mark:focus-visible { outline: 2px solid var(--accent); }
+#tabs { display: flex; gap: 2px; flex: none; }
+#tabs button, #settings-button { height: 24px; width: 30px; background: none; color: var(--bar-dim); }
+#tabs button svg.icon, #settings-button svg.icon { width: 17px; height: 17px; }
+#tabs button:hover, #settings-button:hover { color: var(--bar-text); background: color-mix(in srgb, var(--bar-text) 12%, transparent); filter: none; }
+#tabs button.on { background: var(--accent); color: var(--on-button); }
 #status { font-size: 12.5px; color: var(--bar-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; padding: 0 6px; }
 #status.bad { color: hsl(8 85% 72%); }
 #searchline {
@@ -397,6 +428,48 @@ button.no { background: color-mix(in srgb, var(--bad) 45%, var(--buttons)); }
 .clf-why { margin: 2px 0 6px 60px; padding: 4px 8px; border-left: 2px solid var(--accent); display: flex; flex-direction: column; gap: 2px; }
 .clf-out input[type=number], .clf-train input[type=number] { width: 5em; }
 
+/* ------------------------------------------------------------------ tags */
+.tags-view { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 8px; height: 100%; }
+.tags-side { display: flex; flex-direction: column; gap: 8px; min-height: 0; padding: 10px; }
+.tags-head h2 { margin: 0; }
+.seg { display: inline-flex; border-radius: var(--radius); overflow: hidden; }
+.seg button { border-radius: 0; height: 22px; padding: 0 9px; font-size: 12.5px; background: var(--pad); color: var(--text); }
+.seg button.on { background: var(--accent); color: var(--on-button); }
+button.sort { background: none; color: var(--dim); min-width: 42px; }
+button.sort:hover { color: var(--text); }
+.picked { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-height: 22px; }
+.picked .join { font-size: 12px; color: var(--dim); }
+ul.taglist { list-style: none; margin: 0 -4px; padding: 0 4px; overflow: auto; min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
+ul.taglist li.empty { padding: 4px 6px; }
+button.tagrow {
+  width: 100%; height: 28px; padding: 0 8px 0 6px; justify-content: flex-start; gap: 8px;
+  background: none; color: var(--text); font-size: 14px;
+  display: grid; grid-template-columns: 16px minmax(0, 1fr) 56px 30px;
+}
+button.tagrow:hover { background: color-mix(in srgb, var(--buttons) 35%, transparent); filter: none; }
+button.tagrow.on { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+.tagrow .box { width: 16px; height: 16px; border-radius: 3px; border: 1.5px solid color-mix(in srgb, var(--dim) 70%, transparent); display: grid; place-items: center; }
+.tagrow.on .box { background: var(--accent); border-color: var(--accent); color: var(--on-button); }
+.tagrow .box svg.icon { width: 12px; height: 12px; stroke-width: 3; }
+.tagrow .name { text-align: left; overflow: hidden; text-overflow: ellipsis; }
+.tagrow .track { height: 6px; background: color-mix(in srgb, var(--pad) 70%, transparent); border-radius: 3px; overflow: hidden; }
+.tagrow .fill { display: block; height: 100%; background: var(--accent); min-width: 3px; }
+.tagrow .n { text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; font-size: 13px; }
+.tags-results { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: auto; padding-bottom: 8px; }
+.tags-found { background: var(--cards); border-radius: var(--radius); padding: 10px 14px; }
+.tags-found h2 { margin: 0; font-weight: 400; }
+.tags-found .what { font-weight: 700; color: var(--link); }
+ol.tagnotes { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; }
+.tagnote { display: flex; flex-direction: column; gap: 4px; padding: 10px 14px; }
+.tagnote a.title { font-size: 16px; font-weight: 700; color: var(--text); }
+.tagnote a.title:hover { color: var(--link); }
+.tagnote .chips .chip { height: 20px; font-size: 12px; }
+.tagnote .chip.on { background: var(--accent); }
+.tagnote .excerpt { margin: 2px 0 0; color: var(--dim); font-size: 13.5px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.tags-empty { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 34px 20px; gap: 4px; }
+.tags-empty .big svg.icon { width: 40px; height: 40px; color: var(--accent); stroke-width: 1.5; }
+.tags-empty p { max-width: 420px; margin: 4px 0; }
+
 body.login #bar, body.login #tabs, body.login #settings-button { visibility: hidden; }
 
 /* ------------------------------------------------------------------ phones */
@@ -405,7 +478,11 @@ body.login #bar, body.login #tabs, body.login #settings-button { visibility: hid
   #top { overflow-x: auto; scrollbar-width: none; }
   #top::-webkit-scrollbar { display: none; }
   #tabs { gap: 3px; }
-  #tabs button, #settings-button { padding: 0 6px; font-size: 13px; }
+  #tabs button, #settings-button { width: 28px; }
+  #mark { padding: 0 2px; }
+  .tags-view { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .tags-side { max-height: 42vh; }
+  ol.tagnotes { grid-template-columns: 1fr; }
   #status, #top .grow { display: none; }
   #searchline { display: none !important; }
   #settings-button { margin-left: auto; }

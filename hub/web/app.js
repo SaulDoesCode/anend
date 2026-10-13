@@ -11,10 +11,14 @@ import stats from './views/stats.js';
 import space from './views/space.js';
 import lists from './views/lists.js';
 import classifiers from './views/classify.js';
+import tags from './views/tags.js';
 import settings from './views/settings.js';
+import { icon, tip, startTips } from './icons.js';
 
-const VIEWS = { editor, reader, memory, stats, space, lists, classifiers };
-const ORDER = ['editor', 'reader', 'memory', 'stats', 'space', 'lists', 'classifiers'];
+const VIEWS = { editor, reader, memory, stats, space, lists, classifiers, tags };
+const ORDER = ['editor', 'reader', 'memory', 'stats', 'space', 'lists', 'classifiers', 'tags'];
+// each view's icon in the top bar (its name and shortcut show as the tip)
+const ICONS = { editor: 'editor', reader: 'reader', memory: 'memory', stats: 'stats', space: 'space', lists: 'list', classifiers: 'classifier', tags: 'tags' };
 
 const $ = (id) => document.getElementById(id);
 const barInput = $('bar-input');
@@ -127,10 +131,16 @@ app.savePrefs = () => {
 // ------------------------------------------------------------------ the top bar
 
 const tabs = $('tabs');
-for (const name of ORDER) {
-  tabs.append(el('button.tab', { type: 'button', dataset: { view: name }, title: name, onclick: () => app.go(name) }, name));
-}
-$('settings-button').addEventListener('click', () => settings.toggle());
+ORDER.forEach((name, i) => {
+  const b = el('button.tab.ibtn', { type: 'button', dataset: { view: name }, onclick: () => app.go(name) }, icon(ICONS[name]));
+  tabs.append(tip(b, name, `Ctrl+${i + 1}`));
+});
+const setBtn = $('settings-button');
+setBtn.className = 'ibtn';
+setBtn.replaceChildren(icon('settings'));
+tip(setBtn, 'settings', 'Ctrl+,');
+setBtn.addEventListener('click', () => settings.toggle());
+startTips();
 
 // ------------------------------------------------------------------ the views
 
@@ -156,7 +166,11 @@ function route_() {
     app.view = name;
     document.body.dataset.view = name;
     $(`view-${name}`).hidden = false;
-    for (const b of tabs.children) b.classList.toggle('on', b.dataset.view === name);
+    for (const b of tabs.children) {
+      b.classList.toggle('on', b.dataset.view === name);
+      if (b.dataset.view === name) b.setAttribute('aria-current', 'page');
+      else b.removeAttribute('aria-current');
+    }
     const v = VIEWS[name];
     $('bar-name').textContent = v.barName || name;
     barInput.placeholder = v.barPlaceholder || '';
@@ -192,7 +206,7 @@ window.addEventListener('keydown', (e) => {
     settings.toggle();
     return;
   }
-  if (ctrl && /^[1-7]$/.test(e.key)) {
+  if (ctrl && /^[1-8]$/.test(e.key)) {
     e.preventDefault();
     app.go(ORDER[+e.key - 1]);
     return;

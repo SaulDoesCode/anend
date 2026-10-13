@@ -107,29 +107,31 @@ export function textOfOrdinal(n) {
   return 'z'.repeat(Math.floor(n / 26)) + (n % 26 ? String.fromCharCode(96 + (n % 26)) : '');
 }
 
-// a second click within a few seconds confirms (delete, unlist, pour...)
+// a second click within a few seconds confirms (delete, unlist, pour...); an icon button
+// shows the label in words while it waits
 export function confirmClick(button, label, act) {
   let armed = false;
   let t;
-  const text = button.textContent;
+  let kept = null;
+  const disarm = () => {
+    armed = false;
+    button.classList.remove('armed');
+    if (kept) button.replaceChildren(...kept);
+  };
   button.addEventListener('click', (e) => {
     e.stopPropagation();
     if (armed) {
       clearTimeout(t);
-      armed = false;
-      button.textContent = text;
-      button.classList.remove('armed');
+      disarm();
       act();
       return;
     }
     armed = true;
-    button.textContent = label;
+    kept = [...button.childNodes];
+    button.replaceChildren(document.createTextNode(label));
     button.classList.add('armed');
-    t = setTimeout(() => {
-      armed = false;
-      button.textContent = text;
-      button.classList.remove('armed');
-    }, 3000);
+    t = setTimeout(disarm, 3000);
   });
+  button.addEventListener('blur', () => armed && (clearTimeout(t), disarm()));
   return button;
 }
