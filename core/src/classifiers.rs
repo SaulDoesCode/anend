@@ -1341,4 +1341,27 @@ mod tests {
         drop(s);
         let _ = std::fs::remove_file(path);
     }
+
+    /// `cargo test --release -p anend-core timing -- --ignored --nocapture`: the default
+    /// preset on three lists of 50 short memories
+    #[test]
+    #[ignore]
+    fn timing() {
+        let (s, path) = temp_store("timing");
+        let mut heads = vec![];
+        for (n, ws) in [("fruit", FRUIT), ("rocks", ROCK), ("more", ["alpha", "beta", "gamma", "delta", "omega", "sigma", "theta", "kappa", "lambda", "zeta"])] {
+            let h = Ref::Memory(s.saturate(n).unwrap().0);
+            for i in 0..50 {
+                let t = format!("{} {} {}", ws[i % 10], ws[(i * 7 + 3) % 10], ws[(i / 10 + 5) % 10]);
+                s.enlist(&h, &Ref::Memory(s.saturate(&t).unwrap().0)).unwrap();
+            }
+            heads.push(h);
+        }
+        s.create_classifier("t", &heads, None, HeadKind::Single, DEFAULT_PRESET, vec![]).unwrap();
+        let t0 = std::time::Instant::now();
+        let (_, sum) = s.train_classifier("t", &TrainArgs::default(), |_| Flow::Go).unwrap();
+        println!("{} texts, {} steps, {:.2} s, {:.0} tokens/s, accuracy {:?}", sum.examples, sum.steps, t0.elapsed().as_secs_f64(), sum.tokens_per_sec, sum.metrics.map(|m| m.accuracy));
+        drop(s);
+        let _ = std::fs::remove_file(path);
+    }
 }

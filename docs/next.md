@@ -65,14 +65,18 @@ progress is in `core/src/classify/STATUS.md`. The plan:
   - SIMD and threads where measured to help
   - proof: `cargo run --release -p anend-core --example authors` (corpus in
     `core/corpus/authors/`)
+- **Phase 2 (done):** classifiers kept in the save (`core/src/classifiers.rs`: tables,
+  `Store` API for the desktop app too, bundles carrying them), the hub's `classify.*` ops
+  with background training (`hub/src/classify.rs`, docs/app-api.md), and the web app's
+  classifiers view (Ctrl+7: make from lists, train with progress and metrics, steer with
+  the bias metric live, classifier search with yes/no per contributing classifier,
+  outputs as lists, near texts). Offline the web app says classifiers need a hub.
 - **Then:**
-  - a redb table for models and feedback, and bundles carrying them
-  - hub ops (`classify.*`)
-  - the desktop app's classifiers view
-  - the web app's view, plus a JavaScript port of inference for offline use (as exact as
-    `hub/web/local/` is for the sums)
-  - classifier search, filter presets saved as their own list system, and default
-    classifiers for new saves
+  - the desktop app's classifiers view (src/), on `anend_core::classifiers`
+  - a JavaScript port of inference for offline use (as exact as `hub/web/local/` is for
+    the sums)
+  - classifier search inside the memory view's search modes, filter presets saved as
+    their own list system, and default classifiers for new saves
 - **Later:** a GPU backend behind the kernel boundary (wgpu in the app, WebGPU in the
   browser). Drivers may fuse multiply-adds, so saved models answer on the exact CPU path
   unless the GPU can be proven exact.

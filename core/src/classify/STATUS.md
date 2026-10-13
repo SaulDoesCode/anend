@@ -41,9 +41,34 @@ Corpus: `core/corpus/authors/*.txt` (6 authors × ~47 KB, 10 regions each, READM
   token for future batched/GPU paths).
 - Feedback uses the trained (unsteered) logits for the loss; steering is never trained.
 
+## Phase 2 (done): in the save, the hub, the web app
+
+- `core/src/classifiers.rs`: tables `classifiers` (name → `Definition` JSON: classes as
+  list keys, optional "not" list, head, preset, steering, upstream inputs with coupling,
+  training options, history of training/growth/enlist events, outputs, version),
+  `classifier weights` (name → `ANENDCLS` bytes), `classifier feedback`
+  ((name, n) → `FeedbackEntry`). `Store::{create_classifier, classifiers, classifier,
+  stack, examples, prepare / Training::run / commit, train_classifier, steer_classifier,
+  feedback_classifier, feedback_stack, enlist_outputs, candidates, delete_classifier}`;
+  `Stack::{outputs, extras, bias, contributions}`. Presets tiny / compact (default, 89 k
+  weights) / small / base. Bundles carry `classifiers` (weights base64), optional, so old
+  bundles still read; merge and the forge leave them out. The Bevy app can use this API
+  directly (training: prepare on the UI thread, `run` on a worker, `commit`).
+- `hub/src/classify.rs`: the `classify.*` ops (docs/app-api.md), training as a
+  background thread per classifier with progress/cancel.
+- `hub/web/views/classify.js`: the classifiers view (Ctrl+7). Offline, the engine answers
+  "classifiers need a hub for now" and the view says so; a browser save carries a hub's
+  classifiers through untouched.
+- Tests: core `classifiers::tests` (storage, bundle, stacks, enlist), hub
+  `classify::tests::classifier_calls` (every op). Playwright run of the view: 3 lists ×
+  50 memories, compact preset trains in ~8 s in a debug hub; 0.37 s in release
+  (`cargo test --release -p anend-core timing -- --ignored --nocapture`).
+
 ## Next (not done)
 
-- redb/table integration and UI (the user's part).
+- the desktop app's classifiers view (src/, uses `anend_core::classifiers`).
+- JS port of inference for offline use; search filter panel; default classifiers for
+  new saves; filter presets as lists.
 - GPU backend behind `kernels` (see its module doc for bit-exactness notes).
 - Row-parallel matmuls are used only for single long windows at inference; training is
   data-parallel over examples.
