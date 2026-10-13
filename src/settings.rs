@@ -1,8 +1,11 @@
 //! The settings menu: the saves (each database is a save you can load, start, copy,
-//! rename or delete, like a game's), where they're kept, the fonts, zen mode and the top
-//! bar. Opened from the top bar or with Ctrl+, ; Escape closes it.
+//! rename or delete, like a game's), where they're kept, a hub to share them on (see
+//! hub_ui.rs), the fonts, zen mode and the top bar. Opened from the top bar or with Ctrl+, ; Escape closes it.
 
-use bevy::feathers::controls::{ButtonVariant, FeathersTextInput, FeathersTextInputContainer};
+use bevy::feathers::controls::{
+    ButtonVariant, ColorChannel, ColorSlider, FeathersColorSlider, FeathersTextInput, FeathersTextInputContainer,
+    SliderBaseColor,
+};
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::input_focus::FocusedInput;
 use bevy::picking::Pickable;
@@ -10,12 +13,13 @@ use bevy::picking::cursor::EntityCursor;
 use bevy::picking::events::PointerClick;
 use bevy::prelude::*;
 use bevy::text::{EditableText, TextEdit, TextEditChange};
-use bevy::ui_widgets::{Activate, ScrollArea};
+use bevy::ui_widgets::{Activate, ScrollArea, SliderValue, ValueChange};
 use bevy::window::SystemCursorIcon;
 use std::path::{Path, PathBuf};
 
 use crate::config::{Config, clean_name, save_name};
 use crate::memory_ui::MemoryState;
+use crate::palette::{self, Palette, Role};
 use crate::space::{Space, SpaceText};
 use crate::store::Store;
 use crate::theme::colors;
@@ -53,6 +57,14 @@ pub struct Settings {
     pub font_filter: String,
     pub families: Option<Vec<String>>,
     pub message: String,
+    /// the colour being edited, an index into `Role::ALL`
+    pub color_role: usize,
+    /// its colour as the sliders see it (a hex rounds the hue away on greys)
+    pub hsl: Hsla,
+    /// put the colour into the sliders and the hex box
+    pub sync_colors: bool,
+    /// a slider is moving: leave the sliders' values alone
+    sliding: bool,
     /// put the saves folder in its box
     fill_folder: bool,
 }
@@ -66,6 +78,7 @@ impl Settings {
         self.renaming = None;
         self.confirm_delete = None;
         self.message.clear();
+        self.sync_colors = true;
     }
 }
 
@@ -89,8 +102,128 @@ pub struct Toggles;
 pub struct SettingsMessage;
 #[derive(Component, Default, Clone)]
 pub struct RenameInput;
+#[derive(Component, Default, Clone)]
+pub struct ColorPresets;
+#[derive(Component, Default, Clone)]
+pub struct ColorRoles;
+#[derive(Component, Default, Clone)]
+pub struct HexInput;
+#[derive(Component, Default, Clone)]
+pub struct SizeRows;
+/// a colour swatch: always shows its colour, whatever the palette does
+#[derive(Component)]
+#[require(BackgroundColor)]
+pub struct Swatch(pub Color);
 
-fn heading(label: &'static str) -> impl Scene {
+pub fn paint_swatches(mut q: Query<(&Swatch, &mut BackgroundColor)>) {
+    for (s, mut bg) in &mut q {
+        if bg.0 != s.0 {
+            bg.0 = s.0;
+        }
+    }
+}
+
+/// one of the colour editor's sliders, with its label
+fn color_slider(channel: ColorChannel, label: &'static str) -> impl Scene {
+    bsn! {
+        Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: px(8),
+        }
+        Children [
+            Text(label)
+            TextFont {
+                font: bevy::text::FontSourceTemplate::Handle(bevy::feathers::constants::fonts::REGULAR),
+                font_size: FontSize::Px(13.0),
+            }
+            TextColor(colors::TEXT_DIM)
+            Node { width: px(70) }
+            --
+            @FeathersColorSlider {
+                @value: 0.5,
+                @channel: channel,
+            }
+            on(slide_color)
+        ]
+    }
+}
+
+/// a colour slider moved: the role's colour follows
+fn slide_color(
+    change: On<ValueChange<f32>>,
+    mut s: ResMut<Settings>,
+    mut config: ResMut<Config>,
+    sliders: Query<&ColorSlider>,
+    mut commands: Commands,
+) {
+    let Ok(slider) = sliders.get(change.event_target()) else {
+        return;
+    };
+    let v = change.value;
+    match slider.channel {
+        ColorChannel::HslHue => s.hsl.hue = v,
+        ColorChannel::HslSaturation => s.hsl.saturation = v,
+        ColorChannel::HslLightness => s.hsl.lightness = v,
+        _ => return,
+    }
+    commands.entity(change.event_target()).insert(SliderValue(v));
+    let role = Role::ALL[s.color_role];
+    config
+        .colors
+        .insert(role.name().to_string(), palette::to_hex(Color::from(s.hsl)));
+    config.save();
+    s.sync_colors = true;
+    s.sliding = true;
+}
+
+/// the chosen role takes a colour (from the hex box)
+fn set_role_color(s: &mut Settings, config: &mut Config, c: Color) {
+    let role = Role::ALL[s.color_role];
+    config.colors.insert(role.name().to_string(), palette::to_hex(c));
+    config.save();
+    s.hsl = c.into();
+    s.sync_colors = true;
+    s.changed = true;
+}
+
+/// puts the chosen colour in the sliders and the hex box
+pub fn sync_color_editor(
+    mut s: ResMut<Settings>,
+    config: Res<Config>,
+    mut sliders: Query<(Entity, &ColorSlider, &mut SliderBaseColor)>,
+    mut hex: Single<&mut EditableText, With<HexInput>>,
+    mut commands: Commands,
+) {
+    if !std::mem::take(&mut s.sync_colors) {
+        return;
+    }
+    let sliding = std::mem::take(&mut s.sliding);
+    if !sliding {
+        let role = Role::ALL[s.color_role];
+        s.hsl = Palette::from_config(&config.colors).get(role).into();
+    }
+    let c = Color::from(s.hsl);
+    for (e, slider, mut base) in &mut sliders {
+        base.0 = c;
+        if !sliding {
+            let v = match slider.channel {
+                ColorChannel::HslHue => s.hsl.hue,
+                ColorChannel::HslSaturation => s.hsl.saturation,
+                ColorChannel::HslLightness => s.hsl.lightness,
+                _ => continue,
+            };
+            commands.entity(e).insert(SliderValue(v));
+        }
+    }
+    let h = palette::to_hex(c);
+    if hex.value().to_string() != h {
+        hex.editor_mut().set_text(&h);
+        hex.queue_edit(TextEdit::TextEnd(false));
+    }
+}
+
+pub(crate) fn heading(label: &'static str) -> impl Scene {
     bsn! {
         Text(label)
         TextFont {
@@ -156,6 +289,12 @@ pub fn menu() -> impl Scene {
                     }
                     TextColor(colors::TEXT)
                     Node { flex_grow: 1.0 }
+                    --
+                    @crate::ui::plain_scene_button("forge".into(), ButtonVariant::Normal)
+                    on(|_a: On<Activate>, mut forge: ResMut<crate::forge_ui::ForgeState>, mut s: ResMut<Settings>| {
+                        s.toggle();
+                        forge.toggle();
+                    })
                     --
                     @crate::ui::plain_scene_button("keys".into(), ButtonVariant::Normal)
                     on(|_a: On<Activate>, mut remap: ResMut<crate::keys::Remap>| {
@@ -257,6 +396,10 @@ pub fn menu() -> impl Scene {
                 }
                 TextColor(colors::TEXT_DIM)
                 --
+                @heading("hub")
+                --
+                @crate::hub_ui::section()
+                --
                 @heading("fonts")
                 --
                 Node {
@@ -283,10 +426,98 @@ pub fn menu() -> impl Scene {
                     display: Display::Flex,
                     flex_direction: FlexDirection::Column,
                     max_height: px(190),
+                    flex_shrink: 0.0,
                     overflow: Overflow::scroll_y(),
                 }
                 ScrollArea
                 FontList
+                --
+                @heading("colours")
+                --
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    align_items: AlignItems::Center,
+                    column_gap: px(6),
+                    row_gap: px(4),
+                }
+                ColorPresets
+                --
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: px(4),
+                    row_gap: px(4),
+                }
+                ColorRoles
+                --
+                Node {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(6),
+                    padding: UiRect::axes(px(2), px(4)),
+                }
+                Children [
+                    @color_slider(ColorChannel::HslHue, "hue")
+                    --
+                    @color_slider(ColorChannel::HslSaturation, "saturation")
+                    --
+                    @color_slider(ColorChannel::HslLightness, "lightness")
+                    --
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: px(8),
+                    }
+                    Children [
+                        Text("hex")
+                        TextFont {
+                            font: bevy::text::FontSourceTemplate::Handle(bevy::feathers::constants::fonts::REGULAR),
+                            font_size: FontSize::Px(13.0),
+                        }
+                        TextColor(colors::TEXT_DIM)
+                        Node { width: px(70) }
+                        --
+                        @FeathersTextInputContainer
+                        Node { width: px(110) }
+                        Children [
+                            @FeathersTextInput
+                            HexInput
+                            on(|k: On<FocusedInput<KeyboardInput>>, inputs: Query<&EditableText>, mut s: ResMut<Settings>, mut config: ResMut<Config>| {
+                                if k.input.state.is_pressed() && k.input.logical_key == Key::Enter
+                                    && let Ok(t) = inputs.get(k.event_target())
+                                {
+                                    match palette::from_hex(t.value().to_string().as_str()) {
+                                        Some(c) => set_role_color(&mut s, &mut config, c),
+                                        None => {
+                                            s.message = "a colour is #rrggbb (or #rgb)".into();
+                                            s.changed = true;
+                                        }
+                                    }
+                                }
+                            })
+                        ]
+                        --
+                        @crate::ui::plain_scene_button("reset".into(), ButtonVariant::Normal)
+                        on(|_a: On<Activate>, mut s: ResMut<Settings>, mut config: ResMut<Config>| {
+                            let role = Role::ALL[s.color_role];
+                            config.colors.remove(role.name());
+                            config.save();
+                            s.hsl = role.default_color().into();
+                            s.sync_colors = true;
+                            s.changed = true;
+                        })
+                    ]
+                ]
+                --
+                @heading("sizes")
+                --
+                Node {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(4),
+                }
+                SizeRows
                 --
                 @heading("view")
                 --
@@ -342,7 +573,7 @@ fn same(a: &Path, b: &Path) -> bool {
     a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y)
 }
 
-fn human_size(n: u64) -> String {
+pub(crate) fn human_size(n: u64) -> String {
     if n >= 1 << 20 {
         format!("{:.1} MB", n as f64 / (1u64 << 20) as f64)
     } else {
@@ -363,13 +594,20 @@ fn say(world: &mut World, msg: impl Into<String>) {
 }
 
 /// saves the open note if it can be, before the database changes under it
-fn keep_note(ctx: &mut Ctx) {
+pub(crate) fn keep_note(ctx: &mut Ctx) {
     if ctx.is_dirty() && !ctx.session.active.title.trim().is_empty() {
         ctx.save();
     }
 }
 
 /// closes the open save and opens another; everything that came from the old one goes
+/// reads the open save again from scratch (after something was poured into it)
+pub(crate) fn reload_open(world: &mut World) {
+    if let Some(Db(store)) = world.remove_resource::<Db>() {
+        install(world, store);
+    }
+}
+
 pub fn switch_save(world: &mut World, path: PathBuf) {
     if same(world.resource::<Db>().0.path(), &path) {
         return;
@@ -451,7 +689,8 @@ fn shellexpand(p: &str) -> String {
     }
 }
 
-fn unique(dir: &Path, name: &str) -> PathBuf {
+/// `name.redb` in `dir`, or `name 2.redb` and on if that's taken
+pub(crate) fn unique(dir: &Path, name: &str) -> PathBuf {
     let mut p = dir.join(format!("{}.redb", name));
     let mut i = 2;
     while p.exists() {
@@ -487,22 +726,9 @@ fn rename(world: &mut World, path: PathBuf, name: String) {
     }
     let moved = std::fs::rename(&path, &to);
     if current {
-        let reopen = if moved.is_ok() { &to } else { &path };
-        match Store::open(reopen) {
-            Ok(store) => {
-                world.insert_resource(Db(store));
-                let mut config = world.resource_mut::<Config>();
-                config.current = Some(reopen.clone());
-                config.save();
-            }
-            Err(e) => {
-                // nothing to fall back on: start an empty save so the app keeps working
-                let fresh = unique(&world.resource::<Config>().saves_dir.clone(), "recovered");
-                if let Ok(store) = Store::open(&fresh) {
-                    install(world, store);
-                }
-                return say(world, format!("couldn't reopen the save: {}", e));
-            }
+        let path = if moved.is_ok() { &to } else { &path };
+        if let Err(e) = reopen(world, path) {
+            return say(world, e);
         }
     }
     world.resource_mut::<Settings>().renaming = None;
@@ -510,6 +736,40 @@ fn rename(world: &mut World, path: PathBuf, name: String) {
         Ok(()) => say(world, format!("renamed to {}", name)),
         Err(e) => say(world, format!("couldn't rename: {}", e)),
     }
+}
+
+/// opens a closed save again; with nothing to fall back on, starts an empty save so the
+/// app keeps working
+fn reopen(world: &mut World, path: &Path) -> Result<(), String> {
+    match Store::open(path) {
+        Ok(store) => {
+            world.insert_resource(Db(store));
+            let mut config = world.resource_mut::<Config>();
+            config.current = Some(path.to_path_buf());
+            config.save();
+            Ok(())
+        }
+        Err(e) => {
+            let fresh = unique(&world.resource::<Config>().saves_dir.clone(), "recovered");
+            if let Ok(store) = Store::open(&fresh) {
+                install(world, store);
+            }
+            Err(format!("couldn't reopen the save: {}", e))
+        }
+    }
+}
+
+/// the open save's name and bytes; it's closed for the read, since redb holds the file
+/// (and marks it unfinished) while it's open, then opened again
+pub(crate) fn read_open_save(world: &mut World, max: u64) -> Result<(String, Vec<u8>), String> {
+    let path = world.resource::<Db>().0.path().to_path_buf();
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > max) {
+        return Err(format!("this save is over {}", human_size(max)));
+    }
+    drop(world.remove_resource::<Db>());
+    let bytes = std::fs::read(&path).map_err(|e| format!("couldn't read the save: {}", e));
+    reopen(world, &path)?;
+    bytes.map(|b| (save_name(&path), b))
 }
 
 fn delete(world: &mut World, path: PathBuf) {
@@ -577,6 +837,9 @@ pub fn rebuild_settings(
         Single<Entity, With<FontTabs>>,
         Single<Entity, With<FontList>>,
         Single<Entity, With<Toggles>>,
+        Single<Entity, With<ColorPresets>>,
+        Single<Entity, With<ColorRoles>>,
+        Single<Entity, With<SizeRows>>,
     ),
     mut message: Single<&mut Text, With<SettingsMessage>>,
     mut folder: Single<&mut EditableText, With<FolderInput>>,
@@ -594,6 +857,7 @@ pub fn rebuild_settings(
         return;
     }
     let (saves_list, tabs, font_list, toggles) = (*lists.0, *lists.1, *lists.2, *lists.3);
+    let (presets, roles, sizes) = (*lists.4, *lists.5, *lists.6);
     if message.0 != s.message {
         message.0 = s.message.clone();
     }
@@ -847,6 +1111,143 @@ pub fn rebuild_settings(
         commands.entity(t).insert(Pickable::IGNORE);
     }
 
+    // the colours
+    commands.entity(presets).despawn_related::<Children>();
+    small(&mut commands, presets, "start from", &fonts, colors::TEXT_DIM);
+    for (i, (name, _)) in palette::PRESETS.iter().enumerate() {
+        let current = config.colors == palette::preset_map(i);
+        let variant = if current {
+            ButtonVariant::Primary
+        } else {
+            ButtonVariant::Normal
+        };
+        button(&mut commands, presets, name, variant, |e| {
+            e.observe(
+                move |_a: On<Activate>, mut config: ResMut<Config>, mut s: ResMut<Settings>| {
+                    config.colors = palette::preset_map(i);
+                    config.save();
+                    s.sync_colors = true;
+                    s.changed = true;
+                },
+            );
+        });
+    }
+    commands.entity(roles).despawn_related::<Children>();
+    let pal = Palette::from_config(&config.colors);
+    for (i, role) in Role::ALL.into_iter().enumerate() {
+        let chosen = i == s.color_role;
+        let chip = commands
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: px(5),
+                    padding: UiRect::axes(px(6), px(3)),
+                    border: UiRect::all(px(1)),
+                    border_radius: BorderRadius::all(px(3)),
+                    ..default()
+                },
+                BackgroundColor(if chosen { colors::PAD } else { Color::NONE }),
+                BorderColor::all(if chosen { colors::MOOD_DARK } else { Color::NONE }),
+                EntityCursor::System(SystemCursorIcon::Pointer),
+                ChildOf(roles),
+            ))
+            .observe(move |_c: On<PointerClick>, mut s: ResMut<Settings>| {
+                s.color_role = i;
+                s.sync_colors = true;
+                s.changed = true;
+            })
+            .id();
+        commands.spawn((
+            Node {
+                width: px(14),
+                height: px(14),
+                border: UiRect::all(px(1)),
+                border_radius: BorderRadius::all(px(3)),
+                ..default()
+            },
+            // painted after the palette tags things, so a swatch keeps the colour it shows
+            Swatch(pal.get(role)),
+            BorderColor::all(Color::BLACK.with_alpha(0.3)),
+            Pickable::IGNORE,
+            ChildOf(chip),
+        ));
+        let t = text(&mut commands, chip, role.name(), &fonts.regular, 13.0, colors::TEXT);
+        commands.entity(t).insert(Pickable::IGNORE);
+    }
+
+    // the sizes
+    commands.entity(sizes).despawn_related::<Children>();
+    type Get = fn(&Config) -> f32;
+    type Set = fn(&mut Config, f32);
+    let size_rows: [(&str, Get, Set, f32, f32, f32, bool); 3] = [
+        ("interface", |c| c.ui_scale, |c, v| c.ui_scale = v, 0.1, 0.6, 2.0, true),
+        ("top bar", |c| c.top_bar, |c, v| c.top_bar = v, 2.0, 18.0, 96.0, false),
+        (
+            "command bar",
+            |c| c.bottom_bar,
+            |c, v| c.bottom_bar = v,
+            2.0,
+            18.0,
+            96.0,
+            false,
+        ),
+    ];
+    for (label, get, set, step, lo, hi, percent) in size_rows {
+        let r = commands.spawn((row(), ChildOf(sizes))).id();
+        let l = text(&mut commands, r, label, &fonts.regular, 14.0, colors::TEXT);
+        commands.entity(l).insert(Node {
+            width: px(110),
+            ..default()
+        });
+        let v = get(&config);
+        for (sign, glyph) in [(-1.0f32, "−"), (1.0, "+")] {
+            if sign > 0.0 {
+                let shown = if percent {
+                    format!("{:.0}%", v * 100.0)
+                } else {
+                    format!("{:.0} px", v)
+                };
+                let t = text(&mut commands, r, &shown, &fonts.regular, 14.0, colors::TEXT);
+                commands.entity(t).insert(Node {
+                    width: px(56),
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                });
+            }
+            button(&mut commands, r, glyph, ButtonVariant::Normal, |e| {
+                e.observe(
+                    move |_a: On<Activate>, mut config: ResMut<Config>, mut s: ResMut<Settings>| {
+                        let v = ((get(&config) + sign * step) / step).round() * step;
+                        set(&mut config, v.clamp(lo, hi));
+                        config.save();
+                        s.changed = true;
+                    },
+                );
+            });
+        }
+    }
+    let r = commands.spawn((row(), ChildOf(sizes))).id();
+    small(
+        &mut commands,
+        r,
+        "a bar's text and buttons are sized to fit its height",
+        &fonts,
+        colors::TEXT_DIM,
+    );
+    button(&mut commands, r, "default sizes", ButtonVariant::Normal, |e| {
+        e.observe(
+            |_a: On<Activate>, mut config: ResMut<Config>, mut s: ResMut<Settings>| {
+                let d = Config::default();
+                config.ui_scale = d.ui_scale;
+                config.top_bar = d.top_bar;
+                config.bottom_bar = d.bottom_bar;
+                config.save();
+                s.changed = true;
+            },
+        );
+    });
+
     // the view toggles
     commands.entity(toggles).despawn_related::<Children>();
     let zen = toggle(
@@ -902,6 +1303,35 @@ pub fn rebuild_settings(
         |_c: On<PointerClick>, mut config: ResMut<Config>, mut s: ResMut<Settings>| {
             config.hide_bar = !config.hide_bar;
             config.save();
+            s.changed = true;
+        },
+    );
+    let list = toggle(
+        &mut commands,
+        toggles,
+        "slide the note list away until the pointer comes to the left edge",
+        config.hide_list,
+        &fonts,
+    );
+    commands.entity(list).observe(
+        |_c: On<PointerClick>, mut config: ResMut<Config>, mut s: ResMut<Settings>| {
+            config.hide_list = !config.hide_list;
+            config.save();
+            s.changed = true;
+        },
+    );
+    let sums = toggle(
+        &mut commands,
+        toggles,
+        "in the space, show the search line (the sums and their chain) in the top bar",
+        config.space_sums,
+        &fonts,
+    );
+    commands.entity(sums).observe(
+        |_c: On<PointerClick>, mut config: ResMut<Config>, mut s: ResMut<Settings>, mut space: ResMut<Space>| {
+            config.space_sums = !config.space_sums;
+            config.save();
+            space.redraw.qline = true;
             s.changed = true;
         },
     );

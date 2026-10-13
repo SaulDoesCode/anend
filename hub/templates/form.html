@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }} · {% endblock %}
+{% block main %}
+<section class="card narrow">
+  <h2>{{ heading }}</h2>
+  {% if !intro.is_empty() %}<p class="dim">{{ intro }}</p>{% endif %}
+  <form method="post" action="{{ action }}"{% if multipart %} enctype="multipart/form-data"{% endif %}>
+    {% for f in fields %}
+    <div class="field">
+      <label for="{{ f.name }}">{{ f.label }}</label>
+      {% if f.kind == "textarea" %}<textarea id="{{ f.name }}" name="{{ f.name }}">{{ f.value }}</textarea>
+      {% else if f.kind == "file" %}<input id="{{ f.name }}" name="{{ f.name }}" type="file" accept=".redb"{% if f.required %} required{% endif %}>
+      {% else %}<input id="{{ f.name }}" name="{{ f.name }}" type="{{ f.kind }}" value="{{ f.value }}"{% if f.required %} required{% endif %}>{% endif %}
+      {% if !f.hint.is_empty() %}<span class="dim small">{{ f.hint }}</span>{% endif %}
+    </div>
+    {% endfor %}
+    <p><button class="primary">{{ submit }}</button></p>
+  </form>
+  {% if !after.is_empty() %}<p class="dim small">{{ after }}</p>{% endif %}
+</section>
+{% endblock %}

@@ -1,8 +1,7 @@
 # anend
 
 anend started out as a Go blog server: posts ("writs") in ArangoDB, magic-link email
-logins, and a sand-coloured admin panel for writing markdown. That server still lives
-here (`main.go`, `backend/`, `assets/`, `templates/`).
+logins, and a sand-coloured admin panel for writing markdown. Both halves are Rust now.
 
 **anend notes** is its Rust successor: a desktop markdown note app with no server. It
 keeps the admin panel's look and workflow, and is built with
@@ -10,28 +9,33 @@ keeps the admin panel's look and workflow, and is built with
 embedded [redb](https://www.redb.org) (4.3) database, and you can keep several of them
 as saves and swap between them like a game's.
 
+**anend hub** is what became of the server: a self-hosted place to share saves, the way a
+game has a workshop or a mod hub. People join, share their saves, star and download each
+other's, and earn points, levels and badges when others use what they made; the app
+browses and shares straight from its settings. See [the hub](#the-hub).
+
 ![the editor](docs/editor.png)
 ![the reader](docs/reader.png)
 ![the memory view](docs/memory.png)
 ![the space](docs/space.png)
 ![the settings](docs/settings.png)
+![the night colours](docs/night.png)
 
 ## Using it
 
 | | |
 |---|---|
-| **editor** | the note list (with **+ new**) next to the editor card. The first `# line` is the note's title, the rest is markdown. |
+| **editor** | the note list (with **+ new**) next to the editor card. The first `# line` is the note's title, the rest is markdown. **‹** (or **Ctrl+B**) slides the list away to the left; it peeks back out while the pointer is at the left edge. |
 | **tags** | type a tag in the box at the top of the card and press Enter (or `,`); click a tag to remove it |
-| **published** | ticking it saves the note and shows it in the reader |
 | **view / edit** | switch between the markdown source and the rendered note |
-| **reader** | published notes, newest first, the way the old front page listed writs; click a `#tag` to filter |
+| **reader** | your notes, newest first, the way the old front page listed writs; click a `#tag` to filter |
 | **stats** | counts of notes, words, saves and tags |
 | **memory** | weum's memory view: short texts ("memories") and your notes, searched by gematria or by words |
 | **command bar** | the line at the bottom, one for every view (see below) |
 | **space** | weum's spatial memory (remem): fly through a room where memory texts float, laid out by their sums |
-| **settings** | saves, fonts, zen mode and the top bar (also **Ctrl+,**); the key remap menu is in there too (also **K**, or **Ctrl+K** in the space) |
+| **settings** | saves, fonts, colours, sizes, zen mode and the bars (also **Ctrl+,**); the key remap menu is in there too (also **K**, or **Ctrl+K** in the space) |
 
-Shortcuts: **Ctrl+S** save, **Ctrl+N** new note, **Ctrl+E** toggle view/edit,
+Shortcuts: **Ctrl+S** save, **Ctrl+N** new note, **Ctrl+E** toggle view/edit, **Ctrl+B** the note list,
 **Ctrl+1..5** editor / reader / memory / stats / space, **Ctrl+,** settings, **/** the
 command bar. All of them can be changed in **keys**.
 
@@ -67,7 +71,17 @@ Also in settings:
 |---|---|
 | **fonts** | the interface font (every text in the app, the space's floating texts too) and the memory view's font, from the fonts on your system; filter the list by typing |
 | **zen** | while the mouse rests the bars and panels fade away (after 1, 2.5, 5 or 10 seconds); typing in the editor doesn't bring them back, moving the mouse does |
+| **colours** | every colour the app uses has a name (window, bars, bar text, cards, writing pad, buttons, accent, text, links, code, the space's room...): pick one and set it with the hue, saturation and lightness sliders or a hex. **sand** (the old admin panel's), **night**, **paper** and **sea** are starting points; **reset** puts one colour back. The memory view keeps weum's own colours |
+| **sizes** | the whole interface's scale, and the top bar's and command bar's heights in pixels, the way a desktop panel is set; their text and buttons are sized to fit |
 | **hide the top bar** | it slides up out of the way and back down when the pointer comes to the top edge |
+| **slide the note list away** | the same as **Ctrl+B**: it stays away until the pointer comes to the left edge |
+| **the space's search line** | in the space, what was searched, its counts and its sum's prime factor chain sit in the top bar (fading with it under zen); this turns that off |
+
+**hub**, in settings, under the saves: give it a hub's address and an app token (made on
+your page on the hub) and connect. Browse the hub's saves (search, and sort by new, stars,
+downloads or featured) and **download** one: it's checked, then lands in your saves
+folder, ready to load. **Share this save** sends the open one with a name, description and
+tags. The app only ever talks to the hub you give it, on a background thread.
 
 These settings and your key bindings live in `config.json` in the platform config folder
 (`~/.config/anend` on Linux, `~/Library/Application Support/anend` on macOS,
@@ -163,6 +177,27 @@ Downloads, **Shift+X** saves the map in the database (**Maps** lists them), **H*
 **I** the position card. Every key can be remapped in **keys**. weum's esearch, speech
 and image memories aren't part of it.
 
+## Downloads
+
+Builds for Linux and Windows are on the repository's
+[releases page](https://github.com/SaulDoesCode/anend/releases), each with the app
+(`anend`) and the hub (`anend-hub`). On Linux the app needs the Wayland or X11
+libraries a desktop already has.
+
+They're made by GitHub Actions (`.github/workflows/release.yml`). To make a release, tag a
+commit and push the tag:
+
+```sh
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The workflow builds both on Linux and Windows and attaches a `.tar.gz` and a
+`.zip` to a new release named after the tag, with notes listing the merged pull requests.
+**Run workflow** on the repository's Actions tab (release) builds the same packages as
+downloadable artifacts without making a release. `.github/workflows/ci.yml` checks
+formatting, clippy and the tests of both on every push to master and every pull request.
+
 ## Building
 
 ```sh
@@ -170,7 +205,7 @@ cargo run --release
 ```
 
 Bevy 0.20 needs Rust 1.97.1 or newer. On Linux you also need the usual Bevy system
-packages, e.g. on Debian/Ubuntu: `libwayland-dev libxkbcommon-dev` (plus
+packages, e.g. on Debian/Ubuntu: `libwayland-dev libxkbcommon-dev libfontconfig1-dev` (plus
 `libxkbcommon-x11-0` at runtime on X11). The memory view uses a system serif font
 (Times New Roman, or whatever serif fontconfig offers).
 
@@ -192,8 +227,46 @@ To bring writs over from the old server, export the `writs` collection (for exam
 anend --import writs.json
 ```
 
-This keeps their keys, titles, markdown, tags, dates, edit history and published
-(`public`) state.
+This keeps their keys, titles, markdown, tags, dates and edit history.
+
+## The hub
+
+![the hub](docs/hub.png)
+
+`anend-hub` (in `hub/`, built with [Salvo](https://salvo.rs)) is a website and an API for
+sharing saves. Start one and make yourself its admin:
+
+```sh
+cargo run --release -p anend-hub -- --admin yourname
+```
+
+It prints a login link (good once, within an hour); open it and set a password on your
+page. The hub listens on `127.0.0.1:8080` and keeps everything in `./hub-data`: its own
+redb database (people, sessions, saves' details, stars) and the save files in
+`hub-data/saves/`. Back it up by copying the folder while the hub is stopped.
+
+**What's in it**
+
+| | |
+|---|---|
+| **the grid** | every shared save as a card, headed by its name's ordinal and reversed sums in a colour taken from them; search by words, author or `#tag`, sort by new, stars, downloads or featured |
+| **a save's page** | its description and tags, some of its memories with their sums, its notes' titles, stars, downloads, and the download |
+| **joining** | name and password (email optional). By default it's an application an admin answers; `--open` lets people straight in |
+| **sharing** | upload a `.redb` save with a name, description and tags. The hub opens its own copy to check it's a save the app made (a copy of an open save is fine) and reads its counts and memories. It waits for an admin unless you're trusted; a new version keeps its stars and downloads |
+| **the game** | points when others use what you share: 50 when a save is let in, 5 a star, 1 for each person who downloads it, 100 when it's featured, and 1 for each save you star. Levels go seeker, reader, scribe, counter, cipherer, numerologist, gematrian, archivist, palace keeper, sage; badges for milestones (first save, prolific, beloved, well read, library, memory palace, curator, founder...). Stars and downloads count once per person, and your own don't count |
+| **people** | a page each, with level, badges, saves and a bio; the leaderboard ranks them, and the most starred saves |
+| **admin** | saves waiting (let in, or turn down with a reason), people applying, everyone (member, trusted (no review), admin, ban, make a login link), and every save (approve, turn down, feature, remove) |
+| **app tokens** | made on your page and pasted into the app (settings → hub), which uses them to share (see [the API](docs/hub-api.md)) |
+
+**Options**: `--addr` where it listens, `--url` the address people reach it at (for login
+links, and https cookies when it starts with `https://`), `--data` its folder, `--name` and
+`--about` what it calls itself, `--open`, `--max-upload` in MB (64), `--behind-proxy` to
+trust `X-Forwarded-For`, `--no-ratelimit`. It speaks plain http: put it behind a reverse
+proxy (Caddy, nginx) for https.
+
+Passwords are hashed with argon2; sessions and tokens are random and stored only as
+hashes; forms posted from other sites are refused; logins, joins and uploads are limited
+per address.
 
 ## Layout
 
@@ -217,4 +290,16 @@ This keeps their keys, titles, markdown, tags, dates, edit history and published
 | `src/settings.rs` | the settings menu and the saves: load, new, copy, rename, delete |
 | `src/config.rs` | the settings file |
 | `src/typeface.rs` | swapping the interface font and the memory view's font |
-| `src/zen.rs` | zen's fade and the hiding top bar |
+| `src/zen.rs` | zen's fade, the hiding top bar and the sliding note list |
+| `src/palette.rs` | the colours the settings change, and repainting the interface with them |
+| `src/sizing.rs` | the interface scale and the bars' heights |
+| `src/hub.rs` | talking to a hub: its API, downloads, uploads |
+| `src/hub_ui.rs` | the hub section of the settings |
+| `hub/src/main.rs` | the hub: command line and routes |
+| `hub/src/hub.rs` | taking uploads in, finding saves, stars, downloads, reviews |
+| `hub/src/store.rs` | the hub's redb tables |
+| `hub/src/inspect.rs` | reading an uploaded save |
+| `hub/src/game.rs` | points, levels and badges |
+| `hub/src/auth.rs` | passwords, sessions, tokens, login links, rate limits |
+| `hub/src/web.rs`, `hub/templates/` | the pages |
+| `hub/src/api.rs` | the JSON API |

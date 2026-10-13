@@ -1,17 +1,25 @@
 //! anend notes: a desktop markdown note app with the look and workflow of the old anend
 //! blog admin panel, built on Bevy's feathers widgets. Notes live in a local redb file.
 
+// a release build on Windows opens no console window next to the app
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 #![allow(clippy::type_complexity, clippy::too_many_arguments)] // bevy queries and systems are naturally verbose
 
 mod bar;
 mod config;
+mod forge;
+mod forge_ui;
+mod hub;
+mod hub_ui;
 mod keys;
 mod markdown;
 mod memory;
 mod memory_ui;
 mod note;
+mod palette;
 mod settings;
 mod simd;
+mod sizing;
 mod space;
 mod space_ui;
 mod spread;
@@ -169,8 +177,9 @@ fn main() {
         FeathersPlugins,
         bevy_slugtext::SlugTextPlugin,
     ))
-    .insert_resource(UiTheme(theme::sand_theme()))
+    .insert_resource(UiTheme(theme::sand_theme(&palette::Palette::default())))
     .insert_resource(ClearColor(theme::colors::MOOD_DARK))
+    .init_resource::<palette::Palette>()
     .insert_resource(Db(store))
     // start on the most recent note, like picking the top writ in the old editor
     .insert_resource(Session {
@@ -189,6 +198,8 @@ fn main() {
     .init_resource::<space::Space>()
     .init_resource::<bar::BarState>()
     .init_resource::<settings::Settings>()
+    .init_resource::<forge_ui::ForgeState>()
+    .init_resource::<hub_ui::HubState>()
     .init_resource::<typeface::Typeface>()
     .init_resource::<zen::Zen>()
     .insert_resource(keymap)
@@ -250,10 +261,20 @@ fn main() {
         (
             bar::notes_side,
             settings::rebuild_settings,
+            forge_ui::rebuild_forge,
+            forge_ui::pour,
+            hub_ui::merge_into_open,
+            (hub_ui::poll_hub, hub_ui::rebuild_hub),
             typeface::apply_typeface,
             typeface::apply_memory_font,
+            palette::tag_paints,
+            palette::apply_palette,
+            settings::paint_swatches,
+            settings::sync_color_editor,
+            sizing::apply_sizes,
             zen::zen_fade,
             zen::nav_autohide,
+            zen::list_autohide,
         )
             .chain()
             .after(space_ui::build_opts),

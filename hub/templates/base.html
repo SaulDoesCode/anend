@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{% endblock %}{{ l.hub }}</title>
+<link rel="stylesheet" href="/static/hub.css">
+<link rel="icon" href="/static/favicon.svg">
+</head>
+<body>
+<nav class="bar">
+  <a class="brand" href="/">{{ l.hub }}</a>
+  <a class="btn{% if l.tab == "saves" %} on{% endif %}" href="/">saves</a>
+  <a class="btn{% if l.tab == "leaderboard" %} on{% endif %}" href="/leaderboard">leaderboard</a>
+  {% if let Some(me) = l.me %}
+  <a class="btn{% if l.tab == "upload" %} on{% endif %}" href="/upload">share a save</a>
+  {% if me.admin %}<a class="btn{% if l.tab == "admin" %} on{% endif %}" href="/admin">admin{% if l.waiting > 0 %} · {{ l.waiting }}{% endif %}</a>{% endif %}
+  <span class="grow"></span>
+  <a class="who" href="/u/{{ me.name }}">{{ me.name }} · level {{ me.level }} {{ me.title }} · {{ me.points }} points</a>
+  <form class="inline" method="post" action="/logout"><button class="small">log out</button></form>
+  {% else %}
+  <span class="grow"></span>
+  <a class="btn{% if l.tab == "login" %} on{% endif %}" href="/login">log in</a>
+  <a class="btn primary{% if l.tab == "join" %} on{% endif %}" href="/join">join</a>
+  {% endif %}
+</nav>
+<main>
+{% if !l.flash.is_empty() %}<div class="flash{% if l.flash_bad %} bad{% endif %}">{{ l.flash }}</div>{% endif %}
+{% block main %}{% endblock %}
+</main>
+<footer>an <a href="https://github.com/SaulDoesCode/anend">anend</a> hub · saves for the anend notes app · <a href="/api/hub">api</a></footer>
+</body>
+</html>

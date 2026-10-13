@@ -1,0 +1,13 @@
+<a class="save" href="/saves/{{ c.id }}">
+  <div class="sigil" style="--h: {{ c.hue }}">
+    <span class="n">{{ c.ordinal }}</span><span class="r">{{ c.reversed }} reversed</span>
+    {% if c.featured %}<span class="star">featured</span>{% endif %}
+  </div>
+  <div class="body">
+    <span class="name">{{ c.name }}</span>
+    <span class="small dim">by {{ c.author }} · {{ c.ago }}</span>
+    {% if !c.description.is_empty() %}<span class="desc">{{ c.description }}</span>{% endif %}
+    {% if !c.tags.is_empty() %}<span class="tags">{% for t in c.tags %}<span class="tag">#{{ t }}</span>{% endfor %}</span>{% endif %}
+    <span class="meta"><span>★ {{ c.stars }}</span><span>↓ {{ c.downloads }}</span><span>{{ c.memories }} memories</span><span>{{ c.notes }} notes</span></span>
+  </div>
+</a>

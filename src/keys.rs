@@ -18,6 +18,7 @@ pub enum Action {
     Save,
     NewNote,
     ToggleView,
+    ToggleList,
     GotoEditor,
     GotoReader,
     GotoMemory,
@@ -120,10 +121,11 @@ const fn shift(key: KeyCode) -> Binding {
 }
 
 impl Action {
-    pub const ALL: [Action; 52] = [
+    pub const ALL: [Action; 53] = [
         Action::Save,
         Action::NewNote,
         Action::ToggleView,
+        Action::ToggleList,
         Action::GotoEditor,
         Action::GotoReader,
         Action::GotoMemory,
@@ -179,7 +181,7 @@ impl Action {
         use Action::*;
         match self {
             GotoEditor | GotoReader | GotoMemory | GotoStats | GotoSpace | OpenSettings => Scope::Global,
-            Save | NewNote | ToggleView | FocusTerm | BucketOrdinal | BucketReversed | BucketAtbash
+            Save | NewNote | ToggleView | ToggleList | FocusTerm | BucketOrdinal | BucketReversed | BucketAtbash
             | BucketFrequency | ToggleGsearch | ToggleSaturate | WhiteMode | SideOrdinal | SideReversed
             | SideAtbash | SideFrequency | OpenRemap => Scope::Notes,
             _ => Scope::Space,
@@ -201,6 +203,7 @@ impl Action {
             Action::Save => "save",
             Action::NewNote => "new_note",
             Action::ToggleView => "toggle_view",
+            Action::ToggleList => "toggle_list",
             Action::GotoEditor => "goto_editor",
             Action::GotoReader => "goto_reader",
             Action::GotoMemory => "goto_memory",
@@ -258,6 +261,7 @@ impl Action {
             Action::Save => "save the note",
             Action::NewNote => "new note",
             Action::ToggleView => "editor: view / edit",
+            Action::ToggleList => "slide the note list away / back",
             Action::GotoEditor => "go to the editor",
             Action::GotoReader => "go to the reader",
             Action::GotoMemory => "go to memory",
@@ -315,6 +319,7 @@ impl Action {
             Action::Save => ctrl(KeyCode::KeyS),
             Action::NewNote => ctrl(KeyCode::KeyN),
             Action::ToggleView => ctrl(KeyCode::KeyE),
+            Action::ToggleList => ctrl(KeyCode::KeyB),
             Action::GotoEditor => ctrl(KeyCode::Digit1),
             Action::GotoReader => ctrl(KeyCode::Digit2),
             Action::GotoMemory => ctrl(KeyCode::Digit3),

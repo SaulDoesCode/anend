@@ -331,6 +331,7 @@ pub fn view() -> impl Scene {
         }
         BackgroundColor(BLACK)
         MemoryView
+        crate::palette::OwnColors
         Children [
             Node {
                 position_type: PositionType::Absolute,

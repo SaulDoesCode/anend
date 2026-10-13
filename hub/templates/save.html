@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}{{ s.name }} · {% endblock %}
+{% block main %}
+<div class="savepage">
+  <section class="card">
+    <div class="row spread">
+      <div>
+        <h1>{{ s.name }}</h1>
+        <p class="dim small">by <a href="/u/{{ s.author }}">{{ s.author }}</a> · version {{ s.version }} · updated {{ updated }} · {{ size }}
+        {% if s.status_name != "approved" %} · <span class="pill {{ s.status_name }}">{{ s.status_name }}</span>{% endif %}</p>
+      </div>
+    </div>
+    {% if !s.note.is_empty() %}<div class="flash bad">the admins said: {{ s.note }}</div>{% endif %}
+    {% if !s.description.is_empty() %}<p style="white-space: pre-wrap">{{ s.description }}</p>{% endif %}
+    {% if !s.tags.is_empty() %}<p class="tags">{% for t in s.tags %}<a class="tag" href="/?q=%23{{ t }}">#{{ t }}</a>{% endfor %}</p>{% endif %}
+    {% if !s.sample.is_empty() %}
+    <h3>some of its {{ s.memories }} memories</h3>
+    <div class="samples">{% for m in s.sample %}<div class="sample"><span>{{ m.text }}</span><span class="s">{{ m.ordinal }} · {{ m.reversed }}</span></div>{% endfor %}</div>
+    <p class="dim small">ordinal · reversed sums of each memory's letters</p>
+    {% endif %}
+    {% if !s.titles.is_empty() %}
+    <h3>its notes</h3>
+    <ul class="titles">{% for t in s.titles %}<li>{{ t }}</li>{% endfor %}</ul>
+    {% endif %}
+  </section>
+  <aside style="display:flex; flex-direction:column; gap:8px">
+    <div class="sigil" style="--h: {{ hue }}"><span class="n">{{ ordinal }}</span><span class="r">{{ reversed }} reversed</span></div>
+    <section class="card">
+      <div class="stats" style="margin-bottom: 10px">
+        <div class="stat"><b>{{ s.stars }}</b><span>stars</span></div>
+        <div class="stat"><b>{{ s.downloads }}</b><span>downloads</span></div>
+        <div class="stat"><b>{{ s.memories }}</b><span>memories</span></div>
+        <div class="stat"><b>{{ s.notes }}</b><span>notes</span></div>
+      </div>
+      <div class="row">
+        <a class="btn primary" href="/saves/{{ s.id }}/download">download</a>
+        {% if can_star %}<form class="inline" method="post" action="/saves/{{ s.id }}/star"><button>{% if starred %}★ starred{% else %}☆ star{% endif %}</button></form>{% endif %}
+      </div>
+      <p class="dim small">In the app: settings → hub, or put the file in your saves folder and load it.</p>
+    </section>
+    {% if can_edit %}
+    <section class="card">
+      <h3>{% if is_admin %}admin{% else %}yours{% endif %}</h3>
+      <div class="row">
+        <a class="btn small" href="/saves/{{ s.id }}/edit">edit or new version</a>
+        <form class="inline" method="post" action="/saves/{{ s.id }}/delete" onsubmit="return confirm('Delete this save for good?')"><button class="small bad">delete</button></form>
+      </div>
+      {% if is_admin %}
+      <div class="row" style="margin-top: 8px">
+        {% if s.status_name != "approved" %}<form class="inline" method="post" action="/admin/saves/{{ s.id }}"><input type="hidden" name="action" value="approve"><button class="small primary">approve</button></form>{% endif %}
+        <form class="inline" method="post" action="/admin/saves/{{ s.id }}"><input type="hidden" name="action" value="{% if s.featured %}unfeature{% else %}feature{% endif %}"><button class="small">{% if s.featured %}unfeature{% else %}feature{% endif %}</button></form>
+      </div>
+      {% endif %}
+    </section>
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}

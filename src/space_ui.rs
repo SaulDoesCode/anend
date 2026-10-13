@@ -17,6 +17,7 @@ use bevy::window::SystemCursorIcon;
 
 use crate::bar::{BAR_DIM, BAR_TEXT, BarMode, BarSide};
 use crate::keys::{Action, Keymap, modifiers};
+use crate::palette::{Palette, Role};
 use crate::space::{ACCENT, Qline, SLIDERS, Sp, Space, SpaceText, bucket_color};
 use crate::theme::colors;
 use crate::ui::{Route, Session};
@@ -187,34 +188,7 @@ pub fn view() -> impl Scene {
             ScrollArea
             SpOpts
             crate::zen::Chrome
-            --
-            // what was searched, over the command bar
-            Node {
-                position_type: PositionType::Absolute,
-                bottom: px(0),
-                left: px(0),
-                right: px(0),
-                display: Display::Flex,
-                justify_content: JustifyContent::Center,
-            }
-            Pickable::IGNORE
-            Children [
-                Node {
-                    max_width: percent(50),
-                    display: Display::None,
-                    flex_direction: FlexDirection::Row,
-                    flex_wrap: FlexWrap::Wrap,
-                    align_items: AlignItems::Baseline,
-                    padding: UiRect::axes(px(10), px(3)),
-                    border_radius: BorderRadius::all(px(4)),
-                    max_height: px(64),
-                    overflow: Overflow::scroll_y(),
-                }
-                BackgroundColor(PANEL)
-                ScrollArea
-                SpQline
-            crate::zen::Chrome
-            ]
+
         ]
     }
 }
@@ -335,17 +309,21 @@ fn plain(commands: &mut Commands, parent: Entity, s: impl Into<String>, fonts: &
         .id()
 }
 
-fn bold(commands: &mut Commands, parent: Entity, s: impl Into<String>, fonts: &Fonts) -> Entity {
+fn bold_in(commands: &mut Commands, parent: Entity, s: impl Into<String>, fonts: &Fonts, ink: Color) -> Entity {
     commands
         .spawn((
             Text::new(s),
             text_font(fonts, true, 13.0),
-            TextColor(INK),
+            TextColor(ink),
             Pickable::IGNORE,
             ChildOf(parent),
         ))
         .id()
 }
+
+/// the palette colour a link goes back to when the pointer leaves
+#[derive(Component)]
+struct Ink(Role);
 
 /// a clickable bit of text that turns accent under the pointer
 fn link<'a>(
@@ -355,23 +333,37 @@ fn link<'a>(
     fonts: &Fonts,
     size: f32,
 ) -> EntityCommands<'a> {
+    link_in(commands, parent, s, fonts, size, Role::Text)
+}
+
+fn link_in<'a>(
+    commands: &'a mut Commands,
+    parent: Entity,
+    s: impl Into<String>,
+    fonts: &Fonts,
+    size: f32,
+    ink: Role,
+) -> EntityCommands<'a> {
     let mut e = commands.spawn((
         Text::new(s),
         text_font(fonts, false, size),
-        TextColor(INK),
+        TextColor(ink.default_color()),
+        Ink(ink),
         EntityCursor::System(SystemCursorIcon::Pointer),
         ChildOf(parent),
     ));
     e.observe(|e: On<PointerEnter>, mut colors: Query<&mut TextColor>| {
         if let Ok(mut c) = colors.get_mut(e.event_target()) {
-            c.0 = ACCENT;
+            c.0 = ACCENT.with_alpha(c.0.alpha());
         }
     })
-    .observe(|e: On<PointerLeave>, mut colors: Query<&mut TextColor>| {
-        if let Ok(mut c) = colors.get_mut(e.event_target()) {
-            c.0 = INK;
-        }
-    });
+    .observe(
+        |e: On<PointerLeave>, mut colors: Query<(&mut TextColor, &Ink)>, palette: Res<Palette>| {
+            if let Ok((mut c, ink)) = colors.get_mut(e.event_target()) {
+                c.0 = palette.get(ink.0).with_alpha(c.0.alpha());
+            }
+        },
+    );
     e
 }
 
@@ -390,7 +382,7 @@ fn row(commands: &mut Commands, parent: Entity) -> Entity {
 }
 
 /// weum's prime factor reduction line, its numbers gsearching themselves
-fn pf_line(commands: &mut Commands, parent: Entity, n: u64, rev: bool, fonts: &Fonts) {
+fn pf_line(commands: &mut Commands, parent: Entity, n: u64, rev: bool, fonts: &Fonts, ink: Role) {
     let r = row(commands, parent);
     commands.entity(r).insert(Node {
         flex_direction: FlexDirection::Row,
@@ -402,7 +394,7 @@ fn pf_line(commands: &mut Commands, parent: Entity, n: u64, rev: bool, fonts: &F
         c.spawn((
             Text::new(s),
             text_font(fonts, false, 11.0),
-            TextColor(INK),
+            TextColor(ink.default_color()),
             Pickable::IGNORE,
             ChildOf(r),
         ));
@@ -412,7 +404,7 @@ fn pf_line(commands: &mut Commands, parent: Entity, n: u64, rev: bool, fonts: &F
         match seg {
             Seg::Text(t) => small(commands, t),
             Seg::Num(v) => {
-                link(commands, r, v.to_string(), fonts, 11.0)
+                link_in(commands, r, v.to_string(), fonts, 11.0, ink)
                     .observe(move |_c: On<PointerClick>, mut sp: Sp| sp.envale(v.min(u32::MAX as u64) as u32, rev));
             }
         }
@@ -634,47 +626,57 @@ pub fn rebuild_help(
     }
 }
 
-/// the line over the terminal: what was searched, and how many texts and buckets
+/// the search line in the top bar: what was searched, how many texts and buckets, and the
+/// sum's prime factor chain; only in the space, and only when the settings want it
 pub fn rebuild_qline(
     mut st: ResMut<Space>,
     qline: Single<(Entity, &mut Node), With<SpQline>>,
+    session: Res<Session>,
+    config: Res<crate::config::Config>,
     fonts: Res<Fonts>,
     mut commands: Commands,
 ) {
+    let (q, mut node) = qline.into_inner();
+    let empty = matches!(st.qline, Qline::None) && st.mem_index.is_empty();
+    let display = if empty || session.route != Route::Space || !config.space_sums {
+        Display::None
+    } else {
+        Display::Flex
+    };
+    if node.display != display {
+        node.display = display;
+    }
     if !std::mem::take(&mut st.redraw.qline) {
         return;
     }
-    let (q, mut node) = qline.into_inner();
-    let empty = matches!(st.qline, Qline::None) && st.mem_index.is_empty();
-    node.display = if empty { Display::None } else { Display::Flex };
     commands.entity(q).despawn_related::<Children>();
     let count = format!(" · {} texts · {} buckets", st.mem_index.len(), st.spread.order.len());
     match st.qline.clone() {
         Qline::None => {
             if !st.mem_index.is_empty() {
-                plain(&mut commands, q, count.trim_start_matches(" · "), &fonts, INK);
+                plain(&mut commands, q, count.trim_start_matches(" · "), &fonts, BAR_TEXT);
             }
         }
         Qline::Gsearch { n, rev } => {
-            bold(&mut commands, q, n.to_string(), &fonts);
+            bold_in(&mut commands, q, n.to_string(), &fonts, BAR_TEXT);
             plain(
                 &mut commands,
                 q,
                 format!(" {}{}", if rev { "reversed" } else { "ordinal" }, count),
                 &fonts,
-                INK,
+                BAR_TEXT,
             );
             if n > 1 {
                 let holder = commands
                     .spawn((
                         Node {
-                            width: percent(100),
+                            margin: UiRect::left(px(10)),
                             ..default()
                         },
                         ChildOf(q),
                     ))
                     .id();
-                pf_line(&mut commands, holder, n as u64, rev, &fonts);
+                pf_line(&mut commands, holder, n as u64, rev, &fonts, Role::BarText);
             }
         }
         Qline::Key(k) | Qline::List(k) => {
@@ -683,12 +685,12 @@ pub fn rebuild_qline(
             } else {
                 "list "
             };
-            plain(&mut commands, q, word, &fonts, INK);
-            bold(&mut commands, q, k, &fonts);
-            plain(&mut commands, q, count, &fonts, INK);
+            plain(&mut commands, q, word, &fonts, BAR_TEXT);
+            bold_in(&mut commands, q, k, &fonts, BAR_TEXT);
+            plain(&mut commands, q, count, &fonts, BAR_TEXT);
         }
         Qline::Search(v) => {
-            plain(&mut commands, q, format!("search “{}”{}", v, count), &fonts, INK);
+            plain(&mut commands, q, format!("search “{}”{}", v, count), &fonts, BAR_TEXT);
         }
         Qline::Maps(names) => {
             plain(
@@ -700,12 +702,12 @@ pub fn rebuild_qline(
                     "maps"
                 },
                 &fonts,
-                INK,
+                BAR_TEXT,
             );
             for name in names {
-                plain(&mut commands, q, " · ", &fonts, INK);
+                plain(&mut commands, q, " · ", &fonts, BAR_TEXT);
                 let n = name.clone();
-                link(&mut commands, q, name, &fonts, 13.0)
+                link_in(&mut commands, q, name, &fonts, 13.0, Role::BarText)
                     .observe(move |_c: On<PointerClick>, mut sp: Sp| sp.route(&n));
             }
         }
@@ -790,24 +792,7 @@ pub fn rebuild_termrow(
 
 /// a clickable number in the bar
 fn bar_link<'a>(commands: &'a mut Commands, parent: Entity, s: String, fonts: &Fonts) -> EntityCommands<'a> {
-    let mut e = commands.spawn((
-        Text::new(s),
-        text_font(fonts, false, 13.0),
-        TextColor(BAR_TEXT),
-        EntityCursor::System(SystemCursorIcon::Pointer),
-        ChildOf(parent),
-    ));
-    e.observe(|e: On<PointerEnter>, mut colors: Query<&mut TextColor>| {
-        if let Ok(mut c) = colors.get_mut(e.event_target()) {
-            c.0 = ACCENT;
-        }
-    })
-    .observe(|e: On<PointerLeave>, mut colors: Query<&mut TextColor>| {
-        if let Ok(mut c) = colors.get_mut(e.event_target()) {
-            c.0 = BAR_TEXT;
-        }
-    });
-    e
+    link_in(commands, parent, s, fonts, 13.0, Role::BarText)
 }
 
 /// remem's metrics card: the sums of the text under the pointer (or the selected one), its
@@ -947,7 +932,7 @@ pub fn rebuild_metrics(
         }
     }
     if m.s > 1 {
-        pf_line(&mut commands, m_e, m.s as u64, rtb, &fonts);
+        pf_line(&mut commands, m_e, m.s as u64, rtb, &fonts, Role::Text);
     }
 }
 

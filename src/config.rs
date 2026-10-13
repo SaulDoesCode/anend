@@ -23,7 +23,23 @@ pub struct Config {
     pub zen_delay: f32,
     /// slide the top bar away until the pointer comes near it
     pub hide_bar: bool,
+    /// colours changed from the built in ones, by role name, as `#rrggbb`
+    pub colors: std::collections::BTreeMap<String, String>,
+    /// the whole interface's scale
+    pub ui_scale: f32,
+    /// the top bar's height in pixels; its buttons and text fit it
+    pub top_bar: f32,
+    /// the command bar's height in pixels
+    pub bottom_bar: f32,
+    /// the space's search line (the sums and the digit chain) in the top bar
+    pub space_sums: bool,
+    /// slide the note list away until the pointer comes to the left edge
+    pub hide_list: bool,
     pub keymap: Option<serde_json::Value>,
+    /// the anend hub saves are shared on, e.g. `http://localhost:8080`
+    pub hub_url: String,
+    /// an app token made on the hub's profile page
+    pub hub_token: String,
 }
 
 impl Default for Config {
@@ -36,7 +52,15 @@ impl Default for Config {
             zen: false,
             zen_delay: 2.5,
             hide_bar: false,
+            colors: Default::default(),
+            ui_scale: 1.0,
+            top_bar: 32.0,
+            bottom_bar: 30.0,
+            space_sums: true,
+            hide_list: false,
             keymap: None,
+            hub_url: String::new(),
+            hub_token: String::new(),
         }
     }
 }
@@ -128,5 +152,6 @@ mod tests {
         let c: Config = serde_json::from_str(r#"{"zen": true}"#).unwrap();
         assert!(c.zen && !c.hide_bar);
         assert_eq!(c.zen_delay, 2.5);
+        assert!(c.hub_url.is_empty() && c.hub_token.is_empty());
     }
 }

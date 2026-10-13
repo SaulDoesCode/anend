@@ -1,12 +1,12 @@
 //! The interface: a nav bar (editor / reader / memory / stats / space plus a message box), the editor
 //! (note list on the left, the markdown editor card on the right) and the reader, which
-//! shows published notes the way the old site's front page showed writs.
+//! shows the notes the way the old site's front page showed writs.
 
 use bevy::ecs::system::SystemParam;
 use bevy::feathers::constants::fonts;
 use bevy::feathers::controls::{
-    ButtonVariant, FeathersButton, FeathersCheckbox, FeathersDialog, FeathersDialogBody, FeathersDialogFooter,
-    FeathersDialogHeader, FeathersTextInput, FeathersTextInputContainer,
+    ButtonVariant, FeathersButton, FeathersDialog, FeathersDialogBody, FeathersDialogFooter, FeathersDialogHeader,
+    FeathersTextInput, FeathersTextInputContainer,
 };
 use bevy::feathers::display::caption;
 use bevy::feathers::theme::ThemeBackgroundColor;
@@ -21,8 +21,7 @@ use bevy::text::{
     EditableText, FontSourceTemplate, Strikethrough, TextBackgroundColor, TextCursorStyle, TextEdit, TextEditChange,
     Underline,
 };
-use bevy::ui::Checked;
-use bevy::ui_widgets::{Activate, RequestClose, ScrollArea, TextInput, ValueChange};
+use bevy::ui_widgets::{Activate, RequestClose, ScrollArea, TextInput};
 use bevy::window::{SystemCursorIcon, WindowCloseRequested};
 
 use crate::keys::{Action, Fired, Keymap, Remap};
@@ -130,9 +129,9 @@ pub struct Ctx<'w> {
 }
 
 /// a note as the editor would show it, so stored and edited versions compare fairly
-fn normalized(n: &Note) -> (String, String, Vec<String>, bool) {
+fn normalized(n: &Note) -> (String, String, Vec<String>) {
     let (title, markdown) = note::split(&n.editor_text());
-    (title, markdown, n.tags.clone(), n.published)
+    (title, markdown, n.tags.clone())
 }
 
 impl Ctx<'_> {
@@ -235,14 +234,6 @@ impl Ctx<'_> {
         self.redraw.stats = true;
     }
 
-    pub fn toggle_publish(&mut self) {
-        self.session.active.published = !self.session.active.published;
-        if !self.save() {
-            self.session.active.published = !self.session.active.published;
-        }
-        self.redraw.meta = true;
-    }
-
     fn set_tags(&mut self, tags: Vec<String>) {
         self.session.active.tags = tags;
         self.redraw.meta = true;
@@ -269,9 +260,13 @@ pub struct TagChips;
 #[derive(Component, Default, Clone)]
 pub struct TagInput;
 #[derive(Component, Default, Clone)]
-pub struct PublishBox;
-#[derive(Component, Default, Clone)]
 pub struct ViewToggle;
+/// the note list's panel, which can slide away
+#[derive(Component, Default, Clone)]
+pub struct NoteListPanel;
+/// the button that slides it
+#[derive(Component, Default, Clone)]
+pub struct ListToggle;
 #[derive(Component, Default, Clone)]
 pub struct EditorPad;
 #[derive(Component, Default, Clone)]
@@ -338,6 +333,8 @@ fn root() -> impl Scene {
             --
             @crate::settings::menu()
             --
+            @crate::forge_ui::menu()
+            --
             @remap_menu()
         ]
     }
@@ -387,6 +384,23 @@ fn nav() -> impl Scene {
             --
             @nav_button("space", Route::Space)
             --
+            // the space's search line: what was searched and its sum's chain
+            Node {
+                display: Display::None,
+                flex_direction: FlexDirection::Row,
+                flex_wrap: FlexWrap::NoWrap,
+                flex_shrink: 1.0,
+                min_width: px(0),
+                align_items: AlignItems::Baseline,
+                margin: UiRect::left(px(8)),
+                padding: UiRect::axes(px(10), px(2)),
+                border_radius: BorderRadius::all(px(4)),
+                overflow: Overflow::clip(),
+            }
+            // a tint of the bar's text, which the palette leaves alone as a background
+            BackgroundColor({crate::bar::BAR_TEXT.with_alpha(0.1)})
+            crate::space_ui::SpQline
+            --
             Node {
                 flex_grow: 1.0,
                 min_height: px(24),
@@ -435,6 +449,7 @@ fn editor_view() -> impl Scene {
             // the note list
             Node {
                 width: px(240),
+                flex_shrink: 0.0,
                 min_height: px(0),
                 display: Display::Flex,
                 flex_direction: FlexDirection::Column,
@@ -444,6 +459,7 @@ fn editor_view() -> impl Scene {
             }
             BackgroundColor(colors::CARD)
             crate::zen::Chrome
+            NoteListPanel
             Children [
                 @FeathersButton {
                     @caption: bsn! { @caption("+ new") },
@@ -484,6 +500,13 @@ fn editor_view() -> impl Scene {
                 }
                 crate::zen::Chrome
                 Children [
+                    @tool_button("‹")
+                    ListToggle
+                    on(|_activate: On<Activate>, mut config: ResMut<crate::config::Config>| {
+                        config.hide_list = !config.hide_list;
+                        config.save();
+                    })
+                    --
                     Node {
                         flex_grow: 1.0,
                         display: Display::Flex,
@@ -504,12 +527,6 @@ fn editor_view() -> impl Scene {
                         TagInput
                         on(tag_input_key)
                     ]
-                    --
-                    @FeathersCheckbox {
-                        @caption: bsn! { @caption("published") }
-                    }
-                    PublishBox
-                    on(|_change: On<ValueChange<bool>>, mut ctx: Ctx| ctx.toggle_publish())
                     --
                     @tool_button("view")
                     ViewToggle
@@ -697,6 +714,7 @@ pub fn app_actions(
     mut ctx: Ctx,
     mut remap: ResMut<Remap>,
     mut settings: ResMut<crate::settings::Settings>,
+    mut config: ResMut<crate::config::Config>,
     bar: Single<Entity, With<crate::bar::Bar>>,
     mut focus: ResMut<InputFocus>,
 ) {
@@ -708,6 +726,10 @@ pub fn app_actions(
                 ctx.save();
             }
             Action::NewNote => ctx.new_note(),
+            Action::ToggleList => {
+                config.hide_list = !config.hide_list;
+                config.save();
+            }
             Action::ToggleView if ctx.session.route == Route::Editor => {
                 ctx.session.view_mode = !ctx.session.view_mode;
                 ctx.redraw.meta = true;
@@ -862,7 +884,6 @@ pub fn rebuild_meta(
     mut redraw: ResMut<Redraw>,
     session: Res<Session>,
     chips: Single<Entity, With<TagChips>>,
-    publish: Single<(Entity, Has<Checked>), With<PublishBox>>,
     toggle: Single<&Children, With<ViewToggle>>,
     mut texts: Query<&mut Text>,
     mut commands: Commands,
@@ -872,14 +893,6 @@ pub fn rebuild_meta(
     }
     redraw.meta = false;
 
-    let (publish, checked) = *publish;
-    if session.active.published != checked {
-        if session.active.published {
-            commands.entity(publish).insert(Checked);
-        } else {
-            commands.entity(publish).remove::<Checked>();
-        }
-    }
     for child in toggle.iter() {
         if let Ok(mut t) = texts.get_mut(child) {
             t.0 = if session.view_mode {
@@ -953,10 +966,9 @@ pub fn rebuild_reader(
     redraw.reader = false;
     commands.entity(*reader).despawn_related::<Children>();
 
-    let published: Vec<&Note> = notes
+    let shown: Vec<&Note> = notes
         .0
         .iter()
-        .filter(|n| n.published)
         .filter(|n| session.reader_tag.as_ref().is_none_or(|t| n.tags.contains(t)))
         .filter(|n| session.note_filter.as_ref().is_none_or(|f| f.contains(&n.key)))
         .collect();
@@ -993,14 +1005,14 @@ pub fn rebuild_reader(
             });
     }
 
-    if published.is_empty() {
+    if shown.is_empty() {
         let card = commands
             .spawn((card_node(), BackgroundColor(colors::CARD), ChildOf(*reader)))
             .id();
         text(
             &mut commands,
             card,
-            "Nothing published yet. Tick \"published\" on a note in the editor and it shows up here.",
+            "No notes yet. Write one in the editor and it shows up here.",
             &fonts.italic,
             15.0,
             colors::TEXT_DIM,
@@ -1008,7 +1020,7 @@ pub fn rebuild_reader(
         return;
     }
 
-    for n in published {
+    for n in shown {
         let card = commands
             .spawn((card_node(), BackgroundColor(colors::CARD), ChildOf(*reader)))
             .id();
@@ -1102,7 +1114,6 @@ pub fn rebuild_stats(
         .id();
 
     let total = notes.0.len();
-    let published = notes.0.iter().filter(|n| n.published).count();
     let words: usize = notes.0.iter().map(|n| n.markdown.split_whitespace().count()).sum();
     let edits: usize = notes.0.iter().map(|n| n.edits.len()).sum();
     let mut tags: Vec<(String, usize)> = Vec::new();
@@ -1118,14 +1129,7 @@ pub fn rebuild_stats(
 
     text(&mut commands, card, "stats", &fonts.bold, 24.0, colors::TEXT);
     for line in [
-        format!(
-            "{} {}, {} published, {} {}",
-            total,
-            plural(total, "note"),
-            published,
-            total - published,
-            plural(total - published, "draft")
-        ),
+        format!("{} {}", total, plural(total, "note")),
         format!("{} words written across {} saves", words, total + edits),
         match (
             notes.0.last().and_then(|n| n.created_at()),

@@ -1,0 +1,75 @@
+name: release
+
+# Push a tag like v0.2.0 to build the app and the hub for Linux and Windows and
+# attach them to a GitHub release of that name. "Run workflow" on the Actions tab
+# builds them too, as downloadable artifacts, without making a release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x86_64
+            exe: ""
+          - os: windows-latest
+            name: windows-x86_64
+            exe: .exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: system packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev libfontconfig1-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: build the app and the hub
+        run: cargo build --release --locked --workspace
+
+      - name: package
+        shell: bash
+        run: |
+          dir=anend-${{ github.ref_name }}-${{ matrix.name }}
+          dir=${dir//\//-}
+          mkdir "$dir"
+          cp target/release/anend${{ matrix.exe }} target/release/anend-hub${{ matrix.exe }} README.md LICENSE "$dir"/
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "$dir.zip" "$dir" >/dev/null
+            echo "ASSET=$dir.zip" >> "$GITHUB_ENV"
+          else
+            tar czf "$dir.tar.gz" "$dir"
+            echo "ASSET=$dir.tar.gz" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ env.ASSET }}
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.tar.gz
+            *.zip
+          generate_release_notes: true

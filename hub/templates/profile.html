@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ u.name }} · {% endblock %}
+{% block main %}
+<div class="cols">
+  <section class="card">
+    <div class="row">
+      <span class="avatar" style="--h: {{ hue }}">{{ initial }}</span>
+      <div>
+        <h1 style="margin:0">{{ u.name }}</h1>
+        <span class="dim small">level {{ level }} {{ title }} · {{ u.points }} points · joined {{ joined }} · number {{ u.number }}
+        {% if standing != "active" %} · <span class="pill {{ standing }}">{{ standing }}</span>{% endif %}</span>
+      </div>
+    </div>
+    <div class="level" style="margin-top: 12px"><span class="small dim">level {{ level }}</span><span class="meter"><i style="width: {{ progress }}%"></i></span><span class="small dim">{{ next }} points to level {{ level + 1 }}</span></div>
+    {% if !u.bio.is_empty() %}<p style="white-space: pre-wrap; margin-top: 12px">{{ u.bio }}</p>{% endif %}
+    {% if !badges.is_empty() %}
+    <h3 style="margin-top: 14px">badges</h3>
+    <div class="badges">{% for b in badges %}<span class="badge" title="{{ b.about }}"><b>{{ b.glyph }}</b>{{ b.name }}</span>{% endfor %}</div>
+    {% endif %}
+  </section>
+  <section class="card">
+    <div class="stats">
+      <div class="stat"><b>{{ shared }}</b><span>saves</span></div>
+      <div class="stat"><b>{{ stars }}</b><span>stars</span></div>
+      <div class="stat"><b>{{ downloads }}</b><span>downloads</span></div>
+    </div>
+    <p class="dim small" style="margin-top: 10px">Points: {{ approved_pts }} for each save let in, {{ star_pts }} a star, {{ download_pts }} each person who takes one, {{ featured_pts }} when one is featured, {{ curate_pts }} for each save you star.</p>
+  </section>
+</div>
+{% if cards.is_empty() %}
+<section class="card dim">No saves shared yet.</section>
+{% else %}
+<section class="grid">{% for c in cards %}{% include "card.html" %}{% endfor %}</section>
+{% endif %}
+{% if own %}
+{% if !pending.is_empty() %}
+<section class="card">
+  <h3>waiting or turned down</h3>
+  <table>{% for p in pending %}<tr><td><a href="/saves/{{ p.0 }}">{{ p.1 }}</a></td><td><span class="pill {{ p.2 }}">{{ p.2 }}</span></td><td class="dim small">{{ p.3 }}</td></tr>{% endfor %}</table>
+</section>
+{% endif %}
+<div class="cols">
+  <section class="card">
+    <h3>about you</h3>
+    <form method="post" action="/me">
+      <label for="bio">a few words for your page</label>
+      <textarea id="bio" name="bio">{{ u.bio }}</textarea>
+      <label for="email">email (only admins see it)</label>
+      <input id="email" name="email" type="email" value="{{ u.email }}" style="width:100%">
+      <label for="password">{% if no_password %}set a password, so you can log in without a link{% else %}new password (leave empty to keep yours){% endif %}</label>
+      <input id="password" name="password" type="password" style="width:100%" autocomplete="new-password">
+      <p><button class="primary">save</button></p>
+    </form>
+  </section>
+  <section class="card">
+    <h3>app tokens</h3>
+    <p class="dim small">The app shares and browses saves with a token: make one, paste it in the app (settings → hub). It's shown once.</p>
+    {% if !new_token.is_empty() %}<p class="token">{{ new_token }}</p>{% endif %}
+    <form class="row" method="post" action="/me/tokens"><input type="text" name="label" placeholder="what it's for, e.g. laptop" style="flex:1"><button>make a token</button></form>
+    {% if !tokens.is_empty() %}
+    <table style="margin-top: 8px">{% for t in tokens %}<tr><td>{{ t.1 }}</td><td class="dim small">{{ t.2 }}… · {{ t.3 }}</td><td><form class="inline" method="post" action="/me/tokens/{{ t.0 }}/revoke"><button class="small bad">revoke</button></form></td></tr>{% endfor %}</table>
+    {% endif %}
+  </section>
+</div>
+{% endif %}
+{% endblock %}
