@@ -114,3 +114,7 @@ assets/googleb8218fe872fed5b7.html
 # Rust
 target/
 !Cargo.lock
+
+# Go server
+/anend-server
+/data/

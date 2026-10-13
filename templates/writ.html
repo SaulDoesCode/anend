@@ -5,12 +5,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   {{if .description}}
-  <meta name="description" content="{{.Description}}">
-  <meta property="og:description" content="{{.Description}}">
+  <meta name="description" content="{{.description}}">
+  <meta property="og:description" content="{{.description}}">
   {{end}}
-  <meta name="keywords" content="{{range $i, $el := .Tags}}{{if $i}},{{end}}{{$el}}{{end}}">
+  <meta name="keywords" content="{{range $i, $el := .tags}}{{if $i}},{{end}}{{$el}}{{end}}">
   <meta property="og:type" content="article">
-  <meta property="og:title" content="{{.Title}}">
+  <meta property="og:title" content="{{.title}}">
   <meta property="og:url" content="{{.URL}}">
 <link rel="icon" href="/favicon.png" type="image/png">
   <link rel="canonical" href="{{.URL}}">

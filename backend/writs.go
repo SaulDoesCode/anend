@@ -1,885 +1,632 @@
 package backend
 
 import (
-	"context"
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"strconv"
+	"slices"
+	"sort"
+	"strings"
 	"time"
 
-	"github.com/Machiel/slugify"
-	"github.com/arangodb/go-driver"
+	bolt "go.etcd.io/bbolt"
 )
 
-// Writ - struct representing a post or document in the database
+// Writ is a post: markdown with a title, tags, dates, an edit history and a
+// public flag. The json names are the ones the old arangodb documents used.
 type Writ struct {
-	Key         string      `json:"_key,omitempty" msgpack:"_key,omitempty"`
-	Type        string      `json:"type,omitempty" msgpack:"type,omitempty"`
-	Title       string      `json:"title,omitempty" msgpack:"title,omitempty"`
-	AuthorKey   string      `json:"authorkey,omitempty" msgpack:"authorkey,omitempty"`
-	Author      string      `json:"author,omitempty" msgpack:"author,omitempty"`
-	Content     string      `json:"content,omitempty" msgpack:"content,omitempty"`
-	Injection   string      `json:"injection,omitempty" msgpack:"injection,omitempty"`
-	Markdown    string      `json:"markdown,omitempty" msgpack:"markdown,omitempty"`
-	Description string      `json:"description,omitempty" msgpack:"description,omitempty"`
-	Slug        string      `json:"slug,omitempty" msgpack:"slug,omitempty"`
-	Tags        []string    `json:"tags,omitempty" msgpack:"tags,omitempty"`
-	Edits       []time.Time `json:"edits,omitempty" msgpack:"edits,omitempty"`
-	Created     time.Time   `json:"created,omitempty" msgpack:"created,omitempty"`
-	Views       int64       `json:"views,omitempty" msgpack:"views,omitempty"`
-	ViewedBy    []string    `json:"viewedby,omitempty" msgpack:"viewedby,omitempty"`
-	LikedBy     []string    `json:"likedby,omitempty" msgpack:"likedby,omitempty"`
-	Public      bool        `json:"public,omitempty" msgpack:"public,omitempty"`
-	MembersOnly bool        `json:"membersonly,omitempty" msgpack:"membersonly,omitempty"`
-	NoComments  bool        `json:"nocomments,omitempty" msgpack:"nocomments,omitempty"`
-	Roles       []int64     `json:"roles,omitempty" msgpack:"roles,omitempty"`
+	Key         string      `json:"_key,omitempty"`
+	Type        string      `json:"type,omitempty"`
+	Title       string      `json:"title,omitempty"`
+	AuthorKey   string      `json:"authorkey,omitempty"`
+	Author      string      `json:"author,omitempty"`
+	Content     string      `json:"content,omitempty"`
+	Injection   string      `json:"injection,omitempty"`
+	Markdown    string      `json:"markdown,omitempty"`
+	Description string      `json:"description,omitempty"`
+	Slug        string      `json:"slug,omitempty"`
+	Tags        []string    `json:"tags,omitempty"`
+	Edits       []time.Time `json:"edits,omitempty"`
+	Created     time.Time   `json:"created,omitzero"`
+	Views       int64       `json:"views,omitempty"`
+	ViewedBy    []string    `json:"viewedby,omitempty"`
+	LikedBy     []string    `json:"likedby,omitempty"`
+	Public      bool        `json:"public,omitempty"`
+	MembersOnly bool        `json:"membersonly,omitempty"`
+	NoComments  bool        `json:"nocomments,omitempty"`
+	Roles       []int64     `json:"roles,omitempty"`
 }
 
-// GetLink get a slug link with a key query param incase the title/slug changed
-func (w *Writ) GetLink() string {
-	return "https://" + AppDomain + "/writ/" + w.Slug + "?writ=" + w.Key
+var (
+	// ErrMissingTags writ is missing tags
+	ErrMissingTags = errors.New("writ doesn't have any tags, add some")
+	// ErrIncompleteWrit a new writ needs a title, markdown and an author
+	ErrIncompleteWrit = errors.New("a writ needs a title, markdown and an author")
+	// ErrAuthorIsNoUser writ's author is persona non grata
+	ErrAuthorIsNoUser = errors.New("writ author is not a registered user")
+)
+
+// RenderContent renders .Markdown into .Content.
+func (w *Writ) RenderContent() {
+	w.Content = renderMarkdown(w.Markdown)
+}
+
+// ModifiedDate is the time of the last edit, or the creation time.
+func (w *Writ) ModifiedDate() time.Time {
+	if len(w.Edits) > 0 {
+		return w.Edits[len(w.Edits)-1]
+	}
+	return w.Created
+}
+
+// without returns a copy of the writ with the named (json) fields cleared,
+// like AQL's UNSET.
+func (w Writ) without(fields ...string) Writ {
+	for _, f := range fields {
+		switch f {
+		case "type":
+			w.Type = ""
+		case "title":
+			w.Title = ""
+		case "authorkey":
+			w.AuthorKey = ""
+		case "author":
+			w.Author = ""
+		case "content":
+			w.Content = ""
+		case "injection":
+			w.Injection = ""
+		case "markdown":
+			w.Markdown = ""
+		case "description":
+			w.Description = ""
+		case "slug":
+			w.Slug = ""
+		case "tags":
+			w.Tags = nil
+		case "edits":
+			w.Edits = nil
+		case "created":
+			w.Created = time.Time{}
+		case "views":
+			w.Views = 0
+		case "viewedby":
+			w.ViewedBy = nil
+		case "likedby":
+			w.LikedBy = nil
+		case "public":
+			w.Public = false
+		case "membersonly":
+			w.MembersOnly = false
+		case "nocomments":
+			w.NoComments = false
+		case "roles":
+			w.Roles = nil
+		}
+	}
+	return w
+}
+
+func dateIndexKey(w *Writ) []byte {
+	return []byte(w.Created.UTC().Format("20060102150405.000000000") + "\x00" + w.Key)
+}
+
+func tagIndexKey(tag, key string) []byte {
+	return []byte(tag + "\x00" + key)
+}
+
+// unindexWrit removes the index entries of a stored writ.
+func unindexWrit(tx *bolt.Tx, w *Writ) error {
+	if k, ok := getIndex(tx, bWritsBySlug, w.Slug); ok && k == w.Key {
+		if err := tx.Bucket(bWritsBySlug).Delete([]byte(w.Slug)); err != nil {
+			return err
+		}
+	}
+	if k, ok := getIndex(tx, bWritsByTitle, w.Title); ok && k == w.Key {
+		if err := tx.Bucket(bWritsByTitle).Delete([]byte(w.Title)); err != nil {
+			return err
+		}
+	}
+	for _, tag := range w.Tags {
+		if err := tx.Bucket(bWritsByTag).Delete(tagIndexKey(tag, w.Key)); err != nil {
+			return err
+		}
+	}
+	return tx.Bucket(bWritsByDate).Delete(dateIndexKey(w))
+}
+
+// putWrit stores a writ and its index entries, replacing an older version.
+func putWrit(tx *bolt.Tx, w *Writ) error {
+	if w.Key == "" {
+		return errors.New("writ has no key")
+	}
+	var old Writ
+	switch err := getJSON(tx, bWrits, w.Key, &old); err {
+	case nil:
+		if err := unindexWrit(tx, &old); err != nil {
+			return err
+		}
+	case ErrNotFound:
+	default:
+		return err
+	}
+	if w.Slug != "" {
+		if k, ok := getIndex(tx, bWritsBySlug, w.Slug); ok && k != w.Key {
+			return fmt.Errorf("slug %q is taken by writ %s", w.Slug, k)
+		}
+		if err := tx.Bucket(bWritsBySlug).Put([]byte(w.Slug), []byte(w.Key)); err != nil {
+			return err
+		}
+	}
+	if w.Title != "" {
+		if err := tx.Bucket(bWritsByTitle).Put([]byte(w.Title), []byte(w.Key)); err != nil {
+			return err
+		}
+	}
+	for _, tag := range w.Tags {
+		if err := tx.Bucket(bWritsByTag).Put(tagIndexKey(tag, w.Key), nil); err != nil {
+			return err
+		}
+	}
+	if err := tx.Bucket(bWritsByDate).Put(dateIndexKey(w), nil); err != nil {
+		return err
+	}
+	return putJSON(tx, bWrits, w.Key, w)
+}
+
+// uniqueSlug returns base, or base-2, base-3... whichever isn't used by
+// another writ.
+func uniqueSlug(tx *bolt.Tx, base, key string) string {
+	slug := base
+	for i := 2; ; i++ {
+		k, ok := getIndex(tx, bWritsBySlug, slug)
+		if !ok || k == key {
+			return slug
+		}
+		slug = fmt.Sprintf("%s-%d", base, i)
+	}
+}
+
+func cleanTags(tags []string) []string {
+	out := []string{}
+	for _, t := range tags {
+		t = strings.TrimSpace(t)
+		if t != "" && !slices.Contains(out, t) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// PutWrit stores a writ as it is (keys, slug and dates included), giving it a
+// key if it has none.
+func (s *Store) PutWrit(w *Writ) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		if w.Key == "" {
+			key, err := nextKey(tx, bWrits)
+			if err != nil {
+				return err
+			}
+			w.Key = key
+		}
+		if w.Created.IsZero() {
+			w.Created = time.Now()
+		}
+		return putWrit(tx, w)
+	})
+}
+
+// WritByKey gets a writ by its key.
+func (s *Store) WritByKey(key string) (Writ, error) {
+	var w Writ
+	err := s.db.View(func(tx *bolt.Tx) error {
+		return getJSON(tx, bWrits, key, &w)
+	})
+	return w, err
+}
+
+// WritBySlug gets a writ by its slug.
+func (s *Store) WritBySlug(slug string) (Writ, error) {
+	return s.writByIndex(bWritsBySlug, slug)
+}
+
+// WritByTitle gets a writ by its exact title.
+func (s *Store) WritByTitle(title string) (Writ, error) {
+	return s.writByIndex(bWritsByTitle, title)
+}
+
+func (s *Store) writByIndex(bucket []byte, value string) (Writ, error) {
+	var w Writ
+	err := s.db.View(func(tx *bolt.Tx) error {
+		key, ok := getIndex(tx, bucket, value)
+		if !ok {
+			return ErrNotFound
+		}
+		return getJSON(tx, bWrits, key, &w)
+	})
+	return w, err
+}
+
+// DeleteWrit removes a writ and its index entries.
+func (s *Store) DeleteWrit(key string) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		var w Writ
+		if err := getJSON(tx, bWrits, key, &w); err != nil {
+			return err
+		}
+		if err := unindexWrit(tx, &w); err != nil {
+			return err
+		}
+		return tx.Bucket(bWrits).Delete([]byte(key))
+	})
+}
+
+// UpdateWrit changes a stored writ in place, keeping its indexes in step.
+func (s *Store) UpdateWrit(key string, change func(*Writ) error) (Writ, error) {
+	var w Writ
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		if err := getJSON(tx, bWrits, key, &w); err != nil {
+			return err
+		}
+		if err := change(&w); err != nil {
+			return err
+		}
+		w.Key = key
+		return putWrit(tx, &w)
+	})
+	return w, err
+}
+
+// SaveWrit creates or updates a writ the way the admin editor expects: a writ
+// with a key (or with the title of an existing writ) is updated and gets an
+// edit time, anything else is created. author is the user saving it. It
+// returns the stored writ and whether it was just made public.
+func (s *Store) SaveWrit(in Writ, author *User) (Writ, bool, error) {
+	in.Tags = cleanTags(in.Tags)
+	if len(in.Tags) == 0 {
+		return in, false, ErrMissingTags
+	}
+	in.Title = strings.TrimSpace(in.Title)
+
+	var out Writ
+	published := false
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		var cur Writ
+		exists := false
+		if in.Key != "" {
+			if err := getJSON(tx, bWrits, in.Key, &cur); err != nil {
+				return err
+			}
+			exists = true
+		} else if key, ok := getIndex(tx, bWritsByTitle, in.Title); ok && in.Title != "" {
+			if err := getJSON(tx, bWrits, key, &cur); err != nil {
+				return err
+			}
+			exists = true
+		}
+
+		if !exists {
+			if in.Title == "" || in.Markdown == "" {
+				return ErrIncompleteWrit
+			}
+			w := in
+			w.Created = time.Now()
+			w.Edits = nil
+			if w.Author == "" && author != nil {
+				w.Author = author.Username
+			}
+			if w.Author == "" {
+				return ErrIncompleteWrit
+			}
+			var u User
+			if err := userByIndex(tx, bUsersByName, w.Author, &u); err != nil {
+				return ErrAuthorIsNoUser
+			}
+			w.AuthorKey = u.Key
+			key, err := nextKey(tx, bWrits)
+			if err != nil {
+				return err
+			}
+			w.Key = key
+			w.RenderContent()
+			if w.Slug == "" {
+				w.Slug = Slugify(w.Title)
+			}
+			w.Slug = uniqueSlug(tx, w.Slug, w.Key)
+			published = w.Public
+			out = w
+			return putWrit(tx, &out)
+		}
+
+		w := cur
+		if in.Title != "" && in.Title != cur.Title {
+			w.Title = in.Title
+			w.Slug = uniqueSlug(tx, Slugify(in.Title), w.Key)
+		}
+		if in.Markdown != "" && in.Markdown != cur.Markdown {
+			w.Markdown = in.Markdown
+			w.RenderContent()
+		}
+		w.Tags = in.Tags
+		if in.Description != "" {
+			w.Description = in.Description
+		}
+		w.Injection = in.Injection
+		w.Public = in.Public
+		w.MembersOnly = in.MembersOnly
+		w.NoComments = in.NoComments
+		if in.Type != "" {
+			w.Type = in.Type
+		}
+		if len(in.Roles) > 0 {
+			w.Roles = in.Roles
+		}
+		w.Edits = append(w.Edits, time.Now())
+		published = !cur.Public && w.Public
+		out = w
+		return putWrit(tx, &out)
+	})
+	return out, published, err
+}
+
+// AddView counts a view of a writ, remembering the viewer if there is one.
+func (s *Store) AddView(key, viewer string) error {
+	_, err := s.UpdateWrit(key, func(w *Writ) error {
+		w.Views++
+		if viewer != "" && !slices.Contains(w.ViewedBy, viewer) {
+			w.ViewedBy = append(w.ViewedBy, viewer)
+		}
+		return nil
+	})
+	return err
+}
+
+// ToggleLike likes or unlikes a writ for a user, reporting whether it's now liked.
+func (s *Store) ToggleLike(slug, user string) (bool, error) {
+	w, err := s.WritBySlug(slug)
+	if err != nil {
+		return false, err
+	}
+	liked := false
+	_, err = s.UpdateWrit(w.Key, func(w *Writ) error {
+		if i := slices.Index(w.LikedBy, user); i >= 0 {
+			w.LikedBy = slices.Delete(w.LikedBy, i, i+1)
+		} else {
+			w.LikedBy = append(w.LikedBy, user)
+			liked = true
+		}
+		return nil
+	})
+	return liked, err
 }
 
 // Timeframe a distance of time between a .Start time and a .Finish time
 type Timeframe struct {
-	Start time.Time `json:"start,omitempty" msgpack:"start"`
-	End   time.Time `json:"end,omitempty" msgpack:"end"`
+	Start time.Time `json:"start,omitzero"`
+	End   time.Time `json:"end,omitzero"`
 }
 
-// WritQuery a easier way to query the db for writs
+// WritQuery describes which writs to fetch and how much of them to show. It
+// was compiled to AQL by the old server; now it runs as Go over the indexes.
 type WritQuery struct {
-	One                bool                   `json:"one,omitempty" msgpack:"one,omitempty"`
-	Key                string                 `json:"_key,omitempty" msgpack:"_key,omitempty"`
-	PrivateOnly        bool                   `json:"privateonly,omitempty" msgpack:"privateonly,omitempty"`
-	IncludePrivate     bool                   `json:"includeprivate,omitempty" msgpack:"includeprivate,omitempty"`
-	EditorMode         bool                   `json:"editormode,omitempty" msgpack:"editormode,omitempty"`
-	Extensive          bool                   `json:"extensive,omitempty" msgpack:"extensive,omitempty"`
-	UpdateViews        bool                   `json:"updateviews,omitempty" msgpack:"updateviews,omitempty"`
-	Comments           bool                   `json:"comments,omitempty" msgpack:"comments,omitempty"`
-	MembersOnly        bool                   `json:"membersonly,omitempty" msgpack:"membersonly,omitempty"`
-	IncludeMembersOnly bool                   `json:"includemembersonly,omitempty" msgpack:"includemembersonly,omitempty"`
-	DontSort           bool                   `json:"dontsort,omitempty" msgpack:"dontsort,omitempty"`
-	Vars               map[string]interface{} `json:"vars,omitempty" msgpack:"vars,omitempty"`
-	ViewedBy           string                 `json:"viewedby,omitempty" msgpack:"viewedby,omitempty"`
-	LikedBy            string                 `json:"likedby,omitempty" msgpack:"likedby,omitempty"`
-	Viewer             string                 `json:"viewer,omitempty" msgpack:"viewer,omitempty"`
-	Title              string                 `json:"title,omitempty" msgpack:"title,omitempty"`
-	Slug               string                 `json:"slug,omitempty" msgpack:"slug,omitempty"`
-	Author             string                 `json:"author,omitempty" msgpack:"author,omitempty"`
-	Created            time.Time              `json:"created,omitempty" msgpack:"created,omitempty"`
-	Between            Timeframe              `json:"between,omitempty" msgpack:"between,omitempty"`
-	Roles              []int64                `json:"roles,omitempty" msgpack:"roles,omitempty"`
-	Limit              []int64                `json:"limit,omitempty" msgpack:"limit,omitempty"`
-	Tags               []string               `json:"tags,omitempty" msgpack:"tags,omitempty"`
-	Omissions          []string               `json:"omissions,omitempty" msgpack:"omissions,omitempty"`
+	One                bool      `json:"one,omitempty"`
+	Key                string    `json:"_key,omitempty"`
+	PrivateOnly        bool      `json:"privateonly,omitempty"`
+	IncludePrivate     bool      `json:"includeprivate,omitempty"`
+	EditorMode         bool      `json:"editormode,omitempty"`
+	Extensive          bool      `json:"extensive,omitempty"`
+	UpdateViews        bool      `json:"updateviews,omitempty"`
+	MembersOnly        bool      `json:"membersonly,omitempty"`
+	IncludeMembersOnly bool      `json:"includemembersonly,omitempty"`
+	DontSort           bool      `json:"dontsort,omitempty"`
+	ViewedBy           string    `json:"viewedby,omitempty"`
+	LikedBy            string    `json:"likedby,omitempty"`
+	Viewer             string    `json:"viewer,omitempty"`
+	Title              string    `json:"title,omitempty"`
+	Slug               string    `json:"slug,omitempty"`
+	Author             string    `json:"author,omitempty"`
+	Created            time.Time `json:"created,omitzero"`
+	Between            Timeframe `json:"between,omitzero"`
+	Roles              []int64   `json:"roles,omitempty"`
+	Limit              []int64   `json:"limit,omitempty"`
+	Tags               []string  `json:"tags,omitempty"`
+	Omissions          []string  `json:"omissions,omitempty"`
 }
 
-// Exec execute a WritQuery to retrieve some/certain writs
-func (q *WritQuery) Exec() ([]Writ, error) {
-	writs := []Writ{}
+func containsAll[T comparable](have, want []T) bool {
+	for _, x := range want {
+		if !slices.Contains(have, x) {
+			return false
+		}
+	}
+	return true
+}
 
+// Match is the query's FILTER.
+func (q *WritQuery) Match(w *Writ) bool {
+	switch {
+	case q.PrivateOnly && w.Public:
+		return false
+	case !q.PrivateOnly && !q.IncludePrivate && !w.Public:
+		return false
+	case q.MembersOnly && !w.MembersOnly:
+		return false
+	case !q.MembersOnly && !q.IncludeMembersOnly && w.MembersOnly:
+		return false
+	case !q.Between.Start.IsZero() && !w.Created.After(q.Between.Start):
+		return false
+	case !q.Between.End.IsZero() && !w.Created.Before(q.Between.End):
+		return false
+	case !q.Created.IsZero() && !w.Created.Equal(q.Created):
+		return false
+	case q.Key != "" && w.Key != q.Key:
+		return false
+	case q.Slug != "" && w.Slug != q.Slug:
+		return false
+	case q.Title != "" && w.Title != q.Title:
+		return false
+	case q.Author != "" && w.Author != q.Author:
+		return false
+	case q.ViewedBy != "" && !slices.Contains(w.ViewedBy, q.ViewedBy):
+		return false
+	case q.LikedBy != "" && !slices.Contains(w.LikedBy, q.LikedBy):
+		return false
+	case !containsAll(w.Roles, q.Roles):
+		return false
+	case !containsAll(w.Tags, q.Tags):
+		return false
+	}
+	return true
+}
+
+// project is the query's RETURN UNSET(writ, omissions).
+func (q *WritQuery) project(w Writ) Writ {
+	omit := append([]string{}, q.Omissions...)
+	if q.EditorMode {
+		omit = append(omit, "content")
+	} else {
+		omit = append(omit, "markdown", "edits", "public", "roles", "authorkey")
+	}
+	if !q.Extensive {
+		omit = append(omit, "likedby", "viewedby")
+	}
+	return w.without(omit...)
+}
+
+// Writs runs a query and returns the matching writs, newest first unless
+// DontSort is set. Limit is AQL's LIMIT: [count] or [offset, count].
+func (s *Store) Writs(q WritQuery) ([]Writ, error) {
 	if q.One {
-		writ, err := q.ExecOne()
-		if err == nil {
-			writs = append(writs, writ)
+		w, err := s.Writ(q)
+		if err != nil {
+			return []Writ{}, err
 		}
-		return writs, err
+		return []Writ{w}, nil
+	}
+	var offset, count int64 = 0, -1
+	switch len(q.Limit) {
+	case 1:
+		count = q.Limit[0]
+	case 2:
+		offset, count = q.Limit[0], q.Limit[1]
 	}
 
-	if q.Vars == nil {
-		q.Vars = obj{}
-	}
-
-	query := "FOR writ IN writs "
-
-	filter := ""
-	firstfilter := true
-
-	if q.PrivateOnly {
-		if !firstfilter {
-			filter += "&& "
-		} else {
-			firstfilter = false
+	matches := []Writ{}
+	err := s.db.View(func(tx *bolt.Tx) error {
+		writs := tx.Bucket(bWrits)
+		consider := func(key []byte) error {
+			raw := writs.Get(key)
+			if raw == nil {
+				return nil
+			}
+			var w Writ
+			if err := json.Unmarshal(raw, &w); err != nil {
+				return err
+			}
+			if q.Match(&w) {
+				matches = append(matches, w)
+			}
+			return nil
 		}
-		filter += `writ.public == false `
-	} else if !q.IncludePrivate {
-		if !firstfilter {
-			filter += "&& "
-		} else {
-			firstfilter = false
-		}
-		filter += `writ.public == true `
-	}
 
-	if q.MembersOnly {
-		if !firstfilter {
-			filter += "&& "
-		}
-		firstfilter = false
-		filter += `writ.membersonly == true `
-	} else if !q.IncludeMembersOnly {
-		if !firstfilter {
-			filter += "&& "
-		}
-		firstfilter = false
-		filter += `writ.membersonly == false `
-	}
-
-	startzero := q.Between.Start.IsZero()
-	endzero := q.Between.End.IsZero()
-	if !startzero || !endzero {
-		if !firstfilter {
-			filter += "&& "
-		}
-		firstfilter = false
-		if !startzero && !endzero {
-			q.Vars["@betweenStart"] = q.Between.Start
-			q.Vars["@betweenEnd"] = q.Between.End
-			filter += "writ.created > @betweenStart && writ.created < @betweenEnd "
-		} else if !startzero {
-			q.Vars["@betweenStart"] = q.Between.Start
-			filter += "writ.created > @betweenStart "
-		} else if !endzero {
-			q.Vars["@betweenEnd"] = q.Between.Start
-			filter += "writ.created < @betweenEnd "
-		}
-	}
-
-	if len(q.Author) > 0 {
-		if !firstfilter {
-			filter += "&& "
-		}
-		firstfilter = false
-		q.Vars["author"] = q.Author
-		filter += `writ.author == @author `
-	}
-
-	if len(q.ViewedBy) > 0 {
-		if !firstfilter {
-			filter += "&& "
-		}
-		firstfilter = false
-		q.Vars["viewedby"] = q.ViewedBy
-		filter += `@viewedby IN writ.viewedby `
-	}
-
-	if len(q.LikedBy) > 0 {
-		if !firstfilter {
-			filter += "&& "
-		}
-		firstfilter = false
-		q.Vars["likedby"] = q.LikedBy
-		filter += `@likedby IN writ.likedby `
-	}
-
-	if len(q.Roles) > 0 {
-		if !firstfilter {
-			filter += "&& "
-		}
-		firstfilter = false
-		q.Vars["roles"] = q.Roles
-		filter += `@roles ALL IN writ.roles `
-	}
-
-	if len(q.Tags) > 0 {
-		if !firstfilter {
-			filter += "&& "
-		}
-		firstfilter = false
-		q.Vars["tags"] = q.Tags
-		filter += `@tags ALL IN writ.tags `
-	}
-
-	if !firstfilter {
-		query += "FILTER " + filter
-	}
-
-	if !q.DontSort {
-		query += "SORT writ.created DESC "
-	}
-
-	if len(q.Limit) > 0 {
-		q.Vars["pagenum"] = q.Limit[0]
-		query += `LIMIT @pagenum`
-		if len(q.Limit) == 2 {
-			q.Vars["pagesize"] = q.Limit[1]
-			query += `, @pagesize `
-		}
-	}
-
-	query += " RETURN "
-
-	if !q.EditorMode {
-		q.Omissions = append(q.Omissions, "markdown", "edits", "public", "roles", "authorkey")
-	} else {
-		q.Omissions = append(q.Omissions, "content")
-	}
-
-	if !q.Extensive {
-		q.Omissions = append(q.Omissions, "likedby", "viewedby")
-	}
-
-	if len(q.Omissions) > 0 {
-		q.Vars["omissions"] = q.Omissions
-		query += "UNSET(writ, @omissions)"
-	} else {
-		query += "writ"
-	}
-
-	if DevMode {
-		fmt.Println("\n You're trying this query now: \n", query, "\n\t")
-	}
-
-	ctx := driver.WithQueryCount(context.Background())
-	cursor, err := DB.Query(ctx, query, q.Vars)
-	if err == nil {
-		defer cursor.Close()
-		for {
-			var writ Writ
-			_, err := cursor.ReadDocument(ctx, &writ)
-			if driver.IsNoMoreDocuments(err) {
-				break
-			} else if err != nil {
-				if DevMode {
-					fmt.Println("DB Multiple Query - something strange happened: ", err)
+		if len(q.Tags) > 0 {
+			// walk the first tag's index, then sort by date
+			prefix := []byte(q.Tags[0] + "\x00")
+			c := tx.Bucket(bWritsByTag).Cursor()
+			for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Next() {
+				if err := consider(k[len(prefix):]); err != nil {
+					return err
 				}
-				panic(err)
 			}
-			writs = append(writs, writ)
+			if !q.DontSort {
+				sort.SliceStable(matches, func(i, j int) bool {
+					return matches[i].Created.After(matches[j].Created)
+				})
+			}
+			return nil
 		}
-	} else if driver.IsNoMoreDocuments(err) {
-		fmt.Println(`No more docs? Awww :( - `, err)
-	} else if DevMode {
-		fmt.Println("\n... And, it would seem that it has failed: \n", err, "\n\t")
+
+		// the date index is already in order, walk it newest first and stop
+		// as soon as the page is full
+		c := tx.Bucket(bWritsByDate).Cursor()
+		for k, _ := c.Last(); k != nil; k, _ = c.Prev() {
+			if count >= 0 && int64(len(matches)) >= offset+count {
+				break
+			}
+			i := bytes.IndexByte(k, 0)
+			if err := consider(k[i+1:]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return []Writ{}, err
 	}
-	return writs, err
+
+	if offset > int64(len(matches)) {
+		offset = int64(len(matches))
+	}
+	matches = matches[offset:]
+	if count >= 0 && count < int64(len(matches)) {
+		matches = matches[:count]
+	}
+	for i := range matches {
+		matches[i] = q.project(matches[i])
+	}
+	return matches, nil
 }
 
-// ExecOne execute a WritQuery to retrieve a single writ
-func (q *WritQuery) ExecOne() (Writ, error) {
-	var writ Writ
-
-	if q.Vars == nil {
-		q.Vars = obj{}
-	}
-
-	query := "FOR writ IN writs "
-
-	filter := ""
-	firstfilter := true
-
-	if q.PrivateOnly {
-		if !firstfilter {
-			filter += "&& "
-		} else {
-			firstfilter = false
-		}
-		filter += `writ.public == false `
-	} else if !q.IncludePrivate {
-		if !firstfilter {
-			filter += "&& "
-		} else {
-			firstfilter = false
-		}
-		filter += `writ.public == true `
-	}
-
-	if q.MembersOnly {
-		if !firstfilter {
-			filter += "&& "
-		}
-		firstfilter = false
-		filter += `writ.membersonly == true `
-	}
-
-	if !q.Created.IsZero() {
-		if !firstfilter {
-			filter += "&& "
-		}
-		firstfilter = false
-		q.Vars["@created"] = q.Created
-		filter += "writ.created == @created "
-	}
-
-	if len(q.Key) > 0 {
-		if !firstfilter {
-			filter += "&& "
-		}
-		firstfilter = false
-		q.Vars["key"] = q.Key
-		filter += `writ._key == @key `
-	}
-
-	if len(q.Slug) > 0 {
-		if !firstfilter {
-			filter += "&& "
-		}
-		firstfilter = false
-		q.Vars["slug"] = q.Slug
-		filter += `writ.slug == @slug `
-	}
-
-	if len(q.Title) > 0 {
-		if !firstfilter {
-			filter += "&& "
-		}
-		firstfilter = false
-		q.Vars["title"] = q.Title
-		filter += `writ.title == @title `
-	}
-
-	if len(q.Author) > 0 {
-		if !firstfilter {
-			filter += "&& "
-		}
-		firstfilter = false
-		q.Vars["author"] = q.Author
-		filter += `writ.author == @author `
-	}
-
-	if len(q.ViewedBy) > 0 {
-		if !firstfilter {
-			filter += "&& "
-		}
-		firstfilter = false
-		q.Vars["viewedby"] = q.ViewedBy
-		filter += `@viewedby IN writ.viewedby `
-	}
-
-	if len(q.LikedBy) > 0 {
-		if !firstfilter {
-			filter += "&& "
-		}
-		firstfilter = false
-		q.Vars["likedby"] = q.LikedBy
-		filter += `@likedby IN writ.likedby `
-	}
-
-	if len(q.Roles) > 0 {
-		if !firstfilter {
-			filter += "&& "
-		}
-		firstfilter = false
-		q.Vars["roles"] = q.Roles
-		filter += `@roles ALL IN writ.roles `
-	}
-
-	if len(q.Tags) > 0 {
-		if !firstfilter {
-			filter += "&& "
-		}
-		firstfilter = false
-		q.Vars["tags"] = q.Tags
-		filter += `@tags ALL IN writ.tags `
-	}
-
-	if !firstfilter {
-		query += "FILTER " + filter
-	}
-
-	if q.UpdateViews {
-		query += "UPDATE writ WITH {"
-		if len(q.Viewer) > 0 {
-			q.Vars["viewer"] = q.Viewer
-			query += "viewedby: PUSH(writ.viewedby, @viewer, true)"
-		} else {
-			query += "views: writ.views + 1"
-		}
-		query += "} IN writs "
-	}
-
-	query += "RETURN "
-
-	if !q.EditorMode {
-		q.Omissions = append(q.Omissions, "markdown", "edits", "public", "roles", "authorkey")
-	} else {
-		q.Omissions = append(q.Omissions, "content")
-	}
-
-	if !q.Extensive {
-		q.Omissions = append(q.Omissions, "likedby", "viewedby")
-	}
-
-	if len(q.Omissions) > 0 {
-		q.Vars["omissions"] = q.Omissions
-		query += "UNSET(writ, @omissions)"
-	} else {
-		query += "writ"
-	}
-
-	if DevMode {
-		fmt.Println("\n You're trying this query now: \n", query, "\n\t")
-	}
-
-	err := QueryOne(query, q.Vars, &writ)
-
-	if DevMode && err != nil {
-		fmt.Println("\n... And, it would seem that it has failed: \n", err, "\n\t")
-	}
-
-	return writ, err
-}
-
-// Slugify generate and set .Slug from .Title
-func (w *Writ) Slugify() {
-	w.Slug = slugify.Slugify(w.Title)
-}
-
-// RenderContent from .Markdown generate html and set .Content
-func (w *Writ) RenderContent() {
-	w.Content = string(renderMarkdown([]byte(w.Markdown), false)[:])
-}
-
-// ToObj convert writ into map[string]interface{}
-func (w *Writ) ToObj(omissions ...string) obj {
-	output := obj{}
-
-	if len(w.Key) != 0 {
-		output["_key"] = w.Key
-	}
-	if len(w.Type) != 0 {
-		output["type"] = w.Type
-	}
-	if len(w.Title) != 0 {
-		output["title"] = w.Title
-	}
-	if len(w.AuthorKey) != 0 {
-		output["authorkey"] = w.AuthorKey
-	}
-	if len(w.Author) != 0 {
-		output["author"] = w.Author
-	}
-	if len(w.Content) != 0 {
-		output["content"] = w.Content
-	}
-	if len(w.Injection) != 0 {
-		output["injection"] = w.Injection
-	}
-	if len(w.Markdown) != 0 {
-		output["markdown"] = w.Markdown
-	}
-	if len(w.Description) != 0 {
-		output["description"] = w.Description
-	}
-	if len(w.Slug) != 0 {
-		output["slug"] = w.Slug
-	}
-	if len(w.Tags) != 0 {
-		output["tags"] = w.Tags
-	}
-	if len(w.Edits) != 0 {
-		output["edits"] = w.Edits
-	}
-	if !w.Created.IsZero() {
-		output["created"] = w.Created
-	}
-	if w.Views != 0 {
-		output["views"] = w.Views
-	}
-	if len(w.ViewedBy) != 0 {
-		output["viewedby"] = w.ViewedBy
-	}
-	if len(w.LikedBy) != 0 {
-		output["likedby"] = w.LikedBy
-	}
-	if &w.Public != nil {
-		output["public"] = w.Public
-	}
-	if &w.MembersOnly != nil {
-		output["membersonly"] = w.MembersOnly
-	}
-	if &w.NoComments != nil {
-		output["nocomments"] = w.NoComments
-	}
-	if len(w.Roles) != 0 {
-		output["roles"] = w.Roles
-	}
-
-	if len(omissions) != 0 {
-		for _, omission := range omissions {
-			delete(output, omission)
-		}
-	}
-
-	return output
-}
-
-// Update update a writ's details using a map[string]interface{}
-func (w *Writ) Update(query string, vars obj) error {
-	if len(w.Key) < 0 {
-		return ErrIncompleteWrit
-	}
-	vars["key"] = w.Key
-	query = "FOR w in writs FILTER w._key == @key UPDATE w WITH " + query + " IN writs OPTIONS {keepNull: false, waitForSync: true} RETURN NEW"
-	ctx := driver.WithQueryCount(context.Background())
-	cursor, err := DB.Query(ctx, query, vars)
-	defer cursor.Close()
-	if err == nil {
-		_, err = cursor.ReadDocument(ctx, w)
-	}
-	return err
-}
-
-// WritByKey retrieve user using their db document key
-func WritByKey(key string) (Writ, error) {
-	var writ Writ
-	_, err := Writs.ReadDocument(context.Background(), key, &writ)
-	return writ, err
-}
-
-// InitWrit initialize a new writ
-func InitWrit(w *Writ) error {
-	if len(w.Tags) < 1 {
-		return ErrMissingTags
-	}
-
-	ctx := driver.WithWaitForSync(context.Background(), true)
-
-	exists := true
+// Writ runs a query for a single writ, using the key, slug or title index
+// when the query has one. With UpdateViews it also counts the view.
+func (s *Store) Writ(q WritQuery) (Writ, error) {
+	var w Writ
 	var err error
-	var currentWrit Writ
-	if len(w.Key) == 0 {
-		if DevMode {
-			fmt.Println("Searching For: ", w.Title)
-		}
-		currentWrit, err = (&WritQuery{
-			EditorMode: true,
-			Title:      w.Title,
-		}).ExecOne()
-		exists = err == nil
-		err = nil
-	}
-
-	if !exists {
-		w.Created = time.Now()
-		if len(w.Markdown) < 1 || len(w.Title) < 1 || len(w.Author) < 1 {
-			if DevMode {
-				fmt.Println("InitWrit - it's horribly incomplete, fix it, add in author, title, and markdown")
-			}
-			return ErrIncompleteWrit
-		}
-
-		user, err := UserByUsername(w.Author)
+	switch {
+	case q.Key != "":
+		w, err = s.WritByKey(q.Key)
+	case q.Slug != "":
+		w, err = s.WritBySlug(q.Slug)
+	case q.Title != "":
+		w, err = s.WritByTitle(q.Title)
+	default:
+		var all []Writ
+		all, err = s.Writs(WritQuery{
+			IncludePrivate: true, IncludeMembersOnly: true, EditorMode: true, Extensive: true,
+		})
 		if err != nil {
-			if DevMode {
-				fmt.Println("InitWrit - author ("+w.Author+") is invalid or MIA: ", err)
+			return Writ{}, err
+		}
+		err = ErrNotFound
+		for _, c := range all {
+			if q.Match(&c) {
+				w, err = s.WritByKey(c.Key)
+				break
 			}
-			return ErrAuthorIsNoUser
-		}
-		w.AuthorKey = user.Key
-
-		w.RenderContent()
-		if len(w.Slug) < 1 {
-			w.Slugify()
-		}
-
-		meta, err := Writs.CreateDocument(ctx, w)
-		if err != nil {
-			if DevMode {
-				fmt.Println(`InitWrit - creating a writ in the db: `, err)
-			}
-			return err
-		}
-		w.Key = meta.Key
-	} else {
-		if len(w.Key) == 0 {
-			w.Key = currentWrit.Key
-		}
-		if len(w.Title) != 0 && currentWrit.Title == w.Title {
-			w.Title = ""
-			w.Slug = ""
-		} else {
-			w.Slugify()
-		}
-		if len(w.Content) != 0 && currentWrit.Content == w.Content {
-			w.Content = ""
-			w.Markdown = ""
-		} else {
-			w.RenderContent()
-		}
-		if len(w.Edits) < len(currentWrit.Edits) {
-			w.Edits = append(w.Edits, currentWrit.Edits...)
-		}
-		w.Edits = append(w.Edits, time.Now())
-		ctx = driver.WithMergeObjects(ctx, true)
-		_, err := Writs.UpdateDocument(ctx, w.Key, w.ToObj("_key"))
-		if err != nil {
-			if DevMode {
-				fmt.Println(`InitWrit - error updating a writ in the db: `, err)
-			}
-			return err
-		}
-		if !currentWrit.Public && w.Public {
-			go notifySubscribers(w.Key)
 		}
 	}
-
-	return nil
-}
-
-func notifySubscribers(writKey string) {
-	writ, err := WritByKey(writKey)
 	if err != nil {
-		return
+		return Writ{}, err
 	}
-
-	query := `FOR u IN users FILTER u.subscriber == true RETURN u`
-	ctx := driver.WithQueryCount(context.Background())
-	var users []User
-	cursor, err := DB.Query(ctx, query, obj{})
-	if err != nil {
-		return
+	if !q.Match(&w) {
+		return Writ{}, ErrNotFound
 	}
-	defer cursor.Close()
-	users = []User{}
-	for {
-		var doc User
-		_, err = cursor.ReadDocument(ctx, &doc)
-		if driver.IsNoMoreDocuments(err) {
-			break
-		} else if err != nil {
-			return
+	if q.UpdateViews {
+		if err := s.AddView(w.Key, q.Viewer); err != nil {
+			return Writ{}, err
 		}
-		users = append(users, doc)
+		w.Views++
 	}
-
-	mail := MakeEmail()
-	mail.Subject("Subscriber Update: Newly Published Writ")
-	domain := AppDomain
-	if DevMode {
-		domain = "localhost:2443"
-	}
-	mail.HTML().Set(`
-		<h4>There's a new writ: ` + writ.Title + `</h4>
-		<p><a href="https://` + domain + "/writ/" + writ.Slug + `?writ=` + writ.Key + `">check it out</a></p>
-		<sub><a href="https://` + domain + `/subscribe-toggle">unsubcribe</a></sub>
-	`)
-	for _, user := range users {
-		mail.Bcc(user.Email)
-	}
-	go SendEmail(mail)
+	return q.project(w), nil
 }
 
-func initWrits() {
-	Server.GET("/writ/:slug", func(c ctx) error {
-		slug := c.Param("slug")
-
-		wq := WritQuery{
-			UpdateViews: true,
-			Slug:        slug,
-		}
-
-		user, err := CredentialCheck(c)
-		if err == nil {
-			wq.Viewer = user.Key
-			wq.IncludeMembersOnly = true
-		} else {
-			err = nil
-		}
-
-		writ, err := wq.ExecOne()
-
-		if driver.IsNotFound(err) {
-			wq.Slug = ""
-			// incase the slug/title changed but the key stayed the same
-			key := c.Param("writ")
-			if len(key) < 2 {
-				return NoSuchWrit.Send(c)
-			}
-
-			wq.Key = key
-			writ, err = wq.ExecOne()
-			if err != nil {
-				return Err404NotFound
-			}
-		} else if err != nil {
-			return ServerDBError.SendJSON(c)
-		}
-
-		writdata := writ.ToObj()
-
-		writdata["Created"] = writ.Created.Format("1 Jan 2006")
-		writdata["CreateDate"] = writ.Created
-
-		editslen := len(writ.Edits)
-		if editslen != 0 {
-			writdata["ModifiedDate"] = writ.Edits[editslen-1]
-		}
-
-		writdata["URL"] = writ.GetLink()
-
-		err = c.Render(200, "writ", writdata)
-		if err != nil {
-			if DevMode {
-				fmt.Println("GET /writ/:slug - error executing the post template: ", err)
-			}
-		}
-		return err
+// CountWrits returns how many writs there are.
+func (s *Store) CountWrits() int {
+	n := 0
+	s.db.View(func(tx *bolt.Tx) error {
+		n = tx.Bucket(bWrits).Stats().KeyN
+		return nil
 	})
-
-	Server.GET("/like-writ/:slug", AuthHandle(func(c ctx, user *User) error {
-		slug := c.Param("slug")
-		if len(slug) < 1 {
-			return BadRequestError.Send(c)
-		}
-
-		ctx := driver.WithKeepNull(driver.WithWaitForSync(driver.WithQueryCount(context.Background())), false)
-		_, err := DB.Query(
-			ctx,
-			`FOR w IN writs FILTER w.slug == @slug UPDATE w WITH {
-				 likedby: @user IN w.likedby ? REMOVE(w.likedby, @user) : PUSH(w.likedby, @user)
-			 } IN writs`,
-			obj{
-				"slug": slug,
-				"user": user.Key,
-			},
-		)
-		if err != nil {
-			return c.Msgpack(500, obj{
-				"err": "liking this writ failed somehow",
-				"msg": err.Error(),
-			})
-		}
-		return c.Msgpack(200, obj{"msg": "success, writ liked!"})
-	}))
-
-	Server.GET("/writs-by-tag/:tag/:page/:count", func(c ctx) error {
-		tag := c.Param("tag")
-		if len(tag) < 1 {
-			return BadRequestError.Send(c)
-		}
-
-		page, err := str2int64(c.Param("page"))
-		if err != nil {
-			return BadRequestError.Send(c)
-		}
-		count, err := str2int64(c.Param("count"))
-		if err != nil {
-			return BadRequestError.Send(c)
-		}
-
-		if count > 200 {
-			return RequestQueryOverLimitMembers.Send(c)
-		}
-
-		q := &WritQuery{
-			Limit: []int64{page, count},
-			Tags:  []string{tag},
-		}
-
-		user, err := CredentialCheck(c)
-		if err == nil && user != nil {
-			if count > 200 {
-				return RequestQueryOverLimitMembers.Send(c)
-			}
-			q.IncludeMembersOnly = true
-		} else if count > 50 {
-			return RequestQueryOverLimit.Send(c)
-		}
-
-		writs, err := q.Exec()
-		if err != nil {
-			return ServerDBError.Send(c)
-		}
-		return c.Msgpack(200, writs)
-	})
-
-	Server.GET("/writs/:page/:count", func(c ctx) error {
-		page, err := str2int64(c.Param("page"))
-		if err != nil {
-			return BadRequestError.Send(c)
-		}
-		count, err := str2int64(c.Param("count"))
-		if err != nil {
-			return BadRequestError.Send(c)
-		}
-
-		if count > 200 {
-			return RequestQueryOverLimitMembers.Send(c)
-		}
-
-		q := &WritQuery{
-			Limit: []int64{page, count},
-		}
-
-		user, err := CredentialCheck(c)
-		if err == nil && user != nil {
-			if count > 200 {
-				return RequestQueryOverLimitMembers.Send(c)
-			}
-			q.IncludeMembersOnly = true
-		} else if count > 50 {
-			return RequestQueryOverLimit.Send(c)
-		}
-
-		writs, err := q.Exec()
-		if err != nil {
-			return ServerDBError.Send(c)
-		}
-		return c.Msgpack(200, writs)
-	})
-
-	Server.POST("/writ", AdminHandle(func(c ctx, user *User) error {
-		var writ Writ
-		err := c.Bind(&writ)
-		if err != nil {
-			return BadRequestError.Send(c)
-		}
-
-		if len(writ.Author) == 0 {
-			writ.Author = user.Username
-			writ.AuthorKey = user.Key
-		} else if len(writ.AuthorKey) == 0 {
-			writ.AuthorKey = user.Key
-		}
-
-		err = InitWrit(&writ)
-		if err != nil {
-			if !driver.IsNoMoreDocuments(err) {
-				return SendMsgpack(c, 503, obj{"ok": false, "error": err})
-			}
-		}
-
-		fmt.Println(`Baking Writs! - `, writ.Title)
-		return SuccessMsg.Send(c)
-	}))
-
-	Server.POST("/writ-query", AdminHandle(func(c ctx, user *User) error {
-		var q WritQuery
-		err := c.Bind(&q)
-		if err != nil {
-			return BadRequestError.Send(c)
-		}
-
-		var output interface{}
-		if q.One {
-			output, err = q.ExecOne()
-		} else {
-			output, err = q.Exec()
-		}
-		if err != nil {
-			return ServerDecodeError.Send(c)
-		}
-		return c.Msgpack(200, output)
-	}))
-
-	Server.GET("/writ-delete/:key", AdminHandle(func(c ctx, user *User) error {
-		key := c.Param("key")
-		if len(key) < 1 {
-			return BadRequestError.Send(c)
-		}
-
-		ctx := driver.WithWaitForSync(context.Background(), true)
-		_, err := Writs.RemoveDocument(ctx, key)
-		if err != nil {
-			return DeleteWritError.Send(c)
-		}
-		return c.Msgpack(200, obj{"msg": "writ deleted, it's gone"})
-	}))
-
-	fmt.Println("Writ Service Started")
-}
-
-func str2int64(str string) (int64, error) {
-	i, err := strconv.Atoi(str)
-	return int64(i), err
+	return n
 }

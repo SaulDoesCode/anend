@@ -2,7 +2,8 @@
 
 anend started out as a Go blog server: posts ("writs") in ArangoDB, magic-link email
 logins, and a sand-coloured admin panel for writing markdown. That server still lives
-here (`main.go`, `backend/`, `assets/`, `templates/`).
+here (`main.go`, `backend/`, `assets/`, `templates/`), now on modern Go with an embedded
+database; see [the old server](#the-old-server).
 
 **anend notes** is its Rust successor: a desktop markdown note app with no server. It
 keeps the admin panel's look and workflow, and is built with
@@ -194,6 +195,56 @@ anend --import writs.json
 
 This keeps their keys, titles, markdown, tags, dates, edit history and published
 (`public`) state.
+
+## The old server
+
+The Go server still runs: the front page, writ pages, the admin panel and its editor,
+looking the way they did. ArangoDB is gone; everything sits in one
+[bbolt](https://github.com/etcd-io/bbolt) file. It needs Go 1.26 or newer (an older `go`
+fetches a newer toolchain by itself).
+
+```sh
+go build -o anend-server .
+./anend-server -admin you@example.com
+```
+
+That makes you an admin (creating the user if needed, with a username taken from the
+email, or `-admin-name`) and prints a login link. Open it and you land in `/admin`. The
+site is at `http://localhost:8080`; `-addr` changes where it listens and `-url` the
+address put in links, when it sits behind a proxy.
+
+Logging in works like before, with a username and email in the form on the front page,
+but the magic link is printed in the server's terminal instead of emailed:
+
+```
+2026/10/13 04:18:32 login link for saul <saul@example.com> (good for 15m0s, once):
+
+    http://localhost:8080/auth/Xq3v...a-long-random-token...k9E
+```
+
+A link works once, within 15 minutes, and logs you in for a week. Run with
+`-admin you@example.com` again whenever you need a fresh one. To email links instead, give
+it an SMTP server: `-smtp mail.example.com:587 -smtp-user you -smtp-from you@example.com`,
+with the password in `ANEND_SMTP_PASSWORD`. If sending fails the link is printed anyway.
+
+The data lives in `data/anend.db` (`-db` puts it elsewhere): writs, users, and
+sessions, the last stored only as hashes of the cookies. Back it up by copying the file
+while the server is stopped.
+
+To bring writs over from the ArangoDB days, use the same export as for the app:
+
+```sh
+./anend-server -import writs.json
+```
+
+It reads arangoexport's json or jsonl, keeps keys, slugs, dates, edit history, views and
+the `public` flag, renders the markdown again and exits. Importing twice replaces rather
+than duplicates.
+
+Other flags: `-dev` reads `assets/` and `templates/` from disk (otherwise they're built
+into the binary) and logs every request, `-tls-cert`/`-tls-key` serve https directly,
+`-no-ratelimit` turns off the login request limits. `go test ./...` runs the store tests
+and a login-to-published-writ run through the http api.
 
 ## Layout
 
