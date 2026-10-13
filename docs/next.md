@@ -3,6 +3,27 @@
 Where the work stands, for picking it up in a new session. Branch:
 `claude/adoring-pascal-5nk7o1`.
 
+## Resuming (read first)
+
+As of 13 Oct 2026, evening UTC:
+- **Done:** items 1 (classifiers phase 2) and 3 (web polish).
+- **Were running when the session ran low:** item 2 (desktop polish, in `src/`) and the
+  core, hub and web part of item 4 (classifiers phase 3). Their progress is under their
+  items below and in `core/src/classify/STATUS.md`.
+
+To pick up:
+1. Check what landed: `git log --oneline -15`, `git status`.
+2. Finish item 2 and item 4.
+3. Then do the desktop side of item 4: the classifiers view, colouring in the memory and
+   space views, and the note-indexing panel, using `core/src/classifiers.rs` directly.
+4. Then item 5 (the guide) and item 6 (the review pass).
+5. Then the backlog under "Not started".
+
+Checks to run before every push:
+- `cargo clippy -p anend -p anend-core -p anend-hub`
+- `cargo test -p anend -p anend-core -p anend-hub`
+- `node hub/web/test/parity.mjs`, which must print "all the same"
+
 ## The queue (asked for on 13 Oct, in this order)
 
 Overall aim, in the user's words: "sensibilization, ergonomics, visual appeal of the app,
