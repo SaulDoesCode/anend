@@ -10,8 +10,10 @@ mod markdown;
 mod memory;
 mod memory_ui;
 mod note;
+mod palette;
 mod settings;
 mod simd;
+mod sizing;
 mod space;
 mod space_ui;
 mod spread;
@@ -169,8 +171,9 @@ fn main() {
         FeathersPlugins,
         bevy_slugtext::SlugTextPlugin,
     ))
-    .insert_resource(UiTheme(theme::sand_theme()))
+    .insert_resource(UiTheme(theme::sand_theme(&palette::Palette::default())))
     .insert_resource(ClearColor(theme::colors::MOOD_DARK))
+    .init_resource::<palette::Palette>()
     .insert_resource(Db(store))
     // start on the most recent note, like picking the top writ in the old editor
     .insert_resource(Session {
@@ -252,8 +255,14 @@ fn main() {
             settings::rebuild_settings,
             typeface::apply_typeface,
             typeface::apply_memory_font,
+            palette::tag_paints,
+            palette::apply_palette,
+            settings::paint_swatches,
+            settings::sync_color_editor,
+            sizing::apply_sizes,
             zen::zen_fade,
             zen::nav_autohide,
+            zen::list_autohide,
         )
             .chain()
             .after(space_ui::build_opts),

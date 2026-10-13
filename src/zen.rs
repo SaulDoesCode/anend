@@ -39,6 +39,8 @@ pub struct Zen {
     last_cursor: Option<Vec2>,
     /// how far the top bar is down, 0..1
     slide: f32,
+    /// how far the note list is out, 0..1
+    list: f32,
 }
 
 impl Default for Zen {
@@ -49,6 +51,7 @@ impl Default for Zen {
             faded: false,
             last_cursor: None,
             slide: 1.0,
+            list: 1.0,
         }
     }
 }
@@ -182,5 +185,41 @@ pub fn nav_autohide(
     let top = px(-h * (1.0 - zen.slide));
     if node.margin.top != top {
         node.margin.top = top;
+    }
+}
+
+/// slides the note list away to the left, and back while the pointer is at the left edge
+#[allow(clippy::type_complexity)]
+pub fn list_autohide(
+    mut zen: ResMut<Zen>,
+    config: Res<Config>,
+    time: Res<Time>,
+    window: Single<&Window, With<PrimaryWindow>>,
+    list: Single<(&mut Node, &ComputedNode), With<crate::ui::NoteListPanel>>,
+    toggle: Single<&Children, With<crate::ui::ListToggle>>,
+    mut texts: Query<&mut Text>,
+    settings: Res<crate::settings::Settings>,
+) {
+    let (mut node, computed) = list.into_inner();
+    let w = computed.size().x * computed.inverse_scale_factor() + 8.0;
+    let near = window
+        .cursor_position()
+        .is_some_and(|c| c.x < 10.0 || (zen.list > 0.5 && c.x < w + 16.0));
+    let show = !config.hide_list || (near && !settings.open);
+    let target = if show { 1.0 } else { 0.0 };
+    let dt = time.delta_secs();
+    let slide = zen.list + (target - zen.list) * (1.0 - (-dt * 14.0).exp());
+    zen.list = if (slide - target).abs() < 0.002 { target } else { slide };
+    let left = px(-w * (1.0 - zen.list));
+    if node.margin.left != left {
+        node.margin.left = left;
+    }
+    let glyph = if config.hide_list { "›" } else { "‹" };
+    for c in toggle.iter() {
+        if let Ok(mut t) = texts.get_mut(c)
+            && t.0 != glyph
+        {
+            t.0 = glyph.into();
+        }
     }
 }

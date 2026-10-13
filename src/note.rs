@@ -1,5 +1,5 @@
 //! The note model. A note is what the anend server called a "writ": a markdown document
-//! with a title, tags, a creation date, an edit history and a published flag.
+//! with a title, tags, a creation date and an edit history.
 
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
@@ -20,9 +20,6 @@ pub struct Note {
     /// RFC3339 times of every save after the first
     #[serde(default)]
     pub edits: Vec<String>,
-    /// published notes show up in the reader (the old site's public front page)
-    #[serde(default, alias = "public")]
-    pub published: bool,
 }
 
 impl Note {
@@ -146,7 +143,6 @@ mod tests {
         let writ = r#"{"_key":"1000001","title":"Old","markdown":"hi","tags":["a"],
             "created":"2018-11-16T20:04:05.12+02:00","public":true,"views":3,"author":"saul"}"#;
         let n: Note = serde_json::from_str(writ).unwrap();
-        assert!(n.published);
         assert_eq!(n.created_at().unwrap().timestamp(), 1542391445);
         assert_eq!(n.display_title(), "Old");
     }

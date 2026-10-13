@@ -23,6 +23,18 @@ pub struct Config {
     pub zen_delay: f32,
     /// slide the top bar away until the pointer comes near it
     pub hide_bar: bool,
+    /// colours changed from the built in ones, by role name, as `#rrggbb`
+    pub colors: std::collections::BTreeMap<String, String>,
+    /// the whole interface's scale
+    pub ui_scale: f32,
+    /// the top bar's height in pixels; its buttons and text fit it
+    pub top_bar: f32,
+    /// the command bar's height in pixels
+    pub bottom_bar: f32,
+    /// the space's search line (the sums and the digit chain) in the top bar
+    pub space_sums: bool,
+    /// slide the note list away until the pointer comes to the left edge
+    pub hide_list: bool,
     pub keymap: Option<serde_json::Value>,
 }
 
@@ -36,6 +48,12 @@ impl Default for Config {
             zen: false,
             zen_delay: 2.5,
             hide_bar: false,
+            colors: Default::default(),
+            ui_scale: 1.0,
+            top_bar: 32.0,
+            bottom_bar: 30.0,
+            space_sums: true,
+            hide_list: false,
             keymap: None,
         }
     }

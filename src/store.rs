@@ -169,7 +169,7 @@ impl Store {
     }
 
     /// imports notes (e.g. writs exported from the old server's database) as they are,
-    /// keeping their keys, dates and published state
+    /// keeping their keys and dates
     pub fn import(&self, notes: Vec<Note>) -> StoreResult<usize> {
         let txn = self.db.begin_write().map_err(err)?;
         let n = notes.len();
