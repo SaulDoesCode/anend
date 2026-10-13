@@ -37,6 +37,13 @@ function same(a, b) {
 
 const s = (args, k) => (args && typeof args[k] === 'string' ? args[k] : '');
 
+// every tag the notes have and how many have it, the most used first
+function tagCounts(notes) {
+  const tags = new Map();
+  for (const n of notes) for (const t of n.tags) tags.set(t, (tags.get(t) || 0) + 1);
+  return [...tags].sort((a, b) => b[1] - a[1] || cmpStr(a[0], b[0]));
+}
+
 function hit(h) {
   const [o, r] = spreadSums(h.text);
   return { key: label(h.ref), text: h.text, note: h.ref.startsWith('note:') && h.ref.length > 4, ordinal: o, reversed: r };
@@ -274,8 +281,14 @@ export class Engine {
       case 'notes.list': {
         const q = trim(s(args, 'q'));
         const keep = q === '' ? null : save.noteFilter(q);
-        return save.all().filter((n) => !keep || keep.has(n._key)).map(noteSummary);
+        // tags: the notes must have all of them (or any, with mode "or")
+        const tags = Array.isArray(args.tags) ? args.tags.filter((t) => typeof t === 'string') : [];
+        const any = s(args, 'mode') === 'or';
+        const tagged = (n) => tags.length === 0 || (any ? tags.some((t) => n.tags.includes(t)) : tags.every((t) => n.tags.includes(t)));
+        return save.all().filter((n) => (!keep || keep.has(n._key)) && tagged(n)).map(noteSummary);
       }
+      case 'notes.tags':
+        return tagCounts(save.all()).map(([tag, count]) => ({ tag, count }));
       case 'notes.get': {
         const n = save.all().find((n) => n._key === s(args, 'key'));
         if (!n) throw new Error('no such note');
@@ -379,9 +392,7 @@ export class Engine {
         const notes = save.all();
         const words = notes.reduce((a, n) => a + splitWhitespace(n.markdown).length, 0);
         const edits = notes.reduce((a, n) => a + n.edits.length, 0);
-        const tags = new Map();
-        for (const n of notes) for (const t of n.tags) tags.set(t, (tags.get(t) || 0) + 1);
-        const sorted = [...tags].sort((a, b) => b[1] - a[1] || cmpStr(a[0], b[0]));
+        const sorted = tagCounts(notes);
         return {
           notes: notes.length,
           words,

@@ -26,7 +26,8 @@ A key is a memory's bytes joined by commas, or `note:<key>` for a note.
 | `saves.delete` | `{name}` (not the open one) | `null` |
 | `saves.export` | `{name?}` (the open save if left out) | the save as a [bundle](#bundles) |
 | `saves.import` | `{bundle, name?, merge?}`: a new save keeping the bundle's keys (named after it, or `name`, with a number when taken), or with `merge: true` into the open save, where what's new gets fresh keys | `{save, memories, notes, lists}` or `{merged: true, memories, notes, lists}` |
-| `notes.list` | `{q?}` (words the notes must have) | `[{key, title, tags, created, modified, edits, preview, words}]`, newest first |
+| `notes.list` | `{q?, tags?, mode?}`: `q` the words the notes must have; `tags` the tags they must have, all of them, or any with `mode: "or"` | `[{key, title, tags, created, modified, edits, preview, words}]`, newest first |
+| `notes.tags` | | `[{tag, count}]`: every tag the notes have and how many have it, the most used first (then by name) |
 | `notes.get` | `{key}` | the note: `{_key, title, markdown, tags, created, edits}` |
 | `notes.save` | `{note, text?}`: `text` is the editor's `# title` + markdown | the stored note (new notes get a key) |
 | `notes.delete` | `{key}` | `null` |

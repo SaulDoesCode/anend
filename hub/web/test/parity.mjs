@@ -141,6 +141,13 @@ async function sequence(call) {
   await c('notes.get', { key: notes[0]?._key });
   await c('notes.get', { key: 'nope' });
   for (const q of ['', 'note', 'NOTE wor', 'list', 'bol', 'h1', 'tok', 'zzz', 'émi', 'Λόγ']) await c('notes.list', { q });
+  // the tags view: counts, and notes by all or any of the tags
+  await c('notes.save', { note: { tags: ['odd', 'even', 'Ünï'] }, text: '# both\n\nbody' });
+  await c('notes.tags', {});
+  for (const [tags, mode] of [[['odd'], undefined], [['odd', 'md'], 'and'], [['odd', 'even'], undefined], [['odd', 'even'], 'or'], [['edited', 'Ünï', 'nope'], 'or'], [[], 'or'], [['nope'], undefined], ['odd', undefined], [[1, 'even'], 'and']]) {
+    await c('notes.list', { tags, mode });
+    await c('notes.list', { q: 'note', tags, mode });
+  }
 
   // every token the notes could have been indexed under, searched plainly
   const tokens = new Set();

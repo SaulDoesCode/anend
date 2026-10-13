@@ -456,14 +456,33 @@ pub fn call(ws: &Workspace, op: &str, args: &Value) -> Res {
                 "" => None,
                 q => Some(store.note_filter(q)?),
             };
+            // tags: the notes must have all of them (or any, with mode "or")
+            let tags: Vec<&str> = args
+                .get("tags")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(Value::as_str).collect())
+                .unwrap_or_default();
+            let any = s(args, "mode") == "or";
+            let tagged = |n: &Note| {
+                tags.is_empty()
+                    || if any {
+                        tags.iter().any(|t| n.tags.iter().any(|x| x == t))
+                    } else {
+                        tags.iter().all(|t| n.tags.iter().any(|x| x == t))
+                    }
+            };
             let notes: Vec<Value> = store
                 .all()?
                 .iter()
-                .filter(|n| keep.as_ref().is_none_or(|k| k.contains(&n.key)))
+                .filter(|n| keep.as_ref().is_none_or(|k| k.contains(&n.key)) && tagged(n))
                 .map(note_summary)
                 .collect();
             Ok(Value::Array(notes))
         }
+        "notes.tags" => Ok(json!(tag_counts(&store.all()?)
+            .into_iter()
+            .map(|(tag, count)| json!({ "tag": tag, "count": count }))
+            .collect::<Vec<_>>())),
         "notes.get" => {
             let key = s(args, "key");
             let n = store.all()?.into_iter().find(|n| n.key == key).ok_or("no such note")?;
@@ -606,14 +625,7 @@ pub fn call(ws: &Workspace, op: &str, args: &Value) -> Res {
             let notes = store.all()?;
             let words: usize = notes.iter().map(|n| n.markdown.split_whitespace().count()).sum();
             let edits: usize = notes.iter().map(|n| n.edits.len()).sum();
-            let mut tags: HashMap<String, usize> = HashMap::new();
-            for n in &notes {
-                for t in &n.tags {
-                    *tags.entry(t.clone()).or_default() += 1;
-                }
-            }
-            let mut tags: Vec<(String, usize)> = tags.into_iter().collect();
-            tags.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+            let tags = tag_counts(&notes);
             Ok(json!({
                 "notes": notes.len(), "words": words, "saves": notes.len() + edits,
                 "memories": store.memory_count()?, "tags": tags,
@@ -623,6 +635,19 @@ pub fn call(ws: &Workspace, op: &str, args: &Value) -> Res {
         }
         _ => Err(format!("there's no {op:?} here")),
     }
+}
+
+/// every tag the notes have and how many have it, the most used first
+fn tag_counts(notes: &[Note]) -> Vec<(String, usize)> {
+    let mut tags: HashMap<String, usize> = HashMap::new();
+    for n in notes {
+        for t in &n.tags {
+            *tags.entry(t.clone()).or_default() += 1;
+        }
+    }
+    let mut tags: Vec<(String, usize)> = tags.into_iter().collect();
+    tags.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    tags
 }
 
 /// a hub save into the workspace (`merge`: into the open save instead of beside it)
@@ -687,6 +712,22 @@ mod tests {
             1
         );
         assert!(call(&ws, "notes.save", &json!({"note": {}, "text": "no title"})).is_err());
+
+        // tags: counts, and notes by all or any of them
+        call(&ws, "notes.save", &json!({"note": {"tags": ["a", "b"]}, "text": "# ab"})).unwrap();
+        call(&ws, "notes.save", &json!({"note": {"tags": ["a"]}, "text": "# a"})).unwrap();
+        call(&ws, "notes.save", &json!({"note": {"tags": ["c"]}, "text": "# c"})).unwrap();
+        assert_eq!(
+            call(&ws, "notes.tags", &json!({})).unwrap(),
+            json!([{"tag": "a", "count": 2}, {"tag": "b", "count": 1}, {"tag": "c", "count": 1}])
+        );
+        let titles = |args: Value| -> Vec<String> {
+            call(&ws, "notes.list", &args).unwrap().as_array().unwrap().iter().map(|n| n["title"].as_str().unwrap().to_string()).collect()
+        };
+        assert_eq!(titles(json!({"tags": ["a", "b"]})), ["ab"]);
+        assert_eq!(titles(json!({"tags": ["b", "c"], "mode": "or"})).len(), 2);
+        assert_eq!(titles(json!({"tags": ["a"], "q": "zzz"})).len(), 0);
+        assert_eq!(titles(json!({"tags": []})).len(), 4);
 
         call(&ws, "lists.enlist", &json!({"list": "0", "member": "1"})).unwrap();
         call(&ws, "lists.enlist", &json!({"list": "1", "member": "0"})).unwrap();
