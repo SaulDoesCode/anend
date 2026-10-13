@@ -801,7 +801,9 @@ pub fn fit(
             adam.step(&mut clf.net, &grad, lr, &o.adam(), scale, &train_mask, Some(&pool));
             if let Some(a) = ema.as_mut() {
                 for ((_, av), (_, w)) in a.params_mut().into_iter().zip(clf.net.params()) {
-                    av.iter_mut().zip(w).for_each(|(x, y)| *x = o.ema * *x + (1.0 - o.ema) * y);
+                    av.iter_mut()
+                        .zip(w)
+                        .for_each(|(x, y)| *x = o.ema * *x + (1.0 - o.ema) * y);
                 }
             }
             step += 1;
