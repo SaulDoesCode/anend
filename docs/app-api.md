@@ -111,6 +111,42 @@ feedback?}`, the weights base64 (the `ANENDCLS` file). It is left out when there
 so older bundles read as before. Merging a bundle into a save leaves its classifiers out
 (their lists get new keys there), and so does the forge.
 
+### Classifier buckets, filters and modules
+
+Outputs are memoized per classifier and memory/note (`core/src/memo.rs`), under a stamp
+of the weights' versions and steering, so a retrain, feedback or steering change reads
+them again; an edited text is read again too. Calls fill what they need lazily;
+`classify.index` fills ahead. A bucket is a class (or `uncertain`: in no class) and a
+probability band (0 for 0–10 % … 9 for 90–100 %).
+
+| op | args | data |
+|---|---|---|
+| `classify.index` | `{name, keys?, wait?}` (every memory and note if no keys) | the job `{name, state: running\|done\|failed\|cancelled, done, total, report?: {total, computed, cached, stopped, seconds}, error?}` |
+| `classify.index_job` / `classify.index_cancel` | `{name}` | the job (or `{state: "idle"}`) |
+| `classify.buckets` | `{name}` | `{name, classes, indexed, palette: [hex], buckets: [{class, index, bands: [10 counts], count}]}` (the last is `uncertain`) |
+| `classify.bucket` | `{name, class (name, index or "uncertain") or key or text, band?, min?, limit?: 500}` | `{class, count, stale, indexed, hits: [hit + prob]}`, surest first |
+| `classify.near` | `{name, key or text, by?: embedding\|outputs, limit?: 20}` | `{text, indexed, row, results: [{key, text, note, cosine}]}` among the indexed texts |
+| `classify.tints` | `{name, keys}` (≤ 5000) | `{classes, palette, tints: [{key, class (null: uncertain), strength}]}` |
+| `classify.indexed` | `{key}` | `{key, chosen, verdicts: [{name, classes, probs, top, class, members, confidence, valid, checked, validators: [[by, p]], palette}], classifiers: [{name, trained, chosen}]}` |
+| `classify.set_index` | `{key, names}` | `{chosen}` |
+| `classify.validators` | `{name, set?: [{by, class, min?: 0.5, mode?: gate\|weigh}]}` | `{validators}` |
+| `classify.disagreements` | `{name, limit?: 40}` | `{results: [{key, text, class, prob, checks: [[by, p]]}]}`: texts it counts in a class that a validator doesn't pass |
+| `classify.export` | `{name, upstream?: true, description?, author?}` | `{file, size, data}`: the `.anendcls` module in base64 |
+| `classify.inspect` | `{data}` | the module's summary `{name, description, author, classes, head, preset, weights, accuracy, macro_f1, examples, measured_on, upstream: [[name, bundled]]}` |
+| `classify.import` | `{data, as?, lists?: {class: list key}}` | `{name, created, reused, lists: [[class, key, new]]}` |
+| `filters.list` | | `[{name, expr, description, created, modified, list?, count?, reads}]` |
+| `filters.save` | `{name, expr, description?}` | the preset |
+| `filters.delete` | `{name}` (not while another uses it) | `null` |
+| `filters.run` | `{name or expr, limit?: 200}` | `{scanned, matched, results: [{key, text, note, score}], classifiers, untrained}` |
+| `filters.enlist` | `{name}` | `{list, name: "filter: <name>", members}` |
+
+A filter expression is JSON with `op`: `and`/`or` `{of: [..]}`, `not` `{of}`, `class`
+`{classifier, class, min?, max?, top?}` (min defaults to the steered threshold; the
+classifier's validators apply), `words` `{q}`, `sum` `{bucket: ordinal|reversed|atbash,
+from?, to?}`, `list` `{list}`, `tags` `{tags, any?}`, `kind` `{kind: memories|notes}`,
+`preset` `{name}`. A validator in `gate` mode zeroes a classifier's probabilities on
+texts it doesn't pass; in `weigh` mode multiplies them by its own.
+
 ## Saves in and out
 
 | | |

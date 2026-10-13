@@ -439,7 +439,7 @@ pub fn call(ws: &Workspace, op: &str, args: &Value) -> Res {
         return saves_call(ws, &open, op, args);
     }
     let (open, store) = ws.store()?;
-    if op.starts_with("classify.") {
+    if op.starts_with("classify.") || op.starts_with("filters.") {
         return crate::classify::call(store, op, args);
     }
     let store: &Store = &store;

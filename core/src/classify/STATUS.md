@@ -96,7 +96,10 @@ Done in core (tested by `classifiers::phase3_tests::memo_filters_and_modules`):
   `Classifier::weights_hash`; reader wrapped in catch_unwind.
 - delete_classifier clears memo, indexing choices and validators.
 
-Left (hub, web, docs): see docs/next.md item 4.
+Hub ops done (`hub/src/classify.rs` `phase3`: classify.index/index_job/index_cancel/
+buckets/bucket/near/tints/indexed/set_index/validators/disagreements/export/inspect/
+import, filters.list/save/delete/run/enlist; docs/app-api.md). Left (hub sharing site,
+web UI, screenshots): see docs/next.md item 4.
 
 ## Next (not done)
 

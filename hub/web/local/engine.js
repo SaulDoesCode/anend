@@ -271,7 +271,7 @@ export class Engine {
     args = args ?? {};
     if (op.startsWith('saves.')) return this.savesCall(this.store()[0], op, args);
     // the classifiers' engine (core/src/classify) isn't ported to the browser yet
-    if (op.startsWith('classify.')) throw new Error(CLASSIFIERS_NEED_A_HUB);
+    if (op.startsWith('classify.') || op.startsWith('filters.')) throw new Error(CLASSIFIERS_NEED_A_HUB);
     const [open, save] = this.store();
     switch (op) {
       case 'hello':

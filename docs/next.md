@@ -99,7 +99,9 @@ interface, not stubs.
    `core/src/filters.rs` (boolean filter trees, presets, validators, disagreements),
    `core/src/clsmodule.rs` (`.anendcls` export/import, strict reading). The desktop app
    can use these `Store` methods directly. Left, in this order:
-   - **hub ops** (`hub/src/classify.rs`, docs/app-api.md): `classify.index {name, keys?}`
+   - **hub ops: done** (tested in `classify::tests::classifier_calls`, documented in
+     docs/app-api.md; offline engine refuses `filters.*` too, parity all the same).
+     What was listed: `classify.index {name, keys?}`
      as a background job like training (progress via `classify.index_job`, cancel),
      `classify.bucket {name, class|text|key, band?}`, `classify.buckets {name}` (counts),
      `classify.near {name, key|text, by: outputs|embedding}`, `classify.indexed {key}`
