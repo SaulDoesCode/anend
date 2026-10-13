@@ -11,15 +11,55 @@ interface, not stubs.
 
 1. **Classifiers phase 2** (running): storage in saves, the hub's `classify.*` calls,
    the web app's classifiers view.
-2. **Desktop polish** (`src/`):
-   - icon buttons with hover titles in place of large or common text buttons (e.g. a
-     bucket icon for "2 buckets")
-   - a tags view: type tags to find what's tagged, scroll all tags with counts, click
-     and multi-select to see the results
-   - markdown syntax highlighting in the editor
-   - the window icon (`assets/icon.png`)
-3. **Web polish** (`hub/web/`), the same items: icons with titles, the tags view, editor
-   highlighting. The favicon is done.
+2. **Desktop polish** (`src/`): done.
+   - icons: a shared set of 24px line icons drawn for anend (`assets/icons/*.svg`),
+     rasterized white on transparent by `node scripts/icons.mjs` into
+     `assets/icons/png/` and embedded (`src/icons.rs`); an icon takes its button's text
+     colour, so the palette and zen reach it. Icons now: the top bar's views and
+     settings, the editor's list toggle, view/edit, save, delete and tag box, "new
+     note", the settings' forge/keys/close, a save's copy/rename/delete, the hub's
+     connect/search/upload/download/merge and its star and download counts, the space's
+     text and bucket counts, the reader's edit.
+   - tooltips: anything with a `Tip` shows it after a short rest, with the key bound to
+     its `TipKey` action (from the remap, so it follows rebinding); hidden while zen
+     fades, placed inside the window, scaled with the interface. The memory view's
+     bucket and toggle words carry tips with their keys too.
+   - the tags view (Ctrl+7, `src/tags_ui.rs`): every tag with its count, narrowed by
+     the command bar (Enter adds the first match, so typing tag after tag chooses
+     them); click picks a tag, Ctrl/Shift-click adds or removes, "all"/"any" decides
+     how several combine; the notes found show title, date, tags and a preview, and
+     open in the editor when clicked. Stats' tags open it too. Counts come from
+     `note::tag_counts`, matching from `note::has_tags` (anend-core), so memories can
+     join later.
+   - highlighting (`src/highlight.rs`): the pad's laid out glyphs are copied into an
+     overlay text whose spans carry the class colours (headings, marks, emphasis,
+     strike, code spans and blocks, links and urls, list markers and task boxes,
+     quotes, table pipes, tags, rules, IME composition); the pad's own glyphs go
+     transparent, so editing, cursor, selection, IME and scrolling are untouched. Only
+     visible glyphs are drawn; classes are recomputed once per layout change. Colours
+     come from the palette, nudged until they read on the pad (night and paper work);
+     a settings toggle turns it off. If glyphs ever fail to match the text, the pad
+     shows its own text again.
+   - the window icon from `assets/icon.png` (embedded, set through winit).
+   - polish: plain buttons (the note list, the tag list) take the card's text colour
+     and button text picks dark or light by contrast, so dark palettes read; the
+     editor's selection and cursor follow the palette instead of a stock blue; the
+     memory view says how to start instead of showing an empty page; the note list
+     toggle's setting names the right edge too; stats' "+ new" hint updated.
+3. **Web polish** (`hub/web/`): done.
+   - icons: the shared set (`assets/icons/`, copied into `hub/web/iconset.js` by
+     `node hub/web/tools/icons.mjs`; `classifier.svg` added) for the top bar's views and
+     settings, the editor's actions, the space's buckets and help, the memory view's
+     bucket, save rows, the forge, the hub, classifier actions (yes/no as ✓/✗), lists;
+     every one with an aria-label and a styled tip (name and shortcut), keyboard focus
+     visible; the app's mark in the top bar
+   - the tags view (Ctrl+8, `#/tags/a+b`, `#/tags/a+b/any`): tags with counts, found from
+     the command bar, picked with all/any, their notes beside; the hub's `notes.tags` and
+     `notes.list {tags, mode}` (in the offline engine too, in the parity run)
+   - editor highlighting: a see-through textarea over a mirror of highlighted lines,
+     redrawn line by line (plain past 250 000 characters)
+   - empty states for the memory view and the space, a shortcuts table in settings, the
+     stats' tags opening the tags view, a clean console from a static server
 4. **Classifiers phase 3:**
    - **Classifier buckets:** memoized classifier outputs per memory and note, kept with
      the classifier's version, giving similarity search by classifier and buckets beside

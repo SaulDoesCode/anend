@@ -553,7 +553,7 @@ pub fn paint_overlay(
         }
         return;
     }
-    if !(pad_info.is_changed() || editable.is_changed() || info.is_changed() || palette.is_changed()) {
+    if !(pad_info.is_changed() || editable.is_changed() || info.is_changed() || palette.is_changed() || config.is_changed()) {
         return;
     }
     // each class's section in the overlay's block
@@ -568,12 +568,24 @@ pub fn paint_overlay(
     info.scale_factor = pad_info.scale_factor;
     info.size = pad_info.size;
     info.glyphs.clear();
-    info.glyphs.extend(pad_info.glyphs.iter().zip(&cache.glyphs).map(|(g, c)| {
-        let mut g = g.clone();
-        g.position -= offset;
-        g.section_index = section[*c as usize];
-        g
-    }));
+    // only what can be seen: a long note scrolls by without drawing all of itself
+    let (top, bottom) = (-64.0, editable.viewport.size.y + 64.0);
+    info.glyphs.extend(
+        pad_info
+            .glyphs
+            .iter()
+            .zip(&cache.glyphs)
+            .filter(|(g, _)| {
+                let y = g.position.y - offset.y;
+                y > top && y < bottom
+            })
+            .map(|(g, c)| {
+                let mut g = g.clone();
+                g.position -= offset;
+                g.section_index = section[*c as usize];
+                g
+            }),
+    );
     info.run_geometry.clear();
     info.selection_rects.clear();
     info.cursor = None;

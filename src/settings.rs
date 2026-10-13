@@ -1316,7 +1316,7 @@ pub fn rebuild_settings(
     let list = toggle(
         &mut commands,
         toggles,
-        "slide the note list away until the pointer comes to the left edge",
+        "slide the note list away until the pointer comes to its edge of the window",
         config.hide_list,
         &fonts,
     );
@@ -1351,6 +1351,20 @@ pub fn rebuild_settings(
     commands.entity(right).observe(
         |_c: On<PointerClick>, mut config: ResMut<Config>, mut s: ResMut<Settings>| {
             config.list_right = !config.list_right;
+            config.save();
+            s.changed = true;
+        },
+    );
+    let highlight = toggle(
+        &mut commands,
+        toggles,
+        "colour the markdown in the editor (headings, emphasis, code, links, tags...)",
+        config.highlight,
+        &fonts,
+    );
+    commands.entity(highlight).observe(
+        |_c: On<PointerClick>, mut config: ResMut<Config>, mut s: ResMut<Settings>| {
+            config.highlight = !config.highlight;
             config.save();
             s.changed = true;
         },

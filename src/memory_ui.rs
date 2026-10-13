@@ -600,6 +600,30 @@ pub fn rebuild_results(
         }
     }
 
+    // nothing searched yet: say how to start, rather than show an empty page
+    if mem.state.header.is_none() && mem.state.results.is_empty() {
+        let dim = fg(white).with_alpha(0.55);
+        for (line, size) in [
+            ("type in the bar below", 20.0),
+            (
+                "a number gsearches it in the bucket · text finds what sums the same · \
+                 Shift+Enter remembers it under a key · Ctrl+Enter saturates it",
+                14.0,
+            ),
+        ] {
+            commands.spawn((
+                serif_text(line, size, dim, &serif),
+                Node {
+                    width: percent(100),
+                    margin: UiRect::top(px(if size > 15.0 { 120.0 } else { 6.0 })),
+                    ..default()
+                },
+                TextLayout::justify(Justify::Center),
+                ChildOf(main),
+            ));
+        }
+    }
+
     // which texts share a reversed sum with something else in the database
     let measures: Vec<_> = mem.state.results.iter().map(|h| measure(&h.text)).collect();
     let sums: Vec<u32> = measures.iter().map(|m| m.reversed).collect();
@@ -835,8 +859,15 @@ pub fn rebuild_chrome(
             on,
             &serif,
         );
+        let (key, tip) = match bucket {
+            Bucket::Ordinal => (Action::BucketOrdinal, "list memories by their ordinal sums"),
+            Bucket::Reversed => (Action::BucketReversed, "list memories by their reversed sums"),
+            Bucket::Atbash => (Action::BucketAtbash, "list memories by their atbash sums"),
+            Bucket::Frequency => (Action::BucketFrequency, "list memories by their letters"),
+        };
         commands
             .entity(e)
+            .insert((crate::icons::Tip(tip.into()), crate::icons::TipKey(key)))
             .observe(move |_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {
                 mem.bucket = bucket;
                 mem.redraw_chrome = true;
@@ -845,7 +876,13 @@ pub fn rebuild_chrome(
     let toggle = |commands: &mut Commands, label: &str, on: bool| {
         clickable_text(commands, side, label.into(), if on { color } else { dim }, on, &serif)
     };
+    let tip = |commands: &mut Commands, e: Entity, tip: &str, key: Action| {
+        commands
+            .entity(e)
+            .insert((crate::icons::Tip(tip.into()), crate::icons::TipKey(key)));
+    };
     let g = toggle(&mut commands, "gsearch text", mem.gsearch_text);
+    tip(&mut commands, g, "also gsearch what's typed", Action::ToggleGsearch);
     commands
         .entity(g)
         .observe(|_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {
@@ -853,6 +890,7 @@ pub fn rebuild_chrome(
             mem.redraw_chrome = true;
         });
     let s = toggle(&mut commands, "saturate", mem.also_saturate);
+    tip(&mut commands, s, "searches saturate: each found memory searches on", Action::ToggleSaturate);
     commands
         .entity(s)
         .observe(|_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {
@@ -860,6 +898,7 @@ pub fn rebuild_chrome(
             mem.redraw_chrome = true;
         });
     let w = toggle(&mut commands, "white", mem.white);
+    tip(&mut commands, w, "white mode: dark text on white", Action::WhiteMode);
     commands
         .entity(w)
         .observe(|_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {

@@ -17,7 +17,7 @@ use bevy::ui_widgets::{Activate, ScrollArea};
 use bevy::window::SystemCursorIcon;
 
 use crate::bar::{BAR_DIM, BarSide};
-use crate::icons::{Icon, Tip, icon_label_button, icon_scene_button, spawn_icon};
+use crate::icons::{Icon, Tip, icon_scene_button, spawn_icon};
 use crate::note;
 use crate::theme::colors;
 use crate::ui::{Ctx, Fonts, Notes, Route, Session, plain_scene_button, text};
@@ -297,12 +297,12 @@ pub fn rebuild_tags(
     }
     commands.spawn((Node { flex_grow: 1.0, ..default() }, ChildOf(*head)));
     if st.chosen.len() > 1 {
-        for (all, icon, label, tip) in [
-            (true, Icon::And, "all", "notes with every chosen tag"),
-            (false, Icon::Or, "any", "notes with any chosen tag"),
+        for (all, label, tip) in [
+            (true, "all", "notes with every chosen tag"),
+            (false, "any", "notes with any chosen tag"),
         ] {
             commands
-                .spawn_scene(icon_label_button(icon, label.into(), ButtonVariant::selected(st.all == all)))
+                .spawn_scene(plain_scene_button(label.into(), ButtonVariant::selected(st.all == all)))
                 .insert((ChildOf(*head), Tip(tip.into())))
                 .observe(move |_a: On<Activate>, mut st: ResMut<TagsState>| {
                     st.all = all;
