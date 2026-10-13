@@ -1188,7 +1188,7 @@ pub fn unbase64(s: &str) -> Option<Vec<u8>> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     pub fn temp_store(name: &str) -> (Store, std::path::PathBuf) {
@@ -1377,5 +1377,119 @@ mod tests {
         println!("{} texts, {} steps, {:.2} s, {:.0} tokens/s, accuracy {:?}", sum.examples, sum.steps, t0.elapsed().as_secs_f64(), sum.tokens_per_sec, sum.metrics.map(|m| m.accuracy));
         drop(s);
         let _ = std::fs::remove_file(path);
+    }
+}
+
+#[cfg(test)]
+mod phase3_tests {
+    use super::tests::{lists, temp_store};
+    use super::*;
+    use crate::filters::{Expr, Mode, Validator};
+    use crate::memo::{By, UNCERTAIN};
+
+    #[test]
+    fn memo_filters_and_modules() {
+        let (s, path) = temp_store("phase3");
+        let (f, r) = lists(&s);
+        s.create_classifier("kind", &[f.clone(), r.clone()], None, HeadKind::Single, "tiny", vec![]).unwrap();
+        let a = TrainArgs { epochs: Some(4), threads: Some(2), ..TrainArgs::default() };
+        s.train_classifier("kind", &a, |_| Flow::Go).unwrap();
+        let pool = Pool::new(2);
+        let st = s.stack("kind").unwrap();
+
+        // indexing: deterministic, matches a direct read, buckets filled
+        let rep = s.memo_index(&st, None, 10_000, &pool, |_, _| Flow::Go).unwrap();
+        assert!(rep.computed > 0 && rep.cached == 0);
+        let again = s.memo_index(&st, None, 10_000, &Pool::new(1), |_, _| Flow::Go).unwrap();
+        assert_eq!(again.computed, 0, "memoized");
+        let all = s.memo_all(&st).unwrap();
+        assert_eq!(all.len(), rep.total);
+        let (r0, row0) = &all[0];
+        let t0 = s.ref_text(r0).unwrap().unwrap();
+        assert_eq!(&crate::memo::read(&st, row0.stamp, &t0), row0);
+        assert_eq!(row0.embedding, st.clf().represent(&t0));
+        let mut filed = 0;
+        for c in [0, 1, UNCERTAIN] {
+            filed += s.class_bucket(&st, c, 0..=9).unwrap().0.len();
+        }
+        assert_eq!(filed, all.len());
+        let near = s.memo_near(&st, row0, By::Embedding, Some(r0), 3).unwrap();
+        assert_eq!(near.len(), 3);
+        assert!(near.windows(2).all(|w| w[0].2 >= w[1].2));
+
+        // a steering change invalidates
+        let mut steer = st.def().steer.clone();
+        steer.heads[0].bias = vec![1.0, -1.0];
+        s.steer_classifier("kind", steer).unwrap();
+        let st2 = s.stack("kind").unwrap();
+        assert_ne!(crate::memo::stamp(&st), crate::memo::stamp(&st2));
+        assert_eq!(s.memo_count(&st2).unwrap(), 0);
+        assert!(s.memo_all(&st2).unwrap().is_empty());
+
+        // filters: class, not, words; presets referring to presets; loops refused
+        let fruit = Expr::Class { classifier: "kind".into(), class: "fruit".into(), min: Some(0.5), max: None, top: false };
+        let res = s.run_filter(&fruit, 1000, 10_000, &pool).unwrap();
+        let not = Expr::Not { of: Box::new(fruit.clone()) };
+        let res2 = s.run_filter(&not, 1000, 10_000, &pool).unwrap();
+        assert_eq!(res.matched + res2.matched, res.scanned);
+        let and = Expr::And { of: vec![fruit.clone(), Expr::Words { q: "plum".into() }] };
+        let res3 = s.run_filter(&and, 1000, 10_000, &pool).unwrap();
+        assert!(res3.matched <= res.matched);
+        assert!(res3.results.iter().all(|x| x.note || x.text.contains("plum")));
+        s.save_filter("fruity", fruit.clone(), "").unwrap();
+        s.save_filter("outer", Expr::Preset { name: "fruity".into() }, "").unwrap();
+        assert_eq!(s.run_filter(&Expr::Preset { name: "outer".into() }, 1000, 10_000, &pool).unwrap().matched, res.matched);
+        assert!(s.save_filter("fruity", Expr::Preset { name: "outer".into() }, "").is_err(), "a loop");
+        assert!(s.delete_filter("fruity").is_err(), "outer uses it");
+        let (head, n) = s.enlist_filter("outer", 10_000, &pool).unwrap();
+        assert_eq!(s.list_members(&head).unwrap().len(), n);
+
+        // a validator gating everything out
+        s.create_classifier("judge", &[f.clone(), r.clone()], None, HeadKind::Single, "tiny", vec![]).unwrap();
+        s.train_classifier("judge", &a, |_| Flow::Go).unwrap();
+        assert!(s.set_validators("kind", &[Validator { by: "kind".into(), class: "fruit".into(), min: 0.5, mode: Mode::Gate }]).is_err());
+        s.set_validators("kind", &[Validator { by: "judge".into(), class: "fruit".into(), min: 1.1f32.min(1.0), mode: Mode::Gate }]).unwrap();
+        let gated = s.run_filter(&fruit, 1000, 10_000, &pool).unwrap();
+        assert!(gated.matched <= res.matched);
+        assert!(!s.disagreements("kind", 100, 10_000, &pool).unwrap().is_empty() || gated.matched == 0);
+
+        // modules: round trip into another save, corrupt input refused
+        let bytes = s.export_module("kind", &crate::clsmodule::ExportOpts::default()).unwrap();
+        let m = crate::clsmodule::read(&bytes, crate::clsmodule::MAX_SIZE).unwrap();
+        assert_eq!(m.manifest.main().classes, vec!["fruit", "rocks"]);
+        let (c, pc) = temp_store("phase3b");
+        let got = c.import_module(&m, &crate::clsmodule::ImportOpts::default()).unwrap();
+        assert_eq!(got.name, "kind");
+        assert_eq!(got.lists.len(), 2);
+        let mine = s.stack("kind").unwrap();
+        let theirs = c.stack("kind").unwrap();
+        assert_eq!(mine.graph.predict(mine.node, "granite plum"), theirs.graph.predict(theirs.node, "granite plum"));
+        let again = c.import_module(&m, &crate::clsmodule::ImportOpts::default()).unwrap();
+        assert_eq!(again.reused, vec!["kind"]);
+        for i in [0, 9, 20, bytes.len() / 2, bytes.len() - 1] {
+            let mut bad = bytes.clone();
+            bad[i] ^= 0x41;
+            assert!(crate::clsmodule::read(&bad, crate::clsmodule::MAX_SIZE).is_err(), "byte {i}");
+        }
+        assert!(crate::clsmodule::read(&bytes[..bytes.len() - 9], crate::clsmodule::MAX_SIZE).is_err());
+        assert!(crate::clsmodule::read(b"junk", crate::clsmodule::MAX_SIZE).is_err());
+        assert!(crate::clsmodule::read(&bytes, 100).is_err());
+        // a weights file whose header claims huge shapes is refused before allocating
+        let w = s.classifier_weights("kind").unwrap().unwrap();
+        let hl = u32::from_le_bytes(w[12..16].try_into().unwrap()) as usize;
+        let h = String::from_utf8(w[16..16 + hl].to_vec()).unwrap().replacen("\"d_model\":16", "\"d_model\":99999", 1);
+        let mut forged = w[..12].to_vec();
+        forged.extend_from_slice(&(h.len() as u32).to_le_bytes());
+        forged.extend_from_slice(h.as_bytes());
+        forged.extend_from_slice(&w[16 + hl..w.len() - 8]);
+        let sum = crate::classify::math::fnv(0, &forged);
+        forged.extend_from_slice(&sum.to_le_bytes());
+        assert!(Classifier::from_bytes(&forged).is_err());
+
+        s.delete_classifier("kind").unwrap();
+        drop((s, c));
+        for p in [path, pc] {
+            let _ = std::fs::remove_file(p);
+        }
     }
 }

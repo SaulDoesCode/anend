@@ -64,6 +64,40 @@ Corpus: `core/corpus/authors/*.txt` (6 authors × ~47 KB, 10 regions each, READM
   50 memories, compact preset trains in ~8 s in a debug hub; 0.37 s in release
   (`cargo test --release -p anend-core timing -- --ignored --nocapture`).
 
+## Phase 3 (in progress): buckets, filters, modules
+
+Done in core (tested by `classifiers::phase3_tests::memo_filters_and_modules`):
+
+- `core/src/memo.rs` (classifier buckets): tables `classifier memo` ((name, ref) -> `Row`:
+  stamp, text hash, steered probs, top, members, embedding), `classifier buckets`
+  ((name, class·16+band) -> refs; `UNCERTAIN` = 4095 for texts in no class),
+  `classifier memo stamps`, `classifier indexing` (ref -> chosen classifier names).
+  Stamp = hash of every stack classifier's name, version and steering, so training,
+  feedback and steering invalidate; rows also keep a text hash. API on `Store`:
+  `memo_fresh, memo_clear, memo_kept, memo_rows (lazy fill on the pool), memo_index
+  (batches, progress cb, Flow::Stop), memo_count, memo_all, class_bucket(stack, class,
+  bands), bucket_counts, memo_near(stack, row, By::Outputs|Embedding, except, limit),
+  indexed_on / set_indexed_on / all_indexed / unindex_classifier, tints(stack, refs,
+  pool)`; free fns `stamp, read, read_many, band, bucket_key, palette(k) -> [[u8;3]],
+  tint(row)`. One pass gives outputs and embedding (`Graph::read_node`).
+- `core/src/filters.rs`: `Expr` (JSON `op`: and/or/not/class/words/sum/list/tags/kind/
+  preset), presets in table `filters` (`save_filter, filter_presets, filter_preset,
+  delete_filter, check_expr, run_filter(expr, limit, scan, pool) -> Results,
+  enlist_filter -> list "filter: <name>", note_filter_count, import_filters`);
+  validators in table `classifier validators` (`Validator {by, class, min, mode:
+  gate|weigh}`; `validators, set_validators, drop_validators_of, checked_rows,
+  disagreements`). Bundles carry `filters` and each classifier's `validators` (optional).
+- `core/src/clsmodule.rs`: `.anendcls` modules (magic `ANENDCLM`, manifest JSON + bundled
+  `ANENDCLS` parts + FNV); `Store::export_module(name, ExportOpts{description, author,
+  upstream})`, `read(bytes, max)` strict (sizes, names, steering, hash, widths, catch_unwind),
+  `Store::import_module(&Module, ImportOpts{name, lists})` (classes -> lists by name or
+  given keys; reuses classifiers with the same `weights_hash`), `summary(&Module)`.
+- `classify/io.rs`: header shapes bounded and weight count checked before allocating;
+  `Classifier::weights_hash`; reader wrapped in catch_unwind.
+- delete_classifier clears memo, indexing choices and validators.
+
+Left (hub, web, docs): see docs/next.md item 4.
+
 ## Next (not done)
 
 - the desktop app's classifiers view (src/, uses `anend_core::classifiers`).

@@ -93,18 +93,39 @@ interface, not stubs.
      redrawn line by line (plain past 250 000 characters)
    - empty states for the memory view and the space, a shortcuts table in settings, the
      stats' tags opening the tags view, a clean console from a static server
-4. **Classifiers phase 3:**
-   - **Classifier buckets:** memoized classifier outputs per memory and note, kept with
-     the classifier's version, giving similarity search by classifier and buckets beside
-     ordinal, reversed, atbash and frequency.
-   - **Colouring:** a classifier-based colour scheme in the memory and space views.
-   - **Boolean filters:** hierarchical include/exclude filters over classifiers (A and
-     not B...), and classifiers that validate or invalidate other classifiers.
-   - **Indexing a note:** a view where a note picks which classifiers to index it on;
-     search memoizes what's checked.
-   - **Sharing:** baked classifiers export on their own; the hub shares classifier
-     weights as modules beside saves (browse, upload, download into a save).
-   - **Desktop classifiers view.**
+4. **Classifiers phase 3** (running). Core done and tested (see
+   `core/src/classify/STATUS.md`, "Phase 3"): `core/src/memo.rs` (memoized classifier
+   buckets, near search, per-note indexing choices, tints/palette for colouring),
+   `core/src/filters.rs` (boolean filter trees, presets, validators, disagreements),
+   `core/src/clsmodule.rs` (`.anendcls` export/import, strict reading). The desktop app
+   can use these `Store` methods directly. Left, in this order:
+   - **hub ops** (`hub/src/classify.rs`, docs/app-api.md): `classify.index {name, keys?}`
+     as a background job like training (progress via `classify.index_job`, cancel),
+     `classify.bucket {name, class|text|key, band?}`, `classify.buckets {name}` (counts),
+     `classify.near {name, key|text, by: outputs|embedding}`, `classify.indexed {key}`
+     (chosen classifiers with verdicts: probs/top/members + validator checks),
+     `classify.set_index {key, names}`, `classify.tints {name, keys}` (+ palette hex),
+     `classify.validators {name, set?}`, `classify.disagreements {name}`,
+     `classify.export {name, upstream?}` (base64 or a GET download route
+     `/app/classifiers/{name}.anendcls`), `classify.import` (multipart POST
+     `/app/classifiers`); `filters.list/save/delete/run/enlist`; make `classify.search`
+     use `memo_rows`/`checked_rows`. Offline engine (`hub/web/local/engine.js`): answer
+     `filters.*` with the same "classifiers need a hub for now"; parity must stay "all
+     the same".
+   - **hub sharing**: classifier records in hub/src/store.rs (table + files
+     `classifiers/{id}.anendcls`, stars/downloads keyed `c:<id>` in the existing
+     multimaps), `Hub::accept_classifier` (size limit, `clsmodule::read` in
+     spawn_blocking, pending unless trusted, points as saves), pages `/classifiers`,
+     `/classifiers/{id}` (+download, star, edit, delete), upload form, admin review
+     section, API `/api/classifiers`, app routes "take into my save" and "share from my
+     save"; askama templates in the sand look; tests in hub.rs.
+   - **web UI**: classifiers view (index button with progress, bucket counts, near by
+     outputs/embedding, validators editor, disagreements with yes/no, export/import,
+     hub browse with take), editor drawer (checkboxes of classifiers per note, verdict
+     chips, yes/no), memory and space colouring by a chosen classifier (legend;
+     `classify.tints`), a filters view (Ctrl+9: tree editor, presets, run, enlist).
+   - Playwright screenshots into the scratchpad `shots-phase3/`; docs.
+   - **Desktop classifiers view** (src/, next phase).
 5. **Guide:** `docs/guide.md` on what the app does and how to use it, linked from the
    README and the apps' help.
 6. **Review pass:** security (hub upload and op limits, classifier file checks),
