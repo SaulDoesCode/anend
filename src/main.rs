@@ -1,6 +1,8 @@
 //! anend notes: a desktop markdown note app with the look and workflow of the old anend
 //! blog admin panel, built on Bevy's feathers widgets. Notes live in a local redb file.
 
+// a release build on Windows opens no console window next to the app
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 #![allow(clippy::type_complexity, clippy::too_many_arguments)] // bevy queries and systems are naturally verbose
 
 mod bar;

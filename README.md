@@ -16,23 +16,23 @@ as saves and swap between them like a game's.
 ![the memory view](docs/memory.png)
 ![the space](docs/space.png)
 ![the settings](docs/settings.png)
+![the night colours](docs/night.png)
 
 ## Using it
 
 | | |
 |---|---|
-| **editor** | the note list (with **+ new**) next to the editor card. The first `# line` is the note's title, the rest is markdown. |
+| **editor** | the note list (with **+ new**) next to the editor card. The first `# line` is the note's title, the rest is markdown. **‹** (or **Ctrl+B**) slides the list away to the left; it peeks back out while the pointer is at the left edge. |
 | **tags** | type a tag in the box at the top of the card and press Enter (or `,`); click a tag to remove it |
-| **published** | ticking it saves the note and shows it in the reader |
 | **view / edit** | switch between the markdown source and the rendered note |
-| **reader** | published notes, newest first, the way the old front page listed writs; click a `#tag` to filter |
+| **reader** | your notes, newest first, the way the old front page listed writs; click a `#tag` to filter |
 | **stats** | counts of notes, words, saves and tags |
 | **memory** | weum's memory view: short texts ("memories") and your notes, searched by gematria or by words |
 | **command bar** | the line at the bottom, one for every view (see below) |
 | **space** | weum's spatial memory (remem): fly through a room where memory texts float, laid out by their sums |
-| **settings** | saves, fonts, zen mode and the top bar (also **Ctrl+,**); the key remap menu is in there too (also **K**, or **Ctrl+K** in the space) |
+| **settings** | saves, fonts, colours, sizes, zen mode and the bars (also **Ctrl+,**); the key remap menu is in there too (also **K**, or **Ctrl+K** in the space) |
 
-Shortcuts: **Ctrl+S** save, **Ctrl+N** new note, **Ctrl+E** toggle view/edit,
+Shortcuts: **Ctrl+S** save, **Ctrl+N** new note, **Ctrl+E** toggle view/edit, **Ctrl+B** the note list,
 **Ctrl+1..5** editor / reader / memory / stats / space, **Ctrl+,** settings, **/** the
 command bar. All of them can be changed in **keys**.
 
@@ -68,7 +68,11 @@ Also in settings:
 |---|---|
 | **fonts** | the interface font (every text in the app, the space's floating texts too) and the memory view's font, from the fonts on your system; filter the list by typing |
 | **zen** | while the mouse rests the bars and panels fade away (after 1, 2.5, 5 or 10 seconds); typing in the editor doesn't bring them back, moving the mouse does |
+| **colours** | every colour the app uses has a name (window, bars, bar text, cards, writing pad, buttons, accent, text, links, code, the space's room...): pick one and set it with the hue, saturation and lightness sliders or a hex. **sand** (the old admin panel's), **night**, **paper** and **sea** are starting points; **reset** puts one colour back. The memory view keeps weum's own colours |
+| **sizes** | the whole interface's scale, and the top bar's and command bar's heights in pixels, the way a desktop panel is set; their text and buttons are sized to fit |
 | **hide the top bar** | it slides up out of the way and back down when the pointer comes to the top edge |
+| **slide the note list away** | the same as **Ctrl+B**: it stays away until the pointer comes to the left edge |
+| **the space's search line** | in the space, what was searched, its counts and its sum's prime factor chain sit in the top bar (fading with it under zen); this turns that off |
 
 These settings and your key bindings live in `config.json` in the platform config folder
 (`~/.config/anend` on Linux, `~/Library/Application Support/anend` on macOS,
@@ -164,6 +168,27 @@ Downloads, **Shift+X** saves the map in the database (**Maps** lists them), **H*
 **I** the position card. Every key can be remapped in **keys**. weum's esearch, speech
 and image memories aren't part of it.
 
+## Downloads
+
+Builds for Linux and Windows are on the repository's
+[releases page](https://github.com/SaulDoesCode/anend/releases), each with the app
+(`anend`) and the old server (`anend-server`). On Linux the app needs the Wayland or X11
+libraries a desktop already has.
+
+They're made by GitHub Actions (`.github/workflows/release.yml`). To make a release, tag a
+commit and push the tag:
+
+```sh
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The workflow builds both programs on Linux and Windows and attaches a `.tar.gz` and a
+`.zip` to a new release named after the tag, with notes listing the merged pull requests.
+**Run workflow** on the repository's Actions tab (release) builds the same packages as
+downloadable artifacts without making a release. `.github/workflows/ci.yml` checks
+formatting, clippy and the tests of both on every push to master and every pull request.
+
 ## Building
 
 ```sh
@@ -171,7 +196,7 @@ cargo run --release
 ```
 
 Bevy 0.20 needs Rust 1.97.1 or newer. On Linux you also need the usual Bevy system
-packages, e.g. on Debian/Ubuntu: `libwayland-dev libxkbcommon-dev` (plus
+packages, e.g. on Debian/Ubuntu: `libwayland-dev libxkbcommon-dev libfontconfig1-dev` (plus
 `libxkbcommon-x11-0` at runtime on X11). The memory view uses a system serif font
 (Times New Roman, or whatever serif fontconfig offers).
 
@@ -193,8 +218,7 @@ To bring writs over from the old server, export the `writs` collection (for exam
 anend --import writs.json
 ```
 
-This keeps their keys, titles, markdown, tags, dates, edit history and published
-(`public`) state.
+This keeps their keys, titles, markdown, tags, dates and edit history.
 
 ## The old server
 
@@ -268,4 +292,6 @@ and a login-to-published-writ run through the http api.
 | `src/settings.rs` | the settings menu and the saves: load, new, copy, rename, delete |
 | `src/config.rs` | the settings file |
 | `src/typeface.rs` | swapping the interface font and the memory view's font |
-| `src/zen.rs` | zen's fade and the hiding top bar |
+| `src/zen.rs` | zen's fade, the hiding top bar and the sliding note list |
+| `src/palette.rs` | the colours the settings change, and repainting the interface with them |
+| `src/sizing.rs` | the interface scale and the bars' heights |
