@@ -1313,6 +1313,34 @@ pub fn rebuild_settings(
             s.changed = true;
         },
     );
+    let swapped = toggle(
+        &mut commands,
+        toggles,
+        "the top bar at the bottom, and the command bar at the top",
+        config.bars_swapped,
+        &fonts,
+    );
+    commands.entity(swapped).observe(
+        |_c: On<PointerClick>, mut config: ResMut<Config>, mut s: ResMut<Settings>| {
+            config.bars_swapped = !config.bars_swapped;
+            config.save();
+            s.changed = true;
+        },
+    );
+    let right = toggle(
+        &mut commands,
+        toggles,
+        "the note list on the right",
+        config.list_right,
+        &fonts,
+    );
+    commands.entity(right).observe(
+        |_c: On<PointerClick>, mut config: ResMut<Config>, mut s: ResMut<Settings>| {
+            config.list_right = !config.list_right;
+            config.save();
+            s.changed = true;
+        },
+    );
     let sums = toggle(
         &mut commands,
         toggles,

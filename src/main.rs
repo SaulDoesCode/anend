@@ -276,6 +276,7 @@ fn run(args: Args) {
             zen::zen_fade,
             zen::nav_autohide,
             zen::list_autohide,
+            zen::apply_placement,
         )
             .chain()
             .after(space_ui::build_opts),

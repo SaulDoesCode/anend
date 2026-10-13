@@ -174,17 +174,22 @@ pub fn nav_autohide(
 ) {
     let (mut node, computed) = nav.into_inner();
     let h = computed.size().y * computed.inverse_scale_factor() + 6.0;
+    // the bar's edge: the top, or the bottom when the bars are swapped
+    let height = window.height();
+    let from_edge = |y: f32| if config.bars_swapped { height - y } else { y };
     let near = window
         .cursor_position()
-        .is_some_and(|c| c.y < 10.0 || (zen.slide > 0.5 && c.y < h + 6.0));
+        .is_some_and(|c| from_edge(c.y) < 10.0 || (zen.slide > 0.5 && from_edge(c.y) < h + 6.0));
     let show = !config.hide_bar || near || settings.open || remap.open || !status.text.is_empty();
     let target = if show { 1.0 } else { 0.0 };
     let dt = time.delta_secs();
     let slide = zen.slide + (target - zen.slide) * (1.0 - (-dt * 14.0).exp());
     zen.slide = if (slide - target).abs() < 0.002 { target } else { slide };
-    let top = px(-h * (1.0 - zen.slide));
-    if node.margin.top != top {
+    let off = px(-h * (1.0 - zen.slide));
+    let (top, bottom) = if config.bars_swapped { (px(0), off) } else { (off, px(0)) };
+    if node.margin.top != top || node.margin.bottom != bottom {
         node.margin.top = top;
+        node.margin.bottom = bottom;
     }
 }
 
@@ -202,24 +207,53 @@ pub fn list_autohide(
 ) {
     let (mut node, computed) = list.into_inner();
     let w = computed.size().x * computed.inverse_scale_factor() + 8.0;
+    // the list's edge of the window
+    let width = window.width();
+    let from_edge = |x: f32| if config.list_right { width - x } else { x };
     let near = window
         .cursor_position()
-        .is_some_and(|c| c.x < 10.0 || (zen.list > 0.5 && c.x < w + 16.0));
+        .is_some_and(|c| from_edge(c.x) < 10.0 || (zen.list > 0.5 && from_edge(c.x) < w + 16.0));
     let show = !config.hide_list || (near && !settings.open);
     let target = if show { 1.0 } else { 0.0 };
     let dt = time.delta_secs();
     let slide = zen.list + (target - zen.list) * (1.0 - (-dt * 14.0).exp());
     zen.list = if (slide - target).abs() < 0.002 { target } else { slide };
-    let left = px(-w * (1.0 - zen.list));
-    if node.margin.left != left {
+    let off = px(-w * (1.0 - zen.list));
+    let (left, right) = if config.list_right { (px(0), off) } else { (off, px(0)) };
+    if node.margin.left != left || node.margin.right != right {
         node.margin.left = left;
+        node.margin.right = right;
     }
-    let glyph = if config.hide_list { "›" } else { "‹" };
+    // the arrow points the way the list goes
+    let glyph = match (config.hide_list, config.list_right) {
+        (false, false) | (true, true) => "‹",
+        _ => "›",
+    };
     for c in toggle.iter() {
         if let Ok(mut t) = texts.get_mut(c)
             && t.0 != glyph
         {
             t.0 = glyph.into();
         }
+    }
+}
+
+/// where things sit: the bars swapped or not, the note list left or right
+pub fn apply_placement(
+    config: Res<Config>,
+    mut root: Single<&mut Node, (With<crate::ui::AppRoot>, Without<crate::ui::EditorView>)>,
+    mut editor: Single<&mut Node, (With<crate::ui::EditorView>, Without<crate::ui::AppRoot>)>,
+) {
+    let column = if config.bars_swapped {
+        FlexDirection::ColumnReverse
+    } else {
+        FlexDirection::Column
+    };
+    if root.flex_direction != column {
+        root.flex_direction = column;
+    }
+    let row = if config.list_right { FlexDirection::RowReverse } else { FlexDirection::Row };
+    if editor.flex_direction != row {
+        editor.flex_direction = row;
     }
 }

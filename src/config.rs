@@ -35,6 +35,10 @@ pub struct Config {
     pub space_sums: bool,
     /// slide the note list away until the pointer comes to the left edge
     pub hide_list: bool,
+    /// the top bar at the bottom and the command bar at the top
+    pub bars_swapped: bool,
+    /// the note list on the right of the editor
+    pub list_right: bool,
     pub keymap: Option<serde_json::Value>,
     /// the anend hub saves are shared on, e.g. `http://localhost:8080`
     pub hub_url: String,
@@ -58,6 +62,8 @@ impl Default for Config {
             bottom_bar: 30.0,
             space_sums: true,
             hide_list: false,
+            bars_swapped: false,
+            list_right: false,
             keymap: None,
             hub_url: String::new(),
             hub_token: String::new(),
