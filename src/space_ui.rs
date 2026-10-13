@@ -634,6 +634,7 @@ pub fn rebuild_qline(
     session: Res<Session>,
     config: Res<crate::config::Config>,
     fonts: Res<Fonts>,
+    mut images: ResMut<Assets<Image>>,
     mut commands: Commands,
 ) {
     let (q, mut node) = qline.into_inner();
@@ -709,6 +710,60 @@ pub fn rebuild_qline(
                 let n = name.clone();
                 link_in(&mut commands, q, name, &fonts, 13.0, Role::BarText)
                     .observe(move |_c: On<PointerClick>, mut sp: Sp| sp.route(&n));
+            }
+        }
+    }
+    // the triangle the last Ctrl+right clicked text makes (or the terminal's)
+    let text = if st.tri_text.is_empty() {
+        st.term.clone()
+    } else {
+        st.tri_text.clone()
+    };
+    if text.chars().any(|c| c.is_ascii_alphabetic()) {
+        let holder = commands
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: px(5),
+                    margin: UiRect::left(px(10)),
+                    ..default()
+                },
+                ChildOf(q),
+            ))
+            .id();
+        match spread::triangle(&text) {
+            Some(t) => {
+                commands.spawn((
+                    ImageNode::new(images.add(triangle_image(&t))),
+                    Node {
+                        width: px(TRI_W as f32),
+                        height: px(TRI_H as f32),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                    ChildOf(holder),
+                ));
+                let [s, r, tt] = t.sides;
+                let [a, b, c] = t.angles;
+                plain(
+                    &mut commands,
+                    holder,
+                    format!("{s} {r} {tt} · {a:.0}° {b:.0}° {c:.0}°"),
+                    &fonts,
+                    BAR_DIM,
+                );
+            }
+            None => {
+                let (s, r) = spread::sums(&text);
+                let t = ((s.max(0) * r.max(0)) as f64).sqrt().floor() as i64;
+                plain(
+                    &mut commands,
+                    holder,
+                    format!("△ {s} {r} {t} don't close"),
+                    &fonts,
+                    BAR_DIM,
+                );
             }
         }
     }
@@ -1024,3 +1079,54 @@ pub fn build_opts(
 
 #[derive(Component)]
 pub struct SliderKey(pub &'static str);
+
+const TRI_W: u32 = 40;
+const TRI_H: u32 = 22;
+
+/// a little picture of a text's triangle: filled faintly, edged in the bar's colour
+fn triangle_image(t: &spread::Triangle) -> Image {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    let r = t.sides[1] as f64;
+    let (ax, ay) = t.apex;
+    let (min_x, max_x) = (0f64.min(ax), r.max(ax));
+    let k = ((TRI_W as f64 - 3.0) / (max_x - min_x)).min((TRI_H as f64 - 3.0) / ay.max(1e-9));
+    let ox = (TRI_W as f64 - (max_x - min_x) * k) / 2.0 - min_x * k;
+    let oy = (TRI_H as f64 + ay * k) / 2.0;
+    // corners in pixels, y down
+    let p = [(ox, oy), (ox + r * k, oy), (ox + ax * k, oy - ay * k)];
+    let edge = |(x0, y0): (f64, f64), (x1, y1): (f64, f64), x: f64, y: f64| {
+        let (dx, dy) = (x1 - x0, y1 - y0);
+        let len = (dx * dx + dy * dy).sqrt().max(1e-9);
+        let u = (((x - x0) * dx + (y - y0) * dy) / (len * len)).clamp(0.0, 1.0);
+        ((x - x0 - u * dx).powi(2) + (y - y0 - u * dy).powi(2)).sqrt()
+    };
+    let side = |a: (f64, f64), b: (f64, f64), x: f64, y: f64| (b.0 - a.0) * (y - a.1) - (b.1 - a.1) * (x - a.0);
+    let mut data = vec![0u8; (TRI_W * TRI_H * 4) as usize];
+    for py in 0..TRI_H {
+        for px_ in 0..TRI_W {
+            let (x, y) = (px_ as f64 + 0.5, py as f64 + 0.5);
+            let d = edge(p[0], p[1], x, y)
+                .min(edge(p[1], p[2], x, y))
+                .min(edge(p[2], p[0], x, y));
+            let (s0, s1, s2) = (side(p[0], p[1], x, y), side(p[1], p[2], x, y), side(p[2], p[0], x, y));
+            let inside = (s0 <= 0.0 && s1 <= 0.0 && s2 <= 0.0) || (s0 >= 0.0 && s1 >= 0.0 && s2 >= 0.0);
+            let line = (1.4 - d).clamp(0.0, 1.0);
+            let fill = if inside { 0.22 } else { 0.0 };
+            let a = line.max(fill);
+            let i = ((py * TRI_W + px_) * 4) as usize;
+            data[i..i + 4].copy_from_slice(&[235, 235, 235, (a * 255.0) as u8]);
+        }
+    }
+    Image::new(
+        Extent3d {
+            width: TRI_W,
+            height: TRI_H,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    )
+}

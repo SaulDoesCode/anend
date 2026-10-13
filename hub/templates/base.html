@@ -12,6 +12,7 @@
   <a class="brand" href="/">{{ l.hub }}</a>
   <a class="btn{% if l.tab == "saves" %} on{% endif %}" href="/">saves</a>
   <a class="btn{% if l.tab == "leaderboard" %} on{% endif %}" href="/leaderboard">leaderboard</a>
+  <a class="btn" href="/app/">the app</a>
   {% if let Some(me) = l.me %}
   <a class="btn{% if l.tab == "upload" %} on{% endif %}" href="/upload">share a save</a>
   {% if me.admin %}<a class="btn{% if l.tab == "admin" %} on{% endif %}" href="/admin">admin{% if l.waiting > 0 %} · {{ l.waiting }}{% endif %}</a>{% endif %}

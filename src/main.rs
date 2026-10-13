@@ -6,28 +6,24 @@
 #![allow(clippy::type_complexity, clippy::too_many_arguments)] // bevy queries and systems are naturally verbose
 
 mod bar;
+
+// the saves themselves live in anend-core, shared with the hub
+pub use anend_core::{forge, lists, markdown, memory, note, simd, spread, store, vfs, weum};
 mod config;
-mod forge;
 mod forge_ui;
 mod hub;
 mod hub_ui;
 mod keys;
-mod markdown;
-mod memory;
+mod lists_ui;
 mod memory_ui;
-mod note;
 mod palette;
 mod settings;
-mod simd;
 mod sizing;
 mod space;
 mod space_ui;
-mod spread;
-mod store;
 mod theme;
 mod typeface;
 mod ui;
-mod weum;
 mod zen;
 
 use bevy::feathers::FeathersPlugins;
@@ -127,7 +123,10 @@ fn screenshot(
 }
 
 fn main() {
-    let args = parse_args();
+    run(parse_args());
+}
+
+fn run(args: Args) {
     let mut config = config::Config::load();
     let db_path = args.db.clone().unwrap_or_else(|| config.current_save());
     let store = Store::open(&db_path).unwrap_or_else(|e| fail(&format!("cannot open {}: {}", db_path.display(), e)));
@@ -199,6 +198,7 @@ fn main() {
     .init_resource::<bar::BarState>()
     .init_resource::<settings::Settings>()
     .init_resource::<forge_ui::ForgeState>()
+    .init_resource::<lists_ui::ListsState>()
     .init_resource::<hub_ui::HubState>()
     .init_resource::<typeface::Typeface>()
     .init_resource::<zen::Zen>()
@@ -220,6 +220,7 @@ fn main() {
                 rebuild_preview,
                 rebuild_reader,
                 rebuild_stats,
+                lists_ui::rebuild_lists,
                 rebuild_remap,
             ),
             bar::bar_route,

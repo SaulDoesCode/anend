@@ -82,7 +82,6 @@ pub fn pf_reduction(s: u64) -> Vec<Seg> {
     segs
 }
 
-#[cfg(test)]
 pub fn segs_to_string(segs: &[Seg]) -> String {
     segs.iter()
         .map(|s| match s {

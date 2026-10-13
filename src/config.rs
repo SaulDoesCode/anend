@@ -91,7 +91,7 @@ fn config_path() -> PathBuf {
 
 impl Config {
     pub fn load() -> Config {
-        std::fs::read(config_path())
+        crate::vfs::read(&config_path())
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default()
@@ -100,10 +100,10 @@ impl Config {
     pub fn save(&self) {
         let path = config_path();
         if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
+            let _ = crate::vfs::create_dir_all(dir);
         }
         if let Ok(bytes) = serde_json::to_vec_pretty(self) {
-            let _ = std::fs::write(path, bytes);
+            let _ = crate::vfs::write(&path, &bytes);
         }
     }
 

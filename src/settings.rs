@@ -35,7 +35,7 @@ pub enum FontTarget {
 pub struct SaveInfo {
     pub path: PathBuf,
     pub counts: Option<(u64, u64)>,
-    pub modified: Option<std::time::SystemTime>,
+    pub modified: Option<chrono::DateTime<chrono::Local>>,
     pub size: u64,
     pub current: bool,
 }
@@ -536,20 +536,17 @@ pub fn menu() -> impl Scene {
 
 fn scan(config: &Config, db: &Store) -> Vec<SaveInfo> {
     let current = db.path().to_path_buf();
-    let mut paths: Vec<PathBuf> = std::fs::read_dir(&config.saves_dir)
-        .map(|rd| {
-            rd.filter_map(|e| e.ok().map(|e| e.path()))
-                .filter(|p| p.extension().is_some_and(|x| x == "redb"))
-                .collect()
-        })
-        .unwrap_or_default();
+    let mut paths: Vec<PathBuf> = crate::vfs::list(&config.saves_dir)
+        .into_iter()
+        .filter(|p| p.extension().is_some_and(|x| x == "redb"))
+        .collect();
     if !paths.iter().any(|p| same(p, &current)) {
         paths.push(current.clone());
     }
     let mut saves: Vec<SaveInfo> = paths
         .into_iter()
         .map(|path| {
-            let meta = std::fs::metadata(&path).ok();
+            let meta = crate::vfs::meta(&path);
             let is_current = same(&path, &current);
             SaveInfo {
                 counts: if is_current {
@@ -557,8 +554,8 @@ fn scan(config: &Config, db: &Store) -> Vec<SaveInfo> {
                 } else {
                     Store::summary(&path)
                 },
-                modified: meta.as_ref().and_then(|m| m.modified().ok()),
-                size: meta.map(|m| m.len()).unwrap_or(0),
+                modified: meta.as_ref().and_then(|m| m.modified),
+                size: meta.map(|m| m.len).unwrap_or(0),
                 current: is_current,
                 path,
             }
@@ -570,7 +567,7 @@ fn scan(config: &Config, db: &Store) -> Vec<SaveInfo> {
 }
 
 fn same(a: &Path, b: &Path) -> bool {
-    a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y)
+    crate::vfs::same(a, b)
 }
 
 pub(crate) fn human_size(n: u64) -> String {
@@ -671,7 +668,7 @@ fn use_folder(commands: &mut Commands, ctx: &mut Ctx, s: &mut Settings, config: 
         commands.queue(move |w: &mut World| switch_save(w, path));
         return;
     }
-    if let Err(e) = std::fs::create_dir_all(&path) {
+    if let Err(e) = crate::vfs::create_dir_all(&path) {
         ctx.say(format!("can't use {}: {}", path.display(), e));
         return;
     }
@@ -693,7 +690,7 @@ fn shellexpand(p: &str) -> String {
 pub(crate) fn unique(dir: &Path, name: &str) -> PathBuf {
     let mut p = dir.join(format!("{}.redb", name));
     let mut i = 2;
-    while p.exists() {
+    while crate::vfs::meta(&p).is_some() {
         p = dir.join(format!("{} {}.redb", name, i));
         i += 1;
     }
@@ -703,7 +700,7 @@ pub(crate) fn unique(dir: &Path, name: &str) -> PathBuf {
 fn duplicate(world: &mut World, path: PathBuf) {
     let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
     let to = unique(&dir, &format!("{} copy", save_name(&path)));
-    match std::fs::copy(&path, &to) {
+    match crate::vfs::copy(&path, &to) {
         Ok(_) => say(world, format!("copied {} to {}", save_name(&path), save_name(&to))),
         Err(e) => say(world, format!("couldn't copy {}: {}", save_name(&path), e)),
     }
@@ -715,7 +712,7 @@ fn rename(world: &mut World, path: PathBuf, name: String) {
         return say(world, "a save needs a name");
     };
     let to = path.with_file_name(format!("{}.redb", name));
-    if to.exists() {
+    if crate::vfs::meta(&to).is_some() {
         return say(world, format!("there's already a save called {}", name));
     }
     let current = same(world.resource::<Db>().0.path(), &path);
@@ -724,7 +721,7 @@ fn rename(world: &mut World, path: PathBuf, name: String) {
         let db = world.remove_resource::<Db>();
         drop(db);
     }
-    let moved = std::fs::rename(&path, &to);
+    let moved = crate::vfs::rename(&path, &to);
     if current {
         let path = if moved.is_ok() { &to } else { &path };
         if let Err(e) = reopen(world, path) {
@@ -763,11 +760,11 @@ fn reopen(world: &mut World, path: &Path) -> Result<(), String> {
 /// (and marks it unfinished) while it's open, then opened again
 pub(crate) fn read_open_save(world: &mut World, max: u64) -> Result<(String, Vec<u8>), String> {
     let path = world.resource::<Db>().0.path().to_path_buf();
-    if std::fs::metadata(&path).is_ok_and(|m| m.len() > max) {
+    if crate::vfs::meta(&path).is_some_and(|m| m.len > max) {
         return Err(format!("this save is over {}", human_size(max)));
     }
     drop(world.remove_resource::<Db>());
-    let bytes = std::fs::read(&path).map_err(|e| format!("couldn't read the save: {}", e));
+    let bytes = crate::vfs::read(&path).map_err(|e| format!("couldn't read the save: {}", e));
     reopen(world, &path)?;
     bytes.map(|b| (save_name(&path), b))
 }
@@ -777,7 +774,7 @@ fn delete(world: &mut World, path: PathBuf) {
         return say(world, "load another save before deleting this one");
     }
     world.resource_mut::<Settings>().confirm_delete = None;
-    match std::fs::remove_file(&path) {
+    match crate::vfs::remove(&path) {
         Ok(()) => say(world, format!("deleted {}", save_name(&path))),
         Err(e) => say(world, format!("couldn't delete {}: {}", save_name(&path), e)),
     }
@@ -956,11 +953,7 @@ pub fn rebuild_settings(
             };
             let when = save
                 .modified
-                .map(|t| {
-                    chrono::DateTime::<chrono::Local>::from(t)
-                        .format("%Y-%m-%d %H:%M")
-                        .to_string()
-                })
+                .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
                 .unwrap_or_default();
             small(
                 &mut commands,

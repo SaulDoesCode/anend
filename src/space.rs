@@ -36,7 +36,6 @@ use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow, SystemCursorIco
 use bevy_slugtext::prelude::{TextMaterial, TextMesh};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 use crate::keys::{Action, Fired, Keymap, modifiers};
 use crate::memory::{Bucket, BucketKey, Hit, Ref};
@@ -430,6 +429,8 @@ pub struct Space {
     pub list_id: Option<Ref>,
     pub list_candidate: Option<Ref>,
     pub qline: Qline,
+    /// the text whose triangle the search line draws: the last Ctrl+right clicked one
+    pub tri_text: String,
     pub focus_term: bool,
     pub blur_term: bool,
     // the rest
@@ -485,6 +486,7 @@ impl Default for Space {
             list_id: None,
             list_candidate: None,
             qline: Qline::None,
+            tri_text: String::new(),
             focus_term: false,
             blur_term: false,
             physics_paused: false,
@@ -587,23 +589,8 @@ fn hit_solids(o: Vec3, dir: Vec3) -> f32 {
     best
 }
 
-fn now_ms() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0)
-}
-
-/// where exports go: Downloads when there is one
-fn export_dir() -> PathBuf {
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from);
-    match home {
-        Some(h) if h.join("Downloads").is_dir() => h.join("Downloads"),
-        Some(h) => h,
-        None => PathBuf::from("."),
-    }
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
 }
 
 fn round2(v: f32) -> f32 {
@@ -1431,13 +1418,11 @@ impl Sp<'_, '_> {
             },
             "Backup" => {
                 let out = self.db.0.all_memories().and_then(|all| {
-                    let path = export_dir().join("all-of-it.json");
-                    std::fs::write(&path, serde_json::to_vec(&all).unwrap_or_default())
-                        .map(|_| (all.len(), path))
-                        .map_err(|e| e.to_string())
+                    crate::vfs::save_download("all-of-it.json", &serde_json::to_vec(&all).unwrap_or_default())
+                        .map(|to| (all.len(), to))
                 });
                 match out {
-                    Ok((n, path)) => self.toast(format!("{} memories backed up to {}", n, path.display())),
+                    Ok((n, to)) => self.toast(format!("{} memories backed up to {}", n, to)),
                     Err(e) => self.toast(e),
                 }
             }
@@ -1521,12 +1506,11 @@ impl Sp<'_, '_> {
     pub fn export(&mut self) {
         let rows = self.rows();
         let name = self.hash_name().unwrap_or_else(|| format!("{}-textuality", now_ms()));
-        let path = export_dir().join(format!("{}.json", name));
         match serde_json::to_vec_pretty(&rows)
             .map_err(|e| e.to_string())
-            .and_then(|b| std::fs::write(&path, b).map_err(|e| e.to_string()))
+            .and_then(|b| crate::vfs::save_download(&format!("{}.json", name), &b))
         {
-            Ok(()) => self.toast(format!("{} texts to {}", rows.len(), path.display())),
+            Ok(to) => self.toast(format!("{} texts to {}", rows.len(), to)),
             Err(e) => self.toast(e),
         }
     }
@@ -1649,6 +1633,7 @@ impl Sp<'_, '_> {
         };
         let (s, r) = spread::sums(&text);
         let rev = self.st.chips.rtb;
+        self.st.tri_text = text;
         self.envale(((s * r) as f64).sqrt().floor() as u32, rev);
     }
 

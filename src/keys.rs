@@ -24,6 +24,7 @@ pub enum Action {
     GotoMemory,
     GotoStats,
     GotoSpace,
+    GotoLists,
     OpenSettings,
     FocusTerm,
     BucketOrdinal,
@@ -121,7 +122,7 @@ const fn shift(key: KeyCode) -> Binding {
 }
 
 impl Action {
-    pub const ALL: [Action; 53] = [
+    pub const ALL: [Action; 54] = [
         Action::Save,
         Action::NewNote,
         Action::ToggleView,
@@ -131,6 +132,7 @@ impl Action {
         Action::GotoMemory,
         Action::GotoStats,
         Action::GotoSpace,
+        Action::GotoLists,
         Action::OpenSettings,
         Action::FocusTerm,
         Action::BucketOrdinal,
@@ -180,7 +182,7 @@ impl Action {
     pub fn scope(self) -> Scope {
         use Action::*;
         match self {
-            GotoEditor | GotoReader | GotoMemory | GotoStats | GotoSpace | OpenSettings => Scope::Global,
+            GotoEditor | GotoReader | GotoMemory | GotoStats | GotoSpace | GotoLists | OpenSettings => Scope::Global,
             Save | NewNote | ToggleView | ToggleList | FocusTerm | BucketOrdinal | BucketReversed | BucketAtbash
             | BucketFrequency | ToggleGsearch | ToggleSaturate | WhiteMode | SideOrdinal | SideReversed
             | SideAtbash | SideFrequency | OpenRemap => Scope::Notes,
@@ -209,6 +211,7 @@ impl Action {
             Action::GotoMemory => "goto_memory",
             Action::GotoStats => "goto_stats",
             Action::GotoSpace => "goto_space",
+            Action::GotoLists => "goto_lists",
             Action::OpenSettings => "open_settings",
             Action::FocusTerm => "focus_term",
             Action::BucketOrdinal => "bucket_ordinal",
@@ -267,6 +270,7 @@ impl Action {
             Action::GotoMemory => "go to memory",
             Action::GotoStats => "go to stats",
             Action::GotoSpace => "go to the space",
+            Action::GotoLists => "go to the lists",
             Action::OpenSettings => "open the settings (saves, fonts, zen)",
             Action::FocusTerm => "focus the command bar",
             Action::BucketOrdinal => "memory: ordinal bucket",
@@ -325,6 +329,7 @@ impl Action {
             Action::GotoMemory => ctrl(KeyCode::Digit3),
             Action::GotoStats => ctrl(KeyCode::Digit4),
             Action::GotoSpace => ctrl(KeyCode::Digit5),
+            Action::GotoLists => ctrl(KeyCode::Digit6),
             Action::OpenSettings => ctrl(KeyCode::Comma),
             Action::FocusTerm => plain(KeyCode::Slash),
             Action::BucketOrdinal => plain(KeyCode::KeyO),

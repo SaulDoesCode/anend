@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}server · {% endblock %}
+{% block main %}
+<section class="card narrow">
+  <h2>server</h2>
+  <p class="dim">Serve the hub over https: the paths of a certificate chain and its private key, both PEM (from Let's Encrypt, say: <code>fullchain.pem</code> and <code>privkey.pem</code>). The hub reads them when it starts. Leave both empty for plain http, behind a proxy that does https.</p>
+  <form method="post" action="/admin/server">
+    <div class="field"><label for="cert">certificate chain</label><input id="cert" name="cert" type="text" value="{{ cert }}" placeholder="/etc/letsencrypt/live/example.org/fullchain.pem"></div>
+    <div class="field"><label for="key">private key</label><input id="key" name="key" type="text" value="{{ key }}" placeholder="/etc/letsencrypt/live/example.org/privkey.pem"></div>
+    <p><button class="primary">save</button></p>
+  </form>
+  <p class="dim small">Only shown to an admin browsing from the server itself. Flags win over this: <code>--tls-cert</code> and <code>--tls-key</code>.</p>
+</section>
+{% endblock %}

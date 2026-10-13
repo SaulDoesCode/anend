@@ -8,7 +8,7 @@ use std::path::Path;
 
 use crate::note::Note;
 
-pub(crate) const NOTES: TableDefinition<&str, &[u8]> = TableDefinition::new("notes");
+pub const NOTES: TableDefinition<&str, &[u8]> = TableDefinition::new("notes");
 const META: TableDefinition<&str, u64> = TableDefinition::new("meta");
 
 pub type StoreResult<T> = Result<T, String>;
@@ -21,16 +21,16 @@ fn err(e: impl std::fmt::Display) -> String {
 const INDEX_VERSION: u64 = 1;
 
 pub struct Store {
-    pub(crate) db: Database,
+    pub db: Database,
     path: std::path::PathBuf,
 }
 
 impl Store {
     pub fn open(path: &Path) -> StoreResult<Store> {
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-            std::fs::create_dir_all(dir).map_err(err)?;
+            crate::vfs::create_dir_all(dir).map_err(err)?;
         }
-        let db = Database::create(path).map_err(err)?;
+        let db = crate::vfs::database(path).map_err(err)?;
         let txn = db.begin_write().map_err(err)?;
         txn.open_table(NOTES).map_err(err)?;
         txn.open_table(META).map_err(err)?;

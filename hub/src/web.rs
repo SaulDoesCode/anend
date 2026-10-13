@@ -168,7 +168,7 @@ pub fn hue(name: &str) -> u64 {
     (o * 37 + r * 11) % 360
 }
 
-fn render(res: &mut Response, t: impl Template) {
+pub fn render(res: &mut Response, t: impl Template) {
     match t.render() {
         Ok(html) => res.render(Text::Html(html)),
         Err(e) => {
@@ -196,7 +196,7 @@ pub struct Layout {
     pub waiting: usize,
 }
 
-fn layout(depot: &Depot, tab: &'static str) -> Layout {
+pub fn layout(depot: &Depot, tab: &'static str) -> Layout {
     let flash = depot.get::<String>("flash").cloned().unwrap_or_default();
     let (flash, flash_bad) = match flash.strip_prefix('!') {
         Some(f) => (f.to_string(), true),
@@ -285,7 +285,7 @@ fn need_active<'a>(res: &mut Response, depot: &'a Depot) -> Option<&'a User> {
     }
 }
 
-fn need_admin<'a>(res: &mut Response, depot: &'a Depot) -> Option<&'a User> {
+pub fn need_admin<'a>(res: &mut Response, depot: &'a Depot) -> Option<&'a User> {
     match me(depot) {
         Some(u) if u.is_admin() => Some(u),
         _ => {

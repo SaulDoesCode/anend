@@ -49,6 +49,7 @@ pub enum Route {
     Memory,
     Stats,
     Space,
+    Lists,
 }
 
 #[derive(Resource, Default)]
@@ -326,6 +327,8 @@ fn root() -> impl Scene {
                 --
                 @stats_view()
                 --
+                @crate::lists_ui::view()
+                --
                 @crate::space_ui::view()
             ]
             --
@@ -383,6 +386,8 @@ fn nav() -> impl Scene {
             @nav_button("stats", Route::Stats)
             --
             @nav_button("space", Route::Space)
+            --
+            @nav_button("lists", Route::Lists)
             --
             // the space's search line: what was searched and its sum's chain
             Node {
@@ -735,8 +740,14 @@ pub fn app_actions(
                 ctx.redraw.meta = true;
                 ctx.redraw.preview = true;
             }
-            Action::GotoEditor | Action::GotoReader | Action::GotoMemory | Action::GotoStats | Action::GotoSpace => {
+            Action::GotoEditor
+            | Action::GotoReader
+            | Action::GotoMemory
+            | Action::GotoStats
+            | Action::GotoSpace
+            | Action::GotoLists => {
                 let route = match action {
+                    Action::GotoLists => Route::Lists,
                     Action::GotoEditor => Route::Editor,
                     Action::GotoReader => Route::Reader,
                     Action::GotoMemory => Route::Memory,
@@ -787,6 +798,7 @@ pub fn apply_route(
         Has<MemoryView>,
         Has<StatsView>,
         Has<SpaceView>,
+        Has<crate::lists_ui::ListsView>,
     )>,
     tabs: Query<(Entity, &NavTab)>,
     mut commands: Commands,
@@ -795,15 +807,16 @@ pub fn apply_route(
         return;
     }
     redraw.route = false;
-    for (mut node, editor, reader, memory, stats, space) in views.iter_mut() {
+    for (mut node, editor, reader, memory, stats, space, lists) in views.iter_mut() {
         let shown = match session.route {
             Route::Editor => editor,
             Route::Reader => reader,
             Route::Memory => memory,
             Route::Stats => stats,
             Route::Space => space,
+            Route::Lists => lists,
         };
-        if editor || reader || memory || stats || space {
+        if editor || reader || memory || stats || space || lists {
             node.display = if shown { Display::Flex } else { Display::None };
         }
     }
@@ -1158,7 +1171,7 @@ pub fn rebuild_stats(
 
 // ------------------------------------------------------------------ markdown rendering
 
-fn card_node() -> Node {
+pub(crate) fn card_node() -> Node {
     Node {
         width: percent(100),
         max_width: px(820),

@@ -171,13 +171,7 @@ pub fn note_texts(note: &Note) -> (String, String) {
 }
 
 /// adds (or with `add` false removes) a ref's entries in every search table
-pub(crate) fn index(
-    txn: &WriteTransaction,
-    r: &Ref,
-    gematria_text: &str,
-    token_text: &str,
-    add: bool,
-) -> StoreResult<()> {
+pub fn index(txn: &WriteTransaction, r: &Ref, gematria_text: &str, token_text: &str, add: bool) -> StoreResult<()> {
     let rb = r.bytes();
     let rb = rb.as_slice();
     {
@@ -211,12 +205,12 @@ pub(crate) fn index(
     Ok(())
 }
 
-pub(crate) fn index_note(txn: &WriteTransaction, note: &Note, add: bool) -> StoreResult<()> {
+pub fn index_note(txn: &WriteTransaction, note: &Note, add: bool) -> StoreResult<()> {
     let (gem, tokens) = note_texts(note);
     index(txn, &Ref::Note(note.key.clone()), &gem, &tokens, add)
 }
 
-pub(crate) fn create_tables(txn: &WriteTransaction) -> StoreResult<()> {
+pub fn create_tables(txn: &WriteTransaction) -> StoreResult<()> {
     txn.open_table(MEMORIES).map_err(err)?;
     txn.open_table(STATE).map_err(err)?;
     txn.open_table(SETTINGS).map_err(err)?;

@@ -782,3 +782,56 @@ mod tests {
         assert_ne!(b("listen"), b("dog"));
     }
 }
+
+/// the triangle a text makes: sides s, r and t = ⌊√(s·r)⌋, the corners laid out with r
+/// along the bottom; `None` when the three can't close (one longer than the other two)
+#[derive(Debug, Clone, PartialEq)]
+pub struct Triangle {
+    pub sides: [i64; 3],
+    /// corners: (0, 0), (r, 0) and the apex, in the sides' units
+    pub apex: (f64, f64),
+    /// the angles opposite s, r and t, in degrees
+    pub angles: [f64; 3],
+}
+
+pub fn triangle(text: &str) -> Option<Triangle> {
+    let (s, r) = sums(text);
+    if s <= 0 || r <= 0 {
+        return None;
+    }
+    let t = ((s * r) as f64).sqrt().floor() as i64;
+    let (a, b, c) = (s as f64, r as f64, t as f64);
+    if a + c <= b || b + c <= a || a + b <= c {
+        return None;
+    }
+    // apex: t from the left corner, s from the right one
+    let x = (c * c - a * a + b * b) / (2.0 * b);
+    let y = (c * c - x * x).max(0.0).sqrt();
+    let angle = |opp: f64, p: f64, q: f64| {
+        ((p * p + q * q - opp * opp) / (2.0 * p * q))
+            .clamp(-1.0, 1.0)
+            .acos()
+            .to_degrees()
+    };
+    Some(Triangle {
+        sides: [s, r, t],
+        apex: (x, y),
+        angles: [angle(a, b, c), angle(b, a, c), angle(c, a, b)],
+    })
+}
+
+#[cfg(test)]
+mod triangle_tests {
+    use super::*;
+
+    #[test]
+    fn truth_and_flat_ones() {
+        let t = triangle("truth").unwrap();
+        assert_eq!(t.sides, [87, 48, 64]);
+        assert!((t.angles.iter().sum::<f64>() - 180.0).abs() < 1e-9);
+        assert!(t.apex.1 > 0.0);
+        // a: s = 1, r = 26 and t = 5 don't close
+        assert!(triangle("a").is_none());
+        assert!(triangle("").is_none());
+    }
+}

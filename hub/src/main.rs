@@ -3,10 +3,13 @@
 //! for saves others use. The app browses and shares through its JSON API.
 
 mod api;
+mod app;
+mod appweb;
 mod auth;
 mod game;
 mod hub;
 mod inspect;
+mod server;
 mod store;
 mod web;
 
@@ -31,6 +34,10 @@ usage: anend-hub [options]
   --behind-proxy       trust X-Forwarded-For for the client's address
   --admin NAME         make NAME an admin (creating them if needed), print a login link, carry on
   --no-ratelimit       don't limit login, join and upload tries
+  --local              one workspace for the web app and no login needed for it: the hub
+                       as the app's daemon on your own machine (keep --addr on localhost)
+  --tls-cert FILE      serve https with this certificate chain (PEM)...
+  --tls-key FILE       ...and this private key (PEM); both can be set in the admin panel too
   -h, --help           this
 ";
 
@@ -45,6 +52,9 @@ struct Args {
     behind_proxy: bool,
     admin: Option<String>,
     no_ratelimit: bool,
+    local: bool,
+    tls_cert: Option<PathBuf>,
+    tls_key: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -61,6 +71,9 @@ fn parse_args() -> Result<Args, String> {
         behind_proxy: false,
         admin: None,
         no_ratelimit: false,
+        local: false,
+        tls_cert: None,
+        tls_key: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -80,6 +93,9 @@ fn parse_args() -> Result<Args, String> {
             "--behind-proxy" => a.behind_proxy = true,
             "--admin" => a.admin = Some(value("--admin")?),
             "--no-ratelimit" => a.no_ratelimit = true,
+            "--local" => a.local = true,
+            "--tls-cert" => a.tls_cert = Some(PathBuf::from(value("--tls-cert")?)),
+            "--tls-key" => a.tls_key = Some(PathBuf::from(value("--tls-key")?)),
             "-h" | "--help" => {
                 print!("{HELP}");
                 std::process::exit(0);
@@ -112,9 +128,18 @@ pub fn router() -> Router {
         .push(Router::with_path("me/tokens").post(web::make_token))
         .push(Router::with_path("me/tokens/{hash}/revoke").post(web::revoke_token))
         .push(Router::with_path("leaderboard").get(web::leaderboard))
+        .push(Router::with_path("app").get(appweb::app_root))
+        .push(Router::with_path("app/ws").goal(appweb::socket))
+        .push(Router::with_path("app/api/{op}").post(appweb::api))
+        .push(Router::with_path("app/saves").post(appweb::upload))
+        .push(Router::with_path("app/saves/{name}").get(appweb::download))
+        .push(Router::with_path("app/hub/{id}").post(appweb::take))
+        .push(Router::with_path("app/share").post(appweb::share))
+        .push(Router::with_path("app/{**rest}").get(appweb::files))
         .push(Router::with_path("admin").get(web::admin_page))
         .push(Router::with_path("admin/saves/{id}").post(web::admin_save_action))
         .push(Router::with_path("admin/users/{name}").post(web::admin_user_action))
+        .push(Router::with_path("admin/server").get(server::page).post(server::save))
         .push(Router::with_path("api/hub").get(api::about))
         .push(Router::with_path("api/saves").get(api::list).post(api::share))
         .push(Router::with_path("api/saves/{id}").get(api::one))
@@ -141,7 +166,13 @@ async fn main() {
     };
     // uploads that were being checked when the hub stopped
     std::fs::remove_dir_all(store.incoming()).ok();
-    let url = args.url.clone().unwrap_or_else(|| format!("http://{}", args.addr));
+    // https: the flags, or what the admin panel saved
+    let file = server::ServerFile::load(&args.data);
+    let cert = args.tls_cert.clone().or_else(|| file.cert());
+    let key = args.tls_key.clone().or_else(|| file.key());
+    let tls = cert.zip(key);
+    let scheme = if tls.is_some() { "https" } else { "http" };
+    let url = args.url.clone().unwrap_or_else(|| format!("{scheme}://{}", args.addr));
     let hub = Hub {
         store,
         config: Config {
@@ -154,6 +185,9 @@ async fn main() {
         limiter: Limiter::new(args.no_ratelimit),
     };
     web::BEHIND_PROXY.set(args.behind_proxy).ok();
+    app::LOCAL.set(args.local).ok();
+    app::WORKSPACES.set(app::Workspaces::new(args.data.join("users"))).ok();
+    server::DATA.set(args.data.clone()).ok();
     if web::HUB.set(hub).is_err() {
         unreachable!("the hub starts once");
     }
@@ -172,7 +206,36 @@ async fn main() {
     if users == 0 {
         println!("\n  No one has joined yet. Run with --admin YOURNAME to make yourself the first admin.\n");
     }
-    println!("  the hub is at {url} (data in {})", args.data.display());
-    let acceptor = TcpListener::new(args.addr.clone()).bind().await;
-    Server::new(acceptor).serve(router()).await;
+    println!(
+        "  the hub is at {url} (data in {}); the app at {url}/app/",
+        args.data.display()
+    );
+    if args.local {
+        println!("  --local: the web app needs no login; keep the hub on localhost");
+    }
+    match tls {
+        Some((cert, key)) => {
+            let keycert = salvo::conn::rustls::Keycert::new()
+                .cert_from_path(&cert)
+                .and_then(|k| k.key_from_path(&key));
+            let keycert = match keycert {
+                Ok(k) => k,
+                Err(e) => {
+                    eprintln!(
+                        "couldn't read the certificate or key ({}, {}): {e}",
+                        cert.display(),
+                        key.display()
+                    );
+                    std::process::exit(1);
+                }
+            };
+            let config = salvo::conn::rustls::RustlsConfig::new(keycert);
+            let acceptor = TcpListener::new(args.addr.clone()).rustls(config).bind().await;
+            Server::new(acceptor).serve(router()).await;
+        }
+        None => {
+            let acceptor = TcpListener::new(args.addr.clone()).bind().await;
+            Server::new(acceptor).serve(router()).await;
+        }
+    }
 }

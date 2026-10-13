@@ -1,0 +1,33 @@
+# anend hub as a systemd service. Copy to /etc/systemd/system/anend-hub.service, make
+# the user and folder, then:  systemctl daemon-reload && systemctl enable --now anend-hub
+#
+#   useradd --system --home /var/lib/anend-hub --shell /usr/sbin/nologin anend
+#   install -d -o anend -g anend /var/lib/anend-hub
+#   install -m 755 anend-hub /usr/local/bin/
+#
+# For a daemon only you use, on your own machine, add --local and keep the address on
+# 127.0.0.1. For https, give --tls-cert and --tls-key (readable by the anend user), or
+# set them on /admin/server from the machine itself.
+
+[Unit]
+Description=anend hub: shared saves, the web app and its API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=anend
+Group=anend
+WorkingDirectory=/var/lib/anend-hub
+ExecStart=/usr/local/bin/anend-hub --data /var/lib/anend-hub --addr 127.0.0.1:8080 --url https://hub.example.org --behind-proxy
+Restart=on-failure
+RestartSec=3
+
+# keep it to its own folder
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/anend-hub
+
+[Install]
+WantedBy=multi-user.target

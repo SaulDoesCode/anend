@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}admin · {% endblock %}
 {% block main %}
+<div class="row"><a class="btn small" href="/admin/server">server settings (https)</a></div>
 <section class="card">
   <h2>saves waiting ({{ waiting_saves.len() }})</h2>
   {% if waiting_saves.is_empty() %}<p class="dim">Nothing to look at.</p>{% else %}
