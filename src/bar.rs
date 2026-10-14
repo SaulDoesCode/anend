@@ -57,7 +57,10 @@ impl BarState {
 }
 
 fn notes_route(r: Route) -> bool {
-    !matches!(r, Route::Memory | Route::Space | Route::Lists | Route::Tags | Route::Classifiers | Route::Filters)
+    !matches!(
+        r,
+        Route::Memory | Route::Space | Route::Lists | Route::Tags | Route::Classifiers | Route::Filters
+    )
 }
 
 pub fn bar() -> impl Scene {

@@ -475,7 +475,12 @@ pub fn id_ok(id: &str) -> bool {
 pub fn classifiers_url(hub: &str, q: &str, sort: Sort, page: u32) -> Result<String, String> {
     join(
         hub,
-        &format!("/api/classifiers?q={}&sort={}&page={}", encode(q.trim()), sort.name(), page),
+        &format!(
+            "/api/classifiers?q={}&sort={}&page={}",
+            encode(q.trim()),
+            sort.name(),
+            page
+        ),
     )
 }
 
@@ -526,7 +531,17 @@ pub async fn share_classifier(
         ("file", &filename, bytes),
     );
     let kind = format!("multipart/form-data; boundary={}", boundary);
-    read_json(request("POST", &url, token, Some((kind, body)), MAX_JSON, Duration::from_secs(10 * 60)).await?)
+    read_json(
+        request(
+            "POST",
+            &url,
+            token,
+            Some((kind, body)),
+            MAX_JSON,
+            Duration::from_secs(10 * 60),
+        )
+        .await?,
+    )
 }
 
 // ------------------------------------------------------------------ the guide

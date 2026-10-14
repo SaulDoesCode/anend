@@ -155,15 +155,21 @@ pub fn draw_checks(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts,
         }
         for (j, cl) in classes.iter().enumerate() {
             let cl2 = cl.clone();
-            let b = button(c, r, cl.clone(), ButtonVariant::selected(*cl == v.class), "the class it must say")
-                .observe(move |_a: On<Activate>, mut st: ResMut<ClsState>| {
-                    if let Some(x) = st.vals.get_mut(i) {
-                        x.class = cl2.clone();
-                    }
-                    st.vals_save = true;
-                    st.redraw = true;
-                })
-                .id();
+            let b = button(
+                c,
+                r,
+                cl.clone(),
+                ButtonVariant::selected(*cl == v.class),
+                "the class it must say",
+            )
+            .observe(move |_a: On<Activate>, mut st: ResMut<ClsState>| {
+                if let Some(x) = st.vals.get_mut(i) {
+                    x.class = cl2.clone();
+                }
+                st.vals_save = true;
+                st.redraw = true;
+            })
+            .id();
             let sw = swatch(c, b, class_color(j, classes.len()), 9.0);
             c.entity(sw).insert(Node {
                 width: px(9),
@@ -183,8 +189,16 @@ pub fn draw_checks(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts,
             },
         );
         for (mode, word, tip) in [
-            (Mode::Gate, "gate", "gate: a text it doesn't pass is in none of the classes"),
-            (Mode::Weigh, "scale", "scale: the probabilities are multiplied by the validator's"),
+            (
+                Mode::Gate,
+                "gate",
+                "gate: a text it doesn't pass is in none of the classes",
+            ),
+            (
+                Mode::Weigh,
+                "scale",
+                "scale: the probabilities are multiplied by the validator's",
+            ),
         ] {
             button(c, r, word.into(), ButtonVariant::selected(v.mode == mode), tip).observe(
                 move |_a: On<Activate>, mut st: ResMut<ClsState>| {
@@ -208,7 +222,10 @@ pub fn draw_checks(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts,
             },
         );
     }
-    let free: Vec<&&Definition> = others.iter().filter(|x| !st.vals.iter().any(|v| v.by == x.name)).collect();
+    let free: Vec<&&Definition> = others
+        .iter()
+        .filter(|x| !st.vals.iter().any(|v| v.by == x.name))
+        .collect();
     if st.vals.len() < 8 {
         let r = row(c, k, 6.0);
         if others.is_empty() {
@@ -218,18 +235,23 @@ pub fn draw_checks(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts,
         }
         for o in free {
             let (by, class) = (o.name.clone(), o.class_names().first().cloned().unwrap_or_default());
-            button(c, r, o.name.clone(), ButtonVariant::Normal, "add it as a validator (then pick the class it must say)").observe(
-                move |_a: On<Activate>, mut st: ResMut<ClsState>| {
-                    st.vals.push(Validator {
-                        by: by.clone(),
-                        class: class.clone(),
-                        min: 0.5,
-                        mode: Mode::Gate,
-                    });
-                    st.vals_save = true;
-                    st.redraw = true;
-                },
-            );
+            button(
+                c,
+                r,
+                o.name.clone(),
+                ButtonVariant::Normal,
+                "add it as a validator (then pick the class it must say)",
+            )
+            .observe(move |_a: On<Activate>, mut st: ResMut<ClsState>| {
+                st.vals.push(Validator {
+                    by: by.clone(),
+                    class: class.clone(),
+                    min: 0.5,
+                    mode: Mode::Gate,
+                });
+                st.vals_save = true;
+                st.redraw = true;
+            });
         }
     }
     dim(
@@ -250,24 +272,40 @@ pub fn draw_disagree(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Font
     heading(c, top, Icon::Alert, "disagreements", f);
     grow(c, top);
     if st.vals.is_empty() {
-        dim(c, k, "add a validator first: then this lists the texts the two don't agree on", f);
+        dim(
+            c,
+            k,
+            "add a validator first: then this lists the texts the two don't agree on",
+            f,
+        );
         return;
     }
     icon_label(
         c,
         top,
         Icon::Alert,
-        if st.disagree_busy { "looking…".into() } else { "find them".into() },
+        if st.disagree_busy {
+            "looking…".into()
+        } else {
+            "find them".into()
+        },
         ButtonVariant::Normal,
         "find the texts it counts in a class that a validator doesn't pass",
     )
-    .observe(|_a: On<Activate>, mut st: ResMut<ClsState>, work: Res<Work>, db: Res<Db>| {
-        if !st.disagree_busy {
-            start_disagree(&mut st, &work, db.0.clone());
-        }
-    });
+    .observe(
+        |_a: On<Activate>, mut st: ResMut<ClsState>, work: Res<Work>, db: Res<Db>| {
+            if !st.disagree_busy {
+                start_disagree(&mut st, &work, db.0.clone());
+            }
+        },
+    );
     let Some(list) = st.disagree.clone() else {
-        dim(c, k, "the texts it puts in a class while a validator says no; tell either one it was right", f);
+        dim(
+            c,
+            k,
+            "the texts it puts in a class while a validator says no; tell either one it was right",
+            f,
+        );
         return;
     };
     if list.is_empty() {
@@ -284,7 +322,11 @@ pub fn draw_disagree(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Font
                 padding: UiRect::axes(px(6), px(4)),
                 ..default()
             },
-            BackgroundColor(if n % 2 == 0 { colors::PAD.with_alpha(0.35) } else { Color::NONE }),
+            BackgroundColor(if n % 2 == 0 {
+                colors::PAD.with_alpha(0.35)
+            } else {
+                Color::NONE
+            }),
         ));
         let line = row(c, item, 8.0);
         let p = col(c, line, 2.0);
@@ -296,7 +338,8 @@ pub fn draw_disagree(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Font
         label(c, p, &pct(x.d.prob as f64), f, 12.0, colors::TEXT);
         meter(c, p, x.d.prob, 50.0, 3.0, colors::ACCENT);
         let t = label(c, line, &clip(&x.d.text, 110), f, 13.5, colors::TEXT);
-        c.entity(t).insert((bevy::picking::Pickable::default(), Tip(x.d.key.clone())));
+        c.entity(t)
+            .insert((bevy::picking::Pickable::default(), Tip(x.d.key.clone())));
         let ci = classes.iter().position(|y| *y == x.d.class).unwrap_or(0);
         chip(c, line, class_color(ci, classes.len()), &x.d.class, f);
         grow(c, line);
@@ -389,7 +432,13 @@ fn start_take(st: &mut ClsState, work: &Work, store: Arc<Store>, url: String, id
     });
 }
 
-pub fn start_share(st: &mut ClsState, work: &Work, store: Arc<Store>, config: &crate::config::Config, name: String) -> Result<(), String> {
+pub fn start_share(
+    st: &mut ClsState,
+    work: &Work,
+    store: Arc<Store>,
+    config: &crate::config::Config,
+    name: String,
+) -> Result<(), String> {
     if config.hub_url.trim().is_empty() || config.hub_token.trim().is_empty() {
         return Err("connect to a hub with an app token first (the settings' hub section)".into());
     }
@@ -430,13 +479,18 @@ pub fn draw_hub(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, co
     }
     grow(c, top);
     for s in Sort::ALL {
-        button(c, top, s.name().into(), ButtonVariant::selected(st.hub.sort == s), "order them").observe(
-            move |_a: On<Activate>, mut st: ResMut<ClsState>| {
-                st.hub.sort = s;
-                st.hub.page = 0;
-                st.hub.reload = true;
-            },
-        );
+        button(
+            c,
+            top,
+            s.name().into(),
+            ButtonVariant::selected(st.hub.sort == s),
+            "order them",
+        )
+        .observe(move |_a: On<Activate>, mut st: ResMut<ClsState>| {
+            st.hub.sort = s;
+            st.hub.page = 0;
+            st.hub.reload = true;
+        });
     }
     icon_button(c, top, Icon::Refresh, "ask the hub again", ButtonVariant::Normal).observe(
         |_a: On<Activate>, mut st: ResMut<ClsState>| {
@@ -560,7 +614,10 @@ pub fn draw_hub(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, co
                     }
                 })
                 .collect();
-            let missing = h.upstream.iter().any(|u| !u.bundled && !st.defs.iter().any(|d| d.name == u.name));
+            let missing = h
+                .upstream
+                .iter()
+                .any(|u| !u.bundled && !st.defs.iter().any(|d| d.name == u.name));
             let r = row(c, item, 6.0);
             if missing {
                 crate::icons::spawn_icon(c, r, Icon::Alert, 13.0, colors::LINK);
@@ -570,7 +627,14 @@ pub fn draw_hub(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, co
     }
     if st.hub.more {
         let r = row(c, main, 8.0);
-        button(c, r, if st.hub.busy { "…".into() } else { "more".into() }, ButtonVariant::Normal, "the next page").observe(
+        button(
+            c,
+            r,
+            if st.hub.busy { "…".into() } else { "more".into() },
+            ButtonVariant::Normal,
+            "the next page",
+        )
+        .observe(
             |_a: On<Activate>, mut st: ResMut<ClsState>, work: Res<Work>, config: Res<crate::config::Config>| {
                 if !st.hub.busy {
                     st.hub.page += 1;
@@ -580,4 +644,3 @@ pub fn draw_hub(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, co
         );
     }
 }
-

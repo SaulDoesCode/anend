@@ -831,7 +831,11 @@ fn icon_btn(
     tip: &str,
     f: impl FnOnce(&mut EntityCommands),
 ) {
-    let mut e = commands.spawn_scene(crate::icons::icon_scene_button(icon, tip.to_string(), ButtonVariant::Normal));
+    let mut e = commands.spawn_scene(crate::icons::icon_scene_button(
+        icon,
+        tip.to_string(),
+        ButtonVariant::Normal,
+    ));
     e.insert(ChildOf(parent));
     f(&mut e);
 }
@@ -1052,22 +1056,34 @@ pub fn rebuild_settings(
             });
         });
         let p = path.clone();
-        icon_btn(&mut commands, card, crate::icons::Icon::Rename, "rename this save", |e| {
-            e.observe(move |_a: On<Activate>, mut s: ResMut<Settings>| {
-                s.renaming = Some(p.clone());
-                s.confirm_delete = None;
-                s.changed = true;
-            });
-        });
-        if !save.current {
-            let p = path.clone();
-            icon_btn(&mut commands, card, crate::icons::Icon::Delete, "delete this save", |e| {
+        icon_btn(
+            &mut commands,
+            card,
+            crate::icons::Icon::Rename,
+            "rename this save",
+            |e| {
                 e.observe(move |_a: On<Activate>, mut s: ResMut<Settings>| {
-                    s.confirm_delete = Some(p.clone());
-                    s.renaming = None;
+                    s.renaming = Some(p.clone());
+                    s.confirm_delete = None;
                     s.changed = true;
                 });
-            });
+            },
+        );
+        if !save.current {
+            let p = path.clone();
+            icon_btn(
+                &mut commands,
+                card,
+                crate::icons::Icon::Delete,
+                "delete this save",
+                |e| {
+                    e.observe(move |_a: On<Activate>, mut s: ResMut<Settings>| {
+                        s.confirm_delete = Some(p.clone());
+                        s.renaming = None;
+                        s.changed = true;
+                    });
+                },
+            );
         }
     }
 

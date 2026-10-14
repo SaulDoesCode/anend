@@ -379,7 +379,11 @@ fn reload(st: &mut ClsState, store: &Store) {
                 .collect()
         })
         .unwrap_or_default();
-    if st.selected.as_ref().is_some_and(|s| !st.defs.iter().any(|d| &d.name == s)) {
+    if st
+        .selected
+        .as_ref()
+        .is_some_and(|s| !st.defs.iter().any(|d| &d.name == s))
+    {
         st.select(None);
     }
     if st.selected.is_none()
@@ -547,7 +551,15 @@ fn start_why(st: &mut ClsState, work: &Work, store: Arc<Store>, f: &Found) {
 }
 
 /// yes or no on a text: one classifier's own, or end to end through the stack
-pub fn start_judge(work: &Work, store: Arc<Store>, name: String, f: (Ref, String), class: String, yes: bool, stack: bool) {
+pub fn start_judge(
+    work: &Work,
+    store: Arc<Store>,
+    name: String,
+    f: (Ref, String),
+    class: String,
+    yes: bool,
+    stack: bool,
+) {
     work.spawn("judge", move || {
         let j = Judged {
             key: Some(f.0),
@@ -558,7 +570,9 @@ pub fn start_judge(work: &Work, store: Arc<Store>, name: String, f: (Ref, String
                 .feedback_stack(&name, &j, &class, yes, 1.0)
                 .map(|(e, _, touched)| (e, touched))
         } else {
-            store.feedback_classifier(&name, &j, &class, yes, 1.0).map(|e| (e, vec![]))
+            store
+                .feedback_classifier(&name, &j, &class, yes, 1.0)
+                .map(|e| (e, vec![]))
         };
         Box::new(move |w: &mut World| {
             let msg = match &r {
@@ -749,7 +763,9 @@ fn start_near(st: &mut ClsState, work: &Work, store: Arc<Store>, key: Option<Ref
         let r: Result<Near, String> = (|| {
             let stack = store.stack(&name)?;
             let me = match &key {
-                Some(k) => store.memo_rows(&stack, &[(k.clone(), text.as_str())], &pool())?.remove(0),
+                Some(k) => store
+                    .memo_rows(&stack, &[(k.clone(), text.as_str())], &pool())?
+                    .remove(0),
                 None => memo::read(&stack, store.memo_fresh(&stack)?, &text),
             };
             let results = store.memo_near(&stack, &me, by, key.as_ref(), 16)?;
@@ -827,7 +843,10 @@ fn start_training(st: &mut ClsState, work: &Work, store: Arc<Store>) {
                 Ok((s, true)) => format!(
                     "“{}” trained: {} on {} texts, {:.1} s",
                     name,
-                    s.metrics.as_ref().map(|m| pct(m.accuracy)).unwrap_or_else(|| "–".into()),
+                    s.metrics
+                        .as_ref()
+                        .map(|m| pct(m.accuracy))
+                        .unwrap_or_else(|| "–".into()),
                     s.measured_on,
                     s.seconds
                 ),
@@ -881,34 +900,34 @@ fn start_import(work: &Work, store: Arc<Store>, path: PathBuf) {
 
 /// what taking a module in did, said, and the classifier opened
 pub fn after_import(w: &mut World, r: Result<anend_core::clsmodule::Imported, String>) {
-            match &r {
-                Ok(i) => {
-                    let lists: Vec<String> = i
-                        .lists
-                        .iter()
-                        .map(|(c, _, new)| format!("{}{}", c, if *new { " (new list)" } else { "" }))
-                        .collect();
-                    say(
-                        w,
-                        format!(
-                            "took in “{}”{}: classes {}",
-                            i.name,
-                            if i.reused.is_empty() {
-                                String::new()
-                            } else {
-                                format!(", reusing {}", i.reused.join(", "))
-                            },
-                            lists.join(", ")
-                        ),
-                    );
-                    let mut st = w.resource_mut::<ClsState>();
-                    st.importing = false;
-                    let n = i.name.clone();
-                    st.select(Some(n));
-                }
-                Err(e) => say(w, format!("couldn't take it in: {}", e)),
-            }
-            classifiers_changed(w);
+    match &r {
+        Ok(i) => {
+            let lists: Vec<String> = i
+                .lists
+                .iter()
+                .map(|(c, _, new)| format!("{}{}", c, if *new { " (new list)" } else { "" }))
+                .collect();
+            say(
+                w,
+                format!(
+                    "took in “{}”{}: classes {}",
+                    i.name,
+                    if i.reused.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", reusing {}", i.reused.join(", "))
+                    },
+                    lists.join(", ")
+                ),
+            );
+            let mut st = w.resource_mut::<ClsState>();
+            st.importing = false;
+            let n = i.name.clone();
+            st.select(Some(n));
+        }
+        Err(e) => say(w, format!("couldn't take it in: {}", e)),
+    }
+    classifiers_changed(w);
 }
 
 // ------------------------------------------------------------------ ticking
@@ -1033,7 +1052,11 @@ fn name_row(name: String, status: String, variant: ButtonVariant) -> impl Scene 
 }
 
 fn kind_word(d: &Definition) -> &'static str {
-    if d.head == HeadKind::Multi { "labels" } else { "one class" }
+    if d.head == HeadKind::Multi {
+        "labels"
+    } else {
+        "one class"
+    }
 }
 
 fn status_word(d: &Definition, training: Option<&str>) -> String {
@@ -1138,7 +1161,12 @@ fn draw_side(st: &mut ClsState, c: &mut Commands, side: Entity, f: &Fonts) {
     c.entity(side).despawn_related::<Children>();
     heading(c, side, Icon::Classifier, "classifiers", f);
     if st.defs.is_empty() {
-        let t = dim(c, side, "none yet: a classifier learns lists, then tells any text which list it goes with", f);
+        let t = dim(
+            c,
+            side,
+            "none yet: a classifier learns lists, then tells any text which list it goes with",
+            f,
+        );
         c.entity(t).insert(Node {
             margin: UiRect::vertical(px(4)),
             ..default()
@@ -1151,7 +1179,11 @@ fn draw_side(st: &mut ClsState, c: &mut Commands, side: Entity, f: &Fonts) {
         c.spawn_scene(name_row(
             d.name.clone(),
             status_word(d, training.as_deref()),
-            if on { ButtonVariant::Primary } else { ButtonVariant::Plain },
+            if on {
+                ButtonVariant::Primary
+            } else {
+                ButtonVariant::Plain
+            },
         ))
         .insert((
             ChildOf(side),
@@ -1163,7 +1195,10 @@ fn draw_side(st: &mut ClsState, c: &mut Commands, side: Entity, f: &Fonts) {
                 if d.inputs.is_empty() {
                     String::new()
                 } else {
-                    format!(" · builds on {}", d.inputs.iter().map(|i| i.from.as_str()).collect::<Vec<_>>().join(", "))
+                    format!(
+                        " · builds on {}",
+                        d.inputs.iter().map(|i| i.from.as_str()).collect::<Vec<_>>().join(", ")
+                    )
                 }
             )),
         ))
@@ -1185,7 +1220,11 @@ fn draw_side(st: &mut ClsState, c: &mut Commands, side: Entity, f: &Fonts) {
         r,
         Icon::New,
         "new".into(),
-        if st.creating { ButtonVariant::Primary } else { ButtonVariant::Normal },
+        if st.creating {
+            ButtonVariant::Primary
+        } else {
+            ButtonVariant::Normal
+        },
         "make a classifier from lists",
     )
     .observe(|_a: On<Activate>, mut st: ResMut<ClsState>| {
@@ -1199,7 +1238,11 @@ fn draw_side(st: &mut ClsState, c: &mut Commands, side: Entity, f: &Fonts) {
         r,
         Icon::Download,
         "take in".into(),
-        if st.importing { ButtonVariant::Primary } else { ButtonVariant::Normal },
+        if st.importing {
+            ButtonVariant::Primary
+        } else {
+            ButtonVariant::Normal
+        },
         "take in a classifier module (.anendcls) from Downloads or the saves folder",
     )
     .observe(
@@ -1216,7 +1259,11 @@ fn draw_side(st: &mut ClsState, c: &mut Commands, side: Entity, f: &Fonts) {
         r,
         Icon::Hub,
         "from the hub".into(),
-        if st.hub.open { ButtonVariant::Primary } else { ButtonVariant::Normal },
+        if st.hub.open {
+            ButtonVariant::Primary
+        } else {
+            ButtonVariant::Normal
+        },
         "browse the classifiers shared on the hub and take one in",
     )
     .observe(|_a: On<Activate>, mut st: ResMut<ClsState>| {
@@ -1269,7 +1316,14 @@ fn draw_main(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, confi
     }
 }
 
-fn draw_head(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, d: &Definition, config: &crate::config::Config) {
+fn draw_head(
+    st: &mut ClsState,
+    c: &mut Commands,
+    main: Entity,
+    f: &Fonts,
+    d: &Definition,
+    config: &crate::config::Config,
+) {
     let k = card(c, main);
     let top = row(c, k, 10.0);
     crate::icons::spawn_icon(c, top, Icon::Classifier, 22.0, colors::TEXT);
@@ -1287,7 +1341,11 @@ fn draw_head(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, d: &D
         c,
         top,
         Icon::Palette,
-        if colouring { "colouring views".into() } else { "colour views".into() },
+        if colouring {
+            "colouring views".into()
+        } else {
+            "colour views".into()
+        },
         ButtonVariant::selected(colouring),
         "tint the memory view's and the space's texts by this classifier's top class",
     )
@@ -1308,7 +1366,14 @@ fn draw_head(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, d: &D
     );
     if d.trained() {
         let name = d.name.clone();
-        icon_button(c, top, Icon::Export, "save it as a module (.anendcls) in Downloads", ButtonVariant::Normal).observe(
+        icon_button(
+            c,
+            top,
+            Icon::Export,
+            "save it as a module (.anendcls) in Downloads",
+            ButtonVariant::Normal,
+        )
+        .observe(
             move |_a: On<Activate>, db: Res<Db>, mut status: ResMut<Status>, time: Res<Time>| {
                 let o = anend_core::clsmodule::ExportOpts {
                     upstream: true,
@@ -1350,9 +1415,21 @@ fn draw_head(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, d: &D
     let name = d.name.clone();
     let confirm = st.confirm_delete;
     let mut del = if confirm {
-        button(c, top, "delete it?".into(), ButtonVariant::Primary, "click again to delete it, its weights and its feedback")
+        button(
+            c,
+            top,
+            "delete it?".into(),
+            ButtonVariant::Primary,
+            "click again to delete it, its weights and its feedback",
+        )
     } else {
-        icon_button(c, top, Icon::Delete, "delete this classifier (asks first)", ButtonVariant::Normal)
+        icon_button(
+            c,
+            top,
+            Icon::Delete,
+            "delete this classifier (asks first)",
+            ButtonVariant::Normal,
+        )
     };
     del.observe(
         move |_a: On<Activate>,
@@ -1416,9 +1493,8 @@ fn draw_head(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, d: &D
         for (idx, i) in d.inputs.iter().enumerate() {
             let line = row(c, r, 8.0);
             let from = i.from.clone();
-            button(c, line, i.from.clone(), ButtonVariant::Plain, "open it").observe(
-                move |_a: On<Activate>, mut st: ResMut<ClsState>| st.select(Some(from.clone())),
-            );
+            button(c, line, i.from.clone(), ButtonVariant::Plain, "open it")
+                .observe(move |_a: On<Activate>, mut st: ResMut<ClsState>| st.select(Some(from.clone())));
             let name = d.name.clone();
             slider(c, line, 0.0, 2.0, i.coupling, 0.05, 200.0).observe(
                 move |ch: On<ValueChange<f32>>, mut commands: Commands, db: Res<Db>, mut st: ResMut<ClsState>| {
@@ -1438,13 +1514,8 @@ fn draw_head(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, d: &D
         }
     }
     // feedback given, and how it grew
-    let growth: Vec<&anend_core::classifiers::Event> = d
-        .history
-        .iter()
-        .rev()
-        .filter(|e| e.kind != "train")
-        .take(6)
-        .collect();
+    let growth: Vec<&anend_core::classifiers::Event> =
+        d.history.iter().rev().filter(|e| e.kind != "train").take(6).collect();
     if !growth.is_empty() {
         let r = col(c, k, 2.0);
         dim(c, r, "lately", f);
@@ -1468,21 +1539,36 @@ fn draw_train(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, d: &
     grow(c, top);
     let busy = st.training_name();
     if busy.as_deref() == Some(d.name.as_str()) {
-        icon_label(c, top, Icon::Close, "stop".into(), ButtonVariant::Normal, "stop the training; nothing is kept").observe(
-            |_a: On<Activate>, st: Res<ClsState>| {
-                if let Some(t) = &st.training {
-                    t.cancel.store(true, Ordering::Relaxed);
-                }
-            },
-        );
+        icon_label(
+            c,
+            top,
+            Icon::Close,
+            "stop".into(),
+            ButtonVariant::Normal,
+            "stop the training; nothing is kept",
+        )
+        .observe(|_a: On<Activate>, st: Res<ClsState>| {
+            if let Some(t) = &st.training {
+                t.cancel.store(true, Ordering::Relaxed);
+            }
+        });
     } else if busy.is_some() {
-        dim(c, top, &format!("“{}” is training; one at a time", busy.unwrap_or_default()), f);
+        dim(
+            c,
+            top,
+            &format!("“{}” is training; one at a time", busy.unwrap_or_default()),
+            f,
+        );
     } else {
         let fresh = st.fresh;
         button(
             c,
             top,
-            if fresh { "✓ from scratch".into() } else { "from scratch".into() },
+            if fresh {
+                "✓ from scratch".into()
+            } else {
+                "from scratch".into()
+            },
             ButtonVariant::selected(fresh),
             "start from new weights instead of what it learned",
         )
@@ -1494,7 +1580,11 @@ fn draw_train(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, d: &
             c,
             top,
             Icon::Play,
-            if d.trained() { "train more".into() } else { "train".into() },
+            if d.trained() {
+                "train more".into()
+            } else {
+                "train".into()
+            },
             ButtonVariant::Primary,
             if d.trained() {
                 "train it more, on top of what it learned, from its lists as they are now"
@@ -1502,13 +1592,23 @@ fn draw_train(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, d: &
                 "train it on its lists"
             },
         )
-        .observe(|_a: On<Activate>, mut st: ResMut<ClsState>, work: Res<Work>, db: Res<Db>| {
-            start_training(&mut st, &work, db.0.clone());
-            st.redraw = true;
-        });
+        .observe(
+            |_a: On<Activate>, mut st: ResMut<ClsState>, work: Res<Work>, db: Res<Db>| {
+                start_training(&mut st, &work, db.0.clone());
+                st.redraw = true;
+            },
+        );
     }
     let sliders = row(c, k, 18.0);
-    slider_row(c, sliders, "epochs", "passes over its texts", f, (1.0, 80.0, st.epochs, 1.0)).observe(
+    slider_row(
+        c,
+        sliders,
+        "epochs",
+        "passes over its texts",
+        f,
+        (1.0, 80.0, st.epochs, 1.0),
+    )
+    .observe(
         |ch: On<ValueChange<f32>>, mut commands: Commands, mut st: ResMut<ClsState>| {
             commands.entity(ch.source).insert(SliderValue(ch.value));
             st.epochs = ch.value;
@@ -1522,10 +1622,12 @@ fn draw_train(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, d: &
         f,
         (1.0, 8.0, st.rounds, 1.0),
     )
-    .observe(|ch: On<ValueChange<f32>>, mut commands: Commands, mut st: ResMut<ClsState>| {
-        commands.entity(ch.source).insert(SliderValue(ch.value));
-        st.rounds = ch.value;
-    });
+    .observe(
+        |ch: On<ValueChange<f32>>, mut commands: Commands, mut st: ResMut<ClsState>| {
+            commands.entity(ch.source).insert(SliderValue(ch.value));
+            st.rounds = ch.value;
+        },
+    );
     let live = col(c, k, 6.0);
     st.boxes.live = Some(live);
 }
@@ -1577,7 +1679,14 @@ fn draw_live(st: &ClsState, c: &mut Commands, b: Entity, f: &Fonts) {
         }
     }
     if let Some(Err(e)) = &st.last_run {
-        label(c, b, &format!("the last run failed: {}", e), f, 13.0, Color::srgb(0.7, 0.25, 0.2));
+        label(
+            c,
+            b,
+            &format!("the last run failed: {}", e),
+            f,
+            13.0,
+            Color::srgb(0.7, 0.25, 0.2),
+        );
     }
     if let Some(Ok(s)) = &st.last_run {
         label(
@@ -1675,26 +1784,51 @@ fn draw_steer(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, d: &
         let r = row(c, left, 6.0);
         swatch(c, r, class_color(i, classes.len()), 10.0);
         let v = steer.heads[0].bias.get(i).copied().unwrap_or(0.0);
-        slider_row(c, r, n, &format!("added to {}’s logit: up favours it, down holds it back", n), f, (-8.0, 8.0, v, 0.1))
-            .observe(move |ch: On<ValueChange<f32>>, mut commands: Commands, mut st: ResMut<ClsState>, time: Res<Time>| {
+        slider_row(
+            c,
+            r,
+            n,
+            &format!("added to {}’s logit: up favours it, down holds it back", n),
+            f,
+            (-8.0, 8.0, v, 0.1),
+        )
+        .observe(
+            move |ch: On<ValueChange<f32>>, mut commands: Commands, mut st: ResMut<ClsState>, time: Res<Time>| {
                 commands.entity(ch.source).insert(SliderValue(ch.value));
                 steer_set(&mut st, &time, |s| {
                     if let Some(b) = s.heads[0].bias.get_mut(i) {
                         *b = ch.value;
                     }
                 });
-            });
+            },
+        );
     }
     let right = col(c, cols, 4.0);
     bold(c, right, "reading", f, 13.0, colors::TEXT_DIM);
     let h = &steer.heads[0];
-    slider_row(c, right, "temperature", "above 1 softens, below 1 sharpens", f, (0.2, 5.0, h.temperature, 0.05)).observe(
+    slider_row(
+        c,
+        right,
+        "temperature",
+        "above 1 softens, below 1 sharpens",
+        f,
+        (0.2, 5.0, h.temperature, 0.05),
+    )
+    .observe(
         |ch: On<ValueChange<f32>>, mut commands: Commands, mut st: ResMut<ClsState>, time: Res<Time>| {
             commands.entity(ch.source).insert(SliderValue(ch.value));
             steer_set(&mut st, &time, |s| s.heads[0].temperature = ch.value.max(0.05));
         },
     );
-    slider_row(c, right, "threshold", "how sure it must be to count a text in", f, (0.0, 1.0, h.threshold, 0.01)).observe(
+    slider_row(
+        c,
+        right,
+        "threshold",
+        "how sure it must be to count a text in",
+        f,
+        (0.0, 1.0, h.threshold, 0.01),
+    )
+    .observe(
         |ch: On<ValueChange<f32>>, mut commands: Commands, mut st: ResMut<ClsState>, time: Res<Time>| {
             commands.entity(ch.source).insert(SliderValue(ch.value));
             steer_set(&mut st, &time, |s| s.heads[0].threshold = ch.value.clamp(0.0, 1.0));
@@ -1743,7 +1877,16 @@ fn steer_set(st: &mut ClsState, time: &Time, f: impl FnOnce(&mut Steer)) {
 fn draw_bias(st: &ClsState, c: &mut Commands, b: Entity, f: &Fonts) {
     let Some(d) = st.def() else { return };
     let Some(r) = &st.bias else {
-        dim(c, b, if st.bias_busy { "measuring the bias…" } else { "the bias shows once it’s measured" }, f);
+        dim(
+            c,
+            b,
+            if st.bias_busy {
+                "measuring the bias…"
+            } else {
+                "the bias shows once it’s measured"
+            },
+            f,
+        );
         return;
     };
     let top = row(c, b, 8.0);
@@ -1769,9 +1912,19 @@ fn draw_bias(st: &ClsState, c: &mut Commands, b: Entity, f: &Fonts) {
         )));
         swatch(c, line, class_color(i, classes.len()), 10.0);
         let t = label(c, line, &clip(n, 16), f, 13.0, colors::TEXT);
-        c.entity(t).insert(Node { width: px(120), ..default() });
+        c.entity(t).insert(Node {
+            width: px(120),
+            ..default()
+        });
         shift_bar(c, line, (v * 2.0) as f32, 120.0);
-        label(c, line, &format!("{}{:.1}", if v >= 0.0 { "+" } else { "" }, v * 100.0), f, 12.0, colors::TEXT_DIM);
+        label(
+            c,
+            line,
+            &format!("{}{:.1}", if v >= 0.0 { "+" } else { "" }, v * 100.0),
+            f,
+            12.0,
+            colors::TEXT_DIM,
+        );
     }
     dim(c, b, &format!("over {} of its texts", r.texts), f);
 }
@@ -1791,16 +1944,26 @@ fn draw_search(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, d: 
             ButtonVariant::selected(on),
             &format!("the memories and notes most likely {}", n),
         );
-        b.observe(move |_a: On<Activate>, mut st: ResMut<ClsState>, work: Res<Work>, db: Res<Db>| {
-            st.class = i;
-            st.redraw = true;
-            start_search(&mut st, &work, db.0.clone());
-        });
+        b.observe(
+            move |_a: On<Activate>, mut st: ResMut<ClsState>, work: Res<Work>, db: Res<Db>| {
+                st.class = i;
+                st.redraw = true;
+                start_search(&mut st, &work, db.0.clone());
+            },
+        );
     }
-    icon_button(c, top, Icon::Search, "search (Enter in the bar: only texts with the words typed there)", ButtonVariant::Primary)
-        .observe(|_a: On<Activate>, mut st: ResMut<ClsState>, work: Res<Work>, db: Res<Db>| {
+    icon_button(
+        c,
+        top,
+        Icon::Search,
+        "search (Enter in the bar: only texts with the words typed there)",
+        ButtonVariant::Primary,
+    )
+    .observe(
+        |_a: On<Activate>, mut st: ResMut<ClsState>, work: Res<Work>, db: Res<Db>| {
             start_search(&mut st, &work, db.0.clone());
-        });
+        },
+    );
     let b = col(c, k, 4.0);
     st.boxes.results = Some(b);
 }
@@ -1827,7 +1990,12 @@ fn draw_results(st: &ClsState, c: &mut Commands, b: Entity, f: &Fonts) {
         dim(c, b, "searching again…", f);
     }
     if s.results.is_empty() {
-        dim(c, b, "nothing to rank: the save has no memories or notes with those words", f);
+        dim(
+            c,
+            b,
+            "nothing to rank: the save has no memories or notes with those words",
+            f,
+        );
     }
     for (idx, r) in s.results.iter().enumerate() {
         let line = row(c, b, 8.0);
@@ -1856,7 +2024,11 @@ fn draw_results(st: &ClsState, c: &mut Commands, b: Entity, f: &Fonts) {
         let t = label(
             c,
             line,
-            &format!("{}{}", if matches!(r.r, Ref::Note(_)) { "✎ " } else { "" }, clip(&r.shown, 120)),
+            &format!(
+                "{}{}",
+                if matches!(r.r, Ref::Note(_)) { "✎ " } else { "" },
+                clip(&r.shown, 120)
+            ),
             f,
             14.0,
             if r.valid { colors::TEXT } else { colors::TEXT_DIM },
@@ -1873,17 +2045,37 @@ fn draw_results(st: &ClsState, c: &mut Commands, b: Entity, f: &Fonts) {
                 "{} · says {}{}{}",
                 r.r.label(),
                 classes.get(r.top).cloned().unwrap_or_default(),
-                if r.member { format!(" · counted in {}", cname) } else { String::new() },
-                if r.valid { "" } else { " · its validators don't pass it" }
+                if r.member {
+                    format!(" · counted in {}", cname)
+                } else {
+                    String::new()
+                },
+                if r.valid {
+                    ""
+                } else {
+                    " · its validators don't pass it"
+                }
             )),
         ));
         if r.top != s.class {
-            dim(c, line, &format!("({})", clip(&classes.get(r.top).cloned().unwrap_or_default(), 12)), f);
+            dim(
+                c,
+                line,
+                &format!("({})", clip(&classes.get(r.top).cloned().unwrap_or_default(), 12)),
+                f,
+            );
         }
         judge_buttons(c, line, &d.name, r, &cname, false);
         if stacked {
             let fr = r.clone();
-            icon_button(c, line, Icon::Help, "why: which classifiers had a part in this", ButtonVariant::Normal).observe(
+            icon_button(
+                c,
+                line,
+                Icon::Help,
+                "why: which classifiers had a part in this",
+                ButtonVariant::Normal,
+            )
+            .observe(
                 move |_a: On<Activate>, mut st: ResMut<ClsState>, work: Res<Work>, db: Res<Db>| {
                     let key = fr.r.label();
                     if st.why.remove(&key).is_some() {
@@ -1913,7 +2105,12 @@ fn draw_results(st: &ClsState, c: &mut Commands, b: Entity, f: &Fonts) {
                 },
                 BorderColor::all(colors::ACCENT),
             ));
-            dim(c, w, "each classifier’s part in this, and a yes or no on what it said:", f);
+            dim(
+                c,
+                w,
+                "each classifier’s part in this, and a yes or no on what it said:",
+                f,
+            );
             for x in why {
                 let wl = row(c, w, 8.0);
                 let pp = col(c, wl, 2.0);
@@ -1929,7 +2126,11 @@ fn draw_results(st: &ClsState, c: &mut Commands, b: Entity, f: &Fonts) {
                 dim(
                     c,
                     wl,
-                    &format!("says {} ({})", said, pct(x.probs.get(x.top).copied().unwrap_or(0.0) as f64)),
+                    &format!(
+                        "says {} ({})",
+                        said,
+                        pct(x.probs.get(x.top).copied().unwrap_or(0.0) as f64)
+                    ),
                     f,
                 );
                 grow(c, wl);
@@ -1981,7 +2182,12 @@ pub fn judge_pair(c: &mut Commands, parent: Entity, name: &str, key: Ref, text: 
         };
         let (name, class, key, text) = (name.to_string(), class.to_string(), key.clone(), text.clone());
         icon_button(c, parent, icon, &tip, ButtonVariant::Normal).observe(
-            move |_a: On<Activate>, mut st: ResMut<ClsState>, work: Res<Work>, db: Res<Db>, mut status: ResMut<Status>, time: Res<Time>| {
+            move |_a: On<Activate>,
+                  mut st: ResMut<ClsState>,
+                  work: Res<Work>,
+                  db: Res<Db>,
+                  mut status: ResMut<Status>,
+                  time: Res<Time>| {
                 if st.judging {
                     say_ctx(&mut status, &time, "one yes or no at a time");
                     return;
@@ -1991,8 +2197,20 @@ pub fn judge_pair(c: &mut Commands, parent: Entity, name: &str, key: Ref, text: 
                     return;
                 }
                 st.judging = true;
-                say_ctx(&mut status, &time, format!("telling {} {}…", name, if yes { "yes" } else { "no" }));
-                start_judge(&work, db.0.clone(), name.clone(), (key.clone(), text.clone()), class.clone(), yes, stack);
+                say_ctx(
+                    &mut status,
+                    &time,
+                    format!("telling {} {}…", name, if yes { "yes" } else { "no" }),
+                );
+                start_judge(
+                    &work,
+                    db.0.clone(),
+                    name.clone(),
+                    (key.clone(), text.clone()),
+                    class.clone(),
+                    yes,
+                    stack,
+                );
             },
         );
     }
@@ -2002,7 +2220,12 @@ fn draw_buckets_card(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Font
     let k = card(c, main);
     let top = row(c, k, 8.0);
     heading(c, top, Icon::Bucket, "buckets", f);
-    dim(c, top, "every memory and note filed by class and how sure, kept until it changes", f);
+    dim(
+        c,
+        top,
+        "every memory and note filed by class and how sure, kept until it changes",
+        f,
+    );
     let b = col(c, k, 6.0);
     st.boxes.buckets = Some(b);
 }
@@ -2012,32 +2235,66 @@ fn draw_buckets(st: &ClsState, c: &mut Commands, b: Entity, f: &Fonts) {
     let top = row(c, b, 8.0);
     if let Some(ix) = st.indexing.as_ref().filter(|i| i.name == d.name) {
         let (done, total) = *ix.done.lock().unwrap_or_else(|e| e.into_inner());
-        meter(c, top, if total > 0 { done as f32 / total as f32 } else { 0.0 }, 360.0, 10.0, colors::ACCENT);
-        label(c, top, &format!("indexing {} of {}", done, total), f, 13.0, colors::TEXT);
-        icon_button(c, top, Icon::Close, "stop indexing (what's done is kept)", ButtonVariant::Normal).observe(
-            |_a: On<Activate>, st: Res<ClsState>| {
-                if let Some(i) = &st.indexing {
-                    i.cancel.store(true, Ordering::Relaxed);
-                }
-            },
+        meter(
+            c,
+            top,
+            if total > 0 { done as f32 / total as f32 } else { 0.0 },
+            360.0,
+            10.0,
+            colors::ACCENT,
         );
+        label(
+            c,
+            top,
+            &format!("indexing {} of {}", done, total),
+            f,
+            13.0,
+            colors::TEXT,
+        );
+        icon_button(
+            c,
+            top,
+            Icon::Close,
+            "stop indexing (what's done is kept)",
+            ButtonVariant::Normal,
+        )
+        .observe(|_a: On<Activate>, st: Res<ClsState>| {
+            if let Some(i) = &st.indexing {
+                i.cancel.store(true, Ordering::Relaxed);
+            }
+        });
     } else {
         let indexed = st.buckets.as_ref().map(|x| x.indexed).unwrap_or(0);
         icon_label(
             c,
             top,
             Icon::Refresh,
-            if indexed > 0 { "index again".into() } else { "index the save".into() },
-            if indexed > 0 { ButtonVariant::Normal } else { ButtonVariant::Primary },
+            if indexed > 0 {
+                "index again".into()
+            } else {
+                "index the save".into()
+            },
+            if indexed > 0 {
+                ButtonVariant::Normal
+            } else {
+                ButtonVariant::Primary
+            },
             "read every memory and note once and file it; what's filed and unchanged isn't read again",
         )
-        .observe(|_a: On<Activate>, mut st: ResMut<ClsState>, work: Res<Work>, db: Res<Db>, mut status: ResMut<Status>, time: Res<Time>| {
-            if st.indexing.is_some() {
-                say_ctx(&mut status, &time, "one index at a time");
-                return;
-            }
-            start_index(&mut st, &work, db.0.clone());
-        });
+        .observe(
+            |_a: On<Activate>,
+             mut st: ResMut<ClsState>,
+             work: Res<Work>,
+             db: Res<Db>,
+             mut status: ResMut<Status>,
+             time: Res<Time>| {
+                if st.indexing.is_some() {
+                    say_ctx(&mut status, &time, "one index at a time");
+                    return;
+                }
+                start_index(&mut st, &work, db.0.clone());
+            },
+        );
         dim(
             c,
             top,
@@ -2087,14 +2344,16 @@ fn draw_buckets(st: &ClsState, c: &mut Commands, b: Entity, f: &Fonts) {
             justify_content: JustifyContent::Start,
             ..default()
         })
-        .observe(move |_a: On<Activate>, mut st: ResMut<ClsState>, work: Res<Work>, db: Res<Db>| {
-            if st.bucket_open.as_ref().is_some_and(|(o, _)| *o == cl2) {
-                st.bucket_open = None;
-                st.buckets_dirty = true;
-            } else {
-                start_bucket_open(&mut st, &work, db.0.clone(), cl2);
-            }
-        });
+        .observe(
+            move |_a: On<Activate>, mut st: ResMut<ClsState>, work: Res<Work>, db: Res<Db>| {
+                if st.bucket_open.as_ref().is_some_and(|(o, _)| *o == cl2) {
+                    st.bucket_open = None;
+                    st.buckets_dirty = true;
+                } else {
+                    start_bucket_open(&mut st, &work, db.0.clone(), cl2);
+                }
+            },
+        );
         meter(c, line, n as f32 / max as f32, 200.0, 8.0, color);
         // how sure: ten bands from 0 to 100 %
         let hist = c
@@ -2141,7 +2400,10 @@ fn draw_buckets(st: &ClsState, c: &mut Commands, b: Entity, f: &Fonts) {
             for (r, t, p) in hits {
                 let l = row(c, list, 8.0);
                 let pl = label(c, l, &pct(*p as f64), f, 12.0, colors::TEXT_DIM);
-                c.entity(pl).insert(Node { width: px(52), ..default() });
+                c.entity(pl).insert(Node {
+                    width: px(52),
+                    ..default()
+                });
                 let tt = label(c, l, &clip(t, 110), f, 13.0, colors::TEXT);
                 c.entity(tt).insert((Pickable::default(), Tip(r.label())));
                 let (r2, t2) = (r.clone(), t.clone());
@@ -2164,22 +2426,41 @@ fn draw_near_card(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, 
         (true, "by embedding", "what it represents texts as"),
         (false, "by verdict", "what it says of them: its class probabilities"),
     ] {
-        button(c, top, word.into(), ButtonVariant::selected(st.near_embedding == emb), tip).observe(
-            move |_a: On<Activate>, mut st: ResMut<ClsState>| {
-                st.near_embedding = emb;
-                st.redraw = true;
-            },
-        );
+        button(
+            c,
+            top,
+            word.into(),
+            ButtonVariant::selected(st.near_embedding == emb),
+            tip,
+        )
+        .observe(move |_a: On<Activate>, mut st: ResMut<ClsState>| {
+            st.near_embedding = emb;
+            st.redraw = true;
+        });
     }
-    icon_label(c, top, Icon::Search, "near the bar's text".into(), ButtonVariant::Normal, "the filed texts nearest what's typed in the bar")
-        .observe(|_a: On<Activate>, mut st: ResMut<ClsState>, work: Res<Work>, db: Res<Db>, mut status: ResMut<Status>, time: Res<Time>| {
+    icon_label(
+        c,
+        top,
+        Icon::Search,
+        "near the bar's text".into(),
+        ButtonVariant::Normal,
+        "the filed texts nearest what's typed in the bar",
+    )
+    .observe(
+        |_a: On<Activate>,
+         mut st: ResMut<ClsState>,
+         work: Res<Work>,
+         db: Res<Db>,
+         mut status: ResMut<Status>,
+         time: Res<Time>| {
             let q = st.query.trim().to_string();
             if q.is_empty() {
                 say_ctx(&mut status, &time, "type a text in the bar first");
                 return;
             }
             start_near(&mut st, &work, db.0.clone(), None, q);
-        });
+        },
+    );
     let b = col(c, k, 3.0);
     st.boxes.near = Some(b);
 }
@@ -2198,7 +2479,12 @@ fn draw_near(st: &ClsState, c: &mut Commands, b: Entity, f: &Fonts) {
     dim(c, r, "near", f);
     bold(c, r, &clip(&n.source, 80), f, 13.0, colors::TEXT);
     if n.indexed == 0 {
-        dim(c, b, "nothing is filed yet: index the save (buckets) to find neighbours", f);
+        dim(
+            c,
+            b,
+            "nothing is filed yet: index the save (buckets) to find neighbours",
+            f,
+        );
     }
     for (rf, t, cos) in &n.results {
         let l = row(c, b, 8.0);
@@ -2229,14 +2515,27 @@ fn draw_outputs(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, d:
     let classes = d.class_names();
     let r = row(c, k, 8.0);
     for (i, n) in classes.iter().enumerate() {
-        button(c, r, n.clone(), ButtonVariant::selected(st.out_class == i), "the class to write").observe(
-            move |_a: On<Activate>, mut st: ResMut<ClsState>| {
-                st.out_class = i;
-                st.redraw = true;
-            },
-        );
+        button(
+            c,
+            r,
+            n.clone(),
+            ButtonVariant::selected(st.out_class == i),
+            "the class to write",
+        )
+        .observe(move |_a: On<Activate>, mut st: ResMut<ClsState>| {
+            st.out_class = i;
+            st.redraw = true;
+        });
     }
-    slider_row(c, r, "at least", "how sure it must be of a text to write it", f, (0.0, 1.0, st.out_threshold, 0.05)).observe(
+    slider_row(
+        c,
+        r,
+        "at least",
+        "how sure it must be of a text to write it",
+        f,
+        (0.0, 1.0, st.out_threshold, 0.05),
+    )
+    .observe(
         |ch: On<ValueChange<f32>>, mut commands: Commands, mut st: ResMut<ClsState>| {
             commands.entity(ch.source).insert(SliderValue(ch.value));
             st.out_threshold = ch.value;
@@ -2244,8 +2543,21 @@ fn draw_outputs(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, d:
     );
     let name = d.name.clone();
     let class = classes.get(st.out_class).cloned().unwrap_or_default();
-    icon_label(c, r, Icon::List, "write the list".into(), ButtonVariant::Primary, "write the texts it counts in the class as a list (replacing what that list held)")
-        .observe(move |_a: On<Activate>, st: Res<ClsState>, work: Res<Work>, db: Res<Db>, mut status: ResMut<Status>, time: Res<Time>| {
+    icon_label(
+        c,
+        r,
+        Icon::List,
+        "write the list".into(),
+        ButtonVariant::Primary,
+        "write the texts it counts in the class as a list (replacing what that list held)",
+    )
+    .observe(
+        move |_a: On<Activate>,
+              st: Res<ClsState>,
+              work: Res<Work>,
+              db: Res<Db>,
+              mut status: ResMut<Status>,
+              time: Res<Time>| {
             let (name, class, thr) = (name.clone(), class.clone(), st.out_threshold);
             let store = db.0.clone();
             say_ctx(&mut status, &time, format!("writing “{}: {}”…", name, class));
@@ -2253,14 +2565,18 @@ fn draw_outputs(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, d:
                 let r = store.enlist_outputs(&name, &class, Some(thr), SCAN);
                 Box::new(move |w: &mut World| {
                     match r {
-                        Ok((head, n)) => say(w, format!("{} texts in the list “{}: {}” ({})", n, name, class, head.label())),
+                        Ok((head, n)) => say(
+                            w,
+                            format!("{} texts in the list “{}: {}” ({})", n, name, class, head.label()),
+                        ),
                         Err(e) => say(w, e),
                     }
                     w.resource_mut::<ClsState>().reload = true;
                     w.resource_mut::<crate::lists_ui::ListsState>().redraw = true;
                 }) as Then
             });
-        });
+        },
+    );
     dim(
         c,
         k,
@@ -2296,26 +2612,37 @@ fn draw_form(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts) {
         );
         return;
     }
-    dim(c, k, "its classes: one per list (pick two or more, or one and a “not” list)", f);
+    dim(
+        c,
+        k,
+        "its classes: one per list (pick two or more, or one and a “not” list)",
+        f,
+    );
     let r = row(c, k, 6.0);
     for (key, name, n) in &st.lists {
         let on = st.form.classes.contains(key);
         let key2 = key.clone();
-        button(c, r, format!("{}{}  {}", if on { "✓ " } else { "" }, name, n), ButtonVariant::selected(on), &format!("list {} with {} members", key, n))
-            .observe(move |_a: On<Activate>, mut st: ResMut<ClsState>| {
-                match st.form.classes.iter().position(|x| *x == key2) {
-                    Some(i) => {
-                        st.form.classes.remove(i);
-                    }
-                    None => {
-                        st.form.classes.push(key2.clone());
-                        if st.form.not.as_ref() == Some(&key2) {
-                            st.form.not = None;
-                        }
+        button(
+            c,
+            r,
+            format!("{}{}  {}", if on { "✓ " } else { "" }, name, n),
+            ButtonVariant::selected(on),
+            &format!("list {} with {} members", key, n),
+        )
+        .observe(move |_a: On<Activate>, mut st: ResMut<ClsState>| {
+            match st.form.classes.iter().position(|x| *x == key2) {
+                Some(i) => {
+                    st.form.classes.remove(i);
+                }
+                None => {
+                    st.form.classes.push(key2.clone());
+                    if st.form.not.as_ref() == Some(&key2) {
+                        st.form.not = None;
                     }
                 }
-                st.redraw = true;
-            });
+            }
+            st.redraw = true;
+        });
     }
     if st.lists.len() > st.form.classes.len() {
         dim(c, k, "a “not” list (optional): texts that are none of them", f);
@@ -2327,29 +2654,45 @@ fn draw_form(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts) {
         }
         let on = st.form.not.as_ref() == Some(key);
         let key2 = key.clone();
-        button(c, r, name.clone(), ButtonVariant::selected(on), "texts that are none of the classes").observe(
-            move |_a: On<Activate>, mut st: ResMut<ClsState>| {
-                st.form.not = if st.form.not.as_ref() == Some(&key2) { None } else { Some(key2.clone()) };
-                st.redraw = true;
-            },
-        );
+        button(
+            c,
+            r,
+            name.clone(),
+            ButtonVariant::selected(on),
+            "texts that are none of the classes",
+        )
+        .observe(move |_a: On<Activate>, mut st: ResMut<ClsState>| {
+            st.form.not = if st.form.not.as_ref() == Some(&key2) {
+                None
+            } else {
+                Some(key2.clone())
+            };
+            st.redraw = true;
+        });
     }
     let trained: Vec<String> = st.defs.iter().filter(|d| d.trained()).map(|d| d.name.clone()).collect();
     if !trained.is_empty() {
-        dim(c, k, "builds on (their outputs become its inputs; trained ones only)", f);
+        dim(
+            c,
+            k,
+            "builds on (their outputs become its inputs; trained ones only)",
+            f,
+        );
         let r = row(c, k, 6.0);
         for n in trained {
             let on = st.form.inputs.contains(&n);
             let n2 = n.clone();
-            button(c, r, n, ButtonVariant::selected(on), "").observe(move |_a: On<Activate>, mut st: ResMut<ClsState>| {
-                match st.form.inputs.iter().position(|x| *x == n2) {
-                    Some(i) => {
-                        st.form.inputs.remove(i);
+            button(c, r, n, ButtonVariant::selected(on), "").observe(
+                move |_a: On<Activate>, mut st: ResMut<ClsState>| {
+                    match st.form.inputs.iter().position(|x| *x == n2) {
+                        Some(i) => {
+                            st.form.inputs.remove(i);
+                        }
+                        None => st.form.inputs.push(n2.clone()),
                     }
-                    None => st.form.inputs.push(n2.clone()),
-                }
-                st.redraw = true;
-            });
+                    st.redraw = true;
+                },
+            );
         }
     }
     let r = row(c, k, 6.0);
@@ -2381,45 +2724,59 @@ fn draw_form(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts) {
         );
     }
     let r = row(c, k, 8.0);
-    icon_label(c, r, Icon::New, "make it".into(), ButtonVariant::Primary, "make the classifier; train it next")
-        .observe(
-            |_a: On<Activate>,
-             mut st: ResMut<ClsState>,
-             db: Res<Db>,
-             names: Query<&EditableText, With<ClsNameInput>>,
-             mut status: ResMut<Status>,
-             time: Res<Time>| {
-                let name = names
-                    .iter()
-                    .next()
-                    .map(|e| e.value().to_string())
-                    .unwrap_or_else(|| st.form.name.clone());
-                let classes: Vec<Ref> = st.form.classes.iter().filter_map(|k| Ref::parse(k)).collect();
-                let not = st.form.not.as_ref().and_then(|k| Ref::parse(k));
-                let inputs: Vec<Input> = st
-                    .form
-                    .inputs
-                    .iter()
-                    .map(|n| Input {
-                        from: n.clone(),
-                        coupling: 1.0,
-                    })
-                    .collect();
-                let head = if st.form.multi { HeadKind::Multi } else { HeadKind::Single };
-                match db.0.create_classifier(&name, &classes, not.as_ref(), head, &st.form.preset, inputs) {
-                    Ok(d) => {
-                        say_ctx(&mut status, &time, format!("made “{}”: train it next", d.name));
-                        st.form = Form {
-                            preset: anend_core::classifiers::DEFAULT_PRESET.into(),
-                            ..Form::default()
-                        };
-                        st.reload = true;
-                        st.select(Some(d.name));
-                    }
-                    Err(e) => say_ctx(&mut status, &time, e),
+    icon_label(
+        c,
+        r,
+        Icon::New,
+        "make it".into(),
+        ButtonVariant::Primary,
+        "make the classifier; train it next",
+    )
+    .observe(
+        |_a: On<Activate>,
+         mut st: ResMut<ClsState>,
+         db: Res<Db>,
+         names: Query<&EditableText, With<ClsNameInput>>,
+         mut status: ResMut<Status>,
+         time: Res<Time>| {
+            let name = names
+                .iter()
+                .next()
+                .map(|e| e.value().to_string())
+                .unwrap_or_else(|| st.form.name.clone());
+            let classes: Vec<Ref> = st.form.classes.iter().filter_map(|k| Ref::parse(k)).collect();
+            let not = st.form.not.as_ref().and_then(|k| Ref::parse(k));
+            let inputs: Vec<Input> = st
+                .form
+                .inputs
+                .iter()
+                .map(|n| Input {
+                    from: n.clone(),
+                    coupling: 1.0,
+                })
+                .collect();
+            let head = if st.form.multi {
+                HeadKind::Multi
+            } else {
+                HeadKind::Single
+            };
+            match db
+                .0
+                .create_classifier(&name, &classes, not.as_ref(), head, &st.form.preset, inputs)
+            {
+                Ok(d) => {
+                    say_ctx(&mut status, &time, format!("made “{}”: train it next", d.name));
+                    st.form = Form {
+                        preset: anend_core::classifiers::DEFAULT_PRESET.into(),
+                        ..Form::default()
+                    };
+                    st.reload = true;
+                    st.select(Some(d.name));
                 }
-            },
-        );
+                Err(e) => say_ctx(&mut status, &time, e),
+            }
+        },
+    );
     button(c, r, "cancel".into(), ButtonVariant::Normal, "").observe(|_a: On<Activate>, mut st: ResMut<ClsState>| {
         st.creating = false;
         st.redraw = true;
@@ -2443,13 +2800,35 @@ fn draw_import(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts) {
     for p in &st.imports {
         let r = row(c, k, 8.0);
         crate::icons::spawn_icon(c, r, Icon::Classifier, 15.0, colors::TEXT_DIM);
-        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         bold(c, r, &name, f, 14.0, colors::TEXT);
-        let size = crate::vfs::meta(p).map(|m| format!("{:.1} KB", m.len as f64 / 1024.0)).unwrap_or_default();
-        dim(c, r, &format!("{} · {}", size, p.parent().map(|d| d.display().to_string()).unwrap_or_default()), f);
+        let size = crate::vfs::meta(p)
+            .map(|m| format!("{:.1} KB", m.len as f64 / 1024.0))
+            .unwrap_or_default();
+        dim(
+            c,
+            r,
+            &format!(
+                "{} · {}",
+                size,
+                p.parent().map(|d| d.display().to_string()).unwrap_or_default()
+            ),
+            f,
+        );
         grow(c, r);
         let p2 = p.clone();
-        icon_label(c, r, Icon::Download, "take in".into(), ButtonVariant::Primary, "take this module into the save").observe(
+        icon_label(
+            c,
+            r,
+            Icon::Download,
+            "take in".into(),
+            ButtonVariant::Primary,
+            "take this module into the save",
+        )
+        .observe(
             move |_a: On<Activate>, work: Res<Work>, db: Res<Db>, mut status: ResMut<Status>, time: Res<Time>| {
                 say_ctx(&mut status, &time, "taking it in…");
                 start_import(&work, db.0.clone(), p2.clone());
@@ -2459,10 +2838,7 @@ fn draw_import(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts) {
 }
 
 /// the name typed in the form outlives the form being drawn again
-pub fn keep_form_name(
-    mut st: ResMut<ClsState>,
-    inputs: Query<(&mut EditableText, bevy::prelude::Ref<ClsNameInput>)>,
-) {
+pub fn keep_form_name(mut st: ResMut<ClsState>, inputs: Query<(&mut EditableText, bevy::prelude::Ref<ClsNameInput>)>) {
     for (mut e, marker) in inputs {
         if marker.is_added() {
             if !st.form.name.is_empty() {
@@ -2545,31 +2921,93 @@ mod tests {
     #[test]
     #[ignore]
     fn seed_demo() {
-        let Some(path) = std::env::var_os("ANEND_SEED") else { return };
+        let Some(path) = std::env::var_os("ANEND_SEED") else {
+            return;
+        };
         let store = Store::open(std::path::Path::new(&path)).unwrap();
         let lists: [(&str, &[&str]); 3] = [
             (
                 "fruit",
                 &[
-                    "apple", "pear", "plum", "peach", "cherry", "banana", "mango", "grape", "lemon", "lime", "orange",
-                    "apricot", "fig", "kiwi", "melon", "papaya", "quince", "raspberry", "blackberry", "nectarine",
-                    "a ripe plum", "sweet peach jam", "a basket of apples", "fresh mango slices",
+                    "apple",
+                    "pear",
+                    "plum",
+                    "peach",
+                    "cherry",
+                    "banana",
+                    "mango",
+                    "grape",
+                    "lemon",
+                    "lime",
+                    "orange",
+                    "apricot",
+                    "fig",
+                    "kiwi",
+                    "melon",
+                    "papaya",
+                    "quince",
+                    "raspberry",
+                    "blackberry",
+                    "nectarine",
+                    "a ripe plum",
+                    "sweet peach jam",
+                    "a basket of apples",
+                    "fresh mango slices",
                 ],
             ),
             (
                 "stones",
                 &[
-                    "granite", "basalt", "slate", "flint", "marble", "quartz", "obsidian", "shale", "limestone",
-                    "sandstone", "chalk", "gneiss", "pumice", "jade", "onyx", "agate", "jasper", "feldspar", "mica",
-                    "a slab of granite", "polished marble floor", "flint arrowheads", "grey slate roof",
+                    "granite",
+                    "basalt",
+                    "slate",
+                    "flint",
+                    "marble",
+                    "quartz",
+                    "obsidian",
+                    "shale",
+                    "limestone",
+                    "sandstone",
+                    "chalk",
+                    "gneiss",
+                    "pumice",
+                    "jade",
+                    "onyx",
+                    "agate",
+                    "jasper",
+                    "feldspar",
+                    "mica",
+                    "a slab of granite",
+                    "polished marble floor",
+                    "flint arrowheads",
+                    "grey slate roof",
                 ],
             ),
             (
                 "animals",
                 &[
-                    "fox", "wolf", "badger", "otter", "heron", "sparrow", "hare", "stoat", "weasel", "owl", "raven",
-                    "deer", "boar", "lynx", "beaver", "falcon", "kestrel", "hedgehog", "the red fox runs",
-                    "a heron in the reeds", "wolves howl at night", "an otter swims",
+                    "fox",
+                    "wolf",
+                    "badger",
+                    "otter",
+                    "heron",
+                    "sparrow",
+                    "hare",
+                    "stoat",
+                    "weasel",
+                    "owl",
+                    "raven",
+                    "deer",
+                    "boar",
+                    "lynx",
+                    "beaver",
+                    "falcon",
+                    "kestrel",
+                    "hedgehog",
+                    "the red fox runs",
+                    "a heron in the reeds",
+                    "wolves howl at night",
+                    "an otter swims",
                 ],
             ),
         ];
@@ -2581,13 +3019,31 @@ mod tests {
                 store.enlist(&h, &Ref::Memory(k)).unwrap();
             }
         }
-        for t in ["cherry tart", "a quartz crystal", "the owl at dusk", "lemon and lime", "basalt columns"] {
+        for t in [
+            "cherry tart",
+            "a quartz crystal",
+            "the owl at dusk",
+            "lemon and lime",
+            "basalt columns",
+        ] {
             store.saturate(t).unwrap();
         }
         for (title, md, tags) in [
-            ("Orchard walk", "Picked plums and pears; the apricots were not ripe yet.", vec!["garden"]),
-            ("Quarry notes", "Granite and slate beds, a seam of quartz, some flint.", vec!["field"]),
-            ("Night birds", "An owl called twice; a fox crossed the lane near the badger set.", vec!["field"]),
+            (
+                "Orchard walk",
+                "Picked plums and pears; the apricots were not ripe yet.",
+                vec!["garden"],
+            ),
+            (
+                "Quarry notes",
+                "Granite and slate beds, a seam of quartz, some flint.",
+                vec!["field"],
+            ),
+            (
+                "Night birds",
+                "An owl called twice; a fox crossed the lane near the badger set.",
+                vec!["field"],
+            ),
         ]
         .into_iter()
         .chain([(
@@ -2600,8 +3056,7 @@ mod tests {
                     .into_boxed_str(),
             ),
             vec!["long"],
-        )])
-        {
+        )]) {
             let n = crate::note::Note {
                 title: title.into(),
                 markdown: md.into(),

@@ -258,10 +258,7 @@ pub fn tint_icons(
         let Some(c) = c else { continue };
         let mut want = c.0;
         // its own colour was faded by zen already; a propagated one comes back whole
-        if zen.fade < 1.0
-            && want.alpha() > zen.fade + 0.01
-            && parents.iter_ancestors(e).any(|a| chrome.contains(a))
-        {
+        if zen.fade < 1.0 && want.alpha() > zen.fade + 0.01 && parents.iter_ancestors(e).any(|a| chrome.contains(a)) {
             want = want.with_alpha(want.alpha() * zen.fade);
         }
         if img.color != want {
@@ -308,7 +305,13 @@ pub struct TipHover {
 pub fn tooltips(
     hover_map: Option<Res<HoverMap>>,
     parents: Query<&ChildOf>,
-    tips: Query<(&Tip, Option<&TipKey>, &ComputedNode, &UiGlobalTransform, &InheritedVisibility)>,
+    tips: Query<(
+        &Tip,
+        Option<&TipKey>,
+        &ComputedNode,
+        &UiGlobalTransform,
+        &InheritedVisibility,
+    )>,
     keymap: Res<Keymap>,
     time: Res<Time>,
     zen: Res<crate::zen::Zen>,
@@ -338,9 +341,9 @@ pub fn tooltips(
         state.since = if target == state.target { f64::INFINITY } else { now };
         state.target = target;
     }
-    let shown = target.and_then(|t| tips.get(t).ok()).filter(|(_, _, c, _, vis)| {
-        now - state.since > 0.45 && zen.fade > 0.99 && vis.get() && !c.is_empty()
-    });
+    let shown = target
+        .and_then(|t| tips.get(t).ok())
+        .filter(|(_, _, c, _, vis)| now - state.since > 0.45 && zen.fade > 0.99 && vis.get() && !c.is_empty());
     let Some((tip, key, computed, transform, _)) = shown else {
         if node.display != Display::None {
             node.display = Display::None;

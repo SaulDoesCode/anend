@@ -264,10 +264,20 @@ pub fn rebuild_legend(
         ))
         .id();
     crate::icons::spawn_icon(c, head, Icon::Classifier, 14.0, colors::TEXT_DIM);
-    crate::cls_widgets::bold(c, head, &clip(tints.name.as_deref().unwrap_or(""), 24), &fonts, 13.0, colors::TEXT);
+    crate::cls_widgets::bold(
+        c,
+        head,
+        &clip(tints.name.as_deref().unwrap_or(""), 24),
+        &fonts,
+        13.0,
+        colors::TEXT,
+    );
     crate::cls_widgets::grow(c, head);
     crate::cls_widgets::icon_button(c, head, Icon::Close, "stop colouring by it", ButtonVariant::Plain).observe(
-        |_a: On<Activate>, mut config: ResMut<Config>, mut tints: ResMut<Tints>, mut st: ResMut<crate::classify_ui::ClsState>| {
+        |_a: On<Activate>,
+         mut config: ResMut<Config>,
+         mut tints: ResMut<Tints>,
+         mut st: ResMut<crate::classify_ui::ClsState>| {
             config.tint_by = None;
             config.save();
             tints.reset();
@@ -275,7 +285,13 @@ pub fn rebuild_legend(
         },
     );
     let k = tints.classes.len();
-    for (i, n) in tints.classes.iter().enumerate().map(|(i, n)| (Some(i), n.as_str())).chain([(None, "no class")]) {
+    for (i, n) in tints
+        .classes
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (Some(i), n.as_str()))
+        .chain([(None, "no class")])
+    {
         let r = c
             .spawn((
                 Node {
@@ -292,5 +308,7 @@ pub fn rebuild_legend(
         crate::cls_widgets::label(c, r, &clip(n, 30), &fonts, 12.5, colors::TEXT);
     }
     let t = crate::cls_widgets::dim(c, e, "fainter: less sure", &fonts);
-    c.entity(t).insert(Tip("a text's colour is its surest class; how strongly it shows is how sure".into()));
+    c.entity(t).insert(Tip(
+        "a text's colour is its surest class; how strongly it shows is how sure".into(),
+    ));
 }

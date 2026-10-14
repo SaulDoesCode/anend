@@ -129,11 +129,10 @@ pub fn rebuild_index_panel(
         } else {
             db.0.indexed_on(&Ref::Note(key.clone())).unwrap_or_default()
         };
-        panel.all = db
-            .0
-            .classifiers()
-            .map(|v| v.into_iter().map(|d| (d.name.clone(), d.trained())).collect())
-            .unwrap_or_default();
+        panel.all =
+            db.0.classifiers()
+                .map(|v| v.into_iter().map(|d| (d.name.clone(), d.trained())).collect())
+                .unwrap_or_default();
         panel.verdicts.clear();
         read_verdicts(&mut panel, &work, &db, key.clone());
         panel.dirty = true;
@@ -151,11 +150,21 @@ pub fn rebuild_index_panel(
     crate::icons::spawn_icon(c, top, Icon::Classifier, 15.0, colors::TEXT_DIM);
     bold(c, top, "indexed on", f, 13.0, colors::TEXT);
     if key.is_empty() {
-        dim(c, top, "save the note first, then pick the classifiers it's indexed on", f);
+        dim(
+            c,
+            top,
+            "save the note first, then pick the classifiers it's indexed on",
+            f,
+        );
         return;
     }
     if panel.all.is_empty() {
-        dim(c, top, "no classifiers yet: make one in the classifiers view (Ctrl+7)", f);
+        dim(
+            c,
+            top,
+            "no classifiers yet: make one in the classifiers view (Ctrl+7)",
+            f,
+        );
         return;
     }
     for (n, trained) in panel.all.clone() {
@@ -173,7 +182,13 @@ pub fn rebuild_index_panel(
             },
         )
         .observe(
-            move |_a: On<Activate>, mut panel: ResMut<IndexPanel>, db: Res<Db>, work: Res<Work>, session: Res<Session>, mut status: ResMut<Status>, time: Res<Time>| {
+            move |_a: On<Activate>,
+                  mut panel: ResMut<IndexPanel>,
+                  db: Res<Db>,
+                  work: Res<Work>,
+                  session: Res<Session>,
+                  mut status: ResMut<Status>,
+                  time: Res<Time>| {
                 let mut chosen = panel.chosen.clone();
                 match chosen.iter().position(|x| *x == n2) {
                     Some(i) => {
@@ -223,14 +238,24 @@ pub fn rebuild_index_panel(
         }
         for i in shown {
             let p = v.probs.get(i).copied().unwrap_or(0.0);
-            let ch = chip(c, line, class_color(i, k), &format!("{} {}", v.classes.get(i).cloned().unwrap_or_default(), pct(p as f64)), f);
+            let ch = chip(
+                c,
+                line,
+                class_color(i, k),
+                &format!("{} {}", v.classes.get(i).cloned().unwrap_or_default(), pct(p as f64)),
+                f,
+            );
             let member = v.members.contains(&i);
             c.entity(ch).insert(Tip(format!(
                 "{} says {} ({}){}",
                 v.name,
                 v.classes.get(i).cloned().unwrap_or_default(),
                 pct(p as f64),
-                if member { ", and counts the note in" } else { ", not sure enough to count it in" }
+                if member {
+                    ", and counts the note in"
+                } else {
+                    ", not sure enough to count it in"
+                }
             )));
             if !member {
                 c.entity(ch).insert(BackgroundColor(colors::PAD.with_alpha(0.4)));
@@ -255,13 +280,26 @@ pub fn rebuild_index_panel(
                 ButtonVariant::Normal,
             )
             .observe(
-                move |_a: On<Activate>, db: Res<Db>, work: Res<Work>, mut status: ResMut<Status>, time: Res<Time>, mut panel: ResMut<IndexPanel>| {
+                move |_a: On<Activate>,
+                      db: Res<Db>,
+                      work: Res<Work>,
+                      mut status: ResMut<Status>,
+                      time: Res<Time>,
+                      mut panel: ResMut<IndexPanel>| {
                     let r = Ref::Note(key.clone());
                     let text = db.0.ref_text(&r).ok().flatten().unwrap_or_default();
                     status.text = format!("telling {} {}…", name, if yes { "yes" } else { "no" });
                     status.until = time.elapsed_secs_f64() + 5.0;
                     panel.reading = true;
-                    crate::classify_ui::start_judge(&work, db.0.clone(), name.clone(), (r, text), cls.clone(), yes, false);
+                    crate::classify_ui::start_judge(
+                        &work,
+                        db.0.clone(),
+                        name.clone(),
+                        (r, text),
+                        cls.clone(),
+                        yes,
+                        false,
+                    );
                 },
             );
         }

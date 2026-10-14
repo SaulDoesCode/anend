@@ -909,7 +909,12 @@ pub fn rebuild_chrome(
             mem.redraw_chrome = true;
         });
     let s = toggle(&mut commands, "saturate", mem.also_saturate);
-    tip(&mut commands, s, "searches saturate: each found memory searches on", Action::ToggleSaturate);
+    tip(
+        &mut commands,
+        s,
+        "searches saturate: each found memory searches on",
+        Action::ToggleSaturate,
+    );
     commands
         .entity(s)
         .observe(|_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {

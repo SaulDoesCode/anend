@@ -1277,7 +1277,10 @@ pub fn rebuild_stats(
         for (t, c) in tags {
             commands
                 .spawn_scene(plain_scene_button(format!("#{}  {}", t, c), ButtonVariant::Normal))
-                .insert((ChildOf(row), Tip(format!("see the {} {} with #{}", c, plural(c, "note"), t))))
+                .insert((
+                    ChildOf(row),
+                    Tip(format!("see the {} {} with #{}", c, plural(c, "note"), t)),
+                ))
                 .observe(
                     move |_a: On<Activate>, mut ctx: Ctx, mut st: ResMut<crate::tags_ui::TagsState>| {
                         st.chosen = vec![t.clone()];

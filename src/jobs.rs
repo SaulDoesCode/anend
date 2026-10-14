@@ -40,17 +40,19 @@ impl Work {
     pub fn spawn(&self, name: &str, job: impl FnOnce() -> Then + Send + 'static) {
         let tx = self.tx.clone();
         let generation = self.generation.load(Ordering::SeqCst);
-        let spawned = std::thread::Builder::new().name(format!("anend {}", name)).spawn(move || {
-            let then = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)) {
-                Ok(t) => t,
-                Err(_) => Box::new(|w: &mut World| {
-                    let mut status = w.resource_mut::<crate::ui::Status>();
-                    status.text = "something went wrong in the background".into();
-                    status.until = f64::MAX;
-                }),
-            };
-            let _ = tx.send((generation, then));
-        });
+        let spawned = std::thread::Builder::new()
+            .name(format!("anend {}", name))
+            .spawn(move || {
+                let then = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)) {
+                    Ok(t) => t,
+                    Err(_) => Box::new(|w: &mut World| {
+                        let mut status = w.resource_mut::<crate::ui::Status>();
+                        status.text = "something went wrong in the background".into();
+                        status.until = f64::MAX;
+                    }),
+                };
+                let _ = tx.send((generation, then));
+            });
         if let Err(e) = spawned {
             warn!("couldn't start a thread: {}", e);
         }

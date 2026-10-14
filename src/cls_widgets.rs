@@ -104,7 +104,13 @@ pub fn card(c: &mut Commands, parent: Entity) -> Entity {
     .id()
 }
 
-pub fn button<'a>(c: &'a mut Commands, parent: Entity, s: String, variant: ButtonVariant, tip: &str) -> EntityCommands<'a> {
+pub fn button<'a>(
+    c: &'a mut Commands,
+    parent: Entity,
+    s: String,
+    variant: ButtonVariant,
+    tip: &str,
+) -> EntityCommands<'a> {
     let mut e = c.spawn_scene(plain_scene_button(s, variant));
     e.insert(ChildOf(parent));
     if !tip.is_empty() {
@@ -113,13 +119,26 @@ pub fn button<'a>(c: &'a mut Commands, parent: Entity, s: String, variant: Butto
     e
 }
 
-pub fn icon_button<'a>(c: &'a mut Commands, parent: Entity, icon: Icon, tip: &str, variant: ButtonVariant) -> EntityCommands<'a> {
+pub fn icon_button<'a>(
+    c: &'a mut Commands,
+    parent: Entity,
+    icon: Icon,
+    tip: &str,
+    variant: ButtonVariant,
+) -> EntityCommands<'a> {
     let mut e = c.spawn_scene(icon_scene_button(icon, tip.to_string(), variant));
     e.insert(ChildOf(parent));
     e
 }
 
-pub fn icon_label<'a>(c: &'a mut Commands, parent: Entity, icon: Icon, s: String, variant: ButtonVariant, tip: &str) -> EntityCommands<'a> {
+pub fn icon_label<'a>(
+    c: &'a mut Commands,
+    parent: Entity,
+    icon: Icon,
+    s: String,
+    variant: ButtonVariant,
+    tip: &str,
+) -> EntityCommands<'a> {
     let mut e = c.spawn_scene(crate::icons::icon_label_button(icon, s, variant));
     e.insert(ChildOf(parent));
     if !tip.is_empty() {
@@ -128,7 +147,15 @@ pub fn icon_label<'a>(c: &'a mut Commands, parent: Entity, icon: Icon, s: String
     e
 }
 
-pub fn slider<'a>(c: &'a mut Commands, parent: Entity, min: f32, max: f32, value: f32, step: f32, width: f32) -> EntityCommands<'a> {
+pub fn slider<'a>(
+    c: &'a mut Commands,
+    parent: Entity,
+    min: f32,
+    max: f32,
+    value: f32,
+    step: f32,
+    width: f32,
+) -> EntityCommands<'a> {
     let decimals = (-step.log10()).ceil().max(0.0) as i32;
     // the slider fills a box of the width wanted (its own node keeps its height)
     let holder = c
@@ -268,7 +295,11 @@ pub fn spark(c: &mut Commands, parent: Entity, points: &[f64], width: f32, heigh
                 width: px(width),
                 ..default()
             },
-            Tip(format!("training loss: {:.3} → {:.3}", points[0], points[points.len() - 1])),
+            Tip(format!(
+                "training loss: {:.3} → {:.3}",
+                points[0],
+                points[points.len() - 1]
+            )),
             ChildOf(parent),
         ))
         .id();
@@ -308,7 +339,10 @@ pub fn confusion(c: &mut Commands, parent: Entity, m: &[Vec<u32>], classes: &[St
         ..default()
     });
     let corner = label(c, head, "", fonts, 11.0, colors::TEXT_DIM);
-    c.entity(corner).insert(Node { width: px(90), ..default() });
+    c.entity(corner).insert(Node {
+        width: px(90),
+        ..default()
+    });
     for (j, name) in classes.iter().enumerate() {
         let cell = c
             .spawn((
@@ -342,7 +376,13 @@ pub fn confusion(c: &mut Commands, parent: Entity, m: &[Vec<u32>], classes: &[St
             .id();
         let name = classes.get(i).cloned().unwrap_or_default();
         let t = label(c, line, &short(&name), fonts, 12.0, colors::TEXT);
-        c.entity(t).insert((Node { width: px(90), ..default() }, Tip(name.clone())));
+        c.entity(t).insert((
+            Node {
+                width: px(90),
+                ..default()
+            },
+            Tip(name.clone()),
+        ));
         for (j, &v) in r.iter().enumerate() {
             let k = v as f32 / max;
             let fill = if i == j {
@@ -409,7 +449,11 @@ pub fn shift_bar(c: &mut Commands, parent: Entity, v: f32, half: f32) {
                     width: px(half),
                     height: percent(100),
                     flex_direction: FlexDirection::Row,
-                    justify_content: if side < 0.0 { JustifyContent::End } else { JustifyContent::Start },
+                    justify_content: if side < 0.0 {
+                        JustifyContent::End
+                    } else {
+                        JustifyContent::Start
+                    },
                     ..default()
                 },
                 BackgroundColor(colors::PAD),

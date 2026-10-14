@@ -258,7 +258,11 @@ pub fn rebuild_tags(
             .spawn_scene(tag_row(
                 format!("#{}", tag),
                 count.to_string(),
-                if chosen { ButtonVariant::Primary } else { ButtonVariant::Plain },
+                if chosen {
+                    ButtonVariant::Primary
+                } else {
+                    ButtonVariant::Plain
+                },
             ))
             .insert((
                 ChildOf(*list),
@@ -295,7 +299,13 @@ pub fn rebuild_tags(
             .insert((ChildOf(*head), Tip(format!("stop choosing #{}", tag))))
             .observe(move |_a: On<Activate>, mut st: ResMut<TagsState>| st.pick(&t, true));
     }
-    commands.spawn((Node { flex_grow: 1.0, ..default() }, ChildOf(*head)));
+    commands.spawn((
+        Node {
+            flex_grow: 1.0,
+            ..default()
+        },
+        ChildOf(*head),
+    ));
     if st.chosen.len() > 1 {
         for (all, label, tip) in [
             (true, "all", "notes with every chosen tag"),
@@ -312,7 +322,11 @@ pub fn rebuild_tags(
     }
     if !st.chosen.is_empty() {
         commands
-            .spawn_scene(icon_scene_button(Icon::Close, "clear the choice".into(), ButtonVariant::Normal))
+            .spawn_scene(icon_scene_button(
+                Icon::Close,
+                "clear the choice".into(),
+                ButtonVariant::Normal,
+            ))
             .insert(ChildOf(*head))
             .observe(|_a: On<Activate>, mut st: ResMut<TagsState>| {
                 st.chosen.clear();
@@ -376,7 +390,14 @@ pub fn rebuild_tags(
             ))
             .id();
         if let Some(d) = n.created_at() {
-            let t = text(&mut commands, row, &note::long_date(&d), &fonts.regular, 12.0, colors::TEXT_DIM);
+            let t = text(
+                &mut commands,
+                row,
+                &note::long_date(&d),
+                &fonts.regular,
+                12.0,
+                colors::TEXT_DIM,
+            );
             commands.entity(t).insert(Pickable::IGNORE);
         }
         for tag in &n.tags {

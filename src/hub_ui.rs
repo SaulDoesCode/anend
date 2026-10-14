@@ -15,8 +15,8 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use crate::config::{Config, save_name};
 use crate::hub::{self, HubInfo, HubSave, Me, SavesPage, Sort, Uploaded};
-use crate::settings::{Settings, human_size, keep_note};
 use crate::icons::Icon;
+use crate::settings::{Settings, human_size, keep_note};
 use crate::theme::colors;
 use crate::ui::{Ctx, Db, Fonts, Status, plain_scene_button, text};
 
@@ -619,7 +619,11 @@ fn icon_or_wait(commands: &mut Commands, parent: Entity, busy: bool, icon: Icon,
         return button(commands, parent, "…", ButtonVariant::Normal);
     }
     commands
-        .spawn_scene(crate::icons::icon_scene_button(icon, tip.to_string(), ButtonVariant::Normal))
+        .spawn_scene(crate::icons::icon_scene_button(
+            icon,
+            tip.to_string(),
+            ButtonVariant::Normal,
+        ))
         .insert(ChildOf(parent))
         .id()
 }
@@ -772,7 +776,13 @@ pub fn rebuild_hub(
         let b = icon_or_wait(&mut commands, foot, busy, Icon::Download, "download as a new save");
         let merging = hub.merging.as_ref() == Some(&save.id);
         let m = icon_or_wait(&mut commands, foot, merging, Icon::Merge, "merge into the open save");
-        commands.spawn((Node { flex_grow: 1.0, ..default() }, ChildOf(foot)));
+        commands.spawn((
+            Node {
+                flex_grow: 1.0,
+                ..default()
+            },
+            ChildOf(foot),
+        ));
         // its stars and downloads, as counts beside their icons
         for (icon, n, one, many) in [
             (Icon::Star, save.stars, "star", "stars"),
@@ -791,7 +801,14 @@ pub fn rebuild_hub(
                 ))
                 .id();
             crate::icons::spawn_icon(&mut commands, stat, icon, 13.0, colors::TEXT_DIM);
-            text(&mut commands, stat, &n.to_string(), &fonts.regular, 12.0, colors::TEXT_DIM);
+            text(
+                &mut commands,
+                stat,
+                &n.to_string(),
+                &fonts.regular,
+                12.0,
+                colors::TEXT_DIM,
+            );
         }
         let for_merge = save.clone();
         let save = save.clone();

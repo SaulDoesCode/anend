@@ -190,9 +190,7 @@ impl Action {
         use Action::*;
         match self {
             GotoEditor | GotoReader | GotoMemory | GotoStats | GotoSpace | GotoLists | GotoTags | GotoClassifiers
-            | GotoFilters | OpenSettings => {
-                Scope::Global
-            },
+            | GotoFilters | OpenSettings => Scope::Global,
             Save | NewNote | ToggleView | ToggleList | FocusTerm | BucketOrdinal | BucketReversed | BucketAtbash
             | BucketFrequency | ToggleGsearch | ToggleSaturate | WhiteMode | SideOrdinal | SideReversed
             | SideAtbash | SideFrequency | OpenRemap => Scope::Notes,

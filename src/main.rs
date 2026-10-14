@@ -18,8 +18,8 @@ mod tint;
 pub use anend_core::{forge, lists, markdown, memory, note, simd, spread, store, vfs, weum};
 mod config;
 mod forge_ui;
-mod hub;
 mod highlight;
+mod hub;
 mod hub_ui;
 mod icons;
 mod keys;
@@ -253,7 +253,15 @@ fn run(args: Args) {
     .insert_resource(keymap)
     .insert_resource(config)
     .add_message::<keys::Fired>()
-    .add_systems(Startup, (ui::scene.spawn(), space::setup, icons::spawn_tooltip, tint::spawn_legend))
+    .add_systems(
+        Startup,
+        (
+            ui::scene.spawn(),
+            space::setup,
+            icons::spawn_tooltip,
+            tint::spawn_legend,
+        ),
+    )
     .add_systems(Update, window_icon)
     .add_systems(
         Update,
@@ -340,7 +348,13 @@ fn run(args: Args) {
             zen::nav_autohide,
             zen::list_autohide,
             zen::apply_placement,
-            (theme::plain_button_text, icons::attach_icons, icons::tint_icons, icons::tooltips).chain(),
+            (
+                theme::plain_button_text,
+                icons::attach_icons,
+                icons::tint_icons,
+                icons::tooltips,
+            )
+                .chain(),
         )
             .chain()
             .after(space_ui::build_opts),

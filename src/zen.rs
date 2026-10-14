@@ -186,7 +186,11 @@ pub fn nav_autohide(
     let slide = zen.slide + (target - zen.slide) * (1.0 - (-dt * 14.0).exp());
     zen.slide = if (slide - target).abs() < 0.002 { target } else { slide };
     let off = px(-h * (1.0 - zen.slide));
-    let (top, bottom) = if config.bars_swapped { (px(0), off) } else { (off, px(0)) };
+    let (top, bottom) = if config.bars_swapped {
+        (px(0), off)
+    } else {
+        (off, px(0))
+    };
     if node.margin.top != top || node.margin.bottom != bottom {
         node.margin.top = top;
         node.margin.bottom = bottom;
@@ -238,7 +242,11 @@ pub fn apply_placement(
     if root.flex_direction != column {
         root.flex_direction = column;
     }
-    let row = if config.list_right { FlexDirection::RowReverse } else { FlexDirection::Row };
+    let row = if config.list_right {
+        FlexDirection::RowReverse
+    } else {
+        FlexDirection::Row
+    };
     if editor.flex_direction != row {
         editor.flex_direction = row;
     }

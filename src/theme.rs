@@ -5,9 +5,9 @@
 //! text, the editor is a white card and the writing pad is a light sand (hsl 39 19% 82%).
 
 use bevy::color::{Alpha, Color, Luminance, Mix};
+use bevy::feathers::controls::ButtonVariant;
 use bevy::feathers::dark_theme::create_dark_theme;
 use bevy::feathers::theme::ThemeProps;
-use bevy::feathers::controls::ButtonVariant;
 use bevy::feathers::tokens::semantic;
 
 pub mod colors {
@@ -56,7 +56,11 @@ pub fn sand_theme(p: &Palette) -> ThemeProps {
             let (la, lb) = (crate::palette::brightness(a), crate::palette::brightness(b));
             (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
         };
-        if ratio(near_black, c) >= ratio(light, c) { near_black } else { light }
+        if ratio(near_black, c) >= ratio(light, c) {
+            near_black
+        } else {
+            light
+        }
     };
     // feathers puts every button's text in this one colour, plain and accent buttons alike
     let on_accent = on(mood.mix(&accent, 0.5));
@@ -101,7 +105,11 @@ pub fn sand_theme(p: &Palette) -> ThemeProps {
 #[allow(clippy::type_complexity)]
 pub fn plain_button_text(
     palette: bevy::prelude::Res<Palette>,
-    all: bevy::prelude::Query<(bevy::prelude::Entity, &ButtonVariant, bevy::prelude::Has<bevy::ui::InteractionDisabled>)>,
+    all: bevy::prelude::Query<(
+        bevy::prelude::Entity,
+        &ButtonVariant,
+        bevy::prelude::Has<bevy::ui::InteractionDisabled>,
+    )>,
     changed: bevy::prelude::Query<
         bevy::prelude::Entity,
         bevy::prelude::Or<(

@@ -132,7 +132,8 @@ fn classify_line(line: &str, at: usize, out: &mut [Class], fence: &mut Option<(u
     }
     // headings
     let hashes = trimmed.bytes().take_while(|b| *b == b'#').count();
-    if (1..=6).contains(&hashes) && indent < 4 && trimmed[hashes..].chars().next().is_none_or(|c| c == ' ' || c == '\t') {
+    if (1..=6).contains(&hashes) && indent < 4 && trimmed[hashes..].chars().next().is_none_or(|c| c == ' ' || c == '\t')
+    {
         let mark_end = at + indent + hashes;
         fill(out, span.clone(), Class::Heading);
         fill(out, at..mark_end, Class::Mark);
@@ -270,7 +271,11 @@ fn inline(line: &str, at: usize, from: usize, out: &mut [Class], base: Class) {
             }
             b'[' => match link_end(line, i) {
                 Some((text_end, url_end)) => {
-                    let link_class = if base == Class::Heading { Class::Heading } else { Class::Link };
+                    let link_class = if base == Class::Heading {
+                        Class::Heading
+                    } else {
+                        Class::Link
+                    };
                     fill(out, at + i..at + i + 1, Class::Mark);
                     fill(out, at + i + 1..at + text_end, link_class);
                     inline(&line[..text_end], at, i + 1, out, link_class);
@@ -300,7 +305,10 @@ fn inline(line: &str, at: usize, from: usize, out: &mut [Class], base: Class) {
                 i += len;
             }
             b'#' if (i == 0 || b[i - 1] == b' ' || b[i - 1] == b'\t' || b[i - 1] == b'(')
-                && line[i + 1..].chars().next().is_some_and(|c| c.is_alphanumeric() || c == '_') =>
+                && line[i + 1..]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_alphanumeric() || c == '_') =>
             {
                 let len = 1 + line[i + 1..]
                     .find(|c: char| !(c.is_alphanumeric() || matches!(c, '_' | '-' | '/' | '.')))
@@ -322,7 +330,9 @@ fn inline(line: &str, at: usize, from: usize, out: &mut [Class], base: Class) {
                 }
                 let can_close = !prev.is_ascii_whitespace();
                 let can_open = !next.is_ascii_whitespace();
-                let opener = open.iter().rposition(|(oc, orun, _)| *oc == c && (*orun == run || run >= 2 && *orun >= 2));
+                let opener = open
+                    .iter()
+                    .rposition(|(oc, orun, _)| *oc == c && (*orun == run || run >= 2 && *orun >= 2));
                 if can_close && let Some(k) = opener {
                     let (_, orun, after) = open[k];
                     let used = orun.min(run);
@@ -333,7 +343,9 @@ fn inline(line: &str, at: usize, from: usize, out: &mut [Class], base: Class) {
                     };
                     for x in &mut out[at + after..at + i] {
                         // inner marks and code stay what they are
-                        if matches!(*x, Class::Plain | Class::Quote | Class::Heading) || (class == Class::Strong && *x == Class::Emph) {
+                        if matches!(*x, Class::Plain | Class::Quote | Class::Heading)
+                            || (class == Class::Strong && *x == Class::Emph)
+                        {
                             *x = class;
                         }
                     }
@@ -392,7 +404,12 @@ pub fn class_colors(p: &Palette) -> [Color; 15] {
     // hues the palette doesn't name, turned from its link colour so they suit any preset
     let turn = |deg: f32, sat: f32| {
         let h = Hsla::from(link);
-        Color::from(Hsla::new((h.hue + deg).rem_euclid(360.0), (h.saturation * sat).clamp(0.25, 0.75), h.lightness, 1.0))
+        Color::from(Hsla::new(
+            (h.hue + deg).rem_euclid(360.0),
+            (h.saturation * sat).clamp(0.25, 0.75),
+            h.lightness,
+            1.0,
+        ))
     };
     let heading = readable(link, pad, 5.0);
     let code = readable(turn(140.0, 0.8), pad, 4.2);
@@ -481,10 +498,7 @@ pub fn paint_overlay(
         ),
         (With<EditorPad>, Without<PadOverlay>),
     >,
-    overlay: Single<
-        (Mut<TextLayoutInfo>, &ComputedTextBlock, &mut Visibility),
-        (With<PadOverlay>, Without<EditorPad>),
-    >,
+    overlay: Single<(Mut<TextLayoutInfo>, &ComputedTextBlock, &mut Visibility), (With<PadOverlay>, Without<EditorPad>)>,
     spans: Query<&ClassSpan>,
     mut span_colors: Query<(&ClassSpan, &mut TextColor), Without<EditorPad>>,
     palette: Res<Palette>,
@@ -553,7 +567,12 @@ pub fn paint_overlay(
         }
         return;
     }
-    if !(pad_info.is_changed() || editable.is_changed() || info.is_changed() || palette.is_changed() || config.is_changed()) {
+    if !(pad_info.is_changed()
+        || editable.is_changed()
+        || info.is_changed()
+        || palette.is_changed()
+        || config.is_changed())
+    {
         return;
     }
     // each class's section in the overlay's block
@@ -676,7 +695,18 @@ mod tests {
 
     #[test]
     fn every_byte_gets_a_class() {
-        for t in ["", "é **ü** `ß`", "[unclosed", "**", "` `", "# ", "> ", "|", "\n\n", "- [x] done"] {
+        for t in [
+            "",
+            "é **ü** `ß`",
+            "[unclosed",
+            "**",
+            "` `",
+            "# ",
+            "> ",
+            "|",
+            "\n\n",
+            "- [x] done",
+        ] {
             assert_eq!(classify(t).len(), t.len());
         }
     }

@@ -285,11 +285,14 @@ pub fn rebuild_filters(
     }
     if std::mem::take(&mut st.reload) {
         st.presets = db.0.filter_presets().unwrap_or_default();
-        st.classifiers = db
-            .0
-            .classifiers()
-            .map(|v| v.into_iter().map(|d| (d.name.clone(), d.class_names(), d.trained())).collect())
-            .unwrap_or_default();
+        st.classifiers =
+            db.0.classifiers()
+                .map(|v| {
+                    v.into_iter()
+                        .map(|d| (d.name.clone(), d.class_names(), d.trained()))
+                        .collect()
+                })
+                .unwrap_or_default();
         st.lists = anend_core::lists::stats(&db.0)
             .map(|v| {
                 v.into_iter()
@@ -355,7 +358,14 @@ pub fn rebuild_filters(
         );
         grow(c, r);
         let n = p.name.clone();
-        icon_button(c, r, Icon::List, "write what it finds as a list “filter: name”", ButtonVariant::Plain).observe(
+        icon_button(
+            c,
+            r,
+            Icon::List,
+            "write what it finds as a list “filter: name”",
+            ButtonVariant::Plain,
+        )
+        .observe(
             move |_a: On<Activate>, work: Res<Work>, db: Res<Db>, mut status: ResMut<Status>, time: Res<Time>| {
                 let (n, store) = (n.clone(), db.0.clone());
                 say(&mut status, &time, format!("writing “filter: {}”…", n));
@@ -378,7 +388,11 @@ pub fn rebuild_filters(
         );
         let n = p.name.clone();
         icon_button(c, r, Icon::Delete, "delete this filter", ButtonVariant::Plain).observe(
-            move |_a: On<Activate>, mut st: ResMut<FiltersState>, db: Res<Db>, mut status: ResMut<Status>, time: Res<Time>| {
+            move |_a: On<Activate>,
+                  mut st: ResMut<FiltersState>,
+                  db: Res<Db>,
+                  mut status: ResMut<Status>,
+                  time: Res<Time>| {
                 match db.0.delete_filter(&n) {
                     Ok(()) => say(&mut status, &time, format!("deleted the filter “{}”", n)),
                     Err(e) => say(&mut status, &time, e),
@@ -387,9 +401,21 @@ pub fn rebuild_filters(
             },
         );
         let t = dim(c, k, &clip(&p.expr.describe(), 90), f);
-        c.entity(t).insert(Node { max_width: px(220), ..default() });
+        c.entity(t).insert(Node {
+            max_width: px(220),
+            ..default()
+        });
         if let Some(n) = p.count {
-            dim(c, k, &format!("{} found last time{}", n, if p.list.is_some() { " · a list" } else { "" }), f);
+            dim(
+                c,
+                k,
+                &format!(
+                    "{} found last time{}",
+                    n,
+                    if p.list.is_some() { " · a list" } else { "" }
+                ),
+                f,
+            );
         }
     }
 
@@ -416,7 +442,16 @@ pub fn rebuild_filters(
     let k = card(c, *main);
     let top = row(c, k, 8.0);
     heading(c, top, Icon::New, "add a condition", f);
-    dim(c, top, if st.target.is_empty() { "to the top group" } else { "to the marked group" }, f);
+    dim(
+        c,
+        top,
+        if st.target.is_empty() {
+            "to the top group"
+        } else {
+            "to the marked group"
+        },
+        f,
+    );
     let r = row(c, k, 6.0);
     dim(c, r, "classifier", f);
     if st.classifiers.is_empty() {
@@ -425,32 +460,51 @@ pub fn rebuild_filters(
     for (n, _, trained) in st.classifiers.clone() {
         let on = st.pick.as_ref() == Some(&n);
         let n2 = n.clone();
-        button(c, r, n.clone(), ButtonVariant::selected(on), if trained { "then pick its class" } else { "not trained yet" }).observe(
-            move |_a: On<Activate>, mut st: ResMut<FiltersState>| {
-                st.pick = if st.pick.as_ref() == Some(&n2) { None } else { Some(n2.clone()) };
-                st.redraw = true;
+        button(
+            c,
+            r,
+            n.clone(),
+            ButtonVariant::selected(on),
+            if trained {
+                "then pick its class"
+            } else {
+                "not trained yet"
             },
-        );
+        )
+        .observe(move |_a: On<Activate>, mut st: ResMut<FiltersState>| {
+            st.pick = if st.pick.as_ref() == Some(&n2) {
+                None
+            } else {
+                Some(n2.clone())
+            };
+            st.redraw = true;
+        });
     }
     if let Some((n, classes, _)) = st.classifiers.iter().find(|x| Some(&x.0) == st.pick.as_ref()).cloned() {
         let r = row(c, k, 6.0);
         dim(c, r, &format!("{}: in class", n), f);
         for (i, cl) in classes.iter().enumerate() {
             let (n2, cl2) = (n.clone(), cl.clone());
-            let ch = button(c, r, cl.clone(), ButtonVariant::Normal, "texts it puts in this class (at its threshold; change it below)")
-                .observe(move |_a: On<Activate>, mut st: ResMut<FiltersState>| {
-                    add(
-                        &mut st,
-                        Expr::Class {
-                            classifier: n2.clone(),
-                            class: cl2.clone(),
-                            min: None,
-                            max: None,
-                            top: false,
-                        },
-                    );
-                })
-                .id();
+            let ch = button(
+                c,
+                r,
+                cl.clone(),
+                ButtonVariant::Normal,
+                "texts it puts in this class (at its threshold; change it below)",
+            )
+            .observe(move |_a: On<Activate>, mut st: ResMut<FiltersState>| {
+                add(
+                    &mut st,
+                    Expr::Class {
+                        classifier: n2.clone(),
+                        class: cl2.clone(),
+                        min: None,
+                        max: None,
+                        top: false,
+                    },
+                );
+            })
+            .id();
             let sw = swatch(c, ch, class_color(i, classes.len()), 9.0);
             c.entity(sw).insert(Node {
                 width: px(9),
@@ -465,18 +519,24 @@ pub fn rebuild_filters(
     button(
         c,
         r,
-        if q.is_empty() { "+ words (type them in the bar)".into() } else { format!("+ words “{}”", clip(&q, 24)) },
+        if q.is_empty() {
+            "+ words (type them in the bar)".into()
+        } else {
+            format!("+ words “{}”", clip(&q, 24))
+        },
         ButtonVariant::Normal,
         "texts with these words (and weum's variations)",
     )
-    .observe(|_a: On<Activate>, mut st: ResMut<FiltersState>, mut status: ResMut<Status>, time: Res<Time>| {
-        let q = st.query.trim().to_string();
-        if q.is_empty() {
-            say(&mut status, &time, "type the words in the bar first");
-            return;
-        }
-        add(&mut st, Expr::Words { q });
-    });
+    .observe(
+        |_a: On<Activate>, mut st: ResMut<FiltersState>, mut status: ResMut<Status>, time: Res<Time>| {
+            let q = st.query.trim().to_string();
+            if q.is_empty() {
+                say(&mut status, &time, "type the words in the bar first");
+                return;
+            }
+            add(&mut st, Expr::Words { q });
+        },
+    );
     // sums: a number or a range typed in the bar
     let r2 = row(c, k, 6.0);
     let range = sum_range(&q);
@@ -494,7 +554,14 @@ pub fn rebuild_filters(
             Some((a, b)) => format!("+ {} {}", bucket, show_range(a, b)),
             None => format!("+ {}", bucket),
         };
-        button(c, r2, word, ButtonVariant::Normal, &format!("texts whose {} sum is in the range typed in the bar", bucket)).observe(
+        button(
+            c,
+            r2,
+            word,
+            ButtonVariant::Normal,
+            &format!("texts whose {} sum is in the range typed in the bar", bucket),
+        )
+        .observe(
             move |_a: On<Activate>, mut st: ResMut<FiltersState>, mut status: ResMut<Status>, time: Res<Time>| {
                 match sum_range(&st.query) {
                     Some((from, to)) => add(
@@ -505,26 +572,37 @@ pub fn rebuild_filters(
                             to,
                         },
                     ),
-                    None => say(&mut status, &time, "type a number or a range like 50-90 in the bar first"),
+                    None => say(
+                        &mut status,
+                        &time,
+                        "type a number or a range like 50-90 in the bar first",
+                    ),
                 }
             },
         );
     }
     for (kind, word) in [("memories", "+ memories only"), ("notes", "+ notes only")] {
-        button(c, r, word.into(), ButtonVariant::Normal, "").observe(move |_a: On<Activate>, mut st: ResMut<FiltersState>| {
-            add(&mut st, Expr::Kind { kind: kind.into() });
-        });
+        button(c, r, word.into(), ButtonVariant::Normal, "").observe(
+            move |_a: On<Activate>, mut st: ResMut<FiltersState>| {
+                add(&mut st, Expr::Kind { kind: kind.into() });
+            },
+        );
     }
-    button(c, r, "+ group: any of".into(), ButtonVariant::Normal, "a group whose members are alternatives; new conditions go into it").observe(
-        |_a: On<Activate>, mut st: ResMut<FiltersState>| {
-            let target = st.target.clone();
-            let len = group_mut(&mut st.expr, &target).map(|g| g.len()).unwrap_or(0);
-            add(&mut st, Expr::Or { of: vec![] });
-            let mut t = target;
-            t.push(len);
-            st.target = t;
-        },
-    );
+    button(
+        c,
+        r,
+        "+ group: any of".into(),
+        ButtonVariant::Normal,
+        "a group whose members are alternatives; new conditions go into it",
+    )
+    .observe(|_a: On<Activate>, mut st: ResMut<FiltersState>| {
+        let target = st.target.clone();
+        let len = group_mut(&mut st.expr, &target).map(|g| g.len()).unwrap_or(0);
+        add(&mut st, Expr::Or { of: vec![] });
+        let mut t = target;
+        t.push(len);
+        st.target = t;
+    });
     if !st.lists.is_empty() {
         let r = row(c, k, 6.0);
         dim(c, r, "in list", f);
@@ -539,34 +617,54 @@ pub fn rebuild_filters(
         let r = row(c, k, 6.0);
         dim(c, r, "notes tagged", f);
         for (t, _) in tags.into_iter().take(30) {
-            button(c, r, format!("#{}", t), ButtonVariant::Normal, "").observe(move |_a: On<Activate>, mut st: ResMut<FiltersState>| {
-                add(
-                    &mut st,
-                    Expr::Tags {
-                        tags: vec![t.clone()],
-                        any: false,
-                    },
-                )
-            });
+            button(c, r, format!("#{}", t), ButtonVariant::Normal, "").observe(
+                move |_a: On<Activate>, mut st: ResMut<FiltersState>| {
+                    add(
+                        &mut st,
+                        Expr::Tags {
+                            tags: vec![t.clone()],
+                            any: false,
+                        },
+                    )
+                },
+            );
         }
     }
-    let others: Vec<String> = st.presets.iter().map(|p| p.name.clone()).filter(|n| *n != st.name).collect();
+    let others: Vec<String> = st
+        .presets
+        .iter()
+        .map(|p| p.name.clone())
+        .filter(|n| *n != st.name)
+        .collect();
     if !others.is_empty() {
         let r = row(c, k, 6.0);
         dim(c, r, "another filter", f);
         for n in others {
-            button(c, r, format!("[{}]", n), ButtonVariant::Normal, "what that filter finds").observe(
-                move |_a: On<Activate>, mut st: ResMut<FiltersState>| add(&mut st, Expr::Preset { name: n.clone() }),
-            );
+            button(
+                c,
+                r,
+                format!("[{}]", n),
+                ButtonVariant::Normal,
+                "what that filter finds",
+            )
+            .observe(move |_a: On<Activate>, mut st: ResMut<FiltersState>| {
+                add(&mut st, Expr::Preset { name: n.clone() })
+            });
         }
     }
 
     // run and keep
     let k = card(c, *main);
     let r = row(c, k, 8.0);
-    icon_label(c, r, Icon::Play, "run".into(), ButtonVariant::Primary, "run it over the memories and notes (Enter in the bar)").observe(
-        |_a: On<Activate>, mut st: ResMut<FiltersState>, work: Res<Work>, db: Res<Db>| run(&mut st, &work, &db),
-    );
+    icon_label(
+        c,
+        r,
+        Icon::Play,
+        "run".into(),
+        ButtonVariant::Primary,
+        "run it over the memories and notes (Enter in the bar)",
+    )
+    .observe(|_a: On<Activate>, mut st: ResMut<FiltersState>, work: Res<Work>, db: Res<Db>| run(&mut st, &work, &db));
     dim(c, r, "keep as", f);
     c.spawn_scene(bsn! {
         @FeathersTextInputContainer
@@ -579,7 +677,15 @@ pub fn rebuild_filters(
         ]
     })
     .insert(ChildOf(r));
-    icon_label(c, r, Icon::Save, "keep".into(), ButtonVariant::Normal, "keep it under this name (replacing one of the same name)").observe(
+    icon_label(
+        c,
+        r,
+        Icon::Save,
+        "keep".into(),
+        ButtonVariant::Normal,
+        "keep it under this name (replacing one of the same name)",
+    )
+    .observe(
         |_a: On<Activate>, mut st: ResMut<FiltersState>, db: Res<Db>, mut status: ResMut<Status>, time: Res<Time>| {
             let name = st.name.trim().to_string();
             match db.0.save_filter(&name, st.expr.clone(), "") {
@@ -609,8 +715,16 @@ pub fn rebuild_filters(
                     "{} of {} texts{}{}",
                     res.matched,
                     res.scanned,
-                    if res.classifiers.is_empty() { String::new() } else { format!(" · read {}", res.classifiers.join(", ")) },
-                    if res.untrained.is_empty() { String::new() } else { format!(" · skipped untrained {}", res.untrained.join(", ")) }
+                    if res.classifiers.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" · read {}", res.classifiers.join(", "))
+                    },
+                    if res.untrained.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" · skipped untrained {}", res.untrained.join(", "))
+                    }
                 ),
                 f,
             );
@@ -627,7 +741,14 @@ pub fn rebuild_filters(
                 });
                 label(c, p, &pct(x.score as f64), f, 12.0, colors::TEXT);
                 meter(c, p, x.score, 50.0, 3.0, colors::ACCENT);
-                let t = label(c, line, &format!("{}{}", if x.note { "✎ " } else { "" }, clip(&x.text, 120)), f, 13.5, colors::TEXT);
+                let t = label(
+                    c,
+                    line,
+                    &format!("{}{}", if x.note { "✎ " } else { "" }, clip(&x.text, 120)),
+                    f,
+                    13.5,
+                    colors::TEXT,
+                );
                 c.entity(t).insert((Pickable::default(), Tip(x.key.clone())));
             }
         }
@@ -635,7 +756,15 @@ pub fn rebuild_filters(
 }
 
 /// a condition or group, with its controls, and a group's members under it
-fn draw_node(c: &mut Commands, parent: Entity, e: &Expr, path: &mut Vec<usize>, target: &[usize], f: &Fonts, st: &FiltersState) {
+fn draw_node(
+    c: &mut Commands,
+    parent: Entity,
+    e: &Expr,
+    path: &mut Vec<usize>,
+    target: &[usize],
+    f: &Fonts,
+    st: &FiltersState,
+) {
     let (inner, excluded) = match e {
         Expr::Not { of } => (&**of, true),
         x => (x, false),
@@ -655,7 +784,11 @@ fn draw_node(c: &mut Commands, parent: Entity, e: &Expr, path: &mut Vec<usize>, 
         button(
             c,
             line,
-            if excluded { "✗ exclude".into() } else { "✓ include".into() },
+            if excluded {
+                "✗ exclude".into()
+            } else {
+                "✓ include".into()
+            },
             ButtonVariant::selected(!excluded),
             "include the texts it finds, or leave them out",
         )
@@ -678,7 +811,11 @@ fn draw_node(c: &mut Commands, parent: Entity, e: &Expr, path: &mut Vec<usize>, 
             button(
                 c,
                 line,
-                if marked { "● adding here".into() } else { "add here".into() },
+                if marked {
+                    "● adding here".into()
+                } else {
+                    "add here".into()
+                },
                 ButtonVariant::selected(marked),
                 "new conditions go into this group",
             )
@@ -687,7 +824,16 @@ fn draw_node(c: &mut Commands, parent: Entity, e: &Expr, path: &mut Vec<usize>, 
                 st.redraw = true;
             });
             if of.is_empty() {
-                dim(c, line, if all { "(nothing yet: holds for every text)" } else { "(empty: add an alternative)" }, f);
+                dim(
+                    c,
+                    line,
+                    if all {
+                        "(nothing yet: holds for every text)"
+                    } else {
+                        "(empty: add an alternative)"
+                    },
+                    f,
+                );
             }
             if !path.is_empty() {
                 let p = path.clone();
@@ -700,7 +846,9 @@ fn draw_node(c: &mut Commands, parent: Entity, e: &Expr, path: &mut Vec<usize>, 
                 path.pop();
             }
         }
-        Expr::Class { classifier, class, min, .. } => {
+        Expr::Class {
+            classifier, class, min, ..
+        } => {
             let classes = st
                 .classifiers
                 .iter()
@@ -708,7 +856,13 @@ fn draw_node(c: &mut Commands, parent: Entity, e: &Expr, path: &mut Vec<usize>, 
                 .map(|x| x.1.clone())
                 .unwrap_or_default();
             let i = classes.iter().position(|x| x == class).unwrap_or(0);
-            chip(c, line, class_color(i, classes.len().max(1)), &format!("{}: {}", classifier, class), f);
+            chip(
+                c,
+                line,
+                class_color(i, classes.len().max(1)),
+                &format!("{}: {}", classifier, class),
+                f,
+            );
             dim(c, line, "at least", f);
             let p = path.clone();
             slider(c, line, 0.0, 1.0, min.unwrap_or(0.5), 0.05, 160.0).observe(
@@ -821,7 +975,12 @@ mod tests {
         toggle_not(&mut st, &[1]);
         // through the "not", the group still takes members
         st.target = vec![1];
-        add(&mut st, Expr::Kind { kind: "memories".into() });
+        add(
+            &mut st,
+            Expr::Kind {
+                kind: "memories".into(),
+            },
+        );
         toggle_mode(&mut st, &[1]);
         assert_eq!(st.expr.describe(), "(“plum” and not (notes and memories))");
         remove(&mut st, &[1, 0]);
