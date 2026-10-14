@@ -92,6 +92,48 @@ Checks to run before every push:
 - `cargo test -p anend -p anend-core -p anend-hub`
 - `node hub/web/test/parity.mjs`, which must print "all the same"
 
+## Decisions (14 Oct): the redesign
+
+The user asked for "the route that provides the most feature coverage and performance and
+ergonomics" and approved this plan.
+
+1. **One entry graph is the core.**
+   - **`entries`:**
+     - **The record:** a u64 id, created and edited times, a mime type, and a body.
+     - **The body:** runs of 5-bit packed text and references to other entries
+       (borrowing and dedup; templating uses the same mechanism).
+   - **`edges (from, relation, to [, payload])`:** one table for every relation (notes-on,
+     member-of, tagged, placed-at with a packed transform, validated-by), plus a reverse
+     index.
+   - **Derived indexes:** sums in every mode, tokens, time and classifier buckets. They
+     can always be rebuilt from the two tables above.
+   - **Compatibility:** none with old saves or blog writs. Only weum's `all-of-it.json` is
+     imported. Backups write a texts JSON and an other-data JSON.
+2. **Gematria checked against weum:** atbash per `alphavert`, and the colouring groups per
+   mode.
+3. **The 2D UI is written once in HTML/CSS** (`hub/web`). The desktop app becomes a
+   native window around it (Tauri/wry) with the Rust core running in-process. This
+   fixes:
+   - **Text and input:** crisp text, typing latency, and zoom.
+   - **Parity:** the desktop, web app and hub look the same by construction.
+
+   The space stays 3D (three.js in that same UI; Bevy only if it proves better). The
+   Bevy 2D views are retired once the webview desktop app reaches parity.
+4. **One API:** the app ops (WebSocket/REST) are the API. The desktop, web app, scripts and
+   lenses all use the same calls.
+5. **Views are lenses over one query model:** words, sums, tags, time, classifiers and
+   relations.
+6. **Then:**
+   - server modes (hub only, web app only, both), invite-only, private sharing, sign-in
+     for the web app, a hub-free build;
+   - generative heads and classifier-guided generation over bytes;
+   - the scripting language.
+
+Order of work: (1) the entry graph store, the weum import and backup → (2) gematria
+correctness → (3) the API on the new store → (4) the webview desktop shell, text quality
+and latency → (5) memory parity, right-click actions, undo → (6) lists, reader and stats as
+lenses → (7) server modes and security → (8) generation and the language.
+
 ## Feedback after running the desktop app (14 Oct): the next round
 
 The user built and ran the app and imported their weum texts. Everything below comes from
