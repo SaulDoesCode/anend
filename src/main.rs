@@ -312,6 +312,7 @@ fn run(args: Args) {
                 jobs::apply_done,
                 classify_ui::tick_classifiers,
                 classify_ui::rebuild_classifiers,
+                classify_ui::keep_form_name,
                 index_panel::rebuild_index_panel,
                 tint::request_tints,
                 tint::apply_tints,

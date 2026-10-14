@@ -130,6 +130,18 @@ pub fn icon_label<'a>(c: &'a mut Commands, parent: Entity, icon: Icon, s: String
 
 pub fn slider<'a>(c: &'a mut Commands, parent: Entity, min: f32, max: f32, value: f32, step: f32, width: f32) -> EntityCommands<'a> {
     let decimals = (-step.log10()).ceil().max(0.0) as i32;
+    // the slider fills a box of the width wanted (its own node keeps its height)
+    let holder = c
+        .spawn((
+            Node {
+                width: px(width),
+                flex_shrink: 0.0,
+                display: Display::Flex,
+                ..default()
+            },
+            ChildOf(parent),
+        ))
+        .id();
     let mut e = c.spawn_scene(bsn! {
         @FeathersSlider {
             @min: {min},
@@ -137,15 +149,10 @@ pub fn slider<'a>(c: &'a mut Commands, parent: Entity, min: f32, max: f32, value
         }
     });
     e.insert((
-        ChildOf(parent),
+        ChildOf(holder),
         SliderValue(value.clamp(min, max)),
         SliderStep(step),
         SliderPrecision(decimals),
-        Node {
-            width: px(width),
-            flex_grow: 0.0,
-            ..default()
-        },
     ));
     e
 }

@@ -120,6 +120,7 @@ pub struct Near {
 /// the new classifier form
 #[derive(Default, Clone)]
 pub struct Form {
+    pub name: String,
     pub classes: Vec<String>,
     pub not: Option<String>,
     pub inputs: Vec<String>,
@@ -2164,7 +2165,9 @@ fn draw_form(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts) {
                 st.redraw = true;
             });
     }
-    dim(c, k, "a “not” list (optional): texts that are none of them", f);
+    if st.lists.len() > st.form.classes.len() {
+        dim(c, k, "a “not” list (optional): texts that are none of them", f);
+    }
     let r = row(c, k, 6.0);
     for (key, name, _) in &st.lists {
         if st.form.classes.contains(key) {
@@ -2234,7 +2237,11 @@ fn draw_form(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts) {
              names: Query<&EditableText, With<ClsNameInput>>,
              mut status: ResMut<Status>,
              time: Res<Time>| {
-                let name = names.iter().next().map(|e| e.value().to_string()).unwrap_or_default();
+                let name = names
+                    .iter()
+                    .next()
+                    .map(|e| e.value().to_string())
+                    .unwrap_or_else(|| st.form.name.clone());
                 let classes: Vec<Ref> = st.form.classes.iter().filter_map(|k| Ref::parse(k)).collect();
                 let not = st.form.not.as_ref().and_then(|k| Ref::parse(k));
                 let inputs: Vec<Input> = st
@@ -2299,6 +2306,26 @@ fn draw_import(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts) {
     }
 }
 
+/// the name typed in the form outlives the form being drawn again
+pub fn keep_form_name(
+    mut st: ResMut<ClsState>,
+    inputs: Query<(&mut EditableText, bevy::prelude::Ref<ClsNameInput>)>,
+) {
+    for (mut e, marker) in inputs {
+        if marker.is_added() {
+            if !st.form.name.is_empty() {
+                let n = st.form.name.clone();
+                e.editor_mut().set_text(&n);
+            }
+        } else if e.is_changed() {
+            let v = e.value().to_string();
+            if v != st.form.name {
+                st.form.name = v;
+            }
+        }
+    }
+}
+
 // ------------------------------------------------------------------ the bar
 
 /// typing in the bar keeps the words a search narrows to
@@ -2349,5 +2376,69 @@ pub fn bar_key(
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `ANEND_SEED=<file.redb> cargo test -p anend seed_demo -- --ignored`: a save with
+    /// three lists of short texts and a few notes, to try the classifiers on
+    #[test]
+    #[ignore]
+    fn seed_demo() {
+        let Some(path) = std::env::var_os("ANEND_SEED") else { return };
+        let store = Store::open(std::path::Path::new(&path)).unwrap();
+        let lists: [(&str, &[&str]); 3] = [
+            (
+                "fruit",
+                &[
+                    "apple", "pear", "plum", "peach", "cherry", "banana", "mango", "grape", "lemon", "lime", "orange",
+                    "apricot", "fig", "kiwi", "melon", "papaya", "quince", "raspberry", "blackberry", "nectarine",
+                    "a ripe plum", "sweet peach jam", "a basket of apples", "fresh mango slices",
+                ],
+            ),
+            (
+                "stones",
+                &[
+                    "granite", "basalt", "slate", "flint", "marble", "quartz", "obsidian", "shale", "limestone",
+                    "sandstone", "chalk", "gneiss", "pumice", "jade", "onyx", "agate", "jasper", "feldspar", "mica",
+                    "a slab of granite", "polished marble floor", "flint arrowheads", "grey slate roof",
+                ],
+            ),
+            (
+                "animals",
+                &[
+                    "fox", "wolf", "badger", "otter", "heron", "sparrow", "hare", "stoat", "weasel", "owl", "raven",
+                    "deer", "boar", "lynx", "beaver", "falcon", "kestrel", "hedgehog", "the red fox runs",
+                    "a heron in the reeds", "wolves howl at night", "an otter swims",
+                ],
+            ),
+        ];
+        for (head, members) in lists {
+            let (h, _) = store.saturate(head).unwrap();
+            let h = Ref::Memory(h);
+            for m in members {
+                let (k, _) = store.saturate(m).unwrap();
+                store.enlist(&h, &Ref::Memory(k)).unwrap();
+            }
+        }
+        for t in ["cherry tart", "a quartz crystal", "the owl at dusk", "lemon and lime", "basalt columns"] {
+            store.saturate(t).unwrap();
+        }
+        for (title, md, tags) in [
+            ("Orchard walk", "Picked plums and pears; the apricots were not ripe yet.", vec!["garden"]),
+            ("Quarry notes", "Granite and slate beds, a seam of quartz, some flint.", vec!["field"]),
+            ("Night birds", "An owl called twice; a fox crossed the lane near the badger set.", vec!["field"]),
+        ] {
+            let n = crate::note::Note {
+                title: title.into(),
+                markdown: md.into(),
+                tags: tags.into_iter().map(String::from).collect(),
+                ..Default::default()
+            };
+            store.save(&n).unwrap();
+        }
     }
 }
