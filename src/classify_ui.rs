@@ -319,18 +319,28 @@ pub fn view() -> impl Scene {
             ScrollArea
             ClsSide
             --
+            // a column around the scrolling part, so its height is the view's, not
+            // its content's
             Node {
                 flex_grow: 1.0,
                 min_width: px(300),
                 min_height: px(0),
                 display: Display::Flex,
                 flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                row_gap: px(8),
-                overflow: Overflow::scroll_y(),
             }
-            ScrollArea
-            ClsMain
+            Children [
+                Node {
+                    flex_grow: 1.0,
+                    min_height: px(0),
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: px(8),
+                    overflow: Overflow::scroll_y(),
+                }
+                ScrollArea
+                ClsMain
+            ]
         ]
     }
 }

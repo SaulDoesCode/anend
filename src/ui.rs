@@ -311,6 +311,9 @@ fn root() -> impl Scene {
         Node {
             width: percent(100),
             height: percent(100),
+            // a view's content never pushes the window's layout past its edge
+            min_height: px(0),
+            max_height: percent(100),
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
             padding: UiRect::all(px(6)),

@@ -310,6 +310,7 @@ fn run(args: Args) {
             tags_ui::rebuild_tags,
             (
                 jobs::apply_done,
+                jobs::debug_wheel,
                 classify_ui::tick_classifiers,
                 classify_ui::rebuild_classifiers,
                 classify_ui::keep_form_name,
