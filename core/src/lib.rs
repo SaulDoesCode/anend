@@ -8,6 +8,7 @@ pub mod clsmodule;
 pub mod filters;
 pub mod fmath;
 pub mod forge;
+pub mod graph;
 pub mod lists;
 pub mod markdown;
 pub mod memo;
