@@ -11,6 +11,7 @@
 <nav class="bar">
   <a class="brand" href="/">{{ l.hub }}</a>
   <a class="btn{% if l.tab == "saves" %} on{% endif %}" href="/">saves</a>
+  <a class="btn{% if l.tab == "classifiers" %} on{% endif %}" href="/classifiers">classifiers</a>
   <a class="btn{% if l.tab == "leaderboard" %} on{% endif %}" href="/leaderboard">leaderboard</a>
   <a class="btn" href="/app/">the app</a>
   {% if let Some(me) = l.me %}
@@ -29,6 +30,6 @@
 {% if !l.flash.is_empty() %}<div class="flash{% if l.flash_bad %} bad{% endif %}">{{ l.flash }}</div>{% endif %}
 {% block main %}{% endblock %}
 </main>
-<footer>an <a href="https://github.com/SaulDoesCode/anend">anend</a> hub · saves for the anend notes app · <a href="/api/hub">api</a></footer>
+<footer>an <a href="https://github.com/SaulDoesCode/anend">anend</a> hub · saves and classifiers for the anend notes app · <a href="/api/hub">api</a></footer>
 </body>
 </html>

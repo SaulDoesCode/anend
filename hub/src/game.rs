@@ -1,9 +1,10 @@
 //! The game in the hub: points for sharing saves people use, levels with titles from the
 //! scribes and cipherers of old, and badges for milestones. Points come from what other
 //! people do with your saves, so they can't be farmed alone: a download counts once per
-//! person, a star once per account, and starring your own save earns nothing.
+//! person, a star once per account, and starring your own save earns nothing. Shared
+//! classifiers earn the same way as saves, and have badges of their own.
 
-use crate::store::{Save, Status, User};
+use crate::store::{ClassifierRec, Save, Status, User};
 
 /// an admin let one of your saves in
 pub const APPROVED: i64 = 50;
@@ -58,8 +59,9 @@ pub struct Badge {
     pub glyph: &'static str,
 }
 
-/// the badges a user has earned, from their saves and what they've done
-pub fn badges(user: &User, saves: &[&Save], stars_given: u64) -> Vec<Badge> {
+/// the badges a user has earned, from their saves, their classifiers and what they've done
+pub fn badges(user: &User, saves: &[&Save], classifiers: &[&ClassifierRec], stars_given: u64) -> Vec<Badge> {
+    let shared: Vec<&&ClassifierRec> = classifiers.iter().filter(|c| c.status == Status::Approved).collect();
     let approved: Vec<&&Save> = saves.iter().filter(|s| s.status == Status::Approved).collect();
     let stars: u64 = approved.iter().map(|s| s.stars).sum();
     let downloads: u64 = approved.iter().map(|s| s.downloads).sum();
@@ -96,6 +98,28 @@ pub fn badges(user: &User, saves: &[&Save], stars_given: u64) -> Vec<Badge> {
         "▤",
     );
     give(stars_given >= 10, "curator", "starred ten saves", "✧");
+    give(!shared.is_empty(), "first classifier", "shared a classifier", "◇");
+    give(shared.len() >= 5, "trainer", "shared five classifiers", "◈");
+    give(
+        shared.iter().any(|c| c.stars >= 10),
+        "oracle",
+        "a classifier with ten stars",
+        "◉",
+    );
+    give(
+        shared.iter().map(|c| c.downloads).sum::<u64>() >= 50,
+        "widely taught",
+        "classifiers taken fifty times",
+        "⟁",
+    );
+    give(
+        shared
+            .iter()
+            .any(|c| c.examples >= 100 && c.accuracy.is_some_and(|a| a >= 0.9)),
+        "sharp eye",
+        "a classifier 90% right on a hundred examples",
+        "◎",
+    );
     out
 }
 
@@ -132,8 +156,18 @@ mod tests {
             memories: 2000,
             ..Default::default()
         };
-        let names: Vec<_> = badges(&u, &[&s], 0).iter().map(|b| b.name).collect();
+        let names: Vec<_> = badges(&u, &[&s], &[], 0).iter().map(|b| b.name).collect();
         assert_eq!(names, ["founder", "first save", "beloved", "library"]);
+        let c = ClassifierRec {
+            status: Status::Approved,
+            stars: 10,
+            examples: 400,
+            accuracy: Some(0.95),
+            ..Default::default()
+        };
+        let pending = ClassifierRec::default();
+        let names: Vec<_> = badges(&u, &[], &[&c, &pending], 0).iter().map(|b| b.name).collect();
+        assert_eq!(names, ["founder", "first classifier", "oracle", "sharp eye"]);
         let pending = Save::default();
         assert!(
             badges(
@@ -142,6 +176,7 @@ mod tests {
                     ..Default::default()
                 },
                 &[&pending],
+                &[],
                 0
             )
             .is_empty()

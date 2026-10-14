@@ -156,6 +156,16 @@ texts it doesn't pass; in `weigh` mode multiplies them by its own.
 | `POST /app/hub/{id}` | an approved hub save into the workspace; `?merge=1` merges it into the open save instead |
 | `POST /app/share` | JSON `{name?, description, tags}`: the open save onto the hub |
 
+### Classifiers between the hub and a save
+
+Same rules as the saves' routes: the login cookie (or `--local`), posts only from the
+hub's own pages (`Origin` must match), answers in the usual envelope.
+
+| | |
+|---|---|
+| `POST /app/classifiers/{id}/take` | an approved hub classifier (`id` from `/api/classifiers`) into the open save. Optional JSON `{as?: name, lists?: {class: list key}}`; without `lists` each class goes to the list of its name (made when there's none). Returns `classify.import`'s answer plus `save`: `{name, created, reused, lists: [[class, key, new]], save}`. Counts a download. At most 120 an hour from an address |
+| `POST /app/classifiers/share` | JSON `{name, title?, description?, tags?}`: the open save's trained classifier `name` (with everything it builds on bundled) onto the hub, as `title` (its own name when left out). Returns `{id, status: "pending"\|"approved", url}`. At most 20 uploads an hour |
+
 ## Bundles
 
 A save as plain JSON, keys and all (`core/src/bundle.rs`). The web app keeps one in the

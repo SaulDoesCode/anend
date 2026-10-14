@@ -9,6 +9,7 @@
     <div class="field">
       <label for="{{ f.name }}">{{ f.label }}</label>
       {% if f.kind == "textarea" %}<textarea id="{{ f.name }}" name="{{ f.name }}">{{ f.value }}</textarea>
+      {% else if f.kind == "clsfile" %}<input id="{{ f.name }}" name="{{ f.name }}" type="file" accept=".anendcls"{% if f.required %} required{% endif %}>
       {% else if f.kind == "file" %}<input id="{{ f.name }}" name="{{ f.name }}" type="file" accept=".redb"{% if f.required %} required{% endif %}>
       {% else %}<input id="{{ f.name }}" name="{{ f.name }}" type="{{ f.kind }}" value="{{ f.value }}"{% if f.required %} required{% endif %}>{% endif %}
       {% if !f.hint.is_empty() %}<span class="dim small">{{ f.hint }}</span>{% endif %}

@@ -21,10 +21,11 @@
   <section class="card">
     <div class="stats">
       <div class="stat"><b>{{ shared }}</b><span>saves</span></div>
+      <div class="stat"><b>{{ shared_cls }}</b><span>classifiers</span></div>
       <div class="stat"><b>{{ stars }}</b><span>stars</span></div>
       <div class="stat"><b>{{ downloads }}</b><span>downloads</span></div>
     </div>
-    <p class="dim small" style="margin-top: 10px">Points: {{ approved_pts }} for each save let in, {{ star_pts }} a star, {{ download_pts }} each person who takes one, {{ featured_pts }} when one is featured, {{ curate_pts }} for each save you star.</p>
+    <p class="dim small" style="margin-top: 10px">Points: {{ approved_pts }} for each save or classifier let in, {{ star_pts }} a star, {{ download_pts }} each person who takes one, {{ featured_pts }} when one is featured, {{ curate_pts }} for each save you star.</p>
   </section>
 </div>
 {% if cards.is_empty() %}
@@ -32,11 +33,15 @@
 {% else %}
 <section class="grid">{% for c in cards %}{% include "card.html" %}{% endfor %}</section>
 {% endif %}
+{% if !cls_cards.is_empty() %}
+<h3 style="color: var(--bar-text); margin: 6px 4px 0">classifiers</h3>
+<section class="grid">{% for c in cls_cards %}{% include "clscard.html" %}{% endfor %}</section>
+{% endif %}
 {% if own %}
 {% if !pending.is_empty() %}
 <section class="card">
   <h3>waiting or turned down</h3>
-  <table>{% for p in pending %}<tr><td><a href="/saves/{{ p.0 }}">{{ p.1 }}</a></td><td><span class="pill {{ p.2 }}">{{ p.2 }}</span></td><td class="dim small">{{ p.3 }}</td></tr>{% endfor %}</table>
+  <table>{% for p in pending %}<tr><td><a href="{{ p.0 }}">{{ p.1 }}</a></td><td><span class="pill {{ p.2 }}">{{ p.2 }}</span></td><td class="dim small">{{ p.3 }}</td></tr>{% endfor %}</table>
 </section>
 {% endif %}
 <div class="cols">

@@ -114,13 +114,26 @@ interface, not stubs.
      use `memo_rows`/`checked_rows`. Offline engine (`hub/web/local/engine.js`): answer
      `filters.*` with the same "classifiers need a hub for now"; parity must stay "all
      the same".
-   - **hub sharing**: classifier records in hub/src/store.rs (table + files
-     `classifiers/{id}.anendcls`, stars/downloads keyed `c:<id>` in the existing
-     multimaps), `Hub::accept_classifier` (size limit, `clsmodule::read` in
-     spawn_blocking, pending unless trusted, points as saves), pages `/classifiers`,
-     `/classifiers/{id}` (+download, star, edit, delete), upload form, admin review
-     section, API `/api/classifiers`, app routes "take into my save" and "share from my
-     save"; askama templates in the sand look; tests in hub.rs.
+   - **hub sharing: done** (tests `clshub::tests` and `clstests::classifier_site`; docs
+     in docs/hub-api.md "A classifier" and docs/app-api.md "Classifiers between the hub
+     and a save"). `hub/src/clshub.rs`: records in table `classifiers` (store.rs
+     `ClassifierRec`), modules at `<data>/classifiers/{id}.anendcls`, stars/downloads in
+     the saves' multimaps keyed `c:<id>`; `Hub::accept_classifier(_bytes)` (size cap
+     min(--max-upload, 64 MB), `clsmodule::read` in spawn_blocking + catch_unwind, empty
+     name/description from the module, pending unless trusted, new versions keep stars
+     and downloads, points as saves), find/star/download/review (approve, reject with a
+     note, feature, remove); badges "first classifier", "trainer", "oracle", "widely
+     taught", "sharp eye" (game.rs). Pages (`hub/src/clsweb.rs`, templates
+     classifiers.html, clscard.html, classifier.html): `/classifiers` grid (search,
+     new/stars/downloads/featured), `/classifiers/{id}` (classes, metrics, preset, head,
+     weights, builds-on, take/download/star, edit/delete for the author or an admin,
+     admin verdicts), `/classifiers/upload`, edit/delete, `/admin/classifiers/{id}`, a
+     "classifiers" section in /admin and on profiles, nav link. API:
+     `GET /api/classifiers`, `/api/classifiers/{id}`, `/api/classifiers/{id}/download`,
+     `POST /api/classifiers` (bearer token only). App: `POST /app/classifiers/{id}/take`
+     (import_module, classes to lists by name, optional `as`/`lists`) and
+     `POST /app/classifiers/share` (`{name, title?, description?, tags?}`, exports with
+     upstream bundled). Ids checked (`store::id_ok`) before any path is made.
    - **web UI**: classifiers view (index button with progress, bucket counts, near by
      outputs/embedding, validators editor, disagreements with yes/no, export/import,
      hub browse with take), editor drawer (checkboxes of classifiers per note, verdict

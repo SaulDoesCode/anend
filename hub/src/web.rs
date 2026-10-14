@@ -215,7 +215,9 @@ pub fn layout(depot: &Depot, tab: &'static str) -> Layout {
     let waiting = if me.as_ref().is_some_and(|m| m.admin) {
         let s = hub().store.saves().unwrap_or_default();
         let u = hub().store.users().unwrap_or_default();
+        let c = hub().store.classifiers().unwrap_or_default();
         s.iter().filter(|s| s.status == Status::Pending).count()
+            + c.iter().filter(|c| c.status == Status::Pending).count()
             + u.iter().filter(|u| u.standing == Standing::Applied).count()
     } else {
         0
@@ -254,7 +256,7 @@ pub fn message(res: &mut Response, depot: &Depot, code: StatusCode, heading: &st
     );
 }
 
-fn not_found(res: &mut Response, depot: &Depot) {
+pub(crate) fn not_found(res: &mut Response, depot: &Depot) {
     message(
         res,
         depot,
@@ -265,7 +267,7 @@ fn not_found(res: &mut Response, depot: &Depot) {
 }
 
 /// the logged in, active user, or a message saying why not
-fn need_active<'a>(res: &mut Response, depot: &'a Depot) -> Option<&'a User> {
+pub(crate) fn need_active<'a>(res: &mut Response, depot: &'a Depot) -> Option<&'a User> {
     match me(depot) {
         None => {
             go(res, "/login", "!log in first");
@@ -338,8 +340,9 @@ pub fn card(s: &Save) -> Card {
 pub struct EventView {
     pub user: String,
     pub what: String,
-    pub save: String,
     pub save_name: String,
+    /// where the save or classifier it's about lives
+    pub href: String,
     pub ago: String,
 }
 
@@ -371,6 +374,7 @@ pub async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     let all = h.store.saves().unwrap_or_default();
     let approved: Vec<&Save> = all.iter().filter(|s| s.status == Status::Approved).collect();
     let users = h.store.users().unwrap_or_default();
+    let classifiers = h.store.classifiers().unwrap_or_default();
     let events = h
         .store
         .events(30)
@@ -388,18 +392,23 @@ pub async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) {
         })
         .into_iter()
         .filter_map(|e| {
-            let save_name = if e.save.is_empty() {
-                String::new()
+            // only point at saves and classifiers everyone can see
+            let (save_name, href) = if e.save.is_empty() {
+                (String::new(), String::new())
+            } else if let Some(id) = e.save.strip_prefix(crate::store::CLS) {
+                let c = classifiers
+                    .iter()
+                    .find(|c| c.id == id && c.status == Status::Approved)?;
+                (format!("{} (a classifier)", c.name), format!("/classifiers/{id}"))
             } else {
-                // only point at saves everyone can see
                 let s = approved.iter().find(|s| s.id == e.save)?;
-                s.name.clone()
+                (s.name.clone(), format!("/saves/{}", s.id))
             };
             Some(EventView {
                 user: e.user,
                 what: e.what,
-                save: e.save,
                 save_name,
+                href,
                 ago: ago(e.at),
             })
         })
@@ -583,7 +592,7 @@ pub struct Field {
     pub required: bool,
 }
 
-fn field(name: &'static str, label: &'static str, kind: &'static str, value: &str) -> Field {
+pub(crate) fn field(name: &'static str, label: &'static str, kind: &'static str, value: &str) -> Field {
     Field {
         name,
         label,
@@ -596,15 +605,15 @@ fn field(name: &'static str, label: &'static str, kind: &'static str, value: &st
 
 #[derive(Template)]
 #[template(path = "form.html")]
-struct Form {
-    l: Layout,
-    heading: String,
-    intro: String,
-    action: String,
-    multipart: bool,
-    fields: Vec<Field>,
-    submit: &'static str,
-    after: String,
+pub(crate) struct Form {
+    pub l: Layout,
+    pub heading: String,
+    pub intro: String,
+    pub action: String,
+    pub multipart: bool,
+    pub fields: Vec<Field>,
+    pub submit: &'static str,
+    pub after: String,
 }
 
 fn upload_form(depot: &Depot, action: String, heading: String, s: Option<&Save>, intro: String) -> Form {
@@ -673,14 +682,14 @@ pub async fn upload_page(depot: &mut Depot, res: &mut Response) {
 }
 
 /// what an upload form sent
-struct Sent {
-    name: String,
-    description: String,
-    tags: String,
-    file: Option<(std::path::PathBuf, u64)>,
+pub(crate) struct Sent {
+    pub name: String,
+    pub description: String,
+    pub tags: String,
+    pub file: Option<(std::path::PathBuf, u64)>,
 }
 
-async fn read_upload(req: &mut Request) -> Result<Sent, String> {
+pub(crate) async fn read_upload(req: &mut Request) -> Result<Sent, String> {
     let limit = hub().config.max_upload as usize + 256 * 1024;
     let form = req.form_data_max_size(limit).await.map_err(|e| {
         let e = e.to_string();
@@ -1041,7 +1050,9 @@ struct Profile {
     standing: &'static str,
     badges: Vec<BadgeView>,
     cards: Vec<Card>,
+    cls_cards: Vec<crate::clsweb::ClsCard>,
     shared: usize,
+    shared_cls: usize,
     stars: u64,
     downloads: u64,
     own: bool,
@@ -1089,6 +1100,17 @@ fn show_profile(name: &str, depot: &Depot, res: &mut Response) {
         .collect();
     approved.sort_by(|a, b| b.stars.cmp(&a.stars).then(b.updated.cmp(&a.updated)));
     let given = hub().store.stars_given(&u.name).unwrap_or(0);
+    let all_cls = hub().store.classifiers().unwrap_or_default();
+    let their_cls: Vec<&crate::store::ClassifierRec> = all_cls
+        .iter()
+        .filter(|c| c.author.eq_ignore_ascii_case(&u.name))
+        .collect();
+    let mut cls_approved: Vec<&crate::store::ClassifierRec> = their_cls
+        .iter()
+        .copied()
+        .filter(|c| c.status == Status::Approved)
+        .collect();
+    cls_approved.sort_by(|a, b| b.stars.cmp(&a.stars).then(b.updated.cmp(&a.updated)));
     let level = game::level(u.points);
     let new_token = depot.get::<String>("new_token").cloned().unwrap_or_default();
     let tokens = if own {
@@ -1105,7 +1127,13 @@ fn show_profile(name: &str, depot: &Depot, res: &mut Response) {
     let pending = theirs
         .iter()
         .filter(|s| s.status != Status::Approved)
-        .map(|s| (s.id.clone(), s.name.clone(), status_name(s.status), s.note.clone()))
+        .map(|s| (format!("/saves/{}", s.id), s.name.clone(), status_name(s.status), s.note.clone()))
+        .chain(
+            their_cls
+                .iter()
+                .filter(|c| c.status != Status::Approved)
+                .map(|c| (format!("/classifiers/{}", c.id), format!("{} (a classifier)", c.name), status_name(c.status), c.note.clone())),
+        )
         .collect();
     let no_password = u.password.is_empty();
     if !own && !admin {
@@ -1129,7 +1157,7 @@ fn show_profile(name: &str, depot: &Depot, res: &mut Response) {
             next: game::points_for(level + 1) - u.points,
             joined: ago(u.joined),
             standing: standing_name(u.standing),
-            badges: game::badges(&u, &theirs, given)
+            badges: game::badges(&u, &theirs, &their_cls, given)
                 .into_iter()
                 .map(|b| BadgeView {
                     name: b.name,
@@ -1138,9 +1166,12 @@ fn show_profile(name: &str, depot: &Depot, res: &mut Response) {
                 })
                 .collect(),
             cards: approved.iter().map(|s| card(s)).collect(),
+            cls_cards: cls_approved.iter().map(|c| crate::clsweb::cls_card(c)).collect(),
             shared: approved.len(),
-            stars: approved.iter().map(|s| s.stars).sum(),
-            downloads: approved.iter().map(|s| s.downloads).sum(),
+            shared_cls: cls_approved.len(),
+            stars: approved.iter().map(|s| s.stars).sum::<u64>() + cls_approved.iter().map(|c| c.stars).sum::<u64>(),
+            downloads: approved.iter().map(|s| s.downloads).sum::<u64>()
+                + cls_approved.iter().map(|c| c.downloads).sum::<u64>(),
             own,
             pending,
             tokens,
@@ -1363,6 +1394,8 @@ struct Admin {
     applied: Vec<AdminUser>,
     users: Vec<AdminUser>,
     all_saves: Vec<AdminSave>,
+    waiting_cls: Vec<crate::clsweb::AdminCls>,
+    all_cls: Vec<crate::clsweb::AdminCls>,
     open: bool,
 }
 
@@ -1408,6 +1441,8 @@ pub async fn admin_page(depot: &mut Depot, res: &mut Response) {
     saves.sort_by_key(|s| std::cmp::Reverse(s.updated));
     let mut users = hub().store.users().unwrap_or_default();
     users.sort_by_key(|u| u.number);
+    let mut cls = hub().store.classifiers().unwrap_or_default();
+    cls.sort_by_key(|c| std::cmp::Reverse(c.updated));
     render(
         res,
         Admin {
@@ -1428,6 +1463,12 @@ pub async fn admin_page(depot: &mut Depot, res: &mut Response) {
                 .map(admin_user)
                 .collect(),
             all_saves: saves.iter().map(admin_save).collect(),
+            waiting_cls: cls
+                .iter()
+                .filter(|c| c.status == Status::Pending)
+                .map(crate::clsweb::admin_cls)
+                .collect(),
+            all_cls: cls.iter().map(crate::clsweb::admin_cls).collect(),
             open: hub().config.open,
         },
     );

@@ -33,7 +33,7 @@
 {% if !events.is_empty() %}
 <section class="card">
   <h3>lately</h3>
-  <ul class="feed">{% for e in events %}<li><a href="/u/{{ e.user }}">{{ e.user }}</a> {{ e.what }}{% if !e.save_name.is_empty() %} <a href="/saves/{{ e.save }}">{{ e.save_name }}</a>{% endif %} <span class="dim small">{{ e.ago }}</span></li>{% endfor %}</ul>
+  <ul class="feed">{% for e in events %}<li><a href="/u/{{ e.user }}">{{ e.user }}</a> {{ e.what }}{% if !e.save_name.is_empty() %} <a href="{{ e.href }}">{{ e.save_name }}</a>{% endif %} <span class="dim small">{{ e.ago }}</span></li>{% endfor %}</ul>
 </section>
 {% endif %}
 {% endblock %}

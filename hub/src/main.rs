@@ -1,4 +1,4 @@
-//! anend-hub: a self-hosted place to share anend saves. People join (an admin lets them
+//! anend-hub: a self-hosted place to share anend saves and classifiers. People join (an admin lets them
 //! in), share saves, star and download each other's, and earn points, levels and badges
 //! for saves others use. The app browses and shares through its JSON API.
 
@@ -7,6 +7,10 @@ mod app;
 mod appweb;
 mod auth;
 mod classify;
+mod clshub;
+mod clsweb;
+#[cfg(test)]
+mod clstests;
 mod game;
 mod hub;
 mod inspect;
@@ -21,7 +25,7 @@ use crate::auth::Limiter;
 use crate::hub::{Config, Hub};
 use crate::store::Store;
 
-const HELP: &str = "anend-hub: share anend saves
+const HELP: &str = "anend-hub: share anend saves and classifiers
 
 usage: anend-hub [options]
 
@@ -120,6 +124,21 @@ pub fn router() -> Router {
         .push(Router::with_path("saves/{id}/edit").get(web::edit_page).post(web::edit))
         .push(Router::with_path("saves/{id}/delete").post(web::delete))
         .push(Router::with_path("upload").get(web::upload_page).post(web::upload))
+        .push(Router::with_path("classifiers").get(clsweb::grid))
+        .push(
+            Router::with_path("classifiers/upload")
+                .get(clsweb::upload_page)
+                .post(clsweb::upload),
+        )
+        .push(Router::with_path("classifiers/{id}").get(clsweb::detail))
+        .push(Router::with_path("classifiers/{id}/download").get(clsweb::download))
+        .push(Router::with_path("classifiers/{id}/star").post(clsweb::star))
+        .push(
+            Router::with_path("classifiers/{id}/edit")
+                .get(clsweb::edit_page)
+                .post(clsweb::edit),
+        )
+        .push(Router::with_path("classifiers/{id}/delete").post(clsweb::delete))
         .push(Router::with_path("join").get(web::join_page).post(web::join))
         .push(Router::with_path("login").get(web::login_page).post(web::login))
         .push(Router::with_path("login/{secret}").get(web::login_link))
@@ -136,15 +155,25 @@ pub fn router() -> Router {
         .push(Router::with_path("app/saves/{name}").get(appweb::download))
         .push(Router::with_path("app/hub/{id}").post(appweb::take))
         .push(Router::with_path("app/share").post(appweb::share))
+        .push(Router::with_path("app/classifiers/share").post(appweb::share_classifier))
+        .push(Router::with_path("app/classifiers/{id}/take").post(appweb::take_classifier))
         .push(Router::with_path("app/{**rest}").get(appweb::files))
         .push(Router::with_path("admin").get(web::admin_page))
         .push(Router::with_path("admin/saves/{id}").post(web::admin_save_action))
         .push(Router::with_path("admin/users/{name}").post(web::admin_user_action))
+        .push(Router::with_path("admin/classifiers/{id}").post(clsweb::admin_action))
         .push(Router::with_path("admin/server").get(server::page).post(server::save))
         .push(Router::with_path("api/hub").get(api::about))
         .push(Router::with_path("api/saves").get(api::list).post(api::share))
         .push(Router::with_path("api/saves/{id}").get(api::one))
         .push(Router::with_path("api/me").get(api::whoami))
+        .push(
+            Router::with_path("api/classifiers")
+                .get(api::classifiers)
+                .post(api::share_classifier),
+        )
+        .push(Router::with_path("api/classifiers/{id}").get(api::classifier))
+        .push(Router::with_path("api/classifiers/{id}/download").get(clsweb::download))
         .push(Router::with_path("{**rest}").goal(web::missing))
 }
 

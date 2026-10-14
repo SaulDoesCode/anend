@@ -18,12 +18,14 @@ const TOKENS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("tokens");
 /// sha256 of a one time login link → link
 const LINKS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("links");
 const SAVES: TableDefinition<&str, &[u8]> = TableDefinition::new("saves");
-/// save id → user names that starred it
+/// save id (or `c:` and a classifier's id) → user names that starred it
 const STARS: MultimapTableDefinition<&str, &str> = MultimapTableDefinition::new("stars");
-/// user name → save ids they starred
+/// user name → save ids (and `c:` classifier ids) they starred
 const STARRED: MultimapTableDefinition<&str, &str> = MultimapTableDefinition::new("starred");
-/// save id → who downloaded it (a user name, or a hash of an address), counted once each
+/// save id (or `c:` id) → who downloaded it (a user name, or a hash of an address), counted once each
 const DOWNLOADERS: MultimapTableDefinition<&str, &str> = MultimapTableDefinition::new("downloaders");
+/// shared classifier id → its record (the module sits in `classifiers/{id}.anendcls`)
+const CLASSIFIERS: TableDefinition<&str, &[u8]> = TableDefinition::new("classifiers");
 /// sequence number → event, newest last
 const EVENTS: TableDefinition<u64, &[u8]> = TableDefinition::new("events");
 const META: TableDefinition<&str, &str> = TableDefinition::new("meta");
@@ -144,6 +146,84 @@ pub struct Save {
     pub feature_rewarded: bool,
 }
 
+/// a classifier module shared on the hub: what its uploader said and what its file holds
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClassifierRec {
+    pub id: String,
+    pub name: String,
+    pub author: String,
+    pub description: String,
+    pub tags: Vec<String>,
+    pub status: Status,
+    /// why an admin turned it down
+    pub note: String,
+    pub featured: bool,
+    /// the classifier's own name inside the module
+    pub module: String,
+    pub classes: Vec<String>,
+    /// single, multi or regress
+    pub head: String,
+    pub preset: String,
+    /// weights bundled in the module
+    pub weights: u64,
+    pub accuracy: Option<f64>,
+    pub macro_f1: Option<f64>,
+    pub examples: usize,
+    pub measured_on: String,
+    /// the classifiers it builds on, and whether each is bundled
+    pub upstream: Vec<(String, bool)>,
+    /// its weights' hash
+    pub hash: String,
+    pub size: u64,
+    pub stars: u64,
+    pub downloads: u64,
+    pub created: DateTime<Utc>,
+    pub updated: DateTime<Utc>,
+    pub version: u32,
+    pub rewarded: bool,
+    pub feature_rewarded: bool,
+}
+
+impl ClassifierRec {
+    /// its key in the stars and downloads tables, apart from the saves'
+    pub fn key(&self) -> String {
+        format!("{CLS}{}", self.id)
+    }
+}
+
+/// the prefix of a classifier's key in the stars and downloads tables
+pub const CLS: &str = "c:";
+
+/// a record with stars and downloads counted on it
+trait Counted: Serialize + DeserializeOwned {
+    fn set_stars(&mut self, n: u64);
+    fn add_download(&mut self);
+}
+
+impl Counted for Save {
+    fn set_stars(&mut self, n: u64) {
+        self.stars = n;
+    }
+    fn add_download(&mut self) {
+        self.downloads += 1;
+    }
+}
+
+impl Counted for ClassifierRec {
+    fn set_stars(&mut self, n: u64) {
+        self.stars = n;
+    }
+    fn add_download(&mut self) {
+        self.downloads += 1;
+    }
+}
+
+/// an id the hub made (letters and digits only), so it's safe in a file's name
+pub fn id_ok(id: &str) -> bool {
+    (1..=16).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Event {
     pub at: DateTime<Utc>,
@@ -170,6 +250,7 @@ fn put<T: Serialize>(v: &T) -> Result<Vec<u8>> {
 impl Store {
     pub fn open(dir: &Path) -> Result<Store> {
         std::fs::create_dir_all(dir.join("saves")).map_err(err)?;
+        std::fs::create_dir_all(dir.join("classifiers")).map_err(err)?;
         let db = Database::create(dir.join("hub.redb")).map_err(err)?;
         let txn = db.begin_write().map_err(err)?;
         txn.open_table(USERS).map_err(err)?;
@@ -180,6 +261,7 @@ impl Store {
         txn.open_multimap_table(STARS).map_err(err)?;
         txn.open_multimap_table(STARRED).map_err(err)?;
         txn.open_multimap_table(DOWNLOADERS).map_err(err)?;
+        txn.open_table(CLASSIFIERS).map_err(err)?;
         txn.open_table(EVENTS).map_err(err)?;
         txn.open_table(META).map_err(err)?;
         txn.commit().map_err(err)?;
@@ -192,6 +274,11 @@ impl Store {
     /// where a save's file lives
     pub fn save_path(&self, id: &str) -> PathBuf {
         self.dir.join("saves").join(format!("{id}.redb"))
+    }
+
+    /// where a shared classifier's module lives (`None` for an id the hub couldn't have made)
+    pub fn classifier_path(&self, id: &str) -> Option<PathBuf> {
+        id_ok(id).then(|| self.dir.join("classifiers").join(format!("{id}.anendcls")))
     }
 
     /// a scratch place for uploads being checked
@@ -419,24 +506,33 @@ impl Store {
 
     /// removes a save's record, its stars and downloads (the file is the caller's)
     pub fn remove_save(&self, id: &str) -> Result<Option<Save>> {
+        self.remove_in(SAVES, id, id)
+    }
+
+    fn remove_in<T: DeserializeOwned>(
+        &self,
+        table: TableDefinition<&str, &[u8]>,
+        id: &str,
+        key: &str,
+    ) -> Result<Option<T>> {
         let txn = self.db.begin_write().map_err(err)?;
         let old = {
-            let mut t = txn.open_table(SAVES).map_err(err)?;
+            let mut t = txn.open_table(table).map_err(err)?;
             let old = t.remove(id).map_err(err)?.map(|g| g.value().to_vec());
             let mut stars = txn.open_multimap_table(STARS).map_err(err)?;
             let who: Vec<String> = stars
-                .get(id)
+                .get(key)
                 .map_err(err)?
                 .filter_map(|v| v.ok().map(|v| v.value().to_string()))
                 .collect();
-            stars.remove_all(id).map_err(err)?;
+            stars.remove_all(key).map_err(err)?;
             let mut starred = txn.open_multimap_table(STARRED).map_err(err)?;
             for u in who {
-                starred.remove(u.as_str(), id).map_err(err)?;
+                starred.remove(u.as_str(), key).map_err(err)?;
             }
             txn.open_multimap_table(DOWNLOADERS)
                 .map_err(err)?
-                .remove_all(id)
+                .remove_all(key)
                 .map_err(err)?;
             old
         };
@@ -446,26 +542,36 @@ impl Store {
 
     /// stars or unstars a save; returns whether it's starred now and its star count
     pub fn toggle_star(&self, id: &str, user: &str) -> Result<(bool, u64)> {
+        self.toggle_star_in::<Save>(SAVES, id, id, user)
+    }
+
+    fn toggle_star_in<T: Counted>(
+        &self,
+        table: TableDefinition<&str, &[u8]>,
+        id: &str,
+        key: &str,
+        user: &str,
+    ) -> Result<(bool, u64)> {
         let user = user.to_lowercase();
         let txn = self.db.begin_write().map_err(err)?;
         let result = {
+            let mut t = txn.open_table(table).map_err(err)?;
+            let mut s: T = match t.get(id).map_err(err)? {
+                Some(v) => get(v.value())?,
+                None => return Err("no such thing".into()),
+            };
             let mut stars = txn.open_multimap_table(STARS).map_err(err)?;
             let mut starred = txn.open_multimap_table(STARRED).map_err(err)?;
-            let on = if stars.remove(id, user.as_str()).map_err(err)? {
-                starred.remove(user.as_str(), id).map_err(err)?;
+            let on = if stars.remove(key, user.as_str()).map_err(err)? {
+                starred.remove(user.as_str(), key).map_err(err)?;
                 false
             } else {
-                stars.insert(id, user.as_str()).map_err(err)?;
-                starred.insert(user.as_str(), id).map_err(err)?;
+                stars.insert(key, user.as_str()).map_err(err)?;
+                starred.insert(user.as_str(), key).map_err(err)?;
                 true
             };
-            let count = stars.get(id).map_err(err)?.count() as u64;
-            let mut t = txn.open_table(SAVES).map_err(err)?;
-            let mut s: Save = match t.get(id).map_err(err)? {
-                Some(v) => get(v.value())?,
-                None => return Err("no such save".into()),
-            };
-            s.stars = count;
+            let count = stars.get(key).map_err(err)?.count() as u64;
+            s.set_stars(count);
             t.insert(id, put(&s)?.as_slice()).map_err(err)?;
             (on, count)
         };
@@ -473,11 +579,12 @@ impl Store {
         Ok(result)
     }
 
-    pub fn has_starred(&self, id: &str, user: &str) -> Result<bool> {
+    /// whether a user starred a save (its id) or a classifier (`ClassifierRec::key`)
+    pub fn has_starred(&self, key: &str, user: &str) -> Result<bool> {
         let txn = self.db.begin_read().map_err(err)?;
         let stars = txn.open_multimap_table(STARS).map_err(err)?;
         let user = user.to_lowercase();
-        for v in stars.get(id).map_err(err)? {
+        for v in stars.get(key).map_err(err)? {
             if v.map_err(err)?.value() == user {
                 return Ok(true);
             }
@@ -485,30 +592,117 @@ impl Store {
         Ok(false)
     }
 
-    /// how many saves a user has starred
-    pub fn stars_given(&self, user: &str) -> Result<u64> {
+    /// how many saves, and how many classifiers, a user has starred
+    pub fn stars_given_all(&self, user: &str) -> Result<(u64, u64)> {
         let txn = self.db.begin_read().map_err(err)?;
         let t = txn.open_multimap_table(STARRED).map_err(err)?;
-        Ok(t.get(user.to_lowercase().as_str()).map_err(err)?.count() as u64)
+        let (mut saves, mut cls) = (0, 0);
+        for v in t.get(user.to_lowercase().as_str()).map_err(err)? {
+            if v.map_err(err)?.value().starts_with(CLS) {
+                cls += 1;
+            } else {
+                saves += 1;
+            }
+        }
+        Ok((saves, cls))
+    }
+
+    /// how many saves a user has starred
+    pub fn stars_given(&self, user: &str) -> Result<u64> {
+        Ok(self.stars_given_all(user)?.0)
     }
 
     /// counts a download; true the first time this downloader takes this save
     pub fn count_download(&self, id: &str, who: &str) -> Result<bool> {
+        self.count_download_in::<Save>(SAVES, id, id, who)
+    }
+
+    fn count_download_in<T: Counted>(
+        &self,
+        table: TableDefinition<&str, &[u8]>,
+        id: &str,
+        key: &str,
+        who: &str,
+    ) -> Result<bool> {
         let txn = self.db.begin_write().map_err(err)?;
         let first = {
-            let mut d = txn.open_multimap_table(DOWNLOADERS).map_err(err)?;
-            let first = !d.insert(id, who).map_err(err)?;
-            let mut t = txn.open_table(SAVES).map_err(err)?;
-            let mut s: Save = match t.get(id).map_err(err)? {
+            let mut t = txn.open_table(table).map_err(err)?;
+            let mut s: T = match t.get(id).map_err(err)? {
                 Some(v) => get(v.value())?,
-                None => return Err("no such save".into()),
+                None => return Err("no such thing".into()),
             };
-            s.downloads += 1;
+            let mut d = txn.open_multimap_table(DOWNLOADERS).map_err(err)?;
+            let first = !d.insert(key, who).map_err(err)?;
+            s.add_download();
             t.insert(id, put(&s)?.as_slice()).map_err(err)?;
             first
         };
         txn.commit().map_err(err)?;
         Ok(first)
+    }
+
+    // -------------------------------------------------------------- classifiers
+
+    pub fn classifier(&self, id: &str) -> Result<Option<ClassifierRec>> {
+        if !id_ok(id) {
+            return Ok(None);
+        }
+        let txn = self.db.begin_read().map_err(err)?;
+        let t = txn.open_table(CLASSIFIERS).map_err(err)?;
+        t.get(id).map_err(err)?.map(|v| get(v.value())).transpose()
+    }
+
+    pub fn classifiers(&self) -> Result<Vec<ClassifierRec>> {
+        let txn = self.db.begin_read().map_err(err)?;
+        let t = txn.open_table(CLASSIFIERS).map_err(err)?;
+        let mut out = Vec::new();
+        for row in t.iter().map_err(err)? {
+            let (_, v) = row.map_err(err)?;
+            out.push(get(v.value())?);
+        }
+        Ok(out)
+    }
+
+    pub fn put_classifier(&self, c: &ClassifierRec) -> Result<()> {
+        if !id_ok(&c.id) {
+            return Err("a classifier's id is letters and digits".into());
+        }
+        let txn = self.db.begin_write().map_err(err)?;
+        txn.open_table(CLASSIFIERS)
+            .map_err(err)?
+            .insert(c.id.as_str(), put(c)?.as_slice())
+            .map_err(err)?;
+        txn.commit().map_err(err)
+    }
+
+    pub fn update_classifier(&self, id: &str, f: impl FnOnce(&mut ClassifierRec)) -> Result<ClassifierRec> {
+        let txn = self.db.begin_write().map_err(err)?;
+        let c = {
+            let mut t = txn.open_table(CLASSIFIERS).map_err(err)?;
+            let mut c: ClassifierRec = match t.get(id).map_err(err)? {
+                Some(v) => get(v.value())?,
+                None => return Err("no such classifier".into()),
+            };
+            f(&mut c);
+            t.insert(id, put(&c)?.as_slice()).map_err(err)?;
+            c
+        };
+        txn.commit().map_err(err)?;
+        Ok(c)
+    }
+
+    /// removes a classifier's record, its stars and downloads (the file is the caller's)
+    pub fn remove_classifier(&self, id: &str) -> Result<Option<ClassifierRec>> {
+        self.remove_in(CLASSIFIERS, id, &format!("{CLS}{id}"))
+    }
+
+    pub fn toggle_classifier_star(&self, id: &str, user: &str) -> Result<(bool, u64)> {
+        self.toggle_star_in::<ClassifierRec>(CLASSIFIERS, id, &format!("{CLS}{id}"), user)
+    }
+
+    /// counts a download; true the first time this downloader takes this classifier
+    pub fn count_classifier_download(&self, id: &str, who: &str) -> Result<bool> {
+        self.count_download_in::<ClassifierRec>(CLASSIFIERS, id, &format!("{CLS}{id}"), who)
     }
 
     // -------------------------------------------------------------- events
@@ -609,6 +803,25 @@ mod tests {
         assert!(!s.count_download("x1", "ann").unwrap());
         let x = s.save("x1").unwrap().unwrap();
         assert_eq!((x.stars, x.downloads), (1, 2));
+        // a classifier's stars and downloads sit beside the saves', apart
+        s.put_classifier(&ClassifierRec {
+            id: "x1".into(),
+            name: "kinds".into(),
+            author: "Saul".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(s.toggle_classifier_star("x1", "ann").unwrap(), (true, 1));
+        assert!(s.has_starred("c:x1", "ann").unwrap());
+        assert_eq!(s.stars_given_all("ann").unwrap(), (1, 1));
+        assert!(s.count_classifier_download("x1", "ann").unwrap());
+        assert_eq!(s.save("x1").unwrap().unwrap().downloads, 2);
+        assert!(s.put_classifier(&ClassifierRec { id: "../x".into(), ..Default::default() }).is_err());
+        assert!(s.classifier("../x").unwrap().is_none());
+        assert!(s.classifier_path("a/b").is_none());
+        s.remove_classifier("x1").unwrap();
+        assert_eq!(s.stars_given_all("ann").unwrap(), (1, 0));
+        assert!(s.has_starred("x1", "ann").unwrap());
         s.remove_save("x1").unwrap();
         assert!(s.save("x1").unwrap().is_none());
         assert_eq!(s.stars_given("ann").unwrap(), 0);

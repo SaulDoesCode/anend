@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}classifiers · {% endblock %}
+{% block main %}
+<section class="card hero">
+  <div>
+    <h1>classifiers</h1>
+    <p class="dim">Trained classifiers people share: each tells texts apart into its classes. Take one into a save in the app and its classes become lists there, matched by name; it sorts your memories and notes from then on.</p>
+  </div>
+  <div class="stats">
+    <div class="stat"><b>{{ total }}</b><span>classifiers</span></div>
+    <div class="stat"><b>{{ total_classes }}</b><span>classes</span></div>
+    <div class="stat"><b>{{ authors }}</b><span>makers</span></div>
+  </div>
+</section>
+<section class="card">
+  <form class="find" method="get" action="/classifiers">
+    <input type="search" name="q" value="{{ q }}" placeholder="find classifiers: words, a class, an author, or #tag">
+    <input type="hidden" name="sort" value="{{ sort }}">
+    <button class="primary">find</button>
+    {% for s in sorts %}<a class="btn small{% if *s == sort %} on{% endif %}" href="/classifiers?sort={{ s }}&q={{ q_url }}">{{ s }}</a>{% endfor %}
+    {% if l.me.is_some() %}<span class="grow"></span><a class="btn small" href="/classifiers/upload">share a classifier</a>{% endif %}
+  </form>
+</section>
+{% if cards.is_empty() %}
+<section class="card dim">{% if q.is_empty() %}No classifiers here yet. {% if l.me.is_some() %}<a href="/classifiers/upload">Share the first one.</a>{% else %}<a href="/join">Join</a> and share the first one.{% endif %}{% else %}Nothing matches “{{ q }}”.{% endif %}</section>
+{% else %}
+<section class="grid">
+{% for c in cards %}{% include "clscard.html" %}{% endfor %}
+</section>
+{% endif %}
+<div class="row spread">
+  {% if page > 0 %}<a class="btn" href="/classifiers?sort={{ sort }}&q={{ q_url }}&page={{ page - 1 }}">← newer</a>{% else %}<span></span>{% endif %}
+  {% if more %}<a class="btn" href="/classifiers?sort={{ sort }}&q={{ q_url }}&page={{ page + 1 }}">more →</a>{% endif %}
+</div>
+{% endblock %}

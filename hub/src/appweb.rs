@@ -251,3 +251,86 @@ pub async fn share(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     }
     res.render(Json(envelope(&Value::Null, got)));
 }
+
+// ------------------------------------------------------------------ moving classifiers
+
+/// `POST /app/classifiers/{id}/take`: an approved hub classifier into the open save; its
+/// classes go to lists by name. Optional JSON `{as, lists: {class: key}}`.
+#[handler]
+pub async fn take_classifier(req: &mut Request, depot: &mut Depot, res: &mut Response) {
+    let id = req.param::<String>("id").unwrap_or_default();
+    let args: Value = req.parse_json_with_max_size(64 * 1024).await.unwrap_or(Value::Null);
+    let who = owner(me(depot));
+    let ip = crate::web::client_ip(req);
+    let got = async {
+        let o = who?;
+        if !hub().limiter.allow(ip, "clstake", 120, 3600) {
+            return Err("that's a lot of classifiers; try again in a while".to_string());
+        }
+        let c = hub()
+            .store
+            .classifier(&id)?
+            .filter(|c| c.status == Status::Approved)
+            .ok_or("no such classifier on the hub")?;
+        let file = hub().store.classifier_path(&c.id).ok_or("no such classifier on the hub")?;
+        let max = hub().classifier_max();
+        let took = tokio::task::spawn_blocking(move || crate::clshub::take_into(&workspaces().get(&o), &file, max, &args))
+            .await
+            .map_err(|e| e.to_string())??;
+        let who_took = me(depot)
+            .map(|u| u.name.to_lowercase())
+            .unwrap_or_else(|| "local".into());
+        hub().classifier_downloaded(&c, &who_took).ok();
+        Ok(took)
+    }
+    .await;
+    if got.is_err() {
+        res.status_code(StatusCode::BAD_REQUEST);
+    }
+    res.render(Json(envelope(&Value::Null, got)));
+}
+
+/// `POST /app/classifiers/share`: a classifier from the open save onto the hub (`name`
+/// of the classifier in the save; `title`, `description`, `tags` for the hub)
+#[handler]
+pub async fn share_classifier(req: &mut Request, depot: &mut Depot, res: &mut Response) {
+    let args: Value = req.parse_json_with_max_size(64 * 1024).await.unwrap_or(Value::Null);
+    let user = me(depot).cloned();
+    let ip = crate::web::client_ip(req);
+    let got = async {
+        let user = user.ok_or("log in to share on the hub")?;
+        let o = owner(Some(&user))?;
+        if !hub().limiter.allow(ip, "clsupload", 20, 3600) {
+            return Err("that's a lot of uploads; try again in a while".to_string());
+        }
+        let s = |k: &str| args.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+        let name = s("name");
+        if name.trim().is_empty() {
+            return Err("say which classifier (`name`)".into());
+        }
+        let (description, author) = (s("description"), user.name.clone());
+        let bytes = {
+            let name = name.clone();
+            let description = description.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::clshub::export_from(&workspaces().get(&o), &name, &description, &author)
+            })
+            .await
+            .map_err(|e| e.to_string())??
+        };
+        let title = if s("title").trim().is_empty() { name } else { s("title") };
+        let c = hub()
+            .accept_classifier_bytes(&user, (&title, &description, &s("tags")), bytes, None)
+            .await?;
+        Ok(json!({
+            "id": c.id,
+            "status": if c.status == Status::Approved { "approved" } else { "pending" },
+            "url": format!("/classifiers/{}", c.id),
+        }))
+    }
+    .await;
+    if got.is_err() {
+        res.status_code(StatusCode::BAD_REQUEST);
+    }
+    res.render(Json(envelope(&Value::Null, got)));
+}
