@@ -6,6 +6,10 @@
 
 mod backend;
 mod gem;
+mod icons;
+mod prefs;
+mod theme;
+mod ui;
 
 use dioxus::prelude::*;
 

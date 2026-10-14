@@ -114,6 +114,26 @@ pub struct Note {
     pub edits: Vec<String>,
 }
 
+/// what to find in the query model (`entries.query`)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct EntryQuery {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub words: String,
+    /// ordinal or reversed, with `from`/`to`
+    pub bucket: String,
+    pub from: Option<i64>,
+    pub to: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub until: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    /// notes, memories, or anything
+    pub kind: String,
+    pub limit: usize,
+}
+
 /// which notes: words, tags (all, or any), and a time range (RFC 3339, created)
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct NoteQuery {
@@ -194,7 +214,7 @@ pub struct Stats {
 /// one sum and how many texts it holds, in a mode
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub struct BucketCount {
-    pub sum: u64,
+    pub sum: i64,
     pub count: u64,
 }
 
@@ -344,13 +364,31 @@ pub trait Backend {
             json!({ "bundle": bundle, "name": name, "merge": merge }),
         ))
     }
-    /// weum's `await memory.backup`: the texts in one JSON, everything else in another
+    /// weum's `await memory.backup`: the texts in one JSON, everything else in another;
+    /// on disk the backend writes the two files (their paths come back), elsewhere the
+    /// two documents come back to be downloaded
     fn backup(&self, name: &str) -> Fut<Backup> {
+        if self.on_disk() {
+            return typed(self.call("saves.backup", json!({ "name": name })));
+        }
         let f = self.call("saves.export", json!({ "name": name }));
         Box::pin(async move {
             let b = f.await?;
             Ok(Backup::from_bundle(&b))
         })
+    }
+    /// weum's `all-of-it.json` (or a backup's texts.json) into the open save, or a new one
+    /// named `new_save`
+    fn import_texts(&self, json_text: &str, new_save: &str) -> Fut<Imported> {
+        if self.on_disk() {
+            return typed(self.call("saves.import_texts", json!({ "data": json_text, "name": new_save })));
+        }
+        let parsed: Result<Value, String> = serde_json::from_str(json_text).map_err(|e| e.to_string());
+        let bundle = parsed.and_then(|v| weum_bundle(new_save, &v).map(|b| b.0));
+        match bundle {
+            Ok(b) => self.import_bundle(b, new_save, new_save.is_empty()),
+            Err(e) => Box::pin(async move { Err(e) }),
+        }
     }
 
     // ---- texts (memories) and sums
@@ -405,6 +443,51 @@ pub trait Backend {
     }
     fn unlist(&self, list: &str) -> Fut<u64> {
         field(self.call("lists.unlist", json!({ "list": list })), "removed")
+    }
+
+    // ---- tags on any entry
+    fn tag(&self, key: &str, tag: &str) -> Fut<()> {
+        unit(self.call("tags.add", json!({ "key": key, "tag": tag })))
+    }
+    fn untag(&self, key: &str, tag: &str) -> Fut<()> {
+        unit(self.call("tags.remove", json!({ "key": key, "tag": tag })))
+    }
+    /// every tag and how many entries carry it, the most used first
+    fn all_tags(&self) -> Fut<Vec<(String, u64)>> {
+        let f = self.call("tags.all", json!({}));
+        Box::pin(async move {
+            let v = f.await?;
+            Ok(v.as_array()
+                .into_iter()
+                .flatten()
+                .map(|t| {
+                    (
+                        t["tag"].as_str().unwrap_or("").to_string(),
+                        t["count"].as_u64().unwrap_or(0),
+                    )
+                })
+                .collect())
+        })
+    }
+    /// the entries carrying all (or any) of these tags
+    fn tagged(&self, tags: &[String], any: bool) -> Fut<Vec<Hit>> {
+        typed(self.call(
+            "tags.entries",
+            json!({ "tags": tags, "mode": if any { "or" } else { "and" } }),
+        ))
+    }
+    /// weum's notes on an entry, oldest first
+    fn notes_on(&self, key: &str) -> Fut<Vec<Hit>> {
+        typed(self.call("notes.on", json!({ "key": key })))
+    }
+    /// the query model: words, a sum range, a creation time range, a tag, a kind
+    fn query(&self, q: &EntryQuery) -> Fut<(u64, Vec<Hit>)> {
+        let f = self.call("entries.query", serde_json::to_value(q).unwrap_or_default());
+        Box::pin(async move {
+            let mut v = f.await?;
+            let hits = serde_json::from_value(v["hits"].take()).map_err(|e| e.to_string())?;
+            Ok((v["total"].as_u64().unwrap_or(0), hits))
+        })
     }
 
     // ---- notes

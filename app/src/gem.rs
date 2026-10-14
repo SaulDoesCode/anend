@@ -11,18 +11,16 @@ pub enum Mode {
     #[default]
     Ordinal,
     Reversed,
-    Atbash,
     Frequency,
 }
 
 impl Mode {
-    pub const ALL: [Mode; 4] = [Mode::Ordinal, Mode::Reversed, Mode::Atbash, Mode::Frequency];
+    pub const ALL: [Mode; 3] = [Mode::Ordinal, Mode::Reversed, Mode::Frequency];
 
     pub fn name(self) -> &'static str {
         match self {
             Mode::Ordinal => "ordinal",
             Mode::Reversed => "reversed",
-            Mode::Atbash => "atbash",
             Mode::Frequency => "frequency",
         }
     }
@@ -31,19 +29,16 @@ impl Mode {
         match self {
             Mode::Ordinal => "O",
             Mode::Reversed => "R",
-            Mode::Atbash => "A",
             Mode::Frequency => "F",
         }
     }
 
-    /// the sum whose shared values colour the underlines in this mode (docs/next.md B):
-    /// ordinal by reversed groups (weum), reversed by ordinal groups (weum), atbash by the
-    /// ordinal ones, frequency by atbash
+    /// the sum whose shared values colour the underlines in this mode: ordinal by
+    /// reversed groups, reversed by ordinal groups (weum), frequency by ordinal ones
     pub fn grouping(self) -> Mode {
         match self {
             Mode::Ordinal => Mode::Reversed,
-            Mode::Reversed | Mode::Atbash => Mode::Ordinal,
-            Mode::Frequency => Mode::Atbash,
+            Mode::Reversed | Mode::Frequency => Mode::Ordinal,
         }
     }
 }
@@ -53,7 +48,6 @@ impl Mode {
 pub struct Measure {
     pub ordinal: u64,
     pub reversed: u64,
-    pub atbash: u64,
     /// weum's letter table (`e1i1l1n1s1t1`)
     pub frequency: String,
     /// every byte counted as 1 to 256 (a separate measure, not a mode)
@@ -67,7 +61,6 @@ impl Measure {
         Measure {
             ordinal: s.max(0) as u64,
             reversed: r.max(0) as u64,
-            atbash: m.atbash as u64,
             frequency: m.frequency,
             bytes: byte_sum(text),
         }
@@ -77,7 +70,7 @@ impl Measure {
         match mode {
             Mode::Ordinal => self.ordinal,
             Mode::Reversed => self.reversed,
-            Mode::Atbash | Mode::Frequency => self.atbash,
+            Mode::Frequency => self.ordinal,
         }
     }
 
@@ -104,7 +97,7 @@ pub fn sum_in(text: &str, mode: Mode) -> u64 {
     match mode {
         Mode::Ordinal => sums(text).0,
         Mode::Reversed => sums(text).1,
-        Mode::Atbash | Mode::Frequency => memory::measure(text).atbash as u64,
+        Mode::Frequency => sums(text).0,
     }
 }
 
