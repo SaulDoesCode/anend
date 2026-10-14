@@ -111,14 +111,20 @@ ergonomics" and approved this plan.
      imported. Backups write a texts JSON and an other-data JSON.
 2. **Gematria checked against weum:** atbash per `alphavert`, and the colouring groups per
    mode.
-3. **The 2D UI is written once in HTML/CSS** (`hub/web`). The desktop app becomes a
-   native window around it (Tauri/wry) with the Rust core running in-process. This
-   fixes:
-   - **Text and input:** crisp text, typing latency, and zoom.
-   - **Parity:** the desktop, web app and hub look the same by construction.
-
-   The space stays 3D (three.js in that same UI; Bevy only if it proves better). The
-   Bevy 2D views are retired once the webview desktop app reaches parity.
+3. **The UI is written once, in Rust, with Dioxus** (decided 14 Oct, replacing the
+   earlier HTML/CSS + Tauri idea; the user asked for Rust).
+   - **One codebase:** RSX components shared by the desktop app (Dioxus desktop: the
+     system webview, so browser-quality text, zoom and fast input) and the web app
+     (WebAssembly rendering real HTML).
+   - **Parity by construction:** the desktop, web app and hub look the same.
+   - **The core runs in the browser:** the Rust core compiles to WebAssembly, with redb on
+     a storage backend over OPFS/IndexedDB. That replaces the JS offline engine
+     (`hub/web/local`) and its parity test.
+   - **The hub's pages and API:** served from the same Rust code (Dioxus fullstack/SSR or
+     Salvo serving the built app).
+   - **The space:** a canvas in the app, starting with the existing three.js space through
+     interop; a wgpu/Rust renderer later if it earns it.
+   - **Bevy and the old JS app:** retired once the Dioxus app reaches parity.
 4. **One API:** the app ops (WebSocket/REST) are the API. The desktop, web app, scripts and
    lenses all use the same calls.
 5. **Views are lenses over one query model:** words, sums, tags, time, classifiers and
@@ -130,8 +136,8 @@ ergonomics" and approved this plan.
    - the scripting language.
 
 Order of work: (1) the entry graph store, the weum import and backup → (2) gematria
-correctness → (3) the API on the new store → (4) the webview desktop shell, text quality
-and latency → (5) memory parity, right-click actions, undo → (6) lists, reader and stats as
+correctness → (3) the API on the new store → (4) the Dioxus app (desktop and web), text quality and
+latency → (5) memory parity, right-click actions, undo → (6) lists, reader and stats as
 lenses → (7) server modes and security → (8) generation and the language.
 
 ## Feedback after running the desktop app (14 Oct): the next round
