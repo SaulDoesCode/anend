@@ -383,3 +383,39 @@ pub fn tooltips(
         node.top = px(top.max(4.0));
     }
 }
+
+/// where the app's own icon (assets/icon.png, full colour) goes: the left of the top bar
+#[derive(Component, Default, Clone)]
+pub struct AppMark;
+
+/// gives each new [`AppMark`] the app's icon, decoded once
+pub fn fill_app_mark(
+    mut commands: Commands,
+    marks: Query<Entity, (With<AppMark>, Without<ImageNode>)>,
+    mut images: ResMut<Assets<Image>>,
+    mut handle: Local<Option<Handle<Image>>>,
+) {
+    if marks.is_empty() {
+        return;
+    }
+    if handle.is_none() {
+        match Image::from_buffer(
+            include_bytes!("../assets/icon.png"),
+            ImageType::Extension("png"),
+            CompressedImageFormats::NONE,
+            true,
+            ImageSampler::linear(),
+            RenderAssetUsages::RENDER_WORLD,
+        ) {
+            Ok(img) => *handle = Some(images.add(img)),
+            Err(e) => {
+                warn!("the app's icon didn't decode: {}", e);
+                return;
+            }
+        }
+    }
+    let Some(h) = handle.clone() else { return };
+    for e in &marks {
+        commands.entity(e).insert(ImageNode::new(h.clone()));
+    }
+}

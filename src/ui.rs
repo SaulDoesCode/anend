@@ -403,6 +403,14 @@ fn nav() -> impl Scene {
         NavBar
         crate::zen::Chrome
         Children [
+            // the app's own icon, as the hub and the web app show it
+            Node {
+                width: px(22),
+                height: px(22),
+                margin: UiRect::axes(px(4), px(0)),
+            }
+            crate::icons::AppMark
+            --
             @nav_button(Icon::Editor, "editor", Route::Editor, Action::GotoEditor)
             --
             @nav_button(Icon::Reader, "reader", Route::Reader, Action::GotoReader)

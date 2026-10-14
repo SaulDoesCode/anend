@@ -263,6 +263,7 @@ fn run(args: Args) {
         ),
     )
     .add_systems(Update, window_icon)
+    .add_systems(Update, icons::fill_app_mark)
     .add_systems(
         Update,
         (

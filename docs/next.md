@@ -50,14 +50,14 @@ To pick up:
     or range typed in the bar, `sum_range`, tested). Icons `Shield`, `Alert` added to
     `src/icons.rs`. The classifier list's names no longer wrap word by word (NoWrap).
     `seed_demo` with `ANEND_SEED_TRAIN=1` also trains "kind" and "fruit or not" (tiny).
-  - **Bug found while driving, not fixed:** buttons inside the validators card don't get
-    hover or clicks (the "kind" button under "+ checked by"); a hover probe showed the
-    pointer hitting the card node (1452) but not its child button, while buttons in the
-    cards above and below (near texts, outputs) work. Look at what differs (maybe the
-    card's row children vs `Pickable`, or the long dim text after the row); a debug
-    system logging `HoverMap` entities was used (removed).
-  - Left: fix that bug, then drive and screenshot (scratchpad `shots-desktop4/`, demo save
-    there `demo.redb`): validators + disagreements, hub browse/take/share against a fresh
+  - **The validators card is fine (checked 14 Oct):** the "bug" was the drive scripts
+    clicking a row too high (y 470 is the "none: …" line; "+ checked by kind" is at y≈498).
+    Clicking it adds the validator; its class buttons, slider, gate/scale and × work, and
+    "find them" lists the disagreements with ✓/✗ per classifier.
+  - **The app's icon** is at the left of the desktop top bar (`icons::AppMark`), as on the
+    hub and in the web app.
+  - Left: drive and screenshot (scratchpad `shots-desktop4/`, demo save
+    there `demo.redb`): hub browse/take/share against a fresh
     `anend-hub --admin you --addr 127.0.0.1:18221 --data <scratch>` with a seeded
     classifier, sums in filters, the guide button. The "indented text in name boxes after
     a redraw" is NOT investigated yet. docs/guide.md NOT updated yet (item 3 of the brief:
