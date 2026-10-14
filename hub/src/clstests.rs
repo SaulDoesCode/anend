@@ -49,7 +49,11 @@ fn person(name: &str, role: Role) -> String {
             ..Default::default()
         })
         .unwrap();
-    format!("{}={}", auth::COOKIE, auth::start_session(&web::hub().store, name).unwrap())
+    format!(
+        "{}={}",
+        auth::COOKIE,
+        auth::start_session(&web::hub().store, name).unwrap()
+    )
 }
 
 async fn body(mut r: Response) -> (u16, String) {
@@ -105,10 +109,18 @@ async fn classifier_site() {
     let ann = person("ann", Role::Member);
     let root = person("root", Role::Admin);
     // saul's workspace has a trained classifier (made, then let go so the hub opens it)
-    drop(crate::clshub::tests::trained(&dir.join("users").join("saul").join("saves")));
+    drop(crate::clshub::tests::trained(
+        &dir.join("users").join("saul").join("saves"),
+    ));
 
     // another site can't make saul share
-    let (code, _) = post_json("/app/classifiers/share", &saul, json!({ "name": "kind" }), Some("http://evil.example")).await;
+    let (code, _) = post_json(
+        "/app/classifiers/share",
+        &saul,
+        json!({ "name": "kind" }),
+        Some("http://evil.example"),
+    )
+    .await;
     assert_eq!(code, 403);
     assert!(web::hub().store.classifiers().unwrap().is_empty());
     // nor can nobody
@@ -138,7 +150,10 @@ async fn classifier_site() {
     // the admin panel shows it waiting
     let (code, page) = get("/admin", Some(&root)).await;
     assert_eq!(code, 200);
-    assert!(page.contains("classifiers waiting (1)") && page.contains("fruit or rock"), "{page}");
+    assert!(
+        page.contains("classifiers waiting (1)") && page.contains("fruit or rock"),
+        "{page}"
+    );
     // only an admin's verdict counts
     post_form(&format!("/admin/classifiers/{id}"), &ann, "action=approve").await;
     assert_eq!(get(&format!("/classifiers/{id}"), None).await.0, 404);
@@ -157,7 +172,9 @@ async fn classifier_site() {
     assert!(code == 200 && page.contains("take into my save") && page.contains("rocks"));
     assert_eq!(get("/classifiers/upload", Some(&ann)).await.0, 200);
 
-    let mut r = TestClient::get(format!("{BASE}/classifiers/{id}/download")).send(crate::router()).await;
+    let mut r = TestClient::get(format!("{BASE}/classifiers/{id}/download"))
+        .send(crate::router())
+        .await;
     let bytes = r.take_bytes(None).await.unwrap();
     assert!(bytes.starts_with(b"ANENDCLM"));
     assert_eq!(web::hub().store.classifier(&id).unwrap().unwrap().downloads, 1);
@@ -167,10 +184,21 @@ async fn classifier_site() {
     assert_eq!(code, 200, "{v}");
     assert_eq!(v["data"]["name"], "kind");
     let ws = app::workspaces().get("ann");
-    let p = app::call(&ws, "classify.predict", &json!({ "name": "kind", "texts": ["granite slate flint", "plum peach apple"] })).unwrap();
+    let p = app::call(
+        &ws,
+        "classify.predict",
+        &json!({ "name": "kind", "texts": ["granite slate flint", "plum peach apple"] }),
+    )
+    .unwrap();
     assert_eq!(p["results"][0]["class"], "rocks", "{p}");
     assert_eq!(p["results"][1]["class"], "fruit", "{p}");
-    let (code, _) = post_json(&format!("/app/classifiers/{id}/take"), &ann, json!({}), Some("http://evil.example")).await;
+    let (code, _) = post_json(
+        &format!("/app/classifiers/{id}/take"),
+        &ann,
+        json!({}),
+        Some("http://evil.example"),
+    )
+    .await;
     assert_eq!(code, 403);
 
     // stars: ann may, saul (its author) may not
@@ -200,7 +228,10 @@ async fn classifier_site() {
         .send(crate::router())
         .await;
     assert_eq!(body(r).await.0, 303);
-    assert_eq!(web::hub().store.classifier(&id).unwrap().unwrap().name, "fruit or stone");
+    assert_eq!(
+        web::hub().store.classifier(&id).unwrap().unwrap().name,
+        "fruit or stone"
+    );
 
     // the API takes uploads with a token only, and refuses bad files
     let token = auth::new_token(&web::hub().store, "ann", "test").unwrap();
@@ -238,7 +269,11 @@ async fn classifier_site() {
     for bad in ["..%2F..%2Fhub", "..x", "ABC", "x%00y"] {
         assert_eq!(get(&format!("/classifiers/{bad}"), Some(&root)).await.0, 404, "{bad}");
         assert_eq!(get(&format!("/api/classifiers/{bad}"), None).await.0, 404, "{bad}");
-        assert_eq!(get(&format!("/classifiers/{bad}/download"), Some(&root)).await.0, 404, "{bad}");
+        assert_eq!(
+            get(&format!("/classifiers/{bad}/download"), Some(&root)).await.0,
+            404,
+            "{bad}"
+        );
     }
 
     // saul deletes his; it's gone, file and all
@@ -298,7 +333,14 @@ async fn doors() {
     // nothing is framed by another site; the app's page runs only the hub's scripts
     let r = TestClient::get(format!("{BASE}/")).send(crate::router()).await;
     assert_eq!(r.headers().get("x-frame-options").unwrap(), "DENY");
-    assert!(r.headers().get("content-security-policy").unwrap().to_str().unwrap().contains("frame-ancestors 'none'"));
+    assert!(
+        r.headers()
+            .get("content-security-policy")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("frame-ancestors 'none'")
+    );
     let r = TestClient::get(format!("{BASE}/app/")).send(crate::router()).await;
     assert_eq!(r.headers().get("content-security-policy").unwrap(), web::APP_CSP);
     assert_eq!(r.headers().get("x-content-type-options").unwrap(), "nosniff");

@@ -87,7 +87,11 @@ impl Hub {
         let (bytes, module) = read_module(bytes, self.classifier_max()).await?;
         let sum = clsmodule::summary(&module);
         let (name, description, tags) = words;
-        let name = if name.trim().is_empty() { sum.name.as_str() } else { name };
+        let name = if name.trim().is_empty() {
+            sum.name.as_str()
+        } else {
+            name
+        };
         let description = if description.trim().is_empty() {
             sum.description.chars().take(4000).collect()
         } else {
@@ -298,9 +302,7 @@ impl Hub {
 
 /// whether a user may change or delete a shared classifier: its author or an admin
 pub fn may_edit(user: Option<&User>, c: &ClassifierRec) -> bool {
-    user.is_some_and(|u| {
-        Hub::active(u) && (u.is_admin() || u.name.eq_ignore_ascii_case(&c.author))
-    })
+    user.is_some_and(|u| Hub::active(u) && (u.is_admin() || u.name.eq_ignore_ascii_case(&c.author)))
 }
 
 /// takes a hub classifier's module into a workspace's open save: classes go to lists by
@@ -373,18 +375,31 @@ pub(crate) mod tests {
     pub fn trained(dir: &Path) -> Workspace {
         let ws = Workspace::new(dir.to_path_buf());
         let c = |op: &str, a: Value| app_call(&ws, op, &a).unwrap();
-        let key = |t: &str| c("mem.saturate", json!({ "text": t }))["key"].as_str().unwrap().to_string();
+        let key = |t: &str| {
+            c("mem.saturate", json!({ "text": t }))["key"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
         let (fruit, rocks) = (key("fruit"), key("rocks"));
         let f = ["apple", "banana", "cherry", "mango", "peach", "plum", "grape", "melon"];
-        let r = ["rock", "stone", "granite", "basalt", "flint", "slate", "quartz", "shale"];
+        let r = [
+            "rock", "stone", "granite", "basalt", "flint", "slate", "quartz", "shale",
+        ];
         for i in 0..20 {
             let a = key(&format!("{} {} {}", f[i % 8], f[(i * 3 + 1) % 8], f[(i / 8 + 4) % 8]));
             let b = key(&format!("{} {} {}", r[i % 8], r[(i * 5 + 2) % 8], r[(i / 8 + 4) % 8]));
             c("lists.enlist", json!({ "list": fruit, "member": a }));
             c("lists.enlist", json!({ "list": rocks, "member": b }));
         }
-        c("classify.create", json!({ "name": "kind", "classes": [fruit, rocks], "preset": "tiny" }));
-        c("classify.train", json!({ "name": "kind", "epochs": 6, "threads": 2, "wait": true }));
+        c(
+            "classify.create",
+            json!({ "name": "kind", "classes": [fruit, rocks], "preset": "tiny" }),
+        );
+        c(
+            "classify.train",
+            json!({ "name": "kind", "epochs": 6, "threads": 2, "wait": true }),
+        );
         ws
     }
 
@@ -456,13 +471,19 @@ pub(crate) mod tests {
             .accept_classifier_bytes(&saul, ("kind 2", "", ""), bytes.clone(), Some(&c))
             .await
             .unwrap();
-        assert_eq!((v2.version, v2.status, v2.stars, v2.downloads), (2, Status::Approved, 1, 2));
+        assert_eq!(
+            (v2.version, v2.status, v2.stars, v2.downloads),
+            (2, Status::Approved, 1, 2)
+        );
 
         hub.review_classifier(&admin, &c.id, "feature", "").unwrap();
         assert_eq!(hub.find_classifiers("", Sort::Featured, 0).unwrap().0.len(), 1);
         hub.review_classifier(&admin, &c.id, "reject", "too small").unwrap();
         let r = hub.store.classifier(&c.id).unwrap().unwrap();
-        assert_eq!((r.status, r.note.as_str(), r.featured), (Status::Rejected, "too small", false));
+        assert_eq!(
+            (r.status, r.note.as_str(), r.featured),
+            (Status::Rejected, "too small", false)
+        );
 
         // only its author or an admin may change it
         assert!(may_edit(Some(&saul), &r));
@@ -524,7 +545,11 @@ pub(crate) mod tests {
         assert!(hub.store.classifiers().unwrap().is_empty());
         assert_eq!(std::fs::read_dir(dir.join("classifiers")).unwrap().count(), 0);
         // the good one still goes in
-        assert!(hub.accept_classifier_bytes(&saul, ("x", "", ""), good, None).await.is_ok());
+        assert!(
+            hub.accept_classifier_bytes(&saul, ("x", "", ""), good, None)
+                .await
+                .is_ok()
+        );
         // a waiting account can't share
         let new = hub
             .store
@@ -533,7 +558,11 @@ pub(crate) mod tests {
                 ..Default::default()
             })
             .unwrap();
-        assert!(hub.accept_classifier_bytes(&new, ("x", "", ""), b"x".to_vec(), None).await.is_err());
+        assert!(
+            hub.accept_classifier_bytes(&new, ("x", "", ""), b"x".to_vec(), None)
+                .await
+                .is_err()
+        );
         std::fs::remove_dir_all(dir).ok();
     }
 }

@@ -8,8 +8,8 @@ use anend_core::classifiers::{self as clfs, Input, Judged, Stack, Summary, Tick,
 use anend_core::classify::steer::Output;
 use anend_core::classify::{Flow, Gains, HeadKind, Pool};
 use anend_core::memory::Ref;
-use anend_core::{clsmodule, filters, memo};
 use anend_core::store::Store;
+use anend_core::{clsmodule, filters, memo};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
@@ -119,7 +119,11 @@ fn job_key(store: &Store, name: &str) -> String {
 }
 
 fn job(store: &Store, name: &str) -> Option<Arc<Job>> {
-    jobs().lock().unwrap_or_else(|e| e.into_inner()).get(&job_key(store, name)).cloned()
+    jobs()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&job_key(store, name))
+        .cloned()
 }
 
 fn training(store: &Store, name: &str) -> bool {
@@ -215,7 +219,11 @@ fn start(store: Arc<Store>, name: &str, a: &TrainArgs, wait: bool) -> Res {
         let r = t.run(|tick| {
             j.tick(tick);
             too_long = limit.is_some_and(|l| j.started.elapsed() > l);
-            if too_long || j.cancel.load(Ordering::Relaxed) { Flow::Stop } else { Flow::Go }
+            if too_long || j.cancel.load(Ordering::Relaxed) {
+                Flow::Stop
+            } else {
+                Flow::Go
+            }
         });
         let r = r.and_then(|s| {
             if too_long {
@@ -370,7 +378,10 @@ fn details(store: &Store, d: &clfs::Definition) -> Res {
             None => Value::Null,
         },
     );
-    o.insert("job".into(), job(store, &d.name).map_or(Value::Null, |j| json!(j.snapshot())));
+    o.insert(
+        "job".into(),
+        job(store, &d.name).map_or(Value::Null, |j| json!(j.snapshot())),
+    );
     Ok(v)
 }
 
@@ -460,7 +471,9 @@ fn inputs_arg(args: &Value) -> Result<Vec<Input>, String> {
                 from: n.clone(),
                 coupling: 1.0,
             }),
-            o => serde_json::from_value(o.clone()).map_err(|e| format!("an input is a name or {{from, coupling}}: {e}")),
+            o => {
+                serde_json::from_value(o.clone()).map_err(|e| format!("an input is a name or {{from, coupling}}: {e}"))
+            }
         })
         .collect()
 }
@@ -470,11 +483,13 @@ fn inputs_arg(args: &Value) -> Result<Vec<Input>, String> {
 pub fn call(store: Arc<Store>, op: &str, args: &Value) -> Res {
     let st: &Store = &store;
     match op {
-        "classify.list" => Ok(Value::Array(
-            st.classifiers()?.iter().map(|d| summary(st, d)).collect(),
-        )),
+        "classify.list" => Ok(Value::Array(st.classifiers()?.iter().map(|d| summary(st, d)).collect())),
         "classify.create" => {
-            let lists = args.get("classes").and_then(Value::as_array).cloned().unwrap_or_default();
+            let lists = args
+                .get("classes")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
             let classes = lists
                 .iter()
                 .map(|l| parse_ref(l.as_str().unwrap_or("")))
@@ -500,14 +515,20 @@ pub fn call(store: Arc<Store>, op: &str, args: &Value) -> Res {
             let name = name_arg(args)?;
             not_training(st, &[name.to_string()])?;
             st.delete_classifier(name)?;
-            jobs().lock().unwrap_or_else(|e| e.into_inner()).remove(&job_key(st, name));
+            jobs()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&job_key(st, name));
             Ok(Value::Null)
         }
         "classify.couple" => {
             let name = name_arg(args)?;
             let mut def = st.classifier(name)?;
             let from = s(args, "from");
-            let c = args.get("coupling").and_then(Value::as_f64).ok_or("coupling is a number")? as f32;
+            let c = args
+                .get("coupling")
+                .and_then(Value::as_f64)
+                .ok_or("coupling is a number")? as f32;
             if !(0.0..=10.0).contains(&c) {
                 return Err("coupling from 0 to 10".into());
             }
@@ -741,7 +762,10 @@ fn bands_arg(args: &Value) -> std::ops::RangeInclusive<u32> {
     match args.get("band").and_then(Value::as_u64) {
         Some(b) => (b as u32)..=(b as u32),
         None => {
-            let lo = args.get("min").and_then(Value::as_f64).map_or(0, |p| memo::band(p as f32));
+            let lo = args
+                .get("min")
+                .and_then(Value::as_f64)
+                .map_or(0, |p| memo::band(p as f32));
             lo..=9
         }
     }
@@ -769,7 +793,11 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
                 return Err(format!("train {name:?} first"));
             }
             let refs: Option<Vec<Ref>> = match args.get("keys").and_then(Value::as_array) {
-                Some(v) => Some(v.iter().map(|k| parse_ref(k.as_str().unwrap_or(""))).collect::<Result<_, _>>()?),
+                Some(v) => Some(
+                    v.iter()
+                        .map(|k| parse_ref(k.as_str().unwrap_or("")))
+                        .collect::<Result<_, _>>()?,
+                ),
                 None => None,
             };
             room_for_a_job(st)?;
@@ -793,7 +821,11 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
                     let mut s = j.state.lock().unwrap_or_else(|e| e.into_inner());
                     s["done"] = json!(done);
                     s["total"] = json!(total);
-                    if j.cancel.load(Ordering::Relaxed) { Flow::Stop } else { Flow::Go }
+                    if j.cancel.load(Ordering::Relaxed) {
+                        Flow::Stop
+                    } else {
+                        Flow::Go
+                    }
                 });
                 let mut s = j.state.lock().unwrap_or_else(|e| e.into_inner());
                 match r {
@@ -820,7 +852,11 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
         }
         "classify.index_job" => {
             let name = name_arg(args)?;
-            let j = index_jobs().lock().unwrap_or_else(|e| e.into_inner()).get(&job_key(st, name)).cloned();
+            let j = index_jobs()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&job_key(st, name))
+                .cloned();
             Ok(match j {
                 Some(j) => index_snapshot(&j),
                 None => json!({ "name": name, "state": "idle" }),
@@ -828,7 +864,12 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
         }
         "classify.index_cancel" => {
             let name = name_arg(args)?;
-            let j = index_jobs().lock().unwrap_or_else(|e| e.into_inner()).get(&job_key(st, name)).cloned().ok_or("it isn't being indexed")?;
+            let j = index_jobs()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&job_key(st, name))
+                .cloned()
+                .ok_or("it isn't being indexed")?;
             j.cancel.store(true, Ordering::Relaxed);
             Ok(index_snapshot(&j))
         }
@@ -837,8 +878,15 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
             let classes = stack.def().class_names();
             let counts = st.bucket_counts(&stack)?;
             let mut per: Vec<Value> = Vec::new();
-            for (i, c) in classes.iter().enumerate().map(|(i, c)| (i as u32, c.clone())).chain([(memo::UNCERTAIN, "uncertain".to_string())]) {
-                let bands: Vec<usize> = (0..memo::BANDS).map(|b| counts.iter().find(|x| x.0 == (i, b)).map_or(0, |x| x.1)).collect();
+            for (i, c) in classes
+                .iter()
+                .enumerate()
+                .map(|(i, c)| (i as u32, c.clone()))
+                .chain([(memo::UNCERTAIN, "uncertain".to_string())])
+            {
+                let bands: Vec<usize> = (0..memo::BANDS)
+                    .map(|b| counts.iter().find(|x| x.0 == (i, b)).map_or(0, |x| x.1))
+                    .collect();
                 per.push(json!({ "class": c, "index": if i == memo::UNCERTAIN { Value::Null } else { json!(i) }, "bands": bands, "count": bands.iter().sum::<usize>() }));
             }
             Ok(json!({
@@ -859,7 +907,11 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
             } else {
                 let j = judged(st, args)?;
                 let r = memo::read(&stack, memo::stamp(&stack), &j.text);
-                if r.members.is_empty() { memo::UNCERTAIN } else { r.top as u32 }
+                if r.members.is_empty() {
+                    memo::UNCERTAIN
+                } else {
+                    r.top as u32
+                }
             };
             let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(500).clamp(1, 5000) as usize;
             let (filed, stale) = st.class_bucket(&stack, c, bands_arg(args))?;
@@ -876,7 +928,11 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
         "classify.near" => {
             let stack = st.stack(name_arg(args)?)?;
             let j = judged(st, args)?;
-            let by = if s(args, "by") == "outputs" { memo::By::Outputs } else { memo::By::Embedding };
+            let by = if s(args, "by") == "outputs" {
+                memo::By::Outputs
+            } else {
+                memo::By::Embedding
+            };
             let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(20).clamp(1, 500) as usize;
             let me = match &j.key {
                 Some(k) => st.memo_rows(&stack, &[(k.clone(), j.text.as_str())], pool())?.remove(0),
@@ -897,7 +953,10 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
             if keys.len() > 5000 {
                 return Err("at most 5000 keys".into());
             }
-            let refs: Vec<Ref> = keys.iter().map(|k| parse_ref(k.as_str().unwrap_or(""))).collect::<Result<_, _>>()?;
+            let refs: Vec<Ref> = keys
+                .iter()
+                .map(|k| parse_ref(k.as_str().unwrap_or("")))
+                .collect::<Result<_, _>>()?;
             let tints = st.tints(&stack, &refs, pool())?;
             let classes = stack.def().class_names();
             Ok(json!({
@@ -918,30 +977,54 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
                     verdicts.push(json!({ "name": n, "classes": classes, "trained": false }));
                     continue;
                 }
-                let (row, chk) = st.checked_rows(&stack, &[(r.clone(), text.as_str())], pool())?.remove(0);
+                let (row, chk) = st
+                    .checked_rows(&stack, &[(r.clone(), text.as_str())], pool())?
+                    .remove(0);
                 let mut v = row_json(&classes, &row);
                 v["name"] = json!(n);
                 v["classes"] = json!(classes);
                 v["trained"] = json!(true);
                 v["valid"] = json!(chk.valid);
                 v["checked"] = json!(chk.probs);
-                v["validators"] = json!(st.validators(n)?.iter().map(|x| &x.by).zip(chk.checks).collect::<Vec<_>>());
-                v["palette"] = json!(memo::palette(classes.len()).into_iter().map(hex_colour).collect::<Vec<_>>());
+                v["validators"] = json!(
+                    st.validators(n)?
+                        .iter()
+                        .map(|x| &x.by)
+                        .zip(chk.checks)
+                        .collect::<Vec<_>>()
+                );
+                v["palette"] = json!(
+                    memo::palette(classes.len())
+                        .into_iter()
+                        .map(hex_colour)
+                        .collect::<Vec<_>>()
+                );
                 verdicts.push(v);
             }
-            let all: Vec<Value> = st.classifiers()?.iter().map(|d| json!({ "name": d.name, "trained": d.trained(), "chosen": chosen.contains(&d.name) })).collect();
+            let all: Vec<Value> = st
+                .classifiers()?
+                .iter()
+                .map(|d| json!({ "name": d.name, "trained": d.trained(), "chosen": chosen.contains(&d.name) }))
+                .collect();
             Ok(json!({ "key": r.label(), "chosen": chosen, "verdicts": verdicts, "classifiers": all }))
         }
         "classify.set_index" => {
             let r = parse_ref(s(args, "key"))?;
             st.ref_text(&r)?.ok_or("didn't find that")?;
-            let names: Vec<String> = args.get("names").and_then(Value::as_array).into_iter().flatten().filter_map(|n| n.as_str().map(str::to_string)).collect();
+            let names: Vec<String> = args
+                .get("names")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|n| n.as_str().map(str::to_string))
+                .collect();
             Ok(json!({ "chosen": st.set_indexed_on(&r, &names)? }))
         }
         "classify.validators" => {
             let name = name_arg(args)?;
             if let Some(v) = args.get("set") {
-                let vals: Vec<filters::Validator> = serde_json::from_value(v.clone()).map_err(|e| format!("validators are [{{by, class, min, mode}}]: {e}"))?;
+                let vals: Vec<filters::Validator> = serde_json::from_value(v.clone())
+                    .map_err(|e| format!("validators are [{{by, class, min, mode}}]: {e}"))?;
                 st.set_validators(name, &vals)?;
             }
             Ok(json!({ "validators": st.validators(name)? }))
@@ -971,13 +1054,19 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
         }
 
         // ---- filters
-        "filters.list" => Ok(Value::Array(st.filter_presets()?.iter().map(|p| {
-            let mut v = json!(p);
-            v["reads"] = json!(p.expr.describe());
-            v
-        }).collect())),
+        "filters.list" => Ok(Value::Array(
+            st.filter_presets()?
+                .iter()
+                .map(|p| {
+                    let mut v = json!(p);
+                    v["reads"] = json!(p.expr.describe());
+                    v
+                })
+                .collect(),
+        )),
         "filters.save" => {
-            let e: filters::Expr = serde_json::from_value(args.get("expr").cloned().unwrap_or_default()).map_err(|e| format!("that filter doesn't read: {e}"))?;
+            let e: filters::Expr = serde_json::from_value(args.get("expr").cloned().unwrap_or_default())
+                .map_err(|e| format!("that filter doesn't read: {e}"))?;
             Ok(json!(st.save_filter(s(args, "name"), e, s(args, "description"))?))
         }
         "filters.delete" => {
@@ -987,7 +1076,10 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
         "filters.run" => {
             let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(200).clamp(1, 5000) as usize;
             let (e, preset) = match args.get("expr") {
-                Some(e) if !e.is_null() => (serde_json::from_value(e.clone()).map_err(|e| format!("that filter doesn't read: {e}"))?, None),
+                Some(e) if !e.is_null() => (
+                    serde_json::from_value(e.clone()).map_err(|e| format!("that filter doesn't read: {e}"))?,
+                    None,
+                ),
                 _ => {
                     let p = st.filter_preset(s(args, "name"))?;
                     (p.expr, Some(p.name))
@@ -1001,7 +1093,9 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
         }
         "filters.enlist" => {
             let (head, n) = st.enlist_filter(s(args, "name"), SCAN, pool())?;
-            Ok(json!({ "list": head.label(), "name": st.remember(&head).map(|h| h.text).unwrap_or_default(), "members": n }))
+            Ok(
+                json!({ "list": head.label(), "name": st.remember(&head).map(|h| h.text).unwrap_or_default(), "members": n }),
+            )
         }
         _ => Err(format!("there's no {op:?} here")),
     }
@@ -1015,7 +1109,11 @@ pub fn import_opts_and_take(st: &Store, m: &clsmodule::Module, args: &Value) -> 
     let lists = args
         .get("lists")
         .and_then(Value::as_object)
-        .map(|o| o.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect())
+        .map(|o| {
+            o.iter()
+                .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string())))
+                .collect()
+        })
         .unwrap_or_default();
     let o = clsmodule::ImportOpts {
         name: Some(s(args, "as").trim()).filter(|n| !n.is_empty()).map(str::to_string),
@@ -1031,8 +1129,14 @@ mod tests {
 
     #[test]
     fn job_folders() {
-        assert_eq!(key_folder("/data/users/ann/saves/notes.redb\u{0}kind"), "/data/users/ann/saves");
-        assert_eq!(key_folder("/data/users/ann/saves/a/b.redb\u{0}x/y"), "/data/users/ann/saves/a");
+        assert_eq!(
+            key_folder("/data/users/ann/saves/notes.redb\u{0}kind"),
+            "/data/users/ann/saves"
+        );
+        assert_eq!(
+            key_folder("/data/users/ann/saves/a/b.redb\u{0}x/y"),
+            "/data/users/ann/saves/a"
+        );
         assert_eq!(key_folder("plain"), "");
     }
 
@@ -1041,21 +1145,38 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("anend-clfops-{}", rand::random::<u64>()));
         let ws = Workspace::new(dir.clone());
         let c = |op: &str, a: Value| app_call(&ws, op, &a);
-        let key = |t: &str| c("mem.saturate", json!({ "text": t })).unwrap()["key"].as_str().unwrap().to_string();
+        let key = |t: &str| {
+            c("mem.saturate", json!({ "text": t })).unwrap()["key"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
         let (fruit, rocks) = (key("fruit"), key("rocks"));
         let f = ["apple", "banana", "cherry", "mango", "peach", "plum", "grape", "melon"];
-        let r = ["rock", "stone", "granite", "basalt", "flint", "slate", "quartz", "shale"];
+        let r = [
+            "rock", "stone", "granite", "basalt", "flint", "slate", "quartz", "shale",
+        ];
         for i in 0..20 {
             let a = key(&format!("{} {} {}", f[i % 8], f[(i * 3 + 1) % 8], f[(i / 8 + 4) % 8]));
             let b = key(&format!("{} {} {}", r[i % 8], r[(i * 5 + 2) % 8], r[(i / 8 + 4) % 8]));
             c("lists.enlist", json!({ "list": fruit, "member": a })).unwrap();
             c("lists.enlist", json!({ "list": rocks, "member": b })).unwrap();
         }
-        let made = c("classify.create", json!({ "name": "kind", "classes": [fruit, rocks], "preset": "tiny" })).unwrap();
+        let made = c(
+            "classify.create",
+            json!({ "name": "kind", "classes": [fruit, rocks], "preset": "tiny" }),
+        )
+        .unwrap();
         assert_eq!(made["classes"], json!(["fruit", "rocks"]));
         assert_eq!(made["trained"], false);
         assert!(c("classify.create", json!({ "name": "kind", "classes": [fruit, rocks] })).is_err());
-        assert!(c("classify.create", json!({ "name": "odd", "classes": [fruit], "preset": "huge" })).is_err());
+        assert!(
+            c(
+                "classify.create",
+                json!({ "name": "odd", "classes": [fruit], "preset": "huge" })
+            )
+            .is_err()
+        );
 
         // in the background, then waited for
         let j = c("classify.train", json!({ "name": "kind", "epochs": 6, "threads": 2 })).unwrap();
@@ -1074,27 +1195,53 @@ mod tests {
         assert_eq!(list[0]["trained"], true);
         assert!(c("classify.cancel", json!({ "name": "kind" })).is_err());
 
-        let p = c("classify.predict", json!({ "name": "kind", "texts": ["granite slate flint", "plum peach apple"] })).unwrap();
+        let p = c(
+            "classify.predict",
+            json!({ "name": "kind", "texts": ["granite slate flint", "plum peach apple"] }),
+        )
+        .unwrap();
         assert_eq!(p["results"][0]["class"], "rocks", "{p}");
         assert_eq!(p["results"][1]["class"], "fruit", "{p}");
 
-        let found = c("classify.search", json!({ "name": "kind", "class": "rocks", "limit": 5 })).unwrap();
+        let found = c(
+            "classify.search",
+            json!({ "name": "kind", "class": "rocks", "limit": 5 }),
+        )
+        .unwrap();
         let res = found["results"].as_array().unwrap();
         assert_eq!(res.len(), 5);
         assert!(res.iter().all(|x| x["top_class"] == "rocks"), "{found}");
         let probs: Vec<f64> = res.iter().map(|x| x["prob"].as_f64().unwrap()).collect();
         assert!(probs.windows(2).all(|w| w[0] >= w[1]));
         let q = c("classify.search", json!({ "name": "kind", "class": 0, "q": "plum" })).unwrap();
-        assert!(q["results"].as_array().unwrap().iter().all(|x| x["text"].as_str().unwrap().contains("plum")));
+        assert!(
+            q["results"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|x| x["text"].as_str().unwrap().contains("plum"))
+        );
 
         // yes raises the class for that text, no lowers it
         let t = "melon basalt grape";
-        let prob = || c("classify.predict", json!({ "name": "kind", "texts": [t] })).unwrap()["results"][0]["probs"][1].as_f64().unwrap();
+        let prob = || {
+            c("classify.predict", json!({ "name": "kind", "texts": [t] })).unwrap()["results"][0]["probs"][1]
+                .as_f64()
+                .unwrap()
+        };
         let p0 = prob();
-        let fb = c("classify.feedback", json!({ "name": "kind", "text": t, "class": "rocks", "yes": true })).unwrap();
+        let fb = c(
+            "classify.feedback",
+            json!({ "name": "kind", "text": t, "class": "rocks", "yes": true }),
+        )
+        .unwrap();
         let p1 = prob();
         assert!(p1 > p0, "{p0} {p1} {fb}");
-        c("classify.feedback", json!({ "name": "kind", "text": t, "class": "rocks", "yes": false, "weight": 2.0 })).unwrap();
+        c(
+            "classify.feedback",
+            json!({ "name": "kind", "text": t, "class": "rocks", "yes": false, "weight": 2.0 }),
+        )
+        .unwrap();
         assert!(prob() < p1);
         let got = c("classify.get", json!({ "name": "kind" })).unwrap();
         assert_eq!(got["feedback_count"], 2);
@@ -1103,27 +1250,68 @@ mod tests {
         // steering: a bias towards fruit moves things, and the report says how much
         let s0 = c("classify.steer", json!({ "name": "kind", "steer": {}, "save": false })).unwrap();
         assert_eq!(s0["bias"]["flipped"], 0.0);
-        let s1 = c("classify.steer", json!({ "name": "kind", "steer": { "bias": { "fruit": 4.0 }, "temperature": 2.0 } })).unwrap();
+        let s1 = c(
+            "classify.steer",
+            json!({ "name": "kind", "steer": { "bias": { "fruit": 4.0 }, "temperature": 2.0 } }),
+        )
+        .unwrap();
         assert!(s1["bias"]["mean_kl"].as_f64().unwrap() > 0.0, "{s1}");
         assert!(s1["bias"]["flipped"].as_f64().unwrap() > 0.0, "{s1}");
-        assert_eq!(c("classify.get", json!({ "name": "kind" })).unwrap()["steer"]["heads"][0]["temperature"], 2.0);
+        assert_eq!(
+            c("classify.get", json!({ "name": "kind" })).unwrap()["steer"]["heads"][0]["temperature"],
+            2.0
+        );
         c("classify.steer", json!({ "name": "kind", "steer": { "reset": true } })).unwrap();
 
         // outputs become a list another classifier can train on
-        let e = c("classify.enlist", json!({ "name": "kind", "class": "rocks", "threshold": 0.5 })).unwrap();
+        let e = c(
+            "classify.enlist",
+            json!({ "name": "kind", "class": "rocks", "threshold": 0.5 }),
+        )
+        .unwrap();
         assert_eq!(e["name"], "kind: rocks");
         assert!(e["members"].as_u64().unwrap() >= 15, "{e}");
         let stats = c("lists.stats", json!({})).unwrap();
-        assert!(stats["lists"].as_array().unwrap().iter().any(|l| l["name"] == "kind: rocks"));
-        c("classify.create", json!({ "name": "on top", "classes": [e["list"], fruit], "preset": "tiny", "inputs": ["kind"] })).unwrap();
-        c("classify.train", json!({ "name": "on top", "epochs": 2, "threads": 2, "wait": true })).unwrap();
-        let k = c("classify.contributions", json!({ "name": "on top", "text": "slate plum" })).unwrap();
+        assert!(
+            stats["lists"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|l| l["name"] == "kind: rocks")
+        );
+        c(
+            "classify.create",
+            json!({ "name": "on top", "classes": [e["list"], fruit], "preset": "tiny", "inputs": ["kind"] }),
+        )
+        .unwrap();
+        c(
+            "classify.train",
+            json!({ "name": "on top", "epochs": 2, "threads": 2, "wait": true }),
+        )
+        .unwrap();
+        let k = c(
+            "classify.contributions",
+            json!({ "name": "on top", "text": "slate plum" }),
+        )
+        .unwrap();
         assert_eq!(k["results"].as_array().unwrap().len(), 2);
-        let s = c("classify.feedback_stack", json!({ "name": "on top", "text": "slate plum", "class": 1, "yes": true })).unwrap();
+        let s = c(
+            "classify.feedback_stack",
+            json!({ "name": "on top", "text": "slate plum", "class": 1, "yes": true }),
+        )
+        .unwrap();
         assert_eq!(s["touched"], json!(["kind", "on top"]));
-        c("classify.couple", json!({ "name": "on top", "from": "kind", "coupling": 0.0 })).unwrap();
+        c(
+            "classify.couple",
+            json!({ "name": "on top", "from": "kind", "coupling": 0.0 }),
+        )
+        .unwrap();
 
-        let sim = c("classify.similar", json!({ "name": "kind", "text": "granite", "limit": 3 })).unwrap();
+        let sim = c(
+            "classify.similar",
+            json!({ "name": "kind", "text": "granite", "limit": 3 }),
+        )
+        .unwrap();
         assert_eq!(sim["results"].as_array().unwrap().len(), 3);
         let v = c("classify.represent", json!({ "name": "kind", "text": "granite" })).unwrap();
         assert_eq!(v["vector"].as_array().unwrap().len(), 32);
@@ -1143,12 +1331,25 @@ mod tests {
         }
         assert_eq!(state["state"], "done", "{state}");
         let bk = c("classify.buckets", json!({ "name": "kind" })).unwrap();
-        let filed: u64 = bk["buckets"].as_array().unwrap().iter().map(|b| b["count"].as_u64().unwrap()).sum();
+        let filed: u64 = bk["buckets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|b| b["count"].as_u64().unwrap())
+            .sum();
         assert_eq!(filed, bk["indexed"].as_u64().unwrap());
-        let rocks_bucket = c("classify.bucket", json!({ "name": "kind", "text": "granite slate flint" })).unwrap();
+        let rocks_bucket = c(
+            "classify.bucket",
+            json!({ "name": "kind", "text": "granite slate flint" }),
+        )
+        .unwrap();
         assert_eq!(rocks_bucket["class"], "rocks", "{rocks_bucket}");
         assert!(!rocks_bucket["hits"].as_array().unwrap().is_empty());
-        let near = c("classify.near", json!({ "name": "kind", "text": "granite", "by": "outputs", "limit": 4 })).unwrap();
+        let near = c(
+            "classify.near",
+            json!({ "name": "kind", "text": "granite", "by": "outputs", "limit": 4 }),
+        )
+        .unwrap();
         assert_eq!(near["results"].as_array().unwrap().len(), 4);
         let k0 = rocks_bucket["hits"][0]["key"].as_str().unwrap().to_string();
         let t = c("classify.tints", json!({ "name": "kind", "keys": [k0] })).unwrap();
@@ -1156,7 +1357,11 @@ mod tests {
         c("classify.set_index", json!({ "key": k0, "names": ["kind"] })).unwrap();
         let ind = c("classify.indexed", json!({ "key": k0 })).unwrap();
         assert_eq!(ind["verdicts"][0]["name"], "kind", "{ind}");
-        c("classify.validators", json!({ "name": "on top", "set": [{ "by": "kind", "class": "rocks", "min": 0.5 }] })).unwrap();
+        c(
+            "classify.validators",
+            json!({ "name": "on top", "set": [{ "by": "kind", "class": "rocks", "min": 0.5 }] }),
+        )
+        .unwrap();
         c("classify.disagreements", json!({ "name": "on top" })).unwrap();
         let expr = json!({ "op": "and", "of": [{ "op": "class", "classifier": "kind", "class": "rocks" }, { "op": "not", "of": { "op": "words", "q": "granite" } }] });
         c("filters.save", json!({ "name": "stony", "expr": expr })).unwrap();
@@ -1165,7 +1370,13 @@ mod tests {
         assert_eq!(c("filters.list", json!({})).unwrap()[0]["count"], run["matched"]);
         let en = c("filters.enlist", json!({ "name": "stony" })).unwrap();
         assert_eq!(en["members"], run["matched"]);
-        assert!(c("filters.save", json!({ "name": "bad", "expr": { "op": "class", "classifier": "nope", "class": "x" } })).is_err());
+        assert!(
+            c(
+                "filters.save",
+                json!({ "name": "bad", "expr": { "op": "class", "classifier": "nope", "class": "x" } })
+            )
+            .is_err()
+        );
         c("filters.delete", json!({ "name": "stony" })).unwrap();
         let ex = c("classify.export", json!({ "name": "on top" })).unwrap();
         let ins = c("classify.inspect", json!({ "data": ex["data"] })).unwrap();
@@ -1176,7 +1387,10 @@ mod tests {
         assert!(c("classify.import", json!({ "data": "QUJD" })).is_err());
         c("classify.delete", json!({ "name": "copy" })).unwrap();
 
-        assert!(c("classify.delete", json!({ "name": "kind" })).is_err(), "on top builds on it");
+        assert!(
+            c("classify.delete", json!({ "name": "kind" })).is_err(),
+            "on top builds on it"
+        );
         c("classify.delete", json!({ "name": "on top" })).unwrap();
         c("classify.delete", json!({ "name": "kind" })).unwrap();
         assert!(c("classify.list", json!({})).unwrap().as_array().unwrap().is_empty());

@@ -1195,13 +1195,22 @@ fn show_profile(name: &str, depot: &Depot, res: &mut Response) {
     let pending = theirs
         .iter()
         .filter(|s| s.status != Status::Approved)
-        .map(|s| (format!("/saves/{}", s.id), s.name.clone(), status_name(s.status), s.note.clone()))
-        .chain(
-            their_cls
-                .iter()
-                .filter(|c| c.status != Status::Approved)
-                .map(|c| (format!("/classifiers/{}", c.id), format!("{} (a classifier)", c.name), status_name(c.status), c.note.clone())),
-        )
+        .map(|s| {
+            (
+                format!("/saves/{}", s.id),
+                s.name.clone(),
+                status_name(s.status),
+                s.note.clone(),
+            )
+        })
+        .chain(their_cls.iter().filter(|c| c.status != Status::Approved).map(|c| {
+            (
+                format!("/classifiers/{}", c.id),
+                format!("{} (a classifier)", c.name),
+                status_name(c.status),
+                c.note.clone(),
+            )
+        }))
         .collect();
     let no_password = u.password.is_empty();
     if !own && !admin {
@@ -1693,10 +1702,25 @@ mod tests {
     #[test]
     fn local_hosts() {
         let url = "http://notes.example:8080";
-        for ok in ["localhost:8231", "LOCALHOST", "app.localhost:1", "127.0.0.1:8231", "[::1]:8231", "192.168.1.4:80", "notes.example:8080", "notes.example"] {
+        for ok in [
+            "localhost:8231",
+            "LOCALHOST",
+            "app.localhost:1",
+            "127.0.0.1:8231",
+            "[::1]:8231",
+            "192.168.1.4:80",
+            "notes.example:8080",
+            "notes.example",
+        ] {
             assert!(local_host_ok(ok, url), "{ok}");
         }
-        for bad in ["", "evil.example:8231", "localhost.evil.example", "127.0.0.1.nip.io:8231", "notes.example.evil:8080"] {
+        for bad in [
+            "",
+            "evil.example:8231",
+            "localhost.evil.example",
+            "127.0.0.1.nip.io:8231",
+            "notes.example.evil:8080",
+        ] {
             assert!(!local_host_ok(bad, url), "{bad}");
         }
         assert!(!local_host_ok("notes.example", "http://127.0.0.1:8080"));
@@ -1729,14 +1753,20 @@ mod tests {
         }
         assert!(asked.len() > 20, "{asked:?}");
         for name in asked {
-            assert!(sprite.contains(&format!("<symbol id=\"i-{name}\"")), "no icon {name} in the sprite");
+            assert!(
+                sprite.contains(&format!("<symbol id=\"i-{name}\"")),
+                "no icon {name} in the sprite"
+            );
         }
         // the sprite has the whole set: run hub/web/tools/icons.mjs when it changes
         let set = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/icons");
         for e in std::fs::read_dir(set).unwrap() {
             let f = e.unwrap().file_name().into_string().unwrap();
             if let Some(name) = f.strip_suffix(".svg") {
-                assert!(sprite.contains(&format!("<symbol id=\"i-{name}\"")), "{name} isn't in the sprite: run node hub/web/tools/icons.mjs");
+                assert!(
+                    sprite.contains(&format!("<symbol id=\"i-{name}\"")),
+                    "{name} isn't in the sprite: run node hub/web/tools/icons.mjs"
+                );
             }
         }
         assert!(icon("star").0.contains(&format!("icons.svg?v={ICONS_V}#i-star")));

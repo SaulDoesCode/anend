@@ -212,7 +212,10 @@ pub fn check_steer(steer: &crate::classify::Steer, k: usize) -> StoreResult<()> 
         return Err("temperature above 0, biases finite, threshold from 0 to 1".into());
     }
     let g = &steer.gains;
-    if ![g.letter, g.word, g.side, g.extra].iter().all(|&x| finite(x) && x >= 0.0) {
+    if ![g.letter, g.word, g.side, g.extra]
+        .iter()
+        .all(|&x| finite(x) && x >= 0.0)
+    {
         return Err("gains are 0 or more".into());
     }
     Ok(())
@@ -228,10 +231,18 @@ pub fn clean_name(name: &str) -> StoreResult<String> {
 
 impl Definition {
     /// a new, untrained definition; the class lists are checked by `Store::create_classifier`
-    pub fn new(name: &str, classes: Vec<ClassDef>, not: Option<ClassDef>, head: HeadKind, preset_name: &str) -> StoreResult<Definition> {
+    pub fn new(
+        name: &str,
+        classes: Vec<ClassDef>,
+        not: Option<ClassDef>,
+        head: HeadKind,
+        preset_name: &str,
+    ) -> StoreResult<Definition> {
         let name = clean_name(name)?;
         if preset(preset_name).is_none() {
-            return Err(format!("there's no preset {preset_name:?} (tiny, compact, small, base)"));
+            return Err(format!(
+                "there's no preset {preset_name:?} (tiny, compact, small, base)"
+            ));
         }
         let now = crate::note::now();
         let mut d = Definition {
@@ -355,7 +366,9 @@ impl Stack {
             return vec![];
         }
         let slots: Vec<std::sync::Mutex<Vec<f32>>> = texts.iter().map(|_| Default::default()).collect();
-        pool.run(texts.len(), &|i| *slots[i].lock().unwrap() = self.graph.extra(self.node, texts[i]));
+        pool.run(texts.len(), &|i| {
+            *slots[i].lock().unwrap() = self.graph.extra(self.node, texts[i])
+        });
         slots.into_iter().map(|s| s.into_inner().unwrap()).collect()
     }
 
@@ -484,7 +497,11 @@ impl Training {
             s.tokens_per_sec = rep.tokens_per_sec;
         }
         let pool = self.opts.pool();
-        let (idx, on) = if va.is_empty() { (&tr, "training") } else { (&va, "held out") };
+        let (idx, on) = if va.is_empty() {
+            (&tr, "training")
+        } else {
+            (&va, "held out")
+        };
         let ev = train::evaluate(clf, &self.data, idx, &pool);
         s.metrics = ev.heads.into_iter().next().flatten();
         s.measured_on = on.into();
@@ -652,7 +669,12 @@ impl Store {
             None => def.build(extra)?,
         };
         if def.steer.heads.len() == clf.net.heads.len()
-            && def.steer.heads.iter().zip(&clf.net.heads).all(|(s, h)| s.bias.len() == h.width())
+            && def
+                .steer
+                .heads
+                .iter()
+                .zip(&clf.net.heads)
+                .all(|(s, h)| s.bias.len() == h.width())
         {
             clf.steer = def.steer.clone();
         }
@@ -663,7 +685,12 @@ impl Store {
     pub fn stack(&self, name: &str) -> StoreResult<Stack> {
         let mut order: Vec<Definition> = Vec::new();
         let mut seen: HashMap<String, bool> = HashMap::new(); // false: on the path
-        fn visit(s: &Store, name: &str, seen: &mut HashMap<String, bool>, order: &mut Vec<Definition>) -> StoreResult<()> {
+        fn visit(
+            s: &Store,
+            name: &str,
+            seen: &mut HashMap<String, bool>,
+            order: &mut Vec<Definition>,
+        ) -> StoreResult<()> {
             match seen.get(name) {
                 Some(true) => return Ok(()),
                 Some(false) => return Err(format!("{name:?} builds on itself")),
@@ -883,7 +910,12 @@ impl Store {
     }
 
     /// prepare, run and commit in one go (for callers that may block)
-    pub fn train_classifier(&self, name: &str, a: &TrainArgs, cb: impl FnMut(&Tick) -> Flow) -> StoreResult<(Definition, Summary)> {
+    pub fn train_classifier(
+        &self,
+        name: &str,
+        a: &TrainArgs,
+        cb: impl FnMut(&Tick) -> Flow,
+    ) -> StoreResult<(Definition, Summary)> {
         let mut t = self.prepare(name, a)?;
         let s = t.run(cb)?;
         if s.cancelled {
@@ -946,7 +978,14 @@ impl Store {
 
     /// yes or no on one classifier's own weights: a few small steps, kept in its
     /// feedback for replay, and logged
-    pub fn feedback_classifier(&self, name: &str, j: &Judged, class: &str, yes: bool, weight: f32) -> StoreResult<FeedbackEntry> {
+    pub fn feedback_classifier(
+        &self,
+        name: &str,
+        j: &Judged,
+        class: &str,
+        yes: bool,
+        weight: f32,
+    ) -> StoreResult<FeedbackEntry> {
         let mut stack = self.stack(name)?;
         let mut def = stack.def().clone();
         if !def.trained() {
@@ -954,7 +993,11 @@ impl Store {
         }
         let c = def.class_index(class)?;
         let node = stack.node;
-        let extra = if node > 0 { stack.graph.extra(node, &j.text) } else { vec![] };
+        let extra = if node > 0 {
+            stack.graph.extra(node, &j.text)
+        } else {
+            vec![]
+        };
         let mut replay = self.replay(&def, 24)?;
         if node > 0 {
             let pool = Pool::new(crate::classify::pool::available());
@@ -995,7 +1038,14 @@ impl Store {
 
     /// yes or no end to end: through the classifiers it builds on, each link scaled by
     /// its coupling; every classifier reached is written back
-    pub fn feedback_stack(&self, name: &str, j: &Judged, class: &str, yes: bool, weight: f32) -> StoreResult<(FeedbackEntry, StackReport, Vec<String>)> {
+    pub fn feedback_stack(
+        &self,
+        name: &str,
+        j: &Judged,
+        class: &str,
+        yes: bool,
+        weight: f32,
+    ) -> StoreResult<(FeedbackEntry, StackReport, Vec<String>)> {
         let mut stack = self.stack(name)?;
         let def = stack.def().clone();
         if stack.defs.iter().any(|d| !d.trained()) {
@@ -1053,7 +1103,13 @@ impl Store {
     /// writes a class's members (texts at or above `threshold`, the steered threshold
     /// if none) as a list headed by a memory "<classifier>: <class>", replacing what
     /// that list held; returns the head and the member count
-    pub fn enlist_outputs(&self, name: &str, class: &str, threshold: Option<f32>, limit: usize) -> StoreResult<(Ref, usize)> {
+    pub fn enlist_outputs(
+        &self,
+        name: &str,
+        class: &str,
+        threshold: Option<f32>,
+        limit: usize,
+    ) -> StoreResult<(Ref, usize)> {
         let stack = self.stack(name)?;
         let mut def = stack.def().clone();
         if !def.trained() {
@@ -1223,8 +1279,18 @@ pub(crate) mod tests {
         let k = |t: &str| Ref::Memory(s.saturate(t).unwrap().0);
         let (f, r) = (k("fruit"), k("rocks"));
         for i in 0..24 {
-            let a = format!("{} {} {}", FRUIT[i % 10], FRUIT[(i * 3 + 1) % 10], FRUIT[(i / 10 + 5) % 10]);
-            let b = format!("{} {} {}", ROCK[i % 10], ROCK[(i * 7 + 2) % 10], ROCK[(i / 10 + 5) % 10]);
+            let a = format!(
+                "{} {} {}",
+                FRUIT[i % 10],
+                FRUIT[(i * 3 + 1) % 10],
+                FRUIT[(i / 10 + 5) % 10]
+            );
+            let b = format!(
+                "{} {} {}",
+                ROCK[i % 10],
+                ROCK[(i * 7 + 2) % 10],
+                ROCK[(i / 10 + 5) % 10]
+            );
             s.enlist(&f, &k(&a)).unwrap();
             s.enlist(&r, &k(&b)).unwrap();
         }
@@ -1254,12 +1320,18 @@ pub(crate) mod tests {
     fn definitions_weights_feedback_and_bundles() {
         let (s, path) = temp_store("store");
         let (f, r) = lists(&s);
-        assert!(s.create_classifier("x", std::slice::from_ref(&f), None, HeadKind::Single, "tiny", vec![]).is_err());
+        assert!(
+            s.create_classifier("x", std::slice::from_ref(&f), None, HeadKind::Single, "tiny", vec![])
+                .is_err()
+        );
         let def = s
             .create_classifier("kind", &[f.clone(), r.clone()], None, HeadKind::Single, "tiny", vec![])
             .unwrap();
         assert_eq!(def.class_names(), vec!["fruit", "rocks"]);
-        assert!(s.create_classifier("kind", &[f.clone(), r.clone()], None, HeadKind::Single, "tiny", vec![]).is_err());
+        assert!(
+            s.create_classifier("kind", &[f.clone(), r.clone()], None, HeadKind::Single, "tiny", vec![])
+                .is_err()
+        );
         let ex = s.examples(&def).unwrap();
         assert_eq!(ex.len(), 49);
         assert!(ex.iter().any(|e| e.text == "orchard\n\nplum and cherry"));
@@ -1307,7 +1379,10 @@ pub(crate) mod tests {
         let (c, pc) = temp_store("copy");
         crate::bundle::import(&c, &back).unwrap();
         assert_eq!(c.classifier("kind").unwrap(), s.classifier("kind").unwrap());
-        assert_eq!(c.classifier_weights("kind").unwrap(), s.classifier_weights("kind").unwrap());
+        assert_eq!(
+            c.classifier_weights("kind").unwrap(),
+            s.classifier_weights("kind").unwrap()
+        );
         assert_eq!(c.classifier_feedback("kind").unwrap(), log);
         let mut old: serde_json::Value = serde_json::to_value(&b).unwrap();
         old.as_object_mut().unwrap().remove("classifiers");
@@ -1330,9 +1405,14 @@ pub(crate) mod tests {
     fn hostile_arguments() {
         let (s, path) = temp_store("hostile");
         let (f, r) = lists(&s);
-        let def = s.create_classifier("kind", &[f, r], None, HeadKind::Single, "tiny", vec![]).unwrap();
+        let def = s
+            .create_classifier("kind", &[f, r], None, HeadKind::Single, "tiny", vec![])
+            .unwrap();
         for lr in [-1.0, 0.0, 5.0] {
-            let a = TrainArgs { lr: Some(lr), ..TrainArgs::default() };
+            let a = TrainArgs {
+                lr: Some(lr),
+                ..TrainArgs::default()
+            };
             assert!(s.prepare("kind", &a).is_err(), "lr {lr}");
         }
         let a = TrainArgs {
@@ -1366,17 +1446,26 @@ pub(crate) mod tests {
         let pool = Pool::new(1);
         s.save_filter("p0", Expr::Words { q: "plum".into() }, "").unwrap();
         for i in 1..=10 {
-            let of = vec![Expr::Preset { name: format!("p{}", i - 1) }; 200];
+            let of = vec![
+                Expr::Preset {
+                    name: format!("p{}", i - 1)
+                };
+                200
+            ];
             s.save_filter(&format!("p{i}"), Expr::And { of }, "").unwrap();
         }
         let t = std::time::Instant::now();
-        let r = s.run_filter(&Expr::Preset { name: "p10".into() }, 10, 10_000, &pool).unwrap();
+        let r = s
+            .run_filter(&Expr::Preset { name: "p10".into() }, 10, 10_000, &pool)
+            .unwrap();
         assert!(r.matched > 0);
         assert!(t.elapsed().as_secs() < 10, "{:?}", t.elapsed());
 
         let p = |name: &str, to: &str| Preset {
             name: name.into(),
-            expr: Expr::And { of: vec![Expr::Preset { name: to.into() }; 200] },
+            expr: Expr::And {
+                of: vec![Expr::Preset { name: to.into() }; 200],
+            },
             description: String::new(),
             created: String::new(),
             modified: String::new(),
@@ -1384,9 +1473,16 @@ pub(crate) mod tests {
             count: None,
         };
         s.import_filters(&[p("ping", "pong"), p("pong", "ping")]).unwrap();
-        let e = s.run_filter(&Expr::Preset { name: "ping".into() }, 10, 10_000, &pool).unwrap_err();
+        let e = s
+            .run_filter(&Expr::Preset { name: "ping".into() }, 10, 10_000, &pool)
+            .unwrap_err();
         assert!(e.contains("comes back") || e.contains("include itself"), "{e}");
-        let big = Preset { expr: Expr::Or { of: vec![Expr::Words { q: "x".into() }; 300] }, ..p("big", "p0") };
+        let big = Preset {
+            expr: Expr::Or {
+                of: vec![Expr::Words { q: "x".into() }; 300],
+            },
+            ..p("big", "p0")
+        };
         assert!(s.import_filters(&[big]).is_err());
         drop(s);
         let _ = std::fs::remove_file(path);
@@ -1402,8 +1498,15 @@ pub(crate) mod tests {
             from: "kind".into(),
             coupling: 0.5,
         };
-        s.create_classifier("again", &[f.clone(), r.clone()], None, HeadKind::Multi, "tiny", vec![input])
-            .unwrap();
+        s.create_classifier(
+            "again",
+            &[f.clone(), r.clone()],
+            None,
+            HeadKind::Multi,
+            "tiny",
+            vec![input],
+        )
+        .unwrap();
         let a = TrainArgs {
             epochs: Some(3),
             threads: Some(2),
@@ -1444,7 +1547,16 @@ pub(crate) mod tests {
     fn timing() {
         let (s, path) = temp_store("timing");
         let mut heads = vec![];
-        for (n, ws) in [("fruit", FRUIT), ("rocks", ROCK), ("more", ["alpha", "beta", "gamma", "delta", "omega", "sigma", "theta", "kappa", "lambda", "zeta"])] {
+        for (n, ws) in [
+            ("fruit", FRUIT),
+            ("rocks", ROCK),
+            (
+                "more",
+                [
+                    "alpha", "beta", "gamma", "delta", "omega", "sigma", "theta", "kappa", "lambda", "zeta",
+                ],
+            ),
+        ] {
             let h = Ref::Memory(s.saturate(n).unwrap().0);
             for i in 0..50 {
                 let t = format!("{} {} {}", ws[i % 10], ws[(i * 7 + 3) % 10], ws[(i / 10 + 5) % 10]);
@@ -1452,10 +1564,18 @@ pub(crate) mod tests {
             }
             heads.push(h);
         }
-        s.create_classifier("t", &heads, None, HeadKind::Single, DEFAULT_PRESET, vec![]).unwrap();
+        s.create_classifier("t", &heads, None, HeadKind::Single, DEFAULT_PRESET, vec![])
+            .unwrap();
         let t0 = std::time::Instant::now();
         let (_, sum) = s.train_classifier("t", &TrainArgs::default(), |_| Flow::Go).unwrap();
-        println!("{} texts, {} steps, {:.2} s, {:.0} tokens/s, accuracy {:?}", sum.examples, sum.steps, t0.elapsed().as_secs_f64(), sum.tokens_per_sec, sum.metrics.map(|m| m.accuracy));
+        println!(
+            "{} texts, {} steps, {:.2} s, {:.0} tokens/s, accuracy {:?}",
+            sum.examples,
+            sum.steps,
+            t0.elapsed().as_secs_f64(),
+            sum.tokens_per_sec,
+            sum.metrics.map(|m| m.accuracy)
+        );
         drop(s);
         let _ = std::fs::remove_file(path);
     }
@@ -1472,8 +1592,13 @@ mod phase3_tests {
     fn memo_filters_and_modules() {
         let (s, path) = temp_store("phase3");
         let (f, r) = lists(&s);
-        s.create_classifier("kind", &[f.clone(), r.clone()], None, HeadKind::Single, "tiny", vec![]).unwrap();
-        let a = TrainArgs { epochs: Some(4), threads: Some(2), ..TrainArgs::default() };
+        s.create_classifier("kind", &[f.clone(), r.clone()], None, HeadKind::Single, "tiny", vec![])
+            .unwrap();
+        let a = TrainArgs {
+            epochs: Some(4),
+            threads: Some(2),
+            ..TrainArgs::default()
+        };
         s.train_classifier("kind", &a, |_| Flow::Go).unwrap();
         let pool = Pool::new(2);
         let st = s.stack("kind").unwrap();
@@ -1508,12 +1633,22 @@ mod phase3_tests {
         assert!(s.memo_all(&st2).unwrap().is_empty());
 
         // filters: class, not, words; presets referring to presets; loops refused
-        let fruit = Expr::Class { classifier: "kind".into(), class: "fruit".into(), min: Some(0.5), max: None, top: false };
+        let fruit = Expr::Class {
+            classifier: "kind".into(),
+            class: "fruit".into(),
+            min: Some(0.5),
+            max: None,
+            top: false,
+        };
         let res = s.run_filter(&fruit, 1000, 10_000, &pool).unwrap();
-        let not = Expr::Not { of: Box::new(fruit.clone()) };
+        let not = Expr::Not {
+            of: Box::new(fruit.clone()),
+        };
         let res2 = s.run_filter(&not, 1000, 10_000, &pool).unwrap();
         assert_eq!(res.matched + res2.matched, res.scanned);
-        let and = Expr::And { of: vec![fruit.clone(), Expr::Words { q: "plum".into() }] };
+        let and = Expr::And {
+            of: vec![fruit.clone(), Expr::Words { q: "plum".into() }],
+        };
         let res3 = s.run_filter(&and, 1000, 10_000, &pool).unwrap();
         // an empty "all of" is everything; an empty "any of" is refused
         let every = s.run_filter(&Expr::And { of: vec![] }, 1000, 10_000, &pool).unwrap();
@@ -1522,24 +1657,57 @@ mod phase3_tests {
         assert!(res3.matched <= res.matched);
         assert!(res3.results.iter().all(|x| x.note || x.text.contains("plum")));
         s.save_filter("fruity", fruit.clone(), "").unwrap();
-        s.save_filter("outer", Expr::Preset { name: "fruity".into() }, "").unwrap();
-        assert_eq!(s.run_filter(&Expr::Preset { name: "outer".into() }, 1000, 10_000, &pool).unwrap().matched, res.matched);
-        assert!(s.save_filter("fruity", Expr::Preset { name: "outer".into() }, "").is_err(), "a loop");
+        s.save_filter("outer", Expr::Preset { name: "fruity".into() }, "")
+            .unwrap();
+        assert_eq!(
+            s.run_filter(&Expr::Preset { name: "outer".into() }, 1000, 10_000, &pool)
+                .unwrap()
+                .matched,
+            res.matched
+        );
+        assert!(
+            s.save_filter("fruity", Expr::Preset { name: "outer".into() }, "")
+                .is_err(),
+            "a loop"
+        );
         assert!(s.delete_filter("fruity").is_err(), "outer uses it");
         let (head, n) = s.enlist_filter("outer", 10_000, &pool).unwrap();
         assert_eq!(s.list_members(&head).unwrap().len(), n);
 
         // a validator gating everything out
-        s.create_classifier("judge", &[f.clone(), r.clone()], None, HeadKind::Single, "tiny", vec![]).unwrap();
+        s.create_classifier("judge", &[f.clone(), r.clone()], None, HeadKind::Single, "tiny", vec![])
+            .unwrap();
         s.train_classifier("judge", &a, |_| Flow::Go).unwrap();
-        assert!(s.set_validators("kind", &[Validator { by: "kind".into(), class: "fruit".into(), min: 0.5, mode: Mode::Gate }]).is_err());
-        s.set_validators("kind", &[Validator { by: "judge".into(), class: "fruit".into(), min: 1.1f32.min(1.0), mode: Mode::Gate }]).unwrap();
+        assert!(
+            s.set_validators(
+                "kind",
+                &[Validator {
+                    by: "kind".into(),
+                    class: "fruit".into(),
+                    min: 0.5,
+                    mode: Mode::Gate
+                }]
+            )
+            .is_err()
+        );
+        s.set_validators(
+            "kind",
+            &[Validator {
+                by: "judge".into(),
+                class: "fruit".into(),
+                min: 1.1f32.min(1.0),
+                mode: Mode::Gate,
+            }],
+        )
+        .unwrap();
         let gated = s.run_filter(&fruit, 1000, 10_000, &pool).unwrap();
         assert!(gated.matched <= res.matched);
         assert!(!s.disagreements("kind", 100, 10_000, &pool).unwrap().is_empty() || gated.matched == 0);
 
         // modules: round trip into another save, corrupt input refused
-        let bytes = s.export_module("kind", &crate::clsmodule::ExportOpts::default()).unwrap();
+        let bytes = s
+            .export_module("kind", &crate::clsmodule::ExportOpts::default())
+            .unwrap();
         let m = crate::clsmodule::read(&bytes, crate::clsmodule::MAX_SIZE).unwrap();
         assert_eq!(m.manifest.main().classes, vec!["fruit", "rocks"]);
         let (c, pc) = temp_store("phase3b");
@@ -1548,13 +1716,19 @@ mod phase3_tests {
         assert_eq!(got.lists.len(), 2);
         let mine = s.stack("kind").unwrap();
         let theirs = c.stack("kind").unwrap();
-        assert_eq!(mine.graph.predict(mine.node, "granite plum"), theirs.graph.predict(theirs.node, "granite plum"));
+        assert_eq!(
+            mine.graph.predict(mine.node, "granite plum"),
+            theirs.graph.predict(theirs.node, "granite plum")
+        );
         let again = c.import_module(&m, &crate::clsmodule::ImportOpts::default()).unwrap();
         assert_eq!(again.reused, vec!["kind"]);
         for i in [0, 9, 20, bytes.len() / 2, bytes.len() - 1] {
             let mut bad = bytes.clone();
             bad[i] ^= 0x41;
-            assert!(crate::clsmodule::read(&bad, crate::clsmodule::MAX_SIZE).is_err(), "byte {i}");
+            assert!(
+                crate::clsmodule::read(&bad, crate::clsmodule::MAX_SIZE).is_err(),
+                "byte {i}"
+            );
         }
         assert!(crate::clsmodule::read(&bytes[..bytes.len() - 9], crate::clsmodule::MAX_SIZE).is_err());
         assert!(crate::clsmodule::read(b"junk", crate::clsmodule::MAX_SIZE).is_err());
@@ -1562,7 +1736,9 @@ mod phase3_tests {
         // a weights file whose header claims huge shapes is refused before allocating
         let w = s.classifier_weights("kind").unwrap().unwrap();
         let hl = u32::from_le_bytes(w[12..16].try_into().unwrap()) as usize;
-        let h = String::from_utf8(w[16..16 + hl].to_vec()).unwrap().replacen("\"d_model\":16", "\"d_model\":99999", 1);
+        let h = String::from_utf8(w[16..16 + hl].to_vec())
+            .unwrap()
+            .replacen("\"d_model\":16", "\"d_model\":99999", 1);
         let mut forged = w[..12].to_vec();
         forged.extend_from_slice(&(h.len() as u32).to_le_bytes());
         forged.extend_from_slice(h.as_bytes());

@@ -29,7 +29,11 @@ fn kernel(ax: f64, ay: f64) -> f64 {
 
 pub fn hypot(x: f64, y: f64) -> f64 {
     if !x.is_finite() || !y.is_finite() {
-        return if x.is_infinite() || y.is_infinite() { f64::INFINITY } else { f64::NAN };
+        return if x.is_infinite() || y.is_infinite() {
+            f64::INFINITY
+        } else {
+            f64::NAN
+        };
     }
     let (x, y) = (x.abs(), y.abs());
     let (ax, ay) = if x < y { (y, x) } else { (x, y) };
@@ -113,7 +117,11 @@ fn inv_fact() -> &'static [Dd; 31] {
     })
 }
 
-const PIO2: [f64; 3] = [std::f64::consts::FRAC_PI_2, 6.123233995736766e-17, -1.4973849048591698e-33];
+const PIO2: [f64; 3] = [
+    std::f64::consts::FRAC_PI_2,
+    6.123233995736766e-17,
+    -1.4973849048591698e-33,
+];
 
 /// x − n·π/2 for |x| up to a few thousand (the spread's angles are far smaller)
 fn reduce(x: f64) -> (i64, Dd) {

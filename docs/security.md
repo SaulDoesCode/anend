@@ -36,14 +36,10 @@ what's enforced where, and the limits that are still open. Written during the re
 | disk | `app::Workspace::room` | on a shared hub `--quota` (1 GB) and 200 saves per member; past it only reading and deleting calls work |
 | training | `classify.rs`, `classifiers::prepare` | threads ≤ cores, batch ≤ 4096, lr in (0, 1], epochs ≤ 1000, rounds ≤ 50; on a shared hub 2 jobs (training or indexing) per member, cores-many (4 at least) per hub, a training stops after 2 hours; steering checked even when only measured |
 | filters | `core/src/filters.rs` | at most 256 conditions and 12 levels of presets, loops refused (when saved, and a bundle's presets checked for size when imported); each preset is checked and run once however often it's referred to (it was exponential: 200 references, ten deep), and a loop brought in by a bundle stops with an error |
-| sizes in calls | `app.rs`, `classify.rs` | spreads ≤ 2000 texts, scans ≤ 20 000 texts, tints ≤ 5000 keys, limits clamped |
+| sizes in calls | `app.rs`, `classify.rs` | forge ≤ 32 ingredients, the lists grid only up to 1000 lists, spreads ≤ 2000 texts, scans ≤ 20 000 texts, tints ≤ 5000 keys, limits clamped |
 
 ## Known limits (not fixed)
 
-- **Forge ingredients (open, low).** `forge.preview/make/pour` take any number of
-  ingredients, each read whole; a long list repeats the work. Cap it (32, say).
-- **`lists.stats` grid (open, low).** The cosine grid is lists². A save with tens of
-  thousands of lists makes a large answer. Skip the grid past a few thousand lists.
 - **redb on hostile files (accepted).** redb isn't hardened against crafted files. The hub
   opens uploads on a copy, on a blocking thread, inside `catch_unwind`, so a panic is a
   refused file; a crafted file that makes redb loop or allocate a lot would cost that

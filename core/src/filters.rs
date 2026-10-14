@@ -58,10 +58,16 @@ pub fn create_tables(txn: &WriteTransaction) -> StoreResult<()> {
 #[serde(tag = "op", rename_all = "lowercase")]
 pub enum Expr {
     /// every one of them
-    And { of: Vec<Expr> },
+    And {
+        of: Vec<Expr>,
+    },
     /// any one of them
-    Or { of: Vec<Expr> },
-    Not { of: Box<Expr> },
+    Or {
+        of: Vec<Expr>,
+    },
+    Not {
+        of: Box<Expr>,
+    },
     /// a classifier's (validated) probability for a class, at least `min` (the
     /// classifier's steered threshold if left out) and at most `max`; `top`: the class
     /// must be its top one too
@@ -76,7 +82,9 @@ pub enum Expr {
         top: bool,
     },
     /// the words search (with weum's variations)
-    Words { q: String },
+    Words {
+        q: String,
+    },
     /// a gematria sum in a range: `bucket` ordinal, reversed or atbash
     Sum {
         bucket: String,
@@ -86,7 +94,9 @@ pub enum Expr {
         to: Option<i64>,
     },
     /// a member of a list (by its head's key)
-    List { list: String },
+    List {
+        list: String,
+    },
     /// notes with these tags (all of them, or any)
     Tags {
         tags: Vec<String>,
@@ -94,9 +104,13 @@ pub enum Expr {
         any: bool,
     },
     /// memories or notes only
-    Kind { kind: String },
+    Kind {
+        kind: String,
+    },
     /// another saved filter
-    Preset { name: String },
+    Preset {
+        name: String,
+    },
 }
 
 impl Expr {
@@ -128,7 +142,13 @@ impl Expr {
             Expr::And { of } => join(of, "and"),
             Expr::Or { of } => join(of, "or"),
             Expr::Not { of } => format!("not {}", of.describe()),
-            Expr::Class { classifier, class, min, max, top } => {
+            Expr::Class {
+                classifier,
+                class,
+                min,
+                max,
+                top,
+            } => {
                 let mut s = format!("{classifier}: {class}");
                 if *top {
                     s.push_str(" (top)");
@@ -148,11 +168,7 @@ impl Expr {
                 to.map(|x| x.to_string()).unwrap_or_default()
             ),
             Expr::List { list } => format!("in list {list}"),
-            Expr::Tags { tags, any } => format!(
-                "{} #{}",
-                if *any { "any of" } else { "tags" },
-                tags.join(" #")
-            ),
+            Expr::Tags { tags, any } => format!("{} #{}", if *any { "any of" } else { "tags" }, tags.join(" #")),
             Expr::Kind { kind } => kind.clone(),
             Expr::Preset { name } => format!("[{name}]"),
         }
@@ -245,7 +261,11 @@ pub fn check(row: &Row, vals: &[(Validator, usize)], checks: &[&Row]) -> Checked
             }
         }
     }
-    Checked { probs, valid, checks: seen }
+    Checked {
+        probs,
+        valid,
+        checks: seen,
+    }
 }
 
 impl Store {
@@ -284,7 +304,8 @@ impl Store {
             if vals.is_empty() {
                 t.remove(name).map_err(err)?;
             } else {
-                t.insert(name, serde_json::to_vec(vals).map_err(err)?.as_slice()).map_err(err)?;
+                t.insert(name, serde_json::to_vec(vals).map_err(err)?.as_slice())
+                    .map_err(err)?;
             }
         }
         txn.commit().map_err(err)?;
@@ -299,7 +320,10 @@ impl Store {
             let mut v = Vec::new();
             for item in t.iter().map_err(err)? {
                 let (k, val) = item.map_err(err)?;
-                v.push((k.value().to_string(), serde_json::from_slice(val.value()).unwrap_or_default()));
+                v.push((
+                    k.value().to_string(),
+                    serde_json::from_slice(val.value()).unwrap_or_default(),
+                ));
             }
             v
         };
@@ -311,7 +335,8 @@ impl Store {
                 if k == name || keep.is_empty() {
                     t.remove(k.as_str()).map_err(err)?;
                 } else {
-                    t.insert(k.as_str(), serde_json::to_vec(&keep).map_err(err)?.as_slice()).map_err(err)?;
+                    t.insert(k.as_str(), serde_json::to_vec(&keep).map_err(err)?.as_slice())
+                        .map_err(err)?;
                 }
             }
         }
@@ -482,7 +507,13 @@ impl Store {
                 return Ok(h);
             }
             Expr::Not { of } => return self.check_inner(of, path, done),
-            Expr::Class { classifier, class, min, max, .. } => {
+            Expr::Class {
+                classifier,
+                class,
+                min,
+                max,
+                ..
+            } => {
                 let d = self.classifier(classifier)?;
                 d.class_index(class)?;
                 for v in [min, max].into_iter().flatten() {
@@ -596,7 +627,12 @@ impl<'a> Universe<'a> {
         if !self.checked.contains_key(name) {
             let stack = self.store.stack(name)?;
             let v = if stack.def().trained() {
-                let items: Vec<(Ref, &str)> = self.refs.iter().cloned().zip(self.texts.iter().map(String::as_str)).collect();
+                let items: Vec<(Ref, &str)> = self
+                    .refs
+                    .iter()
+                    .cloned()
+                    .zip(self.texts.iter().map(String::as_str))
+                    .collect();
                 let rows = self.store.checked_rows(&stack, &items, self.pool)?;
                 Some((stack.def().class_names(), stack.def().steer.heads[0].threshold, rows))
             } else {
@@ -644,7 +680,13 @@ impl<'a> Universe<'a> {
                 let (m, _) = self.eval(of, depth)?;
                 (m.into_iter().map(|x| !x).collect(), vec![1.0; n])
             }
-            Expr::Class { classifier, class, min, max, top } => {
+            Expr::Class {
+                classifier,
+                class,
+                min,
+                max,
+                top,
+            } => {
                 let Some((classes, threshold, rows)) = self.classifier(classifier)? else {
                     return Ok((vec![false; n], vec![0.0; n]));
                 };
@@ -699,8 +741,13 @@ impl<'a> Universe<'a> {
                     .iter()
                     .map(|r| match r {
                         Ref::Note(k) => notes.get(k).is_some_and(|have| {
-                            let has = |t: &String| have.iter().any(|h| crate::note::normalize_tag(h).as_ref() == Some(t));
-                            if *any { want.iter().any(has) } else { want.iter().all(has) }
+                            let has =
+                                |t: &String| have.iter().any(|h| crate::note::normalize_tag(h).as_ref() == Some(t));
+                            if *any {
+                                want.iter().any(has)
+                            } else {
+                                want.iter().all(has)
+                            }
                         }),
                         Ref::Memory(_) => false,
                     })
@@ -709,7 +756,10 @@ impl<'a> Universe<'a> {
             }
             Expr::Kind { kind } => {
                 let notes = kind == "notes";
-                (self.refs.iter().map(|r| matches!(r, Ref::Note(_)) == notes).collect(), vec![1.0; n])
+                (
+                    self.refs.iter().map(|r| matches!(r, Ref::Note(_)) == notes).collect(),
+                    vec![1.0; n],
+                )
             }
             Expr::Preset { name } => {
                 if let Some(done) = self.presets.get(name) {
@@ -808,7 +858,10 @@ impl Store {
             // a bundle is data from anywhere: only its size is checked here (what it reads
             // may come with it), the rest when it runs
             if p.expr.count() > MAX_NODES {
-                return Err(format!("the filter {:?} holds more than {MAX_NODES} conditions", p.name));
+                return Err(format!(
+                    "the filter {:?} holds more than {MAX_NODES} conditions",
+                    p.name
+                ));
             }
             self.put_preset(p)?;
         }

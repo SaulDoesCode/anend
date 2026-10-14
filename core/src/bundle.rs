@@ -58,7 +58,10 @@ fn unhex(s: &str) -> Option<Vec<u8>> {
     if !s.len().is_multiple_of(2) {
         return None;
     }
-    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok()).collect()
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok())
+        .collect()
 }
 
 /// everything in a save
@@ -85,7 +88,10 @@ pub fn export(store: &Store, name: &str) -> StoreResult<Bundle> {
 
 pub fn check(b: &Bundle) -> StoreResult<()> {
     if b.anend == 0 || b.anend > VERSION {
-        return Err(format!("that isn't an anend save bundle this version reads ({})", b.anend));
+        return Err(format!(
+            "that isn't an anend save bundle this version reads ({})",
+            b.anend
+        ));
     }
     Ok(())
 }
@@ -128,7 +134,12 @@ pub fn contents(b: &Bundle) -> StoreResult<Contents> {
     };
     let mut seen = std::collections::HashSet::new();
     Ok(Contents {
-        memories: b.memories.iter().map(|(t, _)| t.clone()).filter(|t| seen.insert(t.clone())).collect(),
+        memories: b
+            .memories
+            .iter()
+            .map(|(t, _)| t.clone())
+            .filter(|t| seen.insert(t.clone()))
+            .collect(),
         notes: b.notes.clone(),
         lists: b.lists.iter().filter_map(|(l, m)| Some((item(l)?, item(m)?))).collect(),
     })

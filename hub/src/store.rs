@@ -816,7 +816,13 @@ mod tests {
         assert_eq!(s.stars_given_all("ann").unwrap(), (1, 1));
         assert!(s.count_classifier_download("x1", "ann").unwrap());
         assert_eq!(s.save("x1").unwrap().unwrap().downloads, 2);
-        assert!(s.put_classifier(&ClassifierRec { id: "../x".into(), ..Default::default() }).is_err());
+        assert!(
+            s.put_classifier(&ClassifierRec {
+                id: "../x".into(),
+                ..Default::default()
+            })
+            .is_err()
+        );
         assert!(s.classifier("../x").unwrap().is_none());
         assert!(s.classifier_path("a/b").is_none());
         s.remove_classifier("x1").unwrap();

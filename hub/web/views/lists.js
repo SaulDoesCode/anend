@@ -42,7 +42,7 @@ async function draw() {
       el('div.row', el('h2', 'lists'), el('span.dim.small', 'a list is a memory heading other memories; Shift+click a text in the memory view or the space to pick one')),
       el('div.row', newInput, iconButton('new', 'make a new list headed by this text', { text: 'new list', key: 'Enter', cls: 'primary', onclick: make })),
     ),
-    st.lists.length > 1 ? dotCard(st) : null,
+    st.lists.length > 1 && st.dot.length ? dotCard(st) : null,
     cards.length ? el('div.list-grid', cards) : el('div.card.dim', 'no lists yet'),
   );
 }

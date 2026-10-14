@@ -127,7 +127,11 @@ pub fn tag_counts(notes: &[Note]) -> Vec<(String, usize)> {
         }
     }
     let mut v: Vec<(String, usize)> = counts.into_iter().map(|(t, c)| (t.to_string(), c)).collect();
-    v.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase())).then(a.0.cmp(&b.0)));
+    v.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
+            .then(a.0.cmp(&b.0))
+    });
     v
 }
 
@@ -267,7 +271,10 @@ mod tests {
     #[test]
     fn previews() {
         assert_eq!(
-            preview("## Head\n\nSome **bold** and a [link](http://x.y).\n\n- item\n\n|a|b|\n|---|---|", 200),
+            preview(
+                "## Head\n\nSome **bold** and a [link](http://x.y).\n\n- item\n\n|a|b|\n|---|---|",
+                200
+            ),
             "Head Some bold and a link. item a b"
         );
         assert_eq!(preview("abcdefghij", 5), "abcd…");

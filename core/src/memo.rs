@@ -125,7 +125,10 @@ impl Row {
         let stamp = u64::from_le_bytes(take(8)?.try_into().ok()?);
         let text_hash = u64::from_le_bytes(take(8)?.try_into().ok()?);
         let k = u16::from_le_bytes(take(2)?.try_into().ok()?) as usize;
-        let probs = take(4 * k)?.chunks(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect();
+        let probs = take(4 * k)?
+            .chunks(4)
+            .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+            .collect();
         let top = u16::from_le_bytes(take(2)?.try_into().ok()?) as usize;
         let nm = u16::from_le_bytes(take(2)?.try_into().ok()?) as usize;
         let members = take(2 * nm)?
@@ -150,7 +153,10 @@ impl Row {
     /// the buckets it's filed under
     pub fn keys(&self) -> Vec<u32> {
         if self.members.is_empty() {
-            return vec![bucket_key(UNCERTAIN, band(self.probs.get(self.top).copied().unwrap_or(0.0)))];
+            return vec![bucket_key(
+                UNCERTAIN,
+                band(self.probs.get(self.top).copied().unwrap_or(0.0)),
+            )];
         }
         self.members
             .iter()
@@ -193,7 +199,9 @@ pub fn read(stack: &Stack, stamp: u64, text: &str) -> Row {
 /// rows for many texts at once, in parallel, in the texts' order
 pub fn read_many(stack: &Stack, stamp: u64, texts: &[&str], pool: &Pool) -> Vec<Row> {
     let slots: Vec<std::sync::Mutex<Option<Row>>> = texts.iter().map(|_| Default::default()).collect();
-    pool.run(texts.len(), &|i| *slots[i].lock().unwrap() = Some(read(stack, stamp, texts[i])));
+    pool.run(texts.len(), &|i| {
+        *slots[i].lock().unwrap() = Some(read(stack, stamp, texts[i]))
+    });
     slots.into_iter().map(|s| s.into_inner().unwrap().unwrap()).collect()
 }
 
@@ -260,7 +268,9 @@ impl Store {
         refs.iter()
             .map(|r| {
                 let b = r.bytes();
-                Ok(t.get((name, b.as_slice())).map_err(err)?.and_then(|g| Row::decode(g.value())))
+                Ok(t.get((name, b.as_slice()))
+                    .map_err(err)?
+                    .and_then(|g| Row::decode(g.value())))
             })
             .collect()
     }
@@ -281,7 +291,11 @@ impl Store {
         for chunk in missing.chunks(BATCH * pool.threads().max(1)) {
             let texts: Vec<&str> = chunk.iter().map(|&i| items[i].1).collect();
             let rows = read_many(stack, stamp, &texts, pool);
-            let pairs: Vec<(Ref, Row)> = chunk.iter().map(|&i| items[i].0.clone()).zip(rows.iter().cloned()).collect();
+            let pairs: Vec<(Ref, Row)> = chunk
+                .iter()
+                .map(|&i| items[i].0.clone())
+                .zip(rows.iter().cloned())
+                .collect();
             if !self.memo_write(&name, stamp, &pairs)? {
                 return Err(format!("{name:?} changed while it was read; try again"));
             }
@@ -325,7 +339,14 @@ impl Store {
 
     /// fills a classifier's rows ahead of use: for `refs`, or every memory and note
     /// (`limit` at most); `cb(done, total)` sees each batch and may stop it
-    pub fn memo_index(&self, stack: &Stack, refs: Option<&[Ref]>, limit: usize, pool: &Pool, mut cb: impl FnMut(usize, usize) -> Flow) -> StoreResult<IndexReport> {
+    pub fn memo_index(
+        &self,
+        stack: &Stack,
+        refs: Option<&[Ref]>,
+        limit: usize,
+        pool: &Pool,
+        mut cb: impl FnMut(usize, usize) -> Flow,
+    ) -> StoreResult<IndexReport> {
         let started = std::time::Instant::now();
         let items: Vec<(Ref, String)> = match refs {
             Some(rs) => rs
@@ -347,7 +368,11 @@ impl Store {
         let refs: Vec<Ref> = items.iter().map(|i| i.0.clone()).collect();
         let kept = self.memo_kept(&name, &refs)?;
         let todo: Vec<usize> = (0..items.len())
-            .filter(|&i| !kept[i].as_ref().is_some_and(|r| r.stamp == stamp && r.text_hash == text_hash(&items[i].1)))
+            .filter(|&i| {
+                !kept[i]
+                    .as_ref()
+                    .is_some_and(|r| r.stamp == stamp && r.text_hash == text_hash(&items[i].1))
+            })
             .collect();
         rep.cached = items.len() - todo.len();
         let mut done = rep.cached;
@@ -418,7 +443,12 @@ impl Store {
     /// a bucket: the texts filed under `class` (an index, or `UNCERTAIN`) in the bands
     /// `bands`, surest first; texts that changed since they were read are left out (and
     /// counted as the second value)
-    pub fn class_bucket(&self, stack: &Stack, class: u32, bands: std::ops::RangeInclusive<u32>) -> StoreResult<(Vec<Filed>, usize)> {
+    pub fn class_bucket(
+        &self,
+        stack: &Stack,
+        class: u32,
+        bands: std::ops::RangeInclusive<u32>,
+    ) -> StoreResult<(Vec<Filed>, usize)> {
         let stamp = self.memo_fresh(stack)?;
         let name = stack.def().name.as_str();
         let mut refs: Vec<Vec<u8>> = Vec::new();
@@ -474,7 +504,14 @@ impl Store {
 
     /// the texts nearest a row by cosine, among the ones indexed (`except` left out);
     /// ties by key, so the order is fixed
-    pub fn memo_near(&self, stack: &Stack, me: &Row, by: By, except: Option<&Ref>, limit: usize) -> StoreResult<Vec<(Ref, String, f32)>> {
+    pub fn memo_near(
+        &self,
+        stack: &Stack,
+        me: &Row,
+        by: By,
+        except: Option<&Ref>,
+        limit: usize,
+    ) -> StoreResult<Vec<(Ref, String, f32)>> {
         let all = self.memo_all(stack)?;
         let v = |r: &Row| -> Vec<f32> {
             match by {
@@ -533,7 +570,8 @@ impl Store {
             if v.is_empty() {
                 t.remove(b.as_slice()).map_err(err)?;
             } else {
-                t.insert(b.as_slice(), serde_json::to_vec(&v).map_err(err)?.as_slice()).map_err(err)?;
+                t.insert(b.as_slice(), serde_json::to_vec(&v).map_err(err)?.as_slice())
+                    .map_err(err)?;
             }
         }
         txn.commit().map_err(err)?;
@@ -547,7 +585,10 @@ impl Store {
         let mut out = Vec::new();
         for item in t.iter().map_err(err)? {
             let (k, v) = item.map_err(err)?;
-            out.push((Ref::from_bytes(k.value()), serde_json::from_slice(v.value()).unwrap_or_default()));
+            out.push((
+                Ref::from_bytes(k.value()),
+                serde_json::from_slice(v.value()).unwrap_or_default(),
+            ));
         }
         Ok(out)
     }
@@ -571,7 +612,8 @@ impl Store {
             if names.is_empty() {
                 t.remove(b.as_slice()).map_err(err)?;
             } else {
-                t.insert(b.as_slice(), serde_json::to_vec(names).map_err(err)?.as_slice()).map_err(err)?;
+                t.insert(b.as_slice(), serde_json::to_vec(names).map_err(err)?.as_slice())
+                    .map_err(err)?;
             }
         }
         txn.commit().map_err(err)
@@ -658,7 +700,12 @@ pub struct Tint {
 }
 
 pub fn tint(row: &Row) -> Tint {
-    match row.members.iter().copied().max_by(|&a, &b| row.probs[a].total_cmp(&row.probs[b]).then(b.cmp(&a))) {
+    match row
+        .members
+        .iter()
+        .copied()
+        .max_by(|&a, &b| row.probs[a].total_cmp(&row.probs[b]).then(b.cmp(&a)))
+    {
         Some(c) => Tint {
             class: Some(c),
             strength: row.probs[c],

@@ -44,11 +44,11 @@ A key is a memory's bytes joined by commas, or `note:<key>` for a note.
 | `mem.forget` | `{key}` | `{text}` |
 | `mem.remember` | `{key}` | hit |
 | `mem.all` | `{limit?: 5000}` | `[hit]` |
-| `lists.stats` | | `{lists: [{list, name, members: [hit], count, ordinal_sum, reversed_sum, ordinal_mean, reversed_mean, whole: measure, vector: [26]}], dot: [[cosine]]}` |
+| `lists.stats` | | `{lists: [{list, name, members: [hit], count, ordinal_sum, reversed_sum, ordinal_mean, reversed_mean, whole: measure, vector: [26]}], dot: [[cosine]]}` (`dot` is empty past 1000 lists) |
 | `lists.enlist` / `lists.delist` | `{list, member}` (keys) | `null` |
 | `lists.unlist` | `{list}` | `{removed}` |
 | `space.spread` | `{texts: [{id, text}], reversed?}` | `{d, buckets, nodes: [{id, x, y, z, s, r, q, hue}]}` |
-| `forge.preview` | `{ingredients: [{save, effect: add\|take away\|keep shared}], filter?}` | `{memories, notes, lists, sample, titles}` |
+| `forge.preview` | `{ingredients: [{save, effect: add\|take away\|keep shared}] (at most 32), filter?}` | `{memories, notes, lists, sample, titles}` |
 | `forge.make` | the same and `{name}` | `{save, memories, notes, lists}` |
 | `forge.pour` | the same | what went into the open save |
 | `stats` | | `{notes, words, saves, memories, tags: [[tag, n]], first, latest}` |

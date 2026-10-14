@@ -181,7 +181,8 @@ impl Store {
 
 /// reads a module, refusing anything off (`max` bytes at most)
 pub fn read(b: &[u8], max: usize) -> StoreResult<Module> {
-    std::panic::catch_unwind(|| read_inner(b, max)).unwrap_or_else(|_| Err("that file isn't a classifier module this build reads".into()))
+    std::panic::catch_unwind(|| read_inner(b, max))
+        .unwrap_or_else(|_| Err("that file isn't a classifier module this build reads".into()))
 }
 
 fn read_inner(b: &[u8], max: usize) -> StoreResult<Module> {
@@ -215,7 +216,10 @@ fn read_inner(b: &[u8], max: usize) -> StoreResult<Module> {
     for p in &m.parts {
         let file = if p.size > 0 {
             let n = usize::try_from(p.size).map_err(|_| "a part is too big".to_string())?;
-            let end = at.checked_add(n).filter(|&e| e <= body).ok_or("a part runs past the end of the file")?;
+            let end = at
+                .checked_add(n)
+                .filter(|&e| e <= body)
+                .ok_or("a part runs past the end of the file")?;
             let f = b[at..end].to_vec();
             at = end;
             let clf = Classifier::from_bytes(&f).map_err(|e| format!("{:?}: {e}", p.name))?;
@@ -302,12 +306,18 @@ fn check_manifest(m: &Manifest) -> StoreResult<()> {
             return Err(format!("{:?} has steering that doesn't fit it", p.name));
         }
         let g = p.steer.gains;
-        if ![g.letter, g.word, g.side, g.extra].iter().all(|&x| x.is_finite() && x >= 0.0) {
+        if ![g.letter, g.word, g.side, g.extra]
+            .iter()
+            .all(|&x| x.is_finite() && x >= 0.0)
+        {
             return Err(format!("{:?} has gains out of range", p.name));
         }
         for i in &p.inputs {
             if !seen.contains(&i.from.as_str()) {
-                return Err(format!("{:?} builds on {:?}, which isn't before it in the module", p.name, i.from));
+                return Err(format!(
+                    "{:?} builds on {:?}, which isn't before it in the module",
+                    p.name, i.from
+                ));
             }
             if !(i.coupling.is_finite() && (0.0..=10.0).contains(&i.coupling)) {
                 return Err("a coupling is 0 to 10".into());
@@ -330,7 +340,11 @@ fn check_part(p: &Part, clf: &Classifier, widths: &HashMap<&str, usize>) -> Stor
     if clf.net.heads.len() != 1 || clf.net.heads[0].spec.classes != names || clf.net.heads[0].spec.kind != p.head {
         return Err(format!("{:?}: its weights' classes don't match its definition", p.name));
     }
-    let extra: usize = p.inputs.iter().map(|i| widths.get(i.from.as_str()).copied().unwrap_or(0)).sum();
+    let extra: usize = p
+        .inputs
+        .iter()
+        .map(|i| widths.get(i.from.as_str()).copied().unwrap_or(0))
+        .sum();
     if clf.net.cfg.extra != extra {
         return Err(format!("{:?}: its inputs don't fit its weights", p.name));
     }
@@ -341,7 +355,12 @@ fn check_part(p: &Part, clf: &Classifier, widths: &HashMap<&str, usize>) -> Stor
         return Err(format!("{:?}: its weight count doesn't match", p.name));
     }
     // replayed feedback examples must fit the net (a hand-made file could hold others)
-    if clf.meta.feedback.iter().any(|e| e.head != 0 || !(e.extra.is_empty() || e.extra.len() == extra)) {
+    if clf
+        .meta
+        .feedback
+        .iter()
+        .any(|e| e.head != 0 || !(e.extra.is_empty() || e.extra.len() == extra))
+    {
         return Err(format!("{:?}: its feedback doesn't fit it", p.name));
     }
     Ok(())
@@ -406,7 +425,10 @@ impl Store {
         // everything is checked before anything is written
         for (p, w) in m.manifest.parts.iter().zip(&m.weights) {
             if w.is_none() && !have.contains_key(&p.hash) {
-                return Err(format!("it builds on {:?}, which isn't in this module or this save", p.name));
+                return Err(format!(
+                    "it builds on {:?}, which isn't in this module or this save",
+                    p.name
+                ));
             }
         }
         for (k, v) in &o.lists {
@@ -431,7 +453,11 @@ impl Store {
             };
             let mut clf = Classifier::from_bytes(bytes)?;
             clf.steer = p.steer.clone();
-            let want = if i == last { o.name.clone().unwrap_or_else(|| p.name.clone()) } else { p.name.clone() };
+            let want = if i == last {
+                o.name.clone().unwrap_or_else(|| p.name.clone())
+            } else {
+                p.name.clone()
+            };
             let name = self.free_name(&want)?;
             let class = |c: &str| -> StoreResult<(ClassDef, bool)> {
                 let picked = if i == last { o.lists.get(c) } else { None };
@@ -473,7 +499,15 @@ impl Store {
             history.push(Event {
                 time: now.clone(),
                 kind: "import".into(),
-                note: format!("from the module {:?}{}", m.manifest.name, if m.manifest.author.is_empty() { String::new() } else { format!(" by {}", m.manifest.author) }),
+                note: format!(
+                    "from the module {:?}{}",
+                    m.manifest.name,
+                    if m.manifest.author.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" by {}", m.manifest.author)
+                    }
+                ),
                 ..Event::default()
             });
             let mut def = Definition {
@@ -510,7 +544,12 @@ impl Store {
         if out.lists.is_empty() {
             // reused as it was: its lists are the save's own already
             let d = self.classifier(&out.name)?;
-            out.lists = d.classes.iter().chain(d.not.iter()).map(|c| (c.name.clone(), c.list.clone(), false)).collect();
+            out.lists = d
+                .classes
+                .iter()
+                .chain(d.not.iter())
+                .map(|c| (c.name.clone(), c.list.clone(), false))
+                .collect();
         }
         Ok(out)
     }
@@ -548,7 +587,14 @@ pub fn summary(m: &Module) -> Summary {
         }
         .into(),
         preset: p.preset.clone(),
-        weights: m.manifest.parts.iter().zip(&m.weights).filter(|(_, w)| w.is_some()).map(|(p, _)| p.weights).sum(),
+        weights: m
+            .manifest
+            .parts
+            .iter()
+            .zip(&m.weights)
+            .filter(|(_, w)| w.is_some())
+            .map(|(p, _)| p.weights)
+            .sum(),
         accuracy: p.metrics.as_ref().map(|x| x.accuracy),
         macro_f1: p.metrics.as_ref().map(|x| x.macro_f1),
         examples: p.examples,

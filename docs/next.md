@@ -286,20 +286,23 @@ interface, not stubs.
      past 3/4 refused; `/admin/server` isn't "local" behind a forwarding proxy; logins
      for unknown names take the same time as for known ones; filter presets are checked
      and run once each however often they're referred to (it was exponential), a loop
-     from a bundle errors, and imported presets' size is checked; markdown links with control
+     from a bundle errors, and imported presets' size is checked; the forge takes at most 32 saves and
+     `lists.stats` leaves its grid out past 1000 lists (offline engine too); markdown links with control
      characters before `javascript:` no longer get through (stored XSS through shared
      saves). Tests: `clstests::doors`, `app::tests::quota`, `appweb::tests::turnstiles`,
      `web::tests::local_hosts`, `server::tests::file_round_trip`,
      `classify::tests::job_folders`, `classifiers::tests::hostile_arguments`, `classifiers::tests::filter_presets_stay_cheap`,
      `classify::tests::save_and_load_round_trip`, `node hub/web/test/markdown.mjs`.
+   - **CI (done):** ci.yml now also builds the hub and runs `node hub/web/test/parity.mjs`
+     (must print "all the same") and `node hub/web/test/markdown.mjs` on Node 22. core/
+     and hub/ are rustfmt-clean now; `cargo fmt --all --check` still fails on `src/`
+     (the desktop's files, left to that work). The release workflow builds the whole
+     workspace, and the web app's files (`early.js` too) are embedded by rust-embed, so
+     it needs no change.
    - The note under item 4 about `classify.index` panicking on its thread name is stale:
      the thread names no longer carry the job key, and the web app doesn't wait.
    - **Left, in this order:**
-     1. Cap forge ingredients and skip `lists.stats`'s grid for very many lists.
-     2. CI: add `node hub/web/test/markdown.mjs` (and the parity run if it isn't there)
-        to `.github/workflows/ci.yml`; check the release workflow builds both binaries
-        with the new assets (`hub/web/early.js` comes in through rust-embed).
-     3. The quality sweep: clippy was clean before these changes and after; no TODOs or
+     1. The quality sweep: clippy was clean before these changes and after; no TODOs or
         stubs were found in hub/ or core/ by grep. Still to do: the UX walk of every web
         view at 1280 and 390 px and keyboard-only (Playwright, seeded with
         `scratchpad/seed.mjs`), checking there are no CSP errors in the console now,

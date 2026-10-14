@@ -70,7 +70,8 @@ impl Classifier {
 
     pub fn from_bytes(b: &[u8]) -> Result<Classifier, String> {
         // the reader is careful, but a file is data: a panic anywhere in it is a bad file
-        std::panic::catch_unwind(|| Classifier::read_bytes(b)).unwrap_or_else(|_| Err("not a classifier file this build reads".into()))
+        std::panic::catch_unwind(|| Classifier::read_bytes(b))
+            .unwrap_or_else(|_| Err("not a classifier file this build reads".into()))
     }
 
     fn read_bytes(b: &[u8]) -> Result<Classifier, String> {
@@ -189,14 +190,22 @@ fn expected_weights(h: &Header) -> Result<usize, String> {
     if c.extra > MAX_EXTRA {
         return bad("extra input width");
     }
-    if !(0.0..1.0).contains(&c.dropout) || !(c.rope_base.is_finite() && c.rope_base > 1.0) || !(c.norm_eps.is_finite() && c.norm_eps > 0.0) {
+    if !(0.0..1.0).contains(&c.dropout)
+        || !(c.rope_base.is_finite() && c.rope_base > 1.0)
+        || !(c.norm_eps.is_finite() && c.norm_eps > 0.0)
+    {
         return bad("settings");
     }
     let g = c.gains;
     if ![g.letter, g.word, g.side, g.extra].iter().all(|x| x.is_finite()) {
         return bad("gains");
     }
-    if h.heads.is_empty() || h.heads.len() > MAX_OUT_HEADS || h.heads.iter().any(|x| x.classes.is_empty() || x.classes.len() > MAX_CLASSES) {
+    if h.heads.is_empty()
+        || h.heads.len() > MAX_OUT_HEADS
+        || h.heads
+            .iter()
+            .any(|x| x.classes.is_empty() || x.classes.len() > MAX_CLASSES)
+    {
         return bad("heads");
     }
     // the steering is read for every head, its bias zipped with the logits

@@ -8,9 +8,9 @@ mod appweb;
 mod auth;
 mod classify;
 mod clshub;
-mod clsweb;
 #[cfg(test)]
 mod clstests;
+mod clsweb;
 mod game;
 mod guide;
 mod hub;

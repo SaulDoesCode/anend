@@ -125,7 +125,8 @@ function listStats(save) {
     }
     lists.push({ l, name: h ? h.text : label(l), members, so, sr, joined: members.map((m) => m.text).join(' '), vector: letterVector(members.map((m) => m.text)) });
   }
-  const dot = lists.map((a) => lists.map((b) => round(cosine(a.vector, b.vector) * 1000) / 1000));
+  // like the hub, no grid past 1000 lists (lists² numbers)
+  const dot = lists.length > 1000 ? [] : lists.map((a) => lists.map((b) => round(cosine(a.vector, b.vector) * 1000) / 1000));
   return {
     lists: lists.map((x) => ({
       list: label(x.l),
@@ -410,7 +411,9 @@ export class Engine {
   forgeParts(args) {
     const [openName, open] = this.store();
     const parts = [];
-    for (const ing of Array.isArray(args.ingredients) ? args.ingredients : []) {
+    const ingredients = Array.isArray(args.ingredients) ? args.ingredients : [];
+    if (ingredients.length > 32) throw new Error('the forge takes at most 32 saves at once');
+    for (const ing of ingredients) {
       const name = s(ing, 'save');
       const effect = EFFECTS[s(ing, 'effect')] || 'add';
       // the hub opens (and so makes) a save it doesn't have; here it's just empty

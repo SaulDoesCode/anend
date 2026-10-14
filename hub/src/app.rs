@@ -76,16 +76,51 @@ pub const MAX_SAVES: usize = 200;
 
 /// calls that only read, or make room: they work whatever the quota says
 const MAKE_NO_ROOM: &[&str] = &[
-    "hello", "saves.list", "saves.open", "saves.delete", "saves.rename", "saves.export",
-    "notes.list", "notes.tags", "notes.get", "notes.delete",
-    "mem.measure", "mem.gsearch", "mem.search", "mem.forget", "mem.remember", "mem.all",
-    "lists.stats", "lists.delist", "lists.unlist", "space.spread", "forge.preview", "stats",
-    "classify.list", "classify.get", "classify.delete", "classify.job", "classify.cancel",
-    "classify.predict", "classify.search", "classify.contributions", "classify.represent",
-    "classify.similar", "classify.index_job", "classify.index_cancel", "classify.buckets",
-    "classify.bucket", "classify.near", "classify.tints", "classify.indexed",
-    "classify.disagreements", "classify.export", "classify.inspect",
-    "filters.list", "filters.delete", "filters.run",
+    "hello",
+    "saves.list",
+    "saves.open",
+    "saves.delete",
+    "saves.rename",
+    "saves.export",
+    "notes.list",
+    "notes.tags",
+    "notes.get",
+    "notes.delete",
+    "mem.measure",
+    "mem.gsearch",
+    "mem.search",
+    "mem.forget",
+    "mem.remember",
+    "mem.all",
+    "lists.stats",
+    "lists.delist",
+    "lists.unlist",
+    "space.spread",
+    "forge.preview",
+    "stats",
+    "classify.list",
+    "classify.get",
+    "classify.delete",
+    "classify.job",
+    "classify.cancel",
+    "classify.predict",
+    "classify.search",
+    "classify.contributions",
+    "classify.represent",
+    "classify.similar",
+    "classify.index_job",
+    "classify.index_cancel",
+    "classify.buckets",
+    "classify.bucket",
+    "classify.near",
+    "classify.tints",
+    "classify.indexed",
+    "classify.disagreements",
+    "classify.export",
+    "classify.inspect",
+    "filters.list",
+    "filters.delete",
+    "filters.run",
 ];
 
 /// calls that make a save
@@ -159,7 +194,9 @@ impl Workspace {
             ));
         }
         if new_save && files.len() >= MAX_SAVES {
-            return Err(format!("that's {MAX_SAVES} saves, as many as the hub keeps for each member: delete one first"));
+            return Err(format!(
+                "that's {MAX_SAVES} saves, as many as the hub keeps for each member: delete one first"
+            ));
         }
         Ok(())
     }
@@ -285,9 +322,18 @@ fn note_summary(n: &Note) -> Value {
     })
 }
 
+/// most saves one forge call reads
+const MAX_INGREDIENTS: usize = 32;
+/// past this many lists the grid of how alike every two are (lists² numbers) is left out
+const MAX_DOT_LISTS: usize = 1000;
+
 fn list_stats(store: &Store) -> Res {
     let lists = anend_core::lists::stats(store)?;
-    let dot = anend_core::lists::dots(&lists);
+    let dot = if lists.len() <= MAX_DOT_LISTS {
+        anend_core::lists::dots(&lists)
+    } else {
+        Vec::new()
+    };
     let lists: Vec<Value> = lists
         .iter()
         .map(|l| {
@@ -344,12 +390,15 @@ fn spread_layout(args: &Value) -> Res {
 fn forge_parts(ws: &Workspace, args: &Value) -> Result<forge::Contents, String> {
     let (open_name, open_store) = ws.store()?;
     let mut parts = Vec::new();
-    for ing in args
+    let ingredients = args
         .get("ingredients")
         .and_then(Value::as_array)
         .cloned()
-        .unwrap_or_default()
-    {
+        .unwrap_or_default();
+    if ingredients.len() > MAX_INGREDIENTS {
+        return Err(format!("the forge takes at most {MAX_INGREDIENTS} saves at once"));
+    }
+    for ing in ingredients {
         let name = s(&ing, "save");
         let effect = match s(&ing, "effect") {
             "take away" | "take_away" | "-" => Effect::TakeAway,
@@ -468,8 +517,8 @@ fn saves_call(ws: &Workspace, open: &str, op: &str, args: &Value) -> Res {
             serde_json::to_value(b).map_err(|e| e.to_string())
         }
         "saves.import" => {
-            let b: bundle::Bundle =
-                serde_json::from_value(args.get("bundle").cloned().unwrap_or_default()).map_err(|e| format!("that bundle doesn't read: {e}"))?;
+            let b: bundle::Bundle = serde_json::from_value(args.get("bundle").cloned().unwrap_or_default())
+                .map_err(|e| format!("that bundle doesn't read: {e}"))?;
             bundle::check(&b)?;
             if args.get("merge").and_then(Value::as_bool).unwrap_or(false) {
                 let w = bundle::merge(&ws.store()?.1, &b)?;
@@ -546,10 +595,12 @@ pub fn call(ws: &Workspace, op: &str, args: &Value) -> Res {
                 .collect();
             Ok(Value::Array(notes))
         }
-        "notes.tags" => Ok(json!(tag_counts(&store.all()?)
-            .into_iter()
-            .map(|(tag, count)| json!({ "tag": tag, "count": count }))
-            .collect::<Vec<_>>())),
+        "notes.tags" => Ok(json!(
+            tag_counts(&store.all()?)
+                .into_iter()
+                .map(|(tag, count)| json!({ "tag": tag, "count": count }))
+                .collect::<Vec<_>>()
+        )),
         "notes.get" => {
             let key = s(args, "key");
             let n = store.all()?.into_iter().find(|n| n.key == key).ok_or("no such note")?;
@@ -782,7 +833,12 @@ mod tests {
         assert!(call(&ws, "notes.save", &json!({"note": {}, "text": "no title"})).is_err());
 
         // tags: counts, and notes by all or any of them
-        call(&ws, "notes.save", &json!({"note": {"tags": ["a", "b"]}, "text": "# ab"})).unwrap();
+        call(
+            &ws,
+            "notes.save",
+            &json!({"note": {"tags": ["a", "b"]}, "text": "# ab"}),
+        )
+        .unwrap();
         call(&ws, "notes.save", &json!({"note": {"tags": ["a"]}, "text": "# a"})).unwrap();
         call(&ws, "notes.save", &json!({"note": {"tags": ["c"]}, "text": "# c"})).unwrap();
         assert_eq!(
@@ -790,7 +846,13 @@ mod tests {
             json!([{"tag": "a", "count": 2}, {"tag": "b", "count": 1}, {"tag": "c", "count": 1}])
         );
         let titles = |args: Value| -> Vec<String> {
-            call(&ws, "notes.list", &args).unwrap().as_array().unwrap().iter().map(|n| n["title"].as_str().unwrap().to_string()).collect()
+            call(&ws, "notes.list", &args)
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| n["title"].as_str().unwrap().to_string())
+                .collect()
         };
         assert_eq!(titles(json!({"tags": ["a", "b"]})), ["ab"]);
         assert_eq!(titles(json!({"tags": ["b", "c"], "mode": "or"})).len(), 2);
@@ -817,6 +879,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(p["memories"], 1);
+        let many: Vec<Value> = (0..=MAX_INGREDIENTS).map(|_| json!({"save": "notes"})).collect();
+        assert!(
+            call(&ws, "forge.preview", &json!({"ingredients": many}))
+                .unwrap_err()
+                .contains("at most")
+        );
         call(
             &ws,
             "forge.make",
@@ -836,8 +904,14 @@ mod tests {
         assert_eq!(b["anend"], 1);
         let got = call(&ws, "saves.import", &json!({"bundle": b})).unwrap();
         assert_eq!(got["save"], "notes 2");
-        assert_eq!(call(&ws, "saves.export", &json!({"name": "notes 2"})).unwrap()["memories"], b["memories"]);
-        assert_eq!(call(&ws, "saves.import", &json!({"bundle": b, "merge": true})).unwrap()["memories"], 0);
+        assert_eq!(
+            call(&ws, "saves.export", &json!({"name": "notes 2"})).unwrap()["memories"],
+            b["memories"]
+        );
+        assert_eq!(
+            call(&ws, "saves.import", &json!({"bundle": b, "merge": true})).unwrap()["memories"],
+            0
+        );
         call(&ws, "saves.delete", &json!({"name": "notes 2"})).unwrap();
         // a bundle it can't read leaves nothing behind
         assert!(call(&ws, "saves.import", &json!({"bundle": {"anend": 2}, "name": "bad"})).is_err());
@@ -862,7 +936,14 @@ mod tests {
         let full = ws.room_under(used, false).unwrap_err();
         assert!(full.contains("delete or shrink"), "{full}");
         // the calls that need room are the ones not listed as making none
-        for op in ["notes.save", "mem.saturate", "saves.new", "saves.import", "classify.train", "filters.save"] {
+        for op in [
+            "notes.save",
+            "mem.saturate",
+            "saves.new",
+            "saves.import",
+            "classify.train",
+            "filters.save",
+        ] {
             assert!(!MAKE_NO_ROOM.contains(&op), "{op}");
         }
         for op in MAKE_NO_ROOM {

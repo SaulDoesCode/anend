@@ -53,8 +53,7 @@ fn serve(res: &mut Response, path: &str) {
             res.headers_mut()
                 .insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
             // how the page knows a hub served it (api.js), and not a static server
-            res.headers_mut()
-                .insert("x-anend", HeaderValue::from_static("hub"));
+            res.headers_mut().insert("x-anend", HeaderValue::from_static("hub"));
             res.write_body(f.data.into_owned()).ok();
         }
         None => {
@@ -339,11 +338,15 @@ pub async fn take_classifier(req: &mut Request, depot: &mut Depot, res: &mut Res
             .classifier(&id)?
             .filter(|c| c.status == Status::Approved)
             .ok_or("no such classifier on the hub")?;
-        let file = hub().store.classifier_path(&c.id).ok_or("no such classifier on the hub")?;
+        let file = hub()
+            .store
+            .classifier_path(&c.id)
+            .ok_or("no such classifier on the hub")?;
         let max = hub().classifier_max();
-        let took = tokio::task::spawn_blocking(move || crate::clshub::take_into(&workspaces().get(&o), &file, max, &args))
-            .await
-            .map_err(|e| e.to_string())??;
+        let took =
+            tokio::task::spawn_blocking(move || crate::clshub::take_into(&workspaces().get(&o), &file, max, &args))
+                .await
+                .map_err(|e| e.to_string())??;
         let who_took = me(depot)
             .map(|u| u.name.to_lowercase())
             .unwrap_or_else(|| "local".into());
@@ -417,7 +420,9 @@ mod tests {
         socket_count(&who, false);
         assert!(socket_count(&who, true));
         let g = gate(&who);
-        let held: Vec<_> = (0..CALLS_AT_ONCE).map(|_| g.clone().try_acquire_owned().unwrap()).collect();
+        let held: Vec<_> = (0..CALLS_AT_ONCE)
+            .map(|_| g.clone().try_acquire_owned().unwrap())
+            .collect();
         assert!(g.clone().try_acquire_owned().is_err(), "a fifth call waits");
         drop(held);
         assert!(g.try_acquire_owned().is_ok());

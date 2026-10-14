@@ -193,7 +193,13 @@ fn file_name(c: &ClassifierRec) -> String {
     let n: String = c
         .name
         .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' { ch } else { '-' })
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
         .collect();
     let n = n.trim_matches('-');
     format!("{}.anendcls", if n.is_empty() { c.id.as_str() } else { n })
@@ -269,7 +275,12 @@ fn share_form(depot: &Depot, action: String, heading: String, c: Option<&Classif
             ),
             Field {
                 hint: "a few words, comma separated",
-                ..field("tags", "tags", "text", &c.map(|c| c.tags.join(", ")).unwrap_or_default())
+                ..field(
+                    "tags",
+                    "tags",
+                    "text",
+                    &c.map(|c| c.tags.join(", ")).unwrap_or_default(),
+                )
             },
             Field {
                 required: c.is_none(),
@@ -382,7 +393,11 @@ pub async fn edit(req: &mut Request, depot: &mut Depot, res: &mut Response) {
             }
         }
         None => {
-            let name = if words.0.trim().is_empty() { c.name.as_str() } else { words.0 };
+            let name = if words.0.trim().is_empty() {
+                c.name.as_str()
+            } else {
+                words.0
+            };
             let details = match crate::hub::Details::new(name, words.1, words.2) {
                 Ok(d) => d,
                 Err(e) => return go(res, &back, &format!("!{e}")),
@@ -495,7 +510,14 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(file_name(&c), "etc-passwd--x.anendcls");
-        assert_eq!(file_name(&ClassifierRec { id: "abc".into(), name: "///".into(), ..Default::default() }), "abc.anendcls");
+        assert_eq!(
+            file_name(&ClassifierRec {
+                id: "abc".into(),
+                name: "///".into(),
+                ..Default::default()
+            }),
+            "abc.anendcls"
+        );
         assert_eq!(percent(Some(0.934)), "93%");
         assert_eq!(percent(Some(f64::NAN)), "");
         assert_eq!(count(5200), "5k");
