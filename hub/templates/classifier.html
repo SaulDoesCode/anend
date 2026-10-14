@@ -38,9 +38,9 @@
         <div class="stat"><b>{{ weights }}</b><span>weights</span></div>
       </div>
       <div class="row">
-        {% if can_take %}<button class="primary" id="take" data-id="{{ c.id }}">take into my save</button>{% endif %}
-        <a class="btn{% if !can_take %} primary{% endif %}" href="/classifiers/{{ c.id }}/download">download</a>
-        {% if can_star %}<form class="inline" method="post" action="/classifiers/{{ c.id }}/star"><button>{% if starred %}★ starred{% else %}☆ star{% endif %}</button></form>{% endif %}
+        {% if can_take %}<button class="primary with-text" id="take" data-id="{{ c.id }}">{{ crate::web::icon("download") }}take into my save</button>{% endif %}
+        <a class="btn with-text{% if !can_take %} primary{% endif %}" href="/classifiers/{{ c.id }}/download" download data-tip="download it as a .anendcls file">{{ crate::web::icon("download") }}download</a>
+        {% if can_star %}<form class="inline" method="post" action="/classifiers/{{ c.id }}/star"><button class="with-text{% if starred %} on-star{% endif %}" aria-pressed="{% if starred %}true{% else %}false{% endif %}" data-tip="{% if starred %}starred: click to take your star back{% else %}star it: tell its maker you like it{% endif %}">{{ crate::web::icon("star") }}{% if starred %}starred{% else %}star{% endif %}</button></form>{% endif %}
       </div>
       <p class="dim small" id="took">{% if can_take %}“Take” puts it in the save open in <a href="/app/">the app</a> here. {% endif %}Or download the .anendcls and import it in the app's classifiers view.</p>
     </section>
@@ -48,16 +48,16 @@
     <section class="card">
       <h3>{% if is_admin %}admin{% else %}yours{% endif %}</h3>
       <div class="row">
-        <a class="btn small" href="/classifiers/{{ c.id }}/edit">edit or new version</a>
-        <form class="inline" method="post" action="/classifiers/{{ c.id }}/delete" onsubmit="return confirm('Delete this classifier for good?')"><button class="small bad">delete</button></form>
+        <a class="btn small with-text" href="/classifiers/{{ c.id }}/edit" data-tip="edit it, or send a new version">{{ crate::web::icon("edit") }}edit</a>
+        <form class="inline" method="post" action="/classifiers/{{ c.id }}/delete" onsubmit="return confirm('Delete this classifier for good?')"><button class="small bad ibtn" data-tip="delete this classifier for good" aria-label="delete this classifier for good">{{ crate::web::icon("delete") }}</button></form>
       </div>
       {% if is_admin %}
       <div class="row" style="margin-top: 8px">
-        {% if status != "approved" %}<form class="inline" method="post" action="/admin/classifiers/{{ c.id }}"><input type="hidden" name="action" value="approve"><button class="small primary">approve</button></form>{% endif %}
-        {% if status == "approved" %}<form class="inline" method="post" action="/admin/classifiers/{{ c.id }}"><input type="hidden" name="action" value="{% if c.featured %}unfeature{% else %}feature{% endif %}"><button class="small">{% if c.featured %}unfeature{% else %}feature{% endif %}</button></form>{% endif %}
+        {% if status != "approved" %}<form class="inline" method="post" action="/admin/classifiers/{{ c.id }}"><input type="hidden" name="action" value="approve"><button class="small primary with-text">{{ crate::web::icon("check") }}approve</button></form>{% endif %}
+        {% if status == "approved" %}<form class="inline" method="post" action="/admin/classifiers/{{ c.id }}"><input type="hidden" name="action" value="{% if c.featured %}unfeature{% else %}feature{% endif %}"><button class="small with-text" data-tip="{% if c.featured %}stop featuring it{% else %}feature it: it shows among the featured{% endif %}">{{ crate::web::icon("pin") }}{% if c.featured %}unfeature{% else %}feature{% endif %}</button></form>{% endif %}
       </div>
       {% if status != "rejected" %}
-      <form class="row" style="margin-top: 8px" method="post" action="/admin/classifiers/{{ c.id }}"><input type="text" name="note" placeholder="why not" style="flex:1"><button class="small bad" name="action" value="reject">turn down</button></form>
+      <form class="row" style="margin-top: 8px" method="post" action="/admin/classifiers/{{ c.id }}"><input type="text" name="note" placeholder="why not" style="flex:1"><button class="small bad with-text" name="action" value="reject">{{ crate::web::icon("close") }}turn down</button></form>
       {% endif %}
       {% endif %}
     </section>

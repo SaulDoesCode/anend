@@ -1,7 +1,7 @@
 <a class="save cls" href="/classifiers/{{ c.id }}">
   <div class="sigil" style="--h: {{ c.hue }}">
     <span class="n">{{ c.n_classes }}<small> classes</small></span><span class="r">{% if !c.accuracy.is_empty() %}{{ c.accuracy }} right{% else %}{{ c.preset }}{% endif %}</span>
-    {% if c.featured %}<span class="star">featured</span>{% endif %}
+    {% if c.featured %}<span class="star">{{ crate::web::icon("pin") }}featured</span>{% endif %}
   </div>
   <div class="body">
     <span class="name">{{ c.name }}</span>
@@ -9,6 +9,6 @@
     <span class="chips">{% for k in c.classes %}<span class="chip">{{ k }}</span>{% endfor %}{% if c.more > 0 %}<span class="dim small">+{{ c.more }}</span>{% endif %}</span>
     {% if !c.description.is_empty() %}<span class="desc">{{ c.description }}</span>{% endif %}
     {% if !c.tags.is_empty() %}<span class="tags">{% for t in c.tags %}<span class="tag">#{{ t }}</span>{% endfor %}</span>{% endif %}
-    <span class="meta"><span>★ {{ c.stars }}</span><span>↓ {{ c.downloads }}</span><span>{{ c.preset }}</span><span>{{ c.weights }} weights</span></span>
+    <span class="meta"><span>{{ crate::web::icon("star") }}{{ c.stars }}<span class="vh"> stars</span></span><span>{{ crate::web::icon("download") }}{{ c.downloads }}<span class="vh"> taken</span></span><span>{{ crate::web::icon("sliders") }}{{ c.preset }}</span><span>{{ c.weights }} weights</span></span>
   </div>
 </a>

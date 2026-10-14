@@ -117,6 +117,7 @@ pub fn router() -> Router {
         .hoop(web::who_is_asking)
         .get(web::index)
         .push(Router::with_path("static/hub.css").get(web::css))
+        .push(Router::with_path("static/icons.svg").get(web::icons))
         .push(Router::with_path("static/favicon.svg").get(web::favicon))
         .push(Router::with_path("favicon.ico").get(web::favicon))
         .push(Router::with_path("saves/{id}").get(web::save_page))

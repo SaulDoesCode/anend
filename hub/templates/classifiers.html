@@ -16,9 +16,10 @@
   <form class="find" method="get" action="/classifiers">
     <input type="search" name="q" value="{{ q }}" placeholder="find classifiers: words, a class, an author, or #tag">
     <input type="hidden" name="sort" value="{{ sort }}">
-    <button class="primary">find</button>
+    <button class="primary ibtn" data-tip="find" aria-label="find">{{ crate::web::icon("search") }}</button>
+    <span class="sorts with-icon dim small" data-tip="order" aria-hidden="true">{{ crate::web::icon("sort") }}</span>
     {% for s in sorts %}<a class="btn small{% if *s == sort %} on{% endif %}" href="/classifiers?sort={{ s }}&q={{ q_url }}">{{ s }}</a>{% endfor %}
-    {% if l.me.is_some() %}<span class="grow"></span><a class="btn small" href="/classifiers/upload">share a classifier</a>{% endif %}
+    {% if l.me.is_some() %}<span class="grow"></span><a class="btn small with-text" href="/classifiers/upload">{{ crate::web::icon("upload") }}share a classifier</a>{% endif %}
   </form>
 </section>
 {% if cards.is_empty() %}
@@ -29,7 +30,7 @@
 </section>
 {% endif %}
 <div class="row spread">
-  {% if page > 0 %}<a class="btn" href="/classifiers?sort={{ sort }}&q={{ q_url }}&page={{ page - 1 }}">← newer</a>{% else %}<span></span>{% endif %}
-  {% if more %}<a class="btn" href="/classifiers?sort={{ sort }}&q={{ q_url }}&page={{ page + 1 }}">more →</a>{% endif %}
+  {% if page > 0 %}<a class="btn with-text" href="/classifiers?sort={{ sort }}&q={{ q_url }}&page={{ page - 1 }}">{{ crate::web::icon("chevron-left") }}newer</a>{% else %}<span></span>{% endif %}
+  {% if more %}<a class="btn with-text more-page" href="/classifiers?sort={{ sort }}&q={{ q_url }}&page={{ page + 1 }}">more{{ crate::web::icon("chevron-right") }}</a>{% endif %}
 </div>
 {% endblock %}

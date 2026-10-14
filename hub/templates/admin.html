@@ -1,23 +1,11 @@
 {% extends "base.html" %}
-{% block title %}admin · <section class="card">
-  <h2>all classifiers ({{ all_cls.len() }})</h2>
-  <table>
-    <tr><th>classifier</th><th>by</th><th>status</th><th>★</th><th>↓</th><th></th></tr>
-    {% for c in all_cls %}
-    <tr><td><a href="/classifiers/{{ c.id }}">{{ c.name }}</a>{% if c.featured %} <span class="pill">featured</span>{% endif %}</td><td>{{ c.author }}</td><td><span class="pill {{ c.status }}">{{ c.status }}</span></td><td>{{ c.stars }}</td><td>{{ c.downloads }}</td>
-      <td><form class="row" method="post" action="/admin/classifiers/{{ c.id }}">
-        <select name="action"><option value="">…</option><option value="approve">approve</option><option value="reject">turn down</option><option value="feature">feature</option><option value="unfeature">unfeature</option><option value="remove">remove for good</option></select>
-        <button class="small">do</button></form></td></tr>
-    {% endfor %}
-  </table>
-</section>
-{% endblock %}
+{% block title %}admin · {% endblock %}
 {% block main %}
-<div class="row"><a class="btn small" href="/admin/server">server settings (https)</a></div>
+<div class="row"><a class="btn small with-text" href="/admin/server">{{ crate::web::icon("settings") }}server settings (https)</a></div>
 <section class="card">
   <h2>saves waiting ({{ waiting_saves.len() }})</h2>
   {% if waiting_saves.is_empty() %}<p class="dim">Nothing to look at.</p>{% else %}
-  <table>
+  <div class="scroll"><table>
     <tr><th>save</th><th>by</th><th>inside</th><th>sent</th><th></th></tr>
     {% for s in waiting_saves %}
     <tr>
@@ -26,19 +14,19 @@
       <td class="small">{{ s.memories }} memories · {{ s.notes }} notes · {{ s.size }}</td>
       <td class="dim small">{{ s.ago }}</td>
       <td><form class="row" method="post" action="/admin/saves/{{ s.id }}">
-        <button class="small primary" name="action" value="approve">let in</button>
+        <button class="small primary with-text" name="action" value="approve">{{ crate::web::icon("check") }}let in</button>
         <input type="text" name="note" placeholder="why not (for reject)" style="width: 160px">
-        <button class="small bad" name="action" value="reject">turn down</button>
+        <button class="small bad with-text" name="action" value="reject">{{ crate::web::icon("close") }}turn down</button>
       </form></td>
     </tr>
     {% endfor %}
-  </table>
+  </table></div>
   {% endif %}
 </section>
 <section class="card" id="classifiers">
   <h2>classifiers waiting ({{ waiting_cls.len() }})</h2>
   {% if waiting_cls.is_empty() %}<p class="dim">Nothing to look at.</p>{% else %}
-  <table>
+  <div class="scroll"><table>
     <tr><th>classifier</th><th>by</th><th>classes</th><th>inside</th><th>sent</th><th></th></tr>
     {% for c in waiting_cls %}
     <tr>
@@ -48,35 +36,35 @@
       <td class="small">{{ c.preset }}{% if !c.accuracy.is_empty() %} · {{ c.accuracy }} right{% endif %} · {{ c.size }}{% if c.needs > 0 %} · <span class="pill pending">needs {{ c.needs }} it doesn't carry</span>{% endif %}</td>
       <td class="dim small">{{ c.ago }}</td>
       <td><form class="row" method="post" action="/admin/classifiers/{{ c.id }}">
-        <button class="small primary" name="action" value="approve">let in</button>
+        <button class="small primary with-text" name="action" value="approve">{{ crate::web::icon("check") }}let in</button>
         <input type="text" name="note" placeholder="why not (for reject)" style="width: 160px">
-        <button class="small bad" name="action" value="reject">turn down</button>
+        <button class="small bad with-text" name="action" value="reject">{{ crate::web::icon("close") }}turn down</button>
       </form></td>
     </tr>
     {% endfor %}
-  </table>
+  </table></div>
   {% endif %}
 </section>
 <section class="card">
   <h2>people applying ({{ applied.len() }})</h2>
   {% if applied.is_empty() %}<p class="dim">Nobody waiting.{% if open %} (Joining is open: new accounts don't wait.){% endif %}</p>{% else %}
-  <table>
+  <div class="scroll"><table>
     <tr><th>name</th><th>email</th><th>why they want in</th><th>applied</th><th></th></tr>
     {% for u in applied %}
     <tr><td>{{ u.name }}</td><td class="small">{{ u.email }}</td><td class="small" style="max-width: 360px">{{ u.why }}</td><td class="dim small">{{ u.ago }}</td>
-      <td><form class="row" method="post" action="/admin/users/{{ u.name }}"><button class="small primary" name="action" value="approve">let in</button><button class="small bad" name="action" value="reject">turn down</button></form></td></tr>
+      <td><form class="row" method="post" action="/admin/users/{{ u.name }}"><button class="small primary with-text" name="action" value="approve">{{ crate::web::icon("check") }}let in</button><button class="small bad with-text" name="action" value="reject">{{ crate::web::icon("close") }}turn down</button></form></td></tr>
     {% endfor %}
-  </table>
+  </table></div>
   {% endif %}
 </section>
 <section class="card">
   <h2>everyone ({{ users.len() }})</h2>
-  <table>
+  <div class="scroll"><table>
     <tr><th>name</th><th>role</th><th>standing</th><th>points</th><th>email</th><th></th></tr>
     {% for u in users %}
     <tr><td><a href="/u/{{ u.name }}">{{ u.name }}</a></td><td>{{ u.role }}</td><td><span class="pill {{ u.standing }}">{{ u.standing }}</span></td><td>{{ u.points }}</td><td class="small">{{ u.email }}</td>
       <td><form class="row" method="post" action="/admin/users/{{ u.name }}">
-        <select name="action">
+        <select name="action" aria-label="what to do">
           <option value="">…</option>
           <option value="member">make member</option>
           <option value="trusted">make trusted (no review)</option>
@@ -84,33 +72,33 @@
           {% if u.standing == "banned" %}<option value="unban">unban</option>{% else %}<option value="ban">ban</option>{% endif %}
           <option value="link">make a login link</option>
         </select>
-        <button class="small">do</button>
+        <button class="small ibtn tip-end" data-tip="do it" aria-label="do it">{{ crate::web::icon("check") }}</button>
       </form></td></tr>
     {% endfor %}
-  </table>
+  </table></div>
 </section>
 <section class="card">
   <h2>all saves ({{ all_saves.len() }})</h2>
-  <table>
-    <tr><th>save</th><th>by</th><th>status</th><th>★</th><th>↓</th><th></th></tr>
+  <div class="scroll"><table>
+    <tr><th>save</th><th>by</th><th>status</th><th><span class="with-icon" data-tip="stars">{{ crate::web::icon("star") }}<span class="vh">stars</span></span></th><th><span class="with-icon" data-tip="downloads">{{ crate::web::icon("download") }}<span class="vh">downloads</span></span></th><th></th></tr>
     {% for s in all_saves %}
-    <tr><td><a href="/saves/{{ s.id }}">{{ s.name }}</a>{% if s.featured %} <span class="pill">featured</span>{% endif %}</td><td>{{ s.author }}</td><td><span class="pill {{ s.status }}">{{ s.status }}</span></td><td>{{ s.stars }}</td><td>{{ s.downloads }}</td>
+    <tr><td><a href="/saves/{{ s.id }}">{{ s.name }}</a>{% if s.featured %} <span class="pill with-icon">{{ crate::web::icon("pin") }}featured</span>{% endif %}</td><td>{{ s.author }}</td><td><span class="pill {{ s.status }}">{{ s.status }}</span></td><td>{{ s.stars }}</td><td>{{ s.downloads }}</td>
       <td><form class="row" method="post" action="/admin/saves/{{ s.id }}">
-        <select name="action"><option value="">…</option><option value="approve">approve</option><option value="reject">turn down</option><option value="feature">feature</option><option value="unfeature">unfeature</option><option value="remove">remove for good</option></select>
-        <button class="small">do</button></form></td></tr>
+        <select name="action" aria-label="what to do"><option value="">…</option><option value="approve">approve</option><option value="reject">turn down</option><option value="feature">feature</option><option value="unfeature">unfeature</option><option value="remove">remove for good</option></select>
+        <button class="small ibtn tip-end" data-tip="do it" aria-label="do it">{{ crate::web::icon("check") }}</button></form></td></tr>
     {% endfor %}
-  </table>
+  </table></div>
 </section>
 <section class="card">
   <h2>all classifiers ({{ all_cls.len() }})</h2>
-  <table>
-    <tr><th>classifier</th><th>by</th><th>status</th><th>★</th><th>↓</th><th></th></tr>
+  <div class="scroll"><table>
+    <tr><th>classifier</th><th>by</th><th>status</th><th><span class="with-icon" data-tip="stars">{{ crate::web::icon("star") }}<span class="vh">stars</span></span></th><th><span class="with-icon" data-tip="downloads">{{ crate::web::icon("download") }}<span class="vh">downloads</span></span></th><th></th></tr>
     {% for c in all_cls %}
-    <tr><td><a href="/classifiers/{{ c.id }}">{{ c.name }}</a>{% if c.featured %} <span class="pill">featured</span>{% endif %}</td><td>{{ c.author }}</td><td><span class="pill {{ c.status }}">{{ c.status }}</span></td><td>{{ c.stars }}</td><td>{{ c.downloads }}</td>
+    <tr><td><a href="/classifiers/{{ c.id }}">{{ c.name }}</a>{% if c.featured %} <span class="pill with-icon">{{ crate::web::icon("pin") }}featured</span>{% endif %}</td><td>{{ c.author }}</td><td><span class="pill {{ c.status }}">{{ c.status }}</span></td><td>{{ c.stars }}</td><td>{{ c.downloads }}</td>
       <td><form class="row" method="post" action="/admin/classifiers/{{ c.id }}">
-        <select name="action"><option value="">…</option><option value="approve">approve</option><option value="reject">turn down</option><option value="feature">feature</option><option value="unfeature">unfeature</option><option value="remove">remove for good</option></select>
-        <button class="small">do</button></form></td></tr>
+        <select name="action" aria-label="what to do"><option value="">…</option><option value="approve">approve</option><option value="reject">turn down</option><option value="feature">feature</option><option value="unfeature">unfeature</option><option value="remove">remove for good</option></select>
+        <button class="small ibtn tip-end" data-tip="do it" aria-label="do it">{{ crate::web::icon("check") }}</button></form></td></tr>
     {% endfor %}
-  </table>
+  </table></div>
 </section>
 {% endblock %}

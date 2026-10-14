@@ -15,7 +15,7 @@
     {% if !u.bio.is_empty() %}<p style="white-space: pre-wrap; margin-top: 12px">{{ u.bio }}</p>{% endif %}
     {% if !badges.is_empty() %}
     <h3 style="margin-top: 14px">badges</h3>
-    <div class="badges">{% for b in badges %}<span class="badge" title="{{ b.about }}"><b>{{ b.glyph }}</b>{{ b.name }}</span>{% endfor %}</div>
+    <div class="badges">{% for b in badges %}<span class="badge" tabindex="0" data-tip="{{ b.about }}"><b>{{ b.glyph }}</b>{{ b.name }}</span>{% endfor %}</div>
     {% endif %}
   </section>
   <section class="card">
@@ -34,7 +34,7 @@
 <section class="grid">{% for c in cards %}{% include "card.html" %}{% endfor %}</section>
 {% endif %}
 {% if !cls_cards.is_empty() %}
-<h3 style="color: var(--bar-text); margin: 6px 4px 0">classifiers</h3>
+<h3 class="with-icon" style="color: var(--bar-text); margin: 6px 4px 0">{{ crate::web::icon("classifier") }}classifiers</h3>
 <section class="grid">{% for c in cls_cards %}{% include "clscard.html" %}{% endfor %}</section>
 {% endif %}
 {% if own %}
@@ -54,16 +54,16 @@
       <input id="email" name="email" type="email" value="{{ u.email }}" style="width:100%">
       <label for="password">{% if no_password %}set a password, so you can log in without a link{% else %}new password (leave empty to keep yours){% endif %}</label>
       <input id="password" name="password" type="password" style="width:100%" autocomplete="new-password">
-      <p><button class="primary">save</button></p>
+      <p><button class="primary with-text">{{ crate::web::icon("save") }}save</button></p>
     </form>
   </section>
   <section class="card">
     <h3>app tokens</h3>
     <p class="dim small">The app shares and browses saves with a token: make one, paste it in the app (settings → hub). It's shown once.</p>
     {% if !new_token.is_empty() %}<p class="token">{{ new_token }}</p>{% endif %}
-    <form class="row" method="post" action="/me/tokens"><input type="text" name="label" placeholder="what it's for, e.g. laptop" style="flex:1"><button>make a token</button></form>
+    <form class="row" method="post" action="/me/tokens"><input type="text" name="label" placeholder="what it's for, e.g. laptop" style="flex:1"><button class="with-text">{{ crate::web::icon("keys") }}make a token</button></form>
     {% if !tokens.is_empty() %}
-    <table style="margin-top: 8px">{% for t in tokens %}<tr><td>{{ t.1 }}</td><td class="dim small">{{ t.2 }}… · {{ t.3 }}</td><td><form class="inline" method="post" action="/me/tokens/{{ t.0 }}/revoke"><button class="small bad">revoke</button></form></td></tr>{% endfor %}</table>
+    <table style="margin-top: 8px">{% for t in tokens %}<tr><td>{{ t.1 }}</td><td class="dim small">{{ t.2 }}… · {{ t.3 }}</td><td><form class="inline" method="post" action="/me/tokens/{{ t.0 }}/revoke"><button class="small bad ibtn tip-end" data-tip="revoke it: the app using it can't any more" aria-label="revoke {{ t.1 }}">{{ crate::web::icon("delete") }}</button></form></td></tr>{% endfor %}</table>
     {% endif %}
   </section>
 </div>

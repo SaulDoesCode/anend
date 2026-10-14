@@ -4,32 +4,32 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}{% endblock %}{{ l.hub }}</title>
-<link rel="stylesheet" href="/static/hub.css">
+<link rel="stylesheet" href="/static/hub.css?v={{ crate::web::CSS_V }}">
 <link rel="icon" href="/static/favicon.svg">
 </head>
 <body>
 <nav class="bar">
-  <a class="brand" href="/">{{ l.hub }}</a>
-  <a class="btn{% if l.tab == "saves" %} on{% endif %}" href="/">saves</a>
-  <a class="btn{% if l.tab == "classifiers" %} on{% endif %}" href="/classifiers">classifiers</a>
-  <a class="btn{% if l.tab == "leaderboard" %} on{% endif %}" href="/leaderboard">leaderboard</a>
-  <a class="btn" href="/app/">the app</a>
+  <a class="brand" href="/" aria-label="{{ l.hub }}">{{ crate::web::icon("hub") }}<span class="name">{{ l.hub }}</span></a>
+  <a class="btn tab with-text{% if l.tab == "saves" %} on{% endif %}" href="/" data-tip="saves" aria-label="saves">{{ crate::web::icon("folder") }}<span class="lab">saves</span></a>
+  <a class="btn tab with-text{% if l.tab == "classifiers" %} on{% endif %}" href="/classifiers" data-tip="classifiers" aria-label="classifiers">{{ crate::web::icon("classifier") }}<span class="lab">classifiers</span></a>
+  <a class="btn tab with-text{% if l.tab == "leaderboard" %} on{% endif %}" href="/leaderboard" data-tip="leaderboard" aria-label="leaderboard">{{ crate::web::icon("stats") }}<span class="lab">leaderboard</span></a>
+  <a class="btn tab with-text" href="/app/" data-tip="the app, here in the browser" aria-label="the app">{{ crate::web::icon("editor") }}<span class="lab">the app</span></a>
   {% if let Some(me) = l.me %}
-  <a class="btn{% if l.tab == "upload" %} on{% endif %}" href="/upload">share a save</a>
-  {% if me.admin %}<a class="btn{% if l.tab == "admin" %} on{% endif %}" href="/admin">admin{% if l.waiting > 0 %} · {{ l.waiting }}{% endif %}</a>{% endif %}
+  <a class="btn tab with-text{% if l.tab == "upload" %} on{% endif %}" href="/upload" data-tip="share a save" aria-label="share a save">{{ crate::web::icon("upload") }}<span class="lab">share</span></a>
+  {% if me.admin %}<a class="btn tab with-text{% if l.tab == "admin" %} on{% endif %}" href="/admin" data-tip="admin{% if l.waiting > 0 %}: {{ l.waiting }} waiting{% endif %}" aria-label="admin{% if l.waiting > 0 %}, {{ l.waiting }} waiting{% endif %}">{{ crate::web::icon("shield") }}<span class="lab">admin</span>{% if l.waiting > 0 %}<span class="count">{{ l.waiting }}</span>{% endif %}</a>{% endif %}
   <span class="grow"></span>
-  <a class="who" href="/u/{{ me.name }}">{{ me.name }} · level {{ me.level }} {{ me.title }} · {{ me.points }} points</a>
-  <form class="inline" method="post" action="/logout"><button class="small">log out</button></form>
+  <a class="who" href="/u/{{ me.name }}" data-tip="your page: level {{ me.level }} {{ me.title }}, {{ me.points }} points">{{ me.name }}<span class="more"> · level {{ me.level }} {{ me.title }} · {{ me.points }} points</span></a>
+  <form class="inline" method="post" action="/logout"><button class="tab ibtn tip-end" data-tip="log out" aria-label="log out">{{ crate::web::icon("export") }}</button></form>
   {% else %}
   <span class="grow"></span>
-  <a class="btn{% if l.tab == "login" %} on{% endif %}" href="/login">log in</a>
-  <a class="btn primary{% if l.tab == "join" %} on{% endif %}" href="/join">join</a>
+  <a class="btn tab with-text{% if l.tab == "login" %} on{% endif %}" href="/login" data-tip="log in" aria-label="log in">{{ crate::web::icon("keys") }}<span class="lab">log in</span></a>
+  <a class="btn primary with-text tip-end{% if l.tab == "join" %} on{% endif %}" href="/join" data-tip="join" aria-label="join">{{ crate::web::icon("new") }}<span class="lab">join</span></a>
   {% endif %}
 </nav>
 <main>
 {% if !l.flash.is_empty() %}<div class="flash{% if l.flash_bad %} bad{% endif %}">{{ l.flash }}</div>{% endif %}
 {% block main %}{% endblock %}
 </main>
-<footer>an <a href="https://github.com/SaulDoesCode/anend">anend</a> hub · saves and classifiers for the anend notes app · <a href="/guide">the guide</a> · <a href="/api/hub">api</a></footer>
+<footer>an <a href="https://github.com/SaulDoesCode/anend">anend</a> hub · saves and classifiers for the anend notes app · <a class="with-icon" href="/guide">{{ crate::web::icon("help") }}the guide</a> · <a class="with-icon" href="/api/hub">{{ crate::web::icon("link") }}api</a></footer>
 </body>
 </html>

@@ -15,7 +15,7 @@
       {% if !f.hint.is_empty() %}<span class="dim small">{{ f.hint }}</span>{% endif %}
     </div>
     {% endfor %}
-    <p><button class="primary">{{ submit }}</button></p>
+    <p><button class="primary with-text">{{ crate::web::icon(crate::web::submit_icon(submit)) }}{{ submit }}</button></p>
   </form>
   {% if !after.is_empty() %}<p class="dim small">{{ after }}</p>{% endif %}
 </section>

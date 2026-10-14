@@ -33,8 +33,8 @@
         <div class="stat"><b>{{ s.notes }}</b><span>notes</span></div>
       </div>
       <div class="row">
-        <a class="btn primary" href="/saves/{{ s.id }}/download">download</a>
-        {% if can_star %}<form class="inline" method="post" action="/saves/{{ s.id }}/star"><button>{% if starred %}★ starred{% else %}☆ star{% endif %}</button></form>{% endif %}
+        <a class="btn primary with-text" href="/saves/{{ s.id }}/download" download>{{ crate::web::icon("download") }}download</a>
+        {% if can_star %}<form class="inline" method="post" action="/saves/{{ s.id }}/star"><button class="with-text{% if starred %} on-star{% endif %}" aria-pressed="{% if starred %}true{% else %}false{% endif %}" data-tip="{% if starred %}starred: click to take your star back{% else %}star it: tell its maker you like it{% endif %}">{{ crate::web::icon("star") }}{% if starred %}starred{% else %}star{% endif %}</button></form>{% endif %}
       </div>
       <p class="dim small">In the app: settings → hub, or put the file in your saves folder and load it.</p>
     </section>
@@ -42,13 +42,13 @@
     <section class="card">
       <h3>{% if is_admin %}admin{% else %}yours{% endif %}</h3>
       <div class="row">
-        <a class="btn small" href="/saves/{{ s.id }}/edit">edit or new version</a>
-        <form class="inline" method="post" action="/saves/{{ s.id }}/delete" onsubmit="return confirm('Delete this save for good?')"><button class="small bad">delete</button></form>
+        <a class="btn small with-text" href="/saves/{{ s.id }}/edit" data-tip="edit it, or send a new version">{{ crate::web::icon("edit") }}edit</a>
+        <form class="inline" method="post" action="/saves/{{ s.id }}/delete" onsubmit="return confirm('Delete this save for good?')"><button class="small bad ibtn" data-tip="delete this save for good" aria-label="delete this save for good">{{ crate::web::icon("delete") }}</button></form>
       </div>
       {% if is_admin %}
       <div class="row" style="margin-top: 8px">
-        {% if s.status_name != "approved" %}<form class="inline" method="post" action="/admin/saves/{{ s.id }}"><input type="hidden" name="action" value="approve"><button class="small primary">approve</button></form>{% endif %}
-        <form class="inline" method="post" action="/admin/saves/{{ s.id }}"><input type="hidden" name="action" value="{% if s.featured %}unfeature{% else %}feature{% endif %}"><button class="small">{% if s.featured %}unfeature{% else %}feature{% endif %}</button></form>
+        {% if s.status_name != "approved" %}<form class="inline" method="post" action="/admin/saves/{{ s.id }}"><input type="hidden" name="action" value="approve"><button class="small primary with-text">{{ crate::web::icon("check") }}approve</button></form>{% endif %}
+        <form class="inline" method="post" action="/admin/saves/{{ s.id }}"><input type="hidden" name="action" value="{% if s.featured %}unfeature{% else %}feature{% endif %}"><button class="small with-text" data-tip="{% if s.featured %}stop featuring it{% else %}feature it: it shows among the featured{% endif %}">{{ crate::web::icon("pin") }}{% if s.featured %}unfeature{% else %}feature{% endif %}</button></form>
       </div>
       {% endif %}
     </section>

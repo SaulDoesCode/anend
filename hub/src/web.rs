@@ -1538,12 +1538,69 @@ pub async fn admin_user_action(req: &mut Request, depot: &mut Depot, res: &mut R
 // ------------------------------------------------------------------ files
 
 #[handler]
-pub async fn css(res: &mut Response) {
+pub async fn css(req: &mut Request, res: &mut Response) {
     res.headers_mut()
         .insert(CONTENT_TYPE, HeaderValue::from_static("text/css; charset=utf-8"));
-    res.headers_mut()
-        .insert(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600"));
+    versioned(req, res, CSS_V);
     res.write_body(include_str!("../static/hub.css")).ok();
+}
+
+/// a version for each static file, from what's in it, so pages ask for `?v=` and the
+/// files can be cached for long: a new build that changes them changes the version
+const fn fnv(b: &[u8]) -> u32 {
+    let mut h: u32 = 0x811c_9dc5;
+    let mut i = 0;
+    while i < b.len() {
+        h = (h ^ b[i] as u32).wrapping_mul(0x0100_0193);
+        i += 1;
+    }
+    h
+}
+pub const CSS_V: u32 = fnv(include_bytes!("../static/hub.css"));
+pub const ICONS_V: u32 = fnv(include_bytes!("../static/icons.svg"));
+
+fn versioned(req: &Request, res: &mut Response, version: u32) {
+    // asked for with this build's version: keep it for a year; otherwise for an hour
+    let long = req.query::<String>("v") == Some(version.to_string());
+    res.headers_mut().insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static(if long {
+            "public, max-age=31536000, immutable"
+        } else {
+            "public, max-age=3600"
+        }),
+    );
+}
+
+/// an icon of the shared set (assets/icons), drawn from the sprite: in a template,
+/// `{{ crate::web::icon("star") }}`. It is only a picture: the control it sits in carries
+/// the name (its words, or an aria-label and a data-tip when it is only the icon)
+pub fn icon(name: &str) -> askama::filters::Safe<String> {
+    debug_assert!(name.bytes().all(|b| b.is_ascii_lowercase() || b == b'-'), "{name}");
+    askama::filters::Safe(format!(
+        r#"<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/static/icons.svg?v={ICONS_V}#i-{name}"/></svg>"#
+    ))
+}
+
+/// the icon beside a form's button, by what the button says
+pub fn submit_icon(submit: &str) -> &'static str {
+    match submit {
+        "save" => "save",
+        "share" => "upload",
+        "log in" => "keys",
+        _ => "new",
+    }
+}
+
+/// the shared icon set (assets/icons) as a sprite, made by hub/web/tools/icons.mjs
+#[handler]
+pub async fn icons(req: &mut Request, res: &mut Response) {
+    res.headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("image/svg+xml"));
+    res.headers_mut()
+        .insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    versioned(req, res, ICONS_V);
+    res.write_body(include_str!("../static/icons.svg")).ok();
 }
 
 #[handler]
@@ -1570,5 +1627,37 @@ mod tests {
             assert_eq!(decode(&encode(s)), s);
         }
         assert_eq!(decode("%zz"), "%zz");
+    }
+
+    /// every icon a page asks for is in the sprite (hub/web/tools/icons.mjs makes it from
+    /// assets/icons), and the sprite is only shapes
+    #[test]
+    fn icons_in_the_sprite() {
+        let sprite = include_str!("../static/icons.svg");
+        assert!(!sprite.contains("<script") && !sprite.contains("href=") && !sprite.contains("<foreignObject"));
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/templates");
+        let mut asked = vec![];
+        for e in std::fs::read_dir(dir).unwrap() {
+            let page = std::fs::read_to_string(e.unwrap().path()).unwrap();
+            for part in page.split("crate::web::icon(\"").skip(1) {
+                asked.push(part.split('"').next().unwrap().to_string());
+            }
+        }
+        for s in ["save", "share", "log in", "join", "apply"] {
+            asked.push(submit_icon(s).to_string());
+        }
+        assert!(asked.len() > 20, "{asked:?}");
+        for name in asked {
+            assert!(sprite.contains(&format!("<symbol id=\"i-{name}\"")), "no icon {name} in the sprite");
+        }
+        // the sprite has the whole set: run hub/web/tools/icons.mjs when it changes
+        let set = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/icons");
+        for e in std::fs::read_dir(set).unwrap() {
+            let f = e.unwrap().file_name().into_string().unwrap();
+            if let Some(name) = f.strip_suffix(".svg") {
+                assert!(sprite.contains(&format!("<symbol id=\"i-{name}\"")), "{name} isn't in the sprite: run node hub/web/tools/icons.mjs");
+            }
+        }
+        assert!(icon("star").0.contains(&format!("icons.svg?v={ICONS_V}#i-star")));
     }
 }
