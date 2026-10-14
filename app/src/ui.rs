@@ -90,7 +90,7 @@ impl View {
 
 /// a key press the shell hands to the open view: from the bar (`bar`), or anywhere else
 /// that isn't typing
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct KeyPress {
     pub key: String,
     pub code: String,
@@ -212,8 +212,8 @@ pub struct Ui {
     pub menu: Signal<Option<Menu>>,
     pub actions: Signal<Vec<Action>>,
     pub bar_history: Signal<BarHistory>,
-    /// the open view's key handler
-    pub keys: Signal<Option<Callback<KeyPress, bool>>>,
+    /// each view's key handler
+    pub keys: Signal<Vec<(View, Callback<KeyPress, bool>)>>,
     /// bumped when the save's data changed (views reload)
     pub changed: Signal<u64>,
     pub seq: Signal<u64>,
