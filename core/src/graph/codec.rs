@@ -308,7 +308,10 @@ fn encode_text(w: &mut BitWriter, text: &str, st: &mut RunState) {
 }
 
 fn encode_run(w: &mut BitWriter, segs: &[Seg]) {
-    let mut st = RunState { caps: false, lead: None };
+    let mut st = RunState {
+        caps: false,
+        lead: None,
+    };
     for s in segs {
         match s {
             Seg::Text(t) => encode_text(w, t, &mut st),
@@ -357,7 +360,14 @@ pub fn pack_text(text: &str) -> Vec<u8> {
 /// how many bits a text takes inside a run (no body header), for weighing borrowing
 pub fn text_bits(text: &str) -> usize {
     let mut w = BitWriter::default();
-    encode_text(&mut w, text, &mut RunState { caps: false, lead: None });
+    encode_text(
+        &mut w,
+        text,
+        &mut RunState {
+            caps: false,
+            lead: None,
+        },
+    );
     w.bits()
 }
 
@@ -583,8 +593,8 @@ mod tests {
         // "a": header 3 bits (pad 0b000 → pad = 8 - 8 = 0)... 3 + 5 = 8 bits, no padding
         assert_eq!(pack_text("a"), vec![0b000_00001]);
         // "ab": 3 + 10 = 13 bits, 3 padding bits
-        assert_eq!(pack_text("ab"), vec![0b011_00001, 0b00010_000]);
-        assert_eq!(pack_text("z "), vec![0b011_11010, 0b00000_000]);
+        assert_eq!(pack_text("ab"), vec![0b0110_0001, 0b0001_0000]);
+        assert_eq!(pack_text("z "), vec![0b0111_1010, 0b0000_0000]);
         // lowercase prose is 5/8 of its UTF-8 size, plus the header
         assert_eq!(pack_text(&"abcdefgh".repeat(10)).len(), (3 + 400usize).div_ceil(8));
         assert_eq!(ref_bits(0), 10);
@@ -627,7 +637,18 @@ mod tests {
             &['a', 'e', 't', ' ', 'z', 'q', 'n'],
             &['a', 'B', 'C', ' ', '\n', '1', '9', '.', '#', '*', 'Z'],
             &['ש', 'ל', 'ו', 'ם', ' ', 'λ', 'ό', 'я', '日', '🙂', 'a', '0'],
-            &['\u{0}', '\u{7f}', '\u{80}', '\u{7ff}', '\u{800}', '\u{ffff}', '\u{10000}', '\u{10ffff}', 'é', 'A'],
+            &[
+                '\u{0}',
+                '\u{7f}',
+                '\u{80}',
+                '\u{7ff}',
+                '\u{800}',
+                '\u{ffff}',
+                '\u{10000}',
+                '\u{10ffff}',
+                'é',
+                'A',
+            ],
         ];
         let mut rng = Rng::new(42);
         for case in 0..4000 {

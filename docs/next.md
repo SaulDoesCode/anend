@@ -92,6 +92,29 @@ Checks to run before every push:
 - `cargo test -p anend -p anend-core -p anend-hub`
 - `node hub/web/test/parity.mjs`, which must print "all the same"
 
+## Step 1 status: the entry graph store (`core/src/graph/`)
+
+New module beside the old store (apps not rewired yet; nothing old deleted). 38 tests,
+`cargo test -p anend-core graph::` (about 15 s in debug). Clippy clean on the module.
+- **Done:** `codec` (5-bit tokens, ESC payloads incl. UTF-8 lead runs and digit runs,
+  caps lock, REF/CALL, fuzzed); `interp` (explicit continuation stack, tail calls in
+  constant stack incl. through `if` and the last `concat` argument, memo, fuel/depth/output
+  limits, cycle-safe refs; counter to 1,000,000, mutual even/odd, factorial, Fibonacci);
+  `gematria` (alphavert atbash exactly: pairs, h/i/j, product, difference; the atbash
+  bucket is the product); `record` (varint record header, blocks of 32 entries per row,
+  past versions as deltas, weum key ⇄ id mapping, content hash); `postings` (one row per
+  term and id chunk, varint deltas or a bitmap; bucketed hash pairs); `place` (34-byte
+  transform, rotation re-pack now idempotent); `store` (Graph/View/Tx: dedup, borrowing of
+  prefix/suffix entries with rehoming when a source changes, edits with versions, delete
+  and undelete, weum-order id reuse, edges NOTE/MEMBER/TAG/PLACE/VALIDATES, indexes on disk
+  or in memory, compact, per-table storage stats, in-memory backend, injectable clock);
+  `query` (words, sums, letters, tags, time, mime, relations, order, paging, stats);
+  `backup` (weum `all-of-it.json` import, texts.json + other.json backup and restore).
+- **Left:** `core/examples/graph_bench.rs` and its numbers (sizes per table vs the old
+  store vs raw packed bytes, latencies, borrowing's effect, memory-index rebuild time);
+  `docs/format.md` (the module docs hold the format meanwhile); a wasm check (the
+  wasm32 target isn't installed here).
+
 ## Decisions (14 Oct): the redesign
 
 The user asked for "the route that provides the most feature coverage and performance and

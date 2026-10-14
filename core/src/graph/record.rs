@@ -190,11 +190,7 @@ impl Past {
 /// how many bytes `old` shares with `new` at the start and the end (on char boundaries,
 /// not overlapping)
 pub fn common_ends(old: &str, new: &str) -> (usize, usize) {
-    let mut p = old
-        .bytes()
-        .zip(new.bytes())
-        .take_while(|(a, b)| a == b)
-        .count();
+    let mut p = old.bytes().zip(new.bytes()).take_while(|(a, b)| a == b).count();
     while !old.is_char_boundary(p) || !new.is_char_boundary(p) {
         p -= 1;
     }
@@ -362,7 +358,21 @@ mod tests {
         assert_eq!(key_of(256 + 65_536), vec![0, 0, 0]);
         assert_eq!(key_of(PAST_WEUM - 1), vec![255, 255, 255, 255]);
         assert_eq!(key_of(PAST_WEUM).len(), 8);
-        for id in [0, 1, 255, 256, 257, 65_791, 65_792, 70_000, 16_843_007, 16_843_008, PAST_WEUM - 1, PAST_WEUM, u64::MAX] {
+        for id in [
+            0,
+            1,
+            255,
+            256,
+            257,
+            65_791,
+            65_792,
+            70_000,
+            16_843_007,
+            16_843_008,
+            PAST_WEUM - 1,
+            PAST_WEUM,
+            u64::MAX,
+        ] {
             assert_eq!(id_of(&key_of(id)), Some(id), "{id}");
             assert_eq!(parse_label(&label(id)), Some(id));
         }
@@ -388,7 +398,7 @@ mod tests {
         assert_eq!(slice_poly(&p, 10, t.len()), poly(b"brown fox"));
         assert_ne!(content_hash("a"), content_hash("a "));
         assert_ne!(content_hash(""), content_hash("\0"));
-        assert_eq!(common_ends("hello world", "hello there world"), (6, 6));
+        assert_eq!(common_ends("hello world", "hello there world"), (6, 5));
         assert_eq!(common_ends("aaa", "aaaa"), (3, 0));
         assert_eq!(common_ends("ab", "ab"), (2, 0));
         assert_eq!(common_ends("xé", "yé"), (0, 2));

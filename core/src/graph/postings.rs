@@ -259,7 +259,10 @@ mod tests {
         want.dedup();
         assert_eq!(decode_ids(&u, 0), want);
         assert_eq!(update_ids(Some(&encode_ids(&[5])), 0, &[], &[5]), None);
-        assert_eq!(decode_ids(&update_ids(None, 3, &[3 << 16 | 9, 3 << 16 | 2], &[]).unwrap(), 3), vec![3 << 16 | 2, 3 << 16 | 9]);
+        assert_eq!(
+            decode_ids(&update_ids(None, 3, &[3 << 16 | 9, 3 << 16 | 2], &[]).unwrap(), 3),
+            vec![3 << 16 | 2, 3 << 16 | 9]
+        );
         // a small set is about a byte an id
         let b = encode_ids(&(100..200).collect::<Vec<_>>());
         assert_eq!(b.len(), 1 + 1 + 99);
@@ -269,7 +272,10 @@ mod tests {
     fn hash_pairs_and_memory() {
         let p = update_pairs(None, &[(5, 300), (1, 2), (5, 1)], &[]).unwrap();
         assert_eq!(decode_pairs(&p), vec![(1, 2), (5, 1), (5, 300)]);
-        assert_eq!(decode_pairs(&update_pairs(Some(&p), &[], &[(5, 1)]).unwrap()), vec![(1, 2), (5, 300)]);
+        assert_eq!(
+            decode_pairs(&update_pairs(Some(&p), &[], &[(5, 1)]).unwrap()),
+            vec![(1, 2), (5, 300)]
+        );
         assert_eq!(hash_bucket(u64::MAX), (1 << HASH_BUCKET_BITS) - 1);
         let mut m = MemIndex::default();
         m.add(&Term::Word(b"x".to_vec()), 3);

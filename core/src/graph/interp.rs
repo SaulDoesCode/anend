@@ -367,7 +367,9 @@ impl<'a, S: Source + ?Sized> Interp<'a, S> {
                         tail,
                     } => {
                         vals.push(v);
-                        let Seg::Call { f, args } = &site[at] else { unreachable!() };
+                        let Seg::Call { f, args } = &site[at] else {
+                            unreachable!()
+                        };
                         let f = *f;
                         let next = vals.len();
                         if next == args.len() {
@@ -408,7 +410,9 @@ impl<'a, S: Source + ?Sized> Interp<'a, S> {
                         }
                     }
                     Cont::If { site, at, env, tail } => {
-                        let Seg::Call { args, .. } = &site[at] else { unreachable!() };
+                        let Seg::Call { args, .. } = &site[at] else {
+                            unreachable!()
+                        };
                         let branch = if v.is_empty() { 2 } else { 1 };
                         match args.get(branch) {
                             Some(b) => {
@@ -548,14 +552,15 @@ impl<'a, S: Source + ?Sized> Interp<'a, S> {
             // flat), or put one there
             let n = stack.len();
             let fresh = matches!(stack.last(), Some(Cont::Run { out, .. }) if out.is_empty());
-            if fresh && n >= 2 {
-                if let Cont::Memo { keys } = &mut stack[n - 2] {
-                    if keys.len() < MEMO_KEYS {
-                        keys.push(key);
-                    }
-                    self.replace_top(stack, body, env);
-                    return Ok(None);
+            if fresh
+                && n >= 2
+                && let Cont::Memo { keys } = &mut stack[n - 2]
+            {
+                if keys.len() < MEMO_KEYS {
+                    keys.push(key);
                 }
+                self.replace_top(stack, body, env);
+                return Ok(None);
             }
             if fresh {
                 stack.pop();
@@ -623,8 +628,7 @@ impl<'a, S: Source + ?Sized> Interp<'a, S> {
                 let mode = if arg(1).is_empty() {
                     Mode::Ordinal
                 } else {
-                    Mode::parse(arg(1))
-                        .ok_or_else(|| EvalError::Builtin(name, format!("no sum mode {:?}", arg(1))))?
+                    Mode::parse(arg(1)).ok_or_else(|| EvalError::Builtin(name, format!("no sum mode {:?}", arg(1))))?
                 };
                 Measure::of(arg(0)).get(mode).to_string()
             }
@@ -633,7 +637,11 @@ impl<'a, S: Source + ?Sized> Interp<'a, S> {
                 let n = chars.len() as i64;
                 let at = |v: i64| (if v < 0 { n + v } else { v }).clamp(0, n) as usize;
                 let from = at(num(name, arg(1))?);
-                let to = if vals.len() > 2 { at(num(name, arg(2))?) } else { n as usize };
+                let to = if vals.len() > 2 {
+                    at(num(name, arg(2))?)
+                } else {
+                    n as usize
+                };
                 chars[from..to.max(from)].iter().collect()
             }
             LOOKUP => {

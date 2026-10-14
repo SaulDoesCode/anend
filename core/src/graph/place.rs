@@ -115,7 +115,12 @@ impl Place {
         }
         b[16..20].copy_from_slice(&pack_rotation(self.rot).to_le_bytes());
         for (i, v) in self.scale.iter().enumerate() {
-            b[20 + i * 2..22 + i * 2].copy_from_slice(&f32_to_f16(canon_scale(*v)).to_le_bytes());
+            // a scale that rounds to -0 is +0, like one that was -0 to begin with
+            let h = match f32_to_f16(canon_scale(*v)) {
+                0x8000 => 0,
+                h => h,
+            };
+            b[20 + i * 2..22 + i * 2].copy_from_slice(&h.to_le_bytes());
         }
         b[26..30].copy_from_slice(&self.color);
         b[30..34].copy_from_slice(&self.asset.to_le_bytes());
@@ -327,7 +332,10 @@ mod tests {
     struct Lcg(u64);
     impl Lcg {
         fn next(&mut self) -> u32 {
-            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (self.0 >> 32) as u32
         }
         fn unit(&mut self) -> f32 {
@@ -368,7 +376,10 @@ mod tests {
     fn round_trip_and_idempotence() {
         let p = sample();
         let q = Place::unpack(&p.pack()).unwrap();
-        assert_eq!((q.kind, q.flags, q.pos, q.color, q.asset), (p.kind, p.flags, p.pos, p.color, p.asset));
+        assert_eq!(
+            (q.kind, q.flags, q.pos, q.color, q.asset),
+            (p.kind, p.flags, p.pos, p.color, p.asset)
+        );
         assert_eq!(q.scale, [0.5, 2.0, -1.5]);
         assert_eq!(q.pack(), p.pack());
         let mut b = p.pack();
@@ -412,7 +423,12 @@ mod tests {
         // the cases the first version got wrong: two or more components nearly equal
         let h = std::f32::consts::FRAC_1_SQRT_2;
         let mut g = Lcg(11);
-        let mut cases = vec![[0.0, 0.0, h, h], [h, 0.0, 0.0, h], [0.5, 0.5, 0.5, 0.5], [-0.5, 0.5, -0.5, 0.5]];
+        let mut cases = vec![
+            [0.0, 0.0, h, h],
+            [h, 0.0, 0.0, h],
+            [0.5, 0.5, 0.5, 0.5],
+            [-0.5, 0.5, -0.5, 0.5],
+        ];
         for _ in 0..50_000 {
             let e = g.unit() * 2e-3;
             let a = g.unit();
@@ -452,7 +468,10 @@ mod tests {
         let inf = Place::unpack(&with(&|p| p.pos = [f32::INFINITY, f32::NEG_INFINITY, 1.0])).unwrap();
         assert_eq!(inf.pos, [f32::MAX, f32::MIN, 1.0]);
         assert_eq!(with(&|p| p.scale[0] = -0.0), with(&|p| p.scale[0] = 0.0));
-        assert_eq!(Place::unpack(&with(&|p| p.scale = [f32::NAN; 3])).unwrap().scale, [1.0; 3]);
+        assert_eq!(
+            Place::unpack(&with(&|p| p.scale = [f32::NAN; 3])).unwrap().scale,
+            [1.0; 3]
+        );
         let r = [0.3, -0.5, 0.1, -0.8];
         assert_eq!(pack_rotation(r), pack_rotation(r.map(|v: f32| -v)));
         assert_eq!(pack_rotation(r), pack_rotation(r.map(|v: f32| v * 9.0)));
