@@ -73,6 +73,20 @@ To pick up:
   `web::tests::icons_in_the_sprite` fails when a page asks for a missing icon or the
   sprite is behind `assets/icons` (run the script again).
 
+- **Next big item: one concept, the entry (asked for on 14 Oct).** Notes, memory texts and
+  list names are meant to be one thing, not several. Today a note is a separate
+  record with its own key (`note:<key>`), memories live in `memories`, and list heads are
+  memories or notes. With timestamps (and mime types) coming, do a single schema change
+  that unifies them:
+  - **What an entry is:** text (a note is an entry whose text is a `# title` plus
+    markdown), tags, created and edited times, mime type, and its key.
+  - **What reads entries:** lists, classifiers, buckets, placements and the forge all
+    refer to entries.
+  - **Schema version:** the save carries one, and opening an older save **migrates it in
+    place** (with a backup copy first) so players never have to start fresh.
+  - **Bundles:** they gain the version too, and old bundles migrate on import.
+  - Do this before any more features build on the split.
+
 Checks to run before every push:
 - `cargo clippy -p anend -p anend-core -p anend-hub`
 - `cargo test -p anend -p anend-core -p anend-hub`
