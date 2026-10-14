@@ -84,6 +84,8 @@ button.ibtn.armed { width: auto; padding: 0 8px; }
 a.btn.ibtn { width: 24px; padding: 0; }
 a.btn.small.ibtn { width: 22px; }
 a.btn.ibtn svg.icon { width: 14px; height: 14px; }
+a.btn.ibtn.with-text { width: auto; padding: 0 7px 0 5px; gap: 5px; }
+.set-head .set-guide { margin-right: 8px; }
 button.ibtn.plain { background: none; color: var(--dim); }
 button.ibtn.plain:hover { background: color-mix(in srgb, var(--buttons) 40%, transparent); color: var(--text); }
 

@@ -512,6 +512,15 @@ function viewSection() {
   );
 }
 
+// ---------------------------------------------------------------- the guide
+
+// the hub serves the guide beside the app; offline, the repository's copy
+const GUIDE_ONLINE = 'https://github.com/SaulDoesCode/anend/blob/main/docs/guide.md';
+function guideLink() {
+  const href = app.api.offline ? GUIDE_ONLINE : '/guide';
+  return tip(el('a.btn.small.ibtn.with-text.set-guide', { href, target: '_blank', rel: 'noopener' }, icon('help'), el('span.lab', 'guide')), 'the guide: what each part does and how to use it (a new tab)');
+}
+
 // ---------------------------------------------------------------- the overlay
 
 async function redraw() {
@@ -520,7 +529,7 @@ async function redraw() {
   await loadSaves();
   clear(
     panel,
-    el('div.set-head', el('h2', 'settings'), el('span.grow'), iconButton('close', 'close', { key: 'Esc', cls: 'plain.set-close', onclick: () => close() })),
+    el('div.set-head', el('h2', 'settings'), el('span.grow'), guideLink(), iconButton('close', 'close', { key: 'Esc', cls: 'plain.set-close', onclick: () => close() })),
     savesSection(),
     forgeSection(),
     hubSection(),
