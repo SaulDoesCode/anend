@@ -14,6 +14,9 @@ game has a workshop or a mod hub. People join, share their saves, star and downl
 other's, and earn points, levels and badges when others use what they made; the app
 browses and shares straight from its settings. See [the hub](#the-hub).
 
+**New here?** [The guide](docs/guide.md) explains what anend is and how to use every part
+of it, in the desktop app and the web app (a hub serves it at `/guide` too).
+
 ![the editor](docs/editor.png)
 ![the reader](docs/reader.png)
 ![the memory view](docs/memory.png)

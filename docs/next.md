@@ -184,8 +184,19 @@ interface, not stubs.
        `wait: true` while polling `classify.index_job` for progress; once the name is
        fixed it can go back to not waiting.
    - **Desktop classifiers view** (src/, next phase).
-5. **Guide:** `docs/guide.md` on what the app does and how to use it, linked from the
-   README and the apps' help.
+5. **Guide: done.** `docs/guide.md`, for players: what anend is, then every part task-first
+   (notes, memories and gsearch, the space, lists, classifiers with training figures,
+   steering and bias, feedback per classifier and end to end, stacking, buckets,
+   validators, colouring, sharing; filters, saves and bundles, the forge, the hub's game,
+   settings), a shortcut table for desktop and web with their differences, a glossary.
+   Screenshots (web app, 1100 px, quantized PNGs, ~250 KB) in `docs/guide/`. The hub
+   serves it at `/guide` (`hub/src/guide.rs`: built in, rendered with pulldown-cmark,
+   text escaped, raw HTML shown as text, links only to its headings, the repository and
+   https; pictures at `/guide/{name}.png`; tests check every `#anchor` and picture),
+   linked from every hub page's footer, the README, and the web app's settings ("guide":
+   `/guide`, or the GitHub copy on `main` offline). Left: the desktop app's help link
+   (src/), and keeping the guide in step as features land (filters and validators on the
+   desktop, the web space's editing and maps).
 6. **Review pass:** security (hub upload and op limits, classifier file checks),
    ergonomics, visual consistency, and no stubs.
 
