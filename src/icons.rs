@@ -245,34 +245,33 @@ pub fn spawn_chip<'a>(
     parent: Entity,
     face: ChipFace,
     on: bool,
+    // over the bars' colour (light ink) or straight over a light view (dark ink)
+    over_bars: bool,
     tip: impl Into<String>,
     key: Option<Action>,
     fonts: &crate::ui::Fonts,
 ) -> EntityCommands<'a> {
-    let ink = if on { crate::bar::BAR_TEXT } else { crate::bar::BAR_DIM };
+    // no background, no border: the one that's on is bright, the rest dim
+    let (bright, dim) = if over_bars {
+        (crate::bar::BAR_TEXT, crate::bar::BAR_DIM.with_alpha(0.6))
+    } else {
+        (
+            crate::theme::colors::TEXT,
+            crate::theme::colors::TEXT_DIM.with_alpha(0.6),
+        )
+    };
+    let ink = if on { bright } else { dim };
     let chip = commands
         .spawn((
             Node {
-                width: px(28),
+                width: px(24),
                 height: px(24),
                 flex_shrink: 0.0,
                 display: Display::Flex,
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                border: UiRect::all(px(1)),
-                border_radius: BorderRadius::all(px(4)),
                 ..default()
             },
-            BackgroundColor(if on {
-                crate::bar::WHITE.with_alpha(0.16)
-            } else {
-                Color::NONE
-            }),
-            BorderColor::all(if on {
-                crate::bar::WHITE.with_alpha(0.35)
-            } else {
-                Color::NONE
-            }),
             Tip(tip.into()),
             bevy::picking::cursor::EntityCursor::System(bevy::window::SystemCursorIcon::Pointer),
             ChildOf(parent),

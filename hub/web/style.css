@@ -158,7 +158,7 @@ svg.triangle.flat polygon { stroke: hsl(8 85% 72%); fill: none; }
 }
 #bar-input::placeholder { color: var(--bar-dim); opacity: .55; }
 #bar-right {
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 2px 14px;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 2px 14px;
   min-height: 24px; padding: 2px 8px; min-width: 0;
   background: var(--bars); color: var(--bar-dim); font-size: 12px; line-height: 1.2;
   border-radius: var(--radius) var(--radius) 0 0;
@@ -168,13 +168,14 @@ svg.triangle.flat polygon { stroke: hsl(8 85% 72%); fill: none; }
 .toggles, .chipgroup { display: flex; gap: 2px; align-items: center; }
 .toggles .gap { width: 8px; }
 /* a toggle as small as an icon: its full name and key in the tip */
+/* no background, no border: the one that's on is bright, the rest dim */
 button.tchip {
-  width: 22px; height: 20px; padding: 0; background: none; color: var(--bar-dim);
-  font: 600 12px/1 var(--font);
+  width: 22px; height: 20px; padding: 0; background: none; border: 0; box-shadow: none;
+  color: var(--bar-dim); opacity: .6; font: 600 12px/1 var(--font);
 }
 button.tchip svg.icon { width: 14px; height: 14px; }
-button.tchip:hover { color: var(--bar-text); background: color-mix(in srgb, var(--bar-text) 12%, transparent); filter: none; }
-button.tchip.on { background: var(--accent); color: var(--on-button); }
+button.tchip:hover { opacity: 1; background: none; filter: none; }
+button.tchip.on { background: none; color: var(--bar-text); opacity: 1; }
 
 body.zen .bar, body.zen #bar-right, body.zen .notelist, body.zen .poscard { opacity: 0; }
 body.zen .bar:focus-within, body.zen #dock:focus-within > * { opacity: 1; }

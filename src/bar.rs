@@ -92,7 +92,7 @@ pub fn bar() -> impl Scene {
             Node {
                 display: Display::None,
                 flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
+                justify_content: JustifyContent::End,
                 padding: UiRect::axes(px(8), px(1)),
             }
             BarStrip
@@ -243,8 +243,8 @@ pub fn bar_look(
     if parent.parent() != home {
         commands.entity(side).insert(ChildOf(home));
     }
-    // over the space's room the strip is a small pill in the bars' colour, so it reads
-    let pill = session.route == Route::Space;
+    // no backing anywhere: the space's chips take dark ink over its light room instead
+    let pill = false;
     let want = if pill {
         palette.get(crate::palette::Role::Bars)
     } else {
