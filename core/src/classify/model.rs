@@ -376,15 +376,20 @@ impl Rope {
 
     /// rotates rows [n × 2·half] in place: (a, b) → (a·c − b·s, a·s + b·c), pairs (i, i+half)
     fn apply(&self, x: &mut [f32], n: usize) {
-        let (h, d) = (self.half, 2 * self.half);
+        let d = 2 * self.half;
         for t in 0..n {
-            let row = &mut x[t * d..(t + 1) * d];
-            let (cs, sn) = (&self.cos[t * h..(t + 1) * h], &self.sin[t * h..(t + 1) * h]);
-            for i in 0..h {
-                let (a, b) = (row[i], row[i + h]);
-                row[i] = a * cs[i] - b * sn[i];
-                row[i + h] = a * sn[i] + b * cs[i];
-            }
+            self.apply_at(&mut x[t * d..(t + 1) * d], t);
+        }
+    }
+
+    /// rotates one row as position t
+    fn apply_at(&self, row: &mut [f32], t: usize) {
+        let h = self.half;
+        let (cs, sn) = (&self.cos[t * h..(t + 1) * h], &self.sin[t * h..(t + 1) * h]);
+        for i in 0..h {
+            let (a, b) = (row[i], row[i + h]);
+            row[i] = a * cs[i] - b * sn[i];
+            row[i + h] = a * sn[i] + b * cs[i];
         }
     }
 
@@ -725,6 +730,21 @@ pub struct BlockT {
     pub wd: Vec<f32>,
 }
 
+/// causal attention for position t: scores q·k_s·scale for s ≤ t (8-lane dots),
+/// softmax over them into `p` (t + 1 long), out = Σ_s p_s·v_s in ascending s.
+/// `ks` and `vs` hold at least t + 1 rows of `dh`.
+#[allow(clippy::too_many_arguments)]
+pub fn attend_row(q: &[f32], ks: &[f32], vs: &[f32], t: usize, dh: usize, scale: f32, p: &mut [f32], out: &mut [f32]) {
+    for (s, ps) in p.iter_mut().enumerate().take(t + 1) {
+        *ps = k::dot(q, &ks[s * dh..(s + 1) * dh]) * scale;
+    }
+    softmax_rows(&mut p[..t + 1], t + 1);
+    out.iter_mut().for_each(|v| *v = 0.0);
+    for (s, &ps) in p.iter().enumerate().take(t + 1) {
+        k::axpy(out, ps, &vs[s * dh..(s + 1) * dh]);
+    }
+}
+
 /// a dropout mask: 0 or 1/(1 − p) per element, drawn from `mix(key ^ index)`
 pub fn dropout_mask(key: u64, n: usize, p: f32) -> Vec<f32> {
     let keep = 1.0 / (1.0 - p);
@@ -927,16 +947,28 @@ impl Net {
                 }
                 self.rope.apply(&mut q, n);
                 self.rope.apply(&mut kh, n);
-                let kt = transpose(&kh, n, dh);
-                let mut s = matmul(rows(&q, dh), &kt, n, dh, n, None);
-                s.iter_mut().for_each(|v| *v *= scale);
-                softmax_rows(&mut s, n);
-                let o = matmul(rows(&s, n), &v, n, n, dh, None);
-                for t in 0..n {
-                    ctx[t * a_w + h * dh..t * a_w + (h + 1) * dh].copy_from_slice(&o[t * dh..(t + 1) * dh]);
-                }
-                k::recycle(o);
-                k::recycle(kt);
+                let s = if cfg.causal {
+                    // row by row over the positions so far, exactly as `Decoder` does;
+                    // the probabilities after t stay 0, which backward relies on
+                    let mut s = k::zeros(n * n);
+                    for t in 0..n {
+                        let c = &mut ctx[t * a_w + h * dh..t * a_w + (h + 1) * dh];
+                        attend_row(&q[t * dh..(t + 1) * dh], &kh, &v, t, dh, scale, &mut s[t * n..t * n + t + 1], c);
+                    }
+                    s
+                } else {
+                    let kt = transpose(&kh, n, dh);
+                    let mut s = matmul(rows(&q, dh), &kt, n, dh, n, None);
+                    s.iter_mut().for_each(|v| *v *= scale);
+                    softmax_rows(&mut s, n);
+                    let o = matmul(rows(&s, n), &v, n, n, dh, None);
+                    for t in 0..n {
+                        ctx[t * a_w + h * dh..t * a_w + (h + 1) * dh].copy_from_slice(&o[t * dh..(t + 1) * dh]);
+                    }
+                    k::recycle(o);
+                    k::recycle(kt);
+                    s
+                };
                 qs.push(q);
                 ks.push(kh);
                 vs.push(v);
@@ -1054,9 +1086,26 @@ impl Net {
         y
     }
 
+    /// the generative head's logits at every position, [n × GEN_OUT]: row t predicts
+    /// the token after position t
+    pub fn gen_logits(&self, tr: &Trace) -> Vec<f32> {
+        assert!(self.generator.is_some(), "no generative head");
+        let d = self.cfg.d_model;
+        let mut y = matmul(rows(&tr.xf, d), &self.gen_w, tr.n, d, GEN_OUT, None);
+        for row in y.chunks_exact_mut(GEN_OUT) {
+            row.iter_mut().zip(&self.gen_b).for_each(|(a, b)| *a += b);
+        }
+        y
+    }
+
     /// adds one window's gradients into `g`, given d(loss)/d(logits) for each head
     /// (empty for heads without a loss). Returns d(loss)/d(extra inputs), for stacks.
     pub fn backward(&self, tr: &Trace, dlogits: &[Vec<f32>], tp: &[BlockT], g: &mut Net) -> Vec<f32> {
+        self.backward_gen(tr, dlogits, &[], tp, g)
+    }
+
+    /// `backward` with d(loss)/d(generative logits) too ([n × GEN_OUT], or empty)
+    pub fn backward_gen(&self, tr: &Trace, dlogits: &[Vec<f32>], dgen: &[f32], tp: &[BlockT], g: &mut Net) -> Vec<f32> {
         let cfg = &self.cfg;
         let (d, dh, n) = (cfg.d_model, cfg.head_dim, tr.n);
         let zl = tr.z.len();
@@ -1102,6 +1151,14 @@ impl Net {
                     k::axpy(&mut dxf[t * d..(t + 1) * d], de, &self.pool_q);
                 }
             }
+        }
+        if !dgen.is_empty() {
+            k::gemm(&mut g.gen_w, transposed(&tr.xf, d), dgen, d, n, GEN_OUT, None);
+            for row in dgen.chunks_exact(GEN_OUT) {
+                g.gen_b.iter_mut().zip(row).for_each(|(a, b)| *a += b);
+            }
+            let wt = transpose(&self.gen_w, d, GEN_OUT);
+            k::gemm(&mut dxf, rows(dgen, GEN_OUT), &wt, n, GEN_OUT, d, None);
         }
         let mut dx = k::zeros(n * d);
         norm_back(&dxf, &tr.nf, &self.nf, d, &mut dx, &mut g.nf);
@@ -1211,6 +1268,136 @@ impl Net {
     }
 }
 
+/// One byte at a time through a causal model with a key/value cache, giving the
+/// generative head's logits for the next byte. Each step computes exactly what the full
+/// forward pass computes for that position (the same row operations in the same
+/// order), so decoding equals `gen_logits` bit for bit. When the window is full the
+/// decoder starts over from CLS with the last half window of bytes.
+pub struct Decoder<'a> {
+    net: &'a Net,
+    gains: Gains,
+    /// the bytes in the current window (after its CLS)
+    bytes: Vec<u8>,
+    /// per block, per head: rotated keys and values, rows of head_dim
+    keys: Vec<Vec<Vec<f32>>>,
+    vals: Vec<Vec<Vec<f32>>>,
+    logits: Vec<f32>,
+}
+
+impl<'a> Decoder<'a> {
+    /// a decoder that has read CLS and then `prompt`
+    pub fn new(net: &'a Net, gains: Gains, prompt: &[u8]) -> Decoder<'a> {
+        assert!(net.cfg.causal && net.generator.is_some(), "decoding needs a causal model with a generative head");
+        let mut dec = Decoder {
+            net,
+            gains,
+            bytes: Vec::new(),
+            keys: Vec::new(),
+            vals: Vec::new(),
+            logits: Vec::new(),
+        };
+        dec.restart(&[]);
+        for &b in prompt {
+            dec.push(b);
+        }
+        dec
+    }
+
+    /// the logits for the next byte (GEN_OUT: bytes, then END)
+    pub fn logits(&self) -> &[f32] {
+        &self.logits
+    }
+
+    /// the bytes the current window holds
+    pub fn window(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    fn restart(&mut self, keep: &[u8]) {
+        let heads = |b: &Block| vec![Vec::new(); b.heads];
+        self.keys = self.net.blocks.iter().map(heads).collect();
+        self.vals = self.net.blocks.iter().map(heads).collect();
+        self.bytes.clear();
+        self.step(text::CLS);
+        for &b in keep {
+            self.bytes.push(b);
+            self.step(b as u16);
+        }
+    }
+
+    /// reads one more byte
+    pub fn push(&mut self, b: u8) {
+        if self.bytes.len() + 1 >= self.net.cfg.max_len {
+            let keep = self.bytes[self.bytes.len() - self.net.cfg.room() / 2..].to_vec();
+            self.restart(&keep);
+        }
+        self.bytes.push(b);
+        self.step(b as u16);
+    }
+
+    fn step(&mut self, token: u16) {
+        let net = self.net;
+        let cfg = &net.cfg;
+        let (d, dh) = (cfg.d_model, cfg.head_dim);
+        let pos = self.bytes.len();
+        // the channels of this position, as a causal window computes them
+        let mut w1 = Window {
+            tokens: vec![token],
+            letter: vec![0],
+            ordinal: vec![0],
+            reversed: vec![0],
+            atbash: vec![0],
+            root: vec![0],
+            ..Window::default()
+        };
+        if pos > 0 && (cfg.letters || cfg.words) {
+            let w = text::window_with(&self.bytes, true, false);
+            w1.letter[0] = w.letter[pos];
+            w1.ordinal[0] = w.ordinal[pos];
+            w1.reversed[0] = w.reversed[pos];
+            w1.atbash[0] = w.atbash[pos];
+            w1.root[0] = w.root[pos];
+        }
+        let mut x = net.embed(&w1, &self.gains);
+        let scale = 1.0 / (dh as f32).sqrt();
+        for (l, b) in net.blocks.iter().enumerate() {
+            let a_w = b.heads * dh;
+            let (a, _) = norm_fwd(&x, &b.n1, d, cfg.norm_eps);
+            let qkv = matmul(rows(&a, d), &b.wqkv, 1, d, 3 * a_w, None);
+            let mut ctx = vec![0f32; a_w];
+            let mut p = vec![0f32; pos + 1];
+            for h in 0..b.heads {
+                let mut q = qkv[h * dh..(h + 1) * dh].to_vec();
+                let mut kh = qkv[a_w + h * dh..a_w + (h + 1) * dh].to_vec();
+                let v = &qkv[2 * a_w + h * dh..2 * a_w + (h + 1) * dh];
+                if cfg.qk_norm {
+                    q = norm_fwd(&q, &b.qn, dh, cfg.norm_eps).0;
+                    kh = norm_fwd(&kh, &b.kn, dh, cfg.norm_eps).0;
+                }
+                net.rope.apply_at(&mut q, pos);
+                net.rope.apply_at(&mut kh, pos);
+                self.keys[l][h].extend_from_slice(&kh);
+                self.vals[l][h].extend_from_slice(v);
+                attend_row(&q, &self.keys[l][h], &self.vals[l][h], pos, dh, scale, &mut p, &mut ctx[h * dh..(h + 1) * dh]);
+            }
+            let o = matmul(rows(&ctx, a_w), &b.wo, 1, a_w, d, None);
+            let hres: Vec<f32> = x.iter().zip(&o).map(|(a, b)| a + b).collect();
+            let (bn, _) = norm_fwd(&hres, &b.n2, d, cfg.norm_eps);
+            let g = matmul(rows(&bn, d), &b.wg, 1, d, b.ff, None);
+            let u = matmul(rows(&bn, d), &b.wu, 1, d, b.ff, None);
+            let mut s = vec![0f32; g.len()];
+            k::sigmoid_slice(&g, &mut s);
+            let act: Vec<f32> = g.iter().zip(&s).zip(&u).map(|((g, s), u)| (g * s) * u).collect();
+            let dn = matmul(rows(&act, b.ff), &b.wd, 1, b.ff, d, None);
+            x = hres.iter().zip(&dn).map(|(a, b)| a + b).collect();
+        }
+        let (xf, _) = norm_fwd(&x, &net.nf, d, cfg.norm_eps);
+        let mut y = matmul(rows(&xf, d), &net.gen_w, 1, d, GEN_OUT, None);
+        y.iter_mut().zip(&net.gen_b).for_each(|(a, b)| *a += b);
+        self.logits = y;
+    }
+}
+
 /// a window for this net's sequence length
 pub fn window_of(cfg: &Config, bytes: &[u8]) -> Window {
     text::window(&bytes[..bytes.len().min(cfg.room())])
@@ -1311,6 +1498,99 @@ mod tests {
                     ..Config::tiny()
                 });
             }
+        }
+    }
+
+    /// a causal model with a generative head, numbers and no gematria: finite
+    /// differences on every tensor through the generative logits and a pooled head
+    #[test]
+    fn generative_gradients_match_finite_differences() {
+        let cfg = Config {
+            causal: true,
+            numbers: true,
+            pooling: Pooling::Mean,
+            ..Config::tiny().gematria(false)
+        };
+        let heads = [HeadSpec::single("a", &["x", "y"])];
+        let mut net = Net::with_gen(cfg.clone(), &heads, Some(GenSpec::new("next")), 4).unwrap();
+        let mut r = Rng::new(10);
+        for (_, t) in net.params_mut() {
+            for v in t.iter_mut() {
+                *v += r.symmetric(0.05);
+            }
+        }
+        let mut w = text::window_with(b"owl and cat", true, true);
+        w.push_numbers(&[0.5, -1.25]);
+        let n = w.len();
+        let ch: Vec<f32> = (0..2).map(|_| r.symmetric(1.0)).collect();
+        let cg: Vec<f32> = (0..n * GEN_OUT).map(|_| r.symmetric(1.0)).collect();
+        let loss = |net: &Net| {
+            let tr = net.forward(&w, &[], &Gains::default(), Mode::EVAL, None);
+            k::dot(&net.logits(&tr, 0), &ch) + k::dot(&net.gen_logits(&tr), &cg)
+        };
+        let tr = net.forward(&w, &[], &Gains::default(), Mode::EVAL, None);
+        let mut g = net.zeros_like();
+        net.backward_gen(&tr, &[ch.clone()], &cg, &net.transposes(), &mut g);
+        drop(tr);
+        let grads: Vec<Vec<f32>> = g.params().into_iter().map(|(_, t)| t.clone()).collect();
+        let eps = 4e-3f32;
+        let mut checked = 0;
+        for (ti, gt) in grads.iter().enumerate() {
+            for s in 0..4 {
+                if gt.is_empty() {
+                    break;
+                }
+                let i = (mix(ti as u64 * 31 + s) as usize) % gt.len();
+                if gt[i] == 0.0 && ti == 0 {
+                    continue;
+                }
+                let orig = net.params()[ti].1[i];
+                net.params_mut()[ti].1[i] = orig + eps;
+                let up = loss(&net);
+                net.params_mut()[ti].1[i] = orig - eps;
+                let dn = loss(&net);
+                net.params_mut()[ti].1[i] = orig;
+                let num = (up - dn) / (2.0 * eps);
+                let tol = 5e-3 + 3e-2 * num.abs().max(gt[i].abs());
+                assert!((num - gt[i]).abs() <= tol, "tensor {ti} [{i}]: numeric {num} analytic {}", gt[i]);
+                checked += 1;
+            }
+        }
+        assert!(checked > 40);
+    }
+
+    /// decoding with the cache equals the full causal pass, bit for bit, including
+    /// across a window restart
+    #[test]
+    fn decoder_equals_the_full_pass() {
+        for gematria in [false, true] {
+            let cfg = Config {
+                causal: true,
+                pooling: Pooling::Mean,
+                max_len: 12,
+                stride: 5,
+                ..Config::tiny().gematria(gematria)
+            };
+            let net = Net::with_gen(cfg, &[], Some(GenSpec::new("next")), 7).unwrap();
+            let text = b"Ab cd, efg";
+            let mut dec = Decoder::new(&net, Gains::default(), &[]);
+            let w = text::window_with(text, true, false);
+            let tr = net.forward(&w, &[], &Gains::default(), Mode::EVAL, None);
+            let full = net.gen_logits(&tr);
+            assert_eq!(dec.logits(), &full[..GEN_OUT]);
+            for (i, &b) in text.iter().enumerate() {
+                dec.push(b);
+                assert_eq!(dec.logits(), &full[(i + 1) * GEN_OUT..(i + 2) * GEN_OUT], "position {}", i + 1);
+            }
+            // past max_len the decoder keeps the last half window
+            dec.push(b'!');
+            dec.push(b'?');
+            let kept = dec.window().to_vec();
+            assert_eq!(kept, b" efg!?");
+            let w = text::window_with(&kept, true, false);
+            let tr = net.forward(&w, &[], &Gains::default(), Mode::EVAL, None);
+            let full = net.gen_logits(&tr);
+            assert_eq!(dec.logits(), &full[kept.len() * GEN_OUT..]);
         }
     }
 
