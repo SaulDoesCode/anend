@@ -1356,6 +1356,42 @@ pub(crate) mod tests {
         let _ = std::fs::remove_file(path);
     }
 
+    /// presets referring to presets many times over run once each, and a loop brought in
+    /// by a bundle is an error rather than a hang
+    #[test]
+    fn filter_presets_stay_cheap() {
+        use crate::filters::{Expr, Preset};
+        let (s, path) = temp_store("presets");
+        lists(&s);
+        let pool = Pool::new(1);
+        s.save_filter("p0", Expr::Words { q: "plum".into() }, "").unwrap();
+        for i in 1..=10 {
+            let of = vec![Expr::Preset { name: format!("p{}", i - 1) }; 200];
+            s.save_filter(&format!("p{i}"), Expr::And { of }, "").unwrap();
+        }
+        let t = std::time::Instant::now();
+        let r = s.run_filter(&Expr::Preset { name: "p10".into() }, 10, 10_000, &pool).unwrap();
+        assert!(r.matched > 0);
+        assert!(t.elapsed().as_secs() < 10, "{:?}", t.elapsed());
+
+        let p = |name: &str, to: &str| Preset {
+            name: name.into(),
+            expr: Expr::And { of: vec![Expr::Preset { name: to.into() }; 200] },
+            description: String::new(),
+            created: String::new(),
+            modified: String::new(),
+            list: None,
+            count: None,
+        };
+        s.import_filters(&[p("ping", "pong"), p("pong", "ping")]).unwrap();
+        let e = s.run_filter(&Expr::Preset { name: "ping".into() }, 10, 10_000, &pool).unwrap_err();
+        assert!(e.contains("comes back") || e.contains("include itself"), "{e}");
+        let big = Preset { expr: Expr::Or { of: vec![Expr::Words { q: "x".into() }; 300] }, ..p("big", "p0") };
+        assert!(s.import_filters(&[big]).is_err());
+        drop(s);
+        let _ = std::fs::remove_file(path);
+    }
+
     #[test]
     fn stacks_and_outputs_as_lists() {
         let (s, path) = temp_store("stack");

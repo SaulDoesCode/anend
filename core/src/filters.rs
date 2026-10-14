@@ -456,6 +456,12 @@ impl Store {
     /// that an expression reads: classifiers and classes exist, presets don't loop,
     /// numbers are in range, and it isn't too big
     pub fn check_expr(&self, e: &Expr, path: &mut Vec<String>) -> StoreResult<()> {
+        self.check_inner(e, path, &mut HashMap::new()).map(|_| ())
+    }
+
+    /// `check_expr`, remembering how many levels of presets each checked preset holds, so
+    /// a preset referred to many times is read once; answers this expression's levels
+    fn check_inner(&self, e: &Expr, path: &mut Vec<String>, done: &mut HashMap<String, usize>) -> StoreResult<usize> {
         if e.count() > MAX_NODES {
             return Err(format!("a filter holds at most {MAX_NODES} conditions"));
         }
@@ -469,11 +475,13 @@ impl Store {
                 if of.is_empty() && matches!(e, Expr::Or { .. }) {
                     return Err("an \"any of\" needs something in it".into());
                 }
+                let mut h = 0;
                 for x in of {
-                    self.check_expr(x, path)?;
+                    h = h.max(self.check_inner(x, path, done)?);
                 }
+                return Ok(h);
             }
-            Expr::Not { of } => self.check_expr(of, path)?,
+            Expr::Not { of } => return self.check_inner(of, path, done),
             Expr::Class { classifier, class, min, max, .. } => {
                 let d = self.classifier(classifier)?;
                 d.class_index(class)?;
@@ -510,13 +518,25 @@ impl Store {
                 if path.contains(name) {
                     return Err(format!("the filter {name:?} would include itself"));
                 }
-                let p = self.filter_preset(name)?;
-                path.push(name.clone());
-                self.check_expr(&p.expr, path)?;
-                path.pop();
+                let inner = match done.get(name) {
+                    Some(&h) => h,
+                    None => {
+                        let p = self.filter_preset(name)?;
+                        path.push(name.clone());
+                        let h = self.check_inner(&p.expr, path, done);
+                        path.pop();
+                        let h = h?;
+                        done.insert(name.clone(), h);
+                        h
+                    }
+                };
+                if path.len() + 1 + inner > MAX_DEPTH {
+                    return Err("filters refer to filters too deeply".into());
+                }
+                return Ok(inner + 1);
             }
         }
-        Ok(())
+        Ok(0)
     }
 }
 
@@ -564,6 +584,11 @@ struct Universe<'a> {
     /// classifier -> (classes, threshold, checked rows) over the universe
     checked: HashMap<String, Option<Read>>,
     notes: Option<HashMap<String, Vec<String>>>,
+    /// each preset's answer, worked out once however often it's referred to (a preset
+    /// using another 256 times, twelve deep, would otherwise never finish)
+    presets: HashMap<String, (Vec<bool>, Vec<f32>)>,
+    /// the presets being worked out, to catch one that comes back to itself
+    open: Vec<String>,
 }
 
 impl<'a> Universe<'a> {
@@ -687,8 +712,19 @@ impl<'a> Universe<'a> {
                 (self.refs.iter().map(|r| matches!(r, Ref::Note(_)) == notes).collect(), vec![1.0; n])
             }
             Expr::Preset { name } => {
+                if let Some(done) = self.presets.get(name) {
+                    return Ok(done.clone());
+                }
+                if self.open.contains(name) {
+                    return Err(format!("the filter {name:?} comes back to itself"));
+                }
                 let p = self.store.filter_preset(name)?;
-                self.eval(&p.expr, depth + 1)?
+                self.open.push(name.clone());
+                let r = self.eval(&p.expr, depth + 1);
+                self.open.pop();
+                let r = r?;
+                self.presets.insert(name.clone(), r.clone());
+                r
             }
         })
     }
@@ -708,6 +744,8 @@ impl Store {
             shown: cands.iter().map(|c| c.2.clone()).collect(),
             checked: HashMap::new(),
             notes: None,
+            presets: HashMap::new(),
+            open: Vec::new(),
         };
         let (m, s) = u.eval(e, 0)?;
         let mut order: Vec<usize> = (0..u.refs.len()).filter(|&i| m[i]).collect();
@@ -767,6 +805,11 @@ impl Store {
     pub fn import_filters(&self, all: &[Preset]) -> StoreResult<usize> {
         for p in all {
             clean_name(&p.name)?;
+            // a bundle is data from anywhere: only its size is checked here (what it reads
+            // may come with it), the rest when it runs
+            if p.expr.count() > MAX_NODES {
+                return Err(format!("the filter {:?} holds more than {MAX_NODES} conditions", p.name));
+            }
             self.put_preset(p)?;
         }
         Ok(all.len())

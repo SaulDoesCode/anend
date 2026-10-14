@@ -270,8 +270,40 @@ interface, not stubs.
    `/guide`, or the GitHub copy on `main` offline). Left: the desktop app's help link
    (src/), and keeping the guide in step as features land (filters and validators on the
    desktop, the web space's editing and maps).
-6. **Review pass:** security (hub upload and op limits, classifier file checks),
-   ergonomics, visual consistency, and no stubs.
+6. **Review pass** (security (hub upload and op limits, classifier file checks),
+   ergonomics, visual consistency, and no stubs): **security part done, the rest not
+   started.** The findings and what's enforced where are in `docs/security.md`.
+   - **Fixed and tested (14 Oct):** `POST /api/saves` takes only a bearer token (it was
+     open to CSRF through the cookie); a `--local` hub answers only to localhost, IP
+     addresses and its `--url` (DNS rebinding) and warns when it listens beyond
+     loopback; framing, nosniff and referrer headers on every answer, and
+     `script-src 'self'` for the web app (its inline script is now `hub/web/early.js`);
+     `/app/api` reads no body and `/app/ws` opens no socket without an owner; 4 calls at
+     once and 8 sockets per member; `--quota` (1 GB) and 200 saves per workspace;
+     training limits (threads, batch, lr, 2 jobs per member, cores-many per hub, 2 h),
+     and a training thread that fails to start no longer leaves the job "running";
+     steering checked when only measured; classifier files with windows overlapping
+     past 3/4 refused; `/admin/server` isn't "local" behind a forwarding proxy; logins
+     for unknown names take the same time as for known ones; filter presets are checked
+     and run once each however often they're referred to (it was exponential), a loop
+     from a bundle errors, and imported presets' size is checked; markdown links with control
+     characters before `javascript:` no longer get through (stored XSS through shared
+     saves). Tests: `clstests::doors`, `app::tests::quota`, `appweb::tests::turnstiles`,
+     `web::tests::local_hosts`, `server::tests::file_round_trip`,
+     `classify::tests::job_folders`, `classifiers::tests::hostile_arguments`, `classifiers::tests::filter_presets_stay_cheap`,
+     `classify::tests::save_and_load_round_trip`, `node hub/web/test/markdown.mjs`.
+   - The note under item 4 about `classify.index` panicking on its thread name is stale:
+     the thread names no longer carry the job key, and the web app doesn't wait.
+   - **Left, in this order:**
+     1. Cap forge ingredients and skip `lists.stats`'s grid for very many lists.
+     2. CI: add `node hub/web/test/markdown.mjs` (and the parity run if it isn't there)
+        to `.github/workflows/ci.yml`; check the release workflow builds both binaries
+        with the new assets (`hub/web/early.js` comes in through rust-embed).
+     3. The quality sweep: clippy was clean before these changes and after; no TODOs or
+        stubs were found in hub/ or core/ by grep. Still to do: the UX walk of every web
+        view at 1280 and 390 px and keyboard-only (Playwright, seeded with
+        `scratchpad/seed.mjs`), checking there are no CSP errors in the console now,
+        wording in the app's voice, and fixes; screenshots into `shots-review/`.
 
 ## In progress: classifiers (`core/src/classify/`)
 
