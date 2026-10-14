@@ -91,18 +91,3 @@ pub fn apply_done(world: &mut World) {
 pub fn pool() -> Pool {
     Pool::new(anend_core::classify::pool::available().saturating_sub(1).max(1))
 }
-
-pub fn debug_wheel(
-    mut scroll: MessageReader<bevy::picking::events::PointerScroll>,
-    q: Query<(&ComputedNode, &Node)>,
-    parents: Query<&ChildOf>,
-) {
-    for s in scroll.read() {
-        for e in std::iter::once(s.entity).chain(parents.iter_ancestors(s.entity)) {
-            if let Ok((c, n)) = q.get(e) {
-                info!("ANC {:?} size={:?} dir={:?} grow={} minh={:?} h={:?} ov={:?}", e, c.size(), n.flex_direction, n.flex_grow, n.min_height, n.height, n.overflow);
-            }
-        }
-        break;
-    }
-}

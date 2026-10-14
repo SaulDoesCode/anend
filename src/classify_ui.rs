@@ -349,7 +349,7 @@ pub fn view() -> impl Scene {
 
 fn reload(st: &mut ClsState, store: &Store) {
     st.defs = store.classifiers().unwrap_or_default();
-    st.defs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    st.defs.sort_by_key(|d| d.name.to_lowercase());
     st.lists = anend_core::lists::stats(store)
         .map(|v| {
             v.into_iter()
@@ -881,12 +881,10 @@ pub fn tick_classifiers(
     time: Res<Time>,
 ) {
     let now = time.elapsed_secs_f64();
-    if st.training.is_some() || st.indexing.is_some() {
-        if now - st.live_at > 0.25 {
-            st.live_at = now;
-            st.live_dirty = true;
-            st.buckets_dirty |= st.indexing.is_some();
-        }
+    if (st.training.is_some() || st.indexing.is_some()) && now - st.live_at > 0.25 {
+        st.live_at = now;
+        st.live_dirty = true;
+        st.buckets_dirty |= st.indexing.is_some();
     }
     if session.route != Route::Classifiers {
         return;

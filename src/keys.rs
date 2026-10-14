@@ -28,6 +28,7 @@ pub enum Action {
     GotoLists,
     GotoTags,
     GotoClassifiers,
+    GotoFilters,
     OpenSettings,
     FocusTerm,
     BucketOrdinal,
@@ -125,7 +126,7 @@ const fn shift(key: KeyCode) -> Binding {
 }
 
 impl Action {
-    pub const ALL: [Action; 56] = [
+    pub const ALL: [Action; 57] = [
         Action::Save,
         Action::NewNote,
         Action::ToggleView,
@@ -138,6 +139,7 @@ impl Action {
         Action::GotoLists,
         Action::GotoTags,
         Action::GotoClassifiers,
+        Action::GotoFilters,
         Action::OpenSettings,
         Action::FocusTerm,
         Action::BucketOrdinal,
@@ -188,7 +190,7 @@ impl Action {
         use Action::*;
         match self {
             GotoEditor | GotoReader | GotoMemory | GotoStats | GotoSpace | GotoLists | GotoTags | GotoClassifiers
-            | OpenSettings => {
+            | GotoFilters | OpenSettings => {
                 Scope::Global
             },
             Save | NewNote | ToggleView | ToggleList | FocusTerm | BucketOrdinal | BucketReversed | BucketAtbash
@@ -222,6 +224,7 @@ impl Action {
             Action::GotoLists => "goto_lists",
             Action::GotoTags => "goto_tags",
             Action::GotoClassifiers => "goto_classifiers",
+            Action::GotoFilters => "goto_filters",
             Action::OpenSettings => "open_settings",
             Action::FocusTerm => "focus_term",
             Action::BucketOrdinal => "bucket_ordinal",
@@ -283,6 +286,7 @@ impl Action {
             Action::GotoLists => "go to the lists",
             Action::GotoTags => "go to the tags",
             Action::GotoClassifiers => "go to the classifiers",
+            Action::GotoFilters => "go to the filters",
             Action::OpenSettings => "open the settings (saves, fonts, zen)",
             Action::FocusTerm => "focus the command bar",
             Action::BucketOrdinal => "memory: ordinal bucket",
@@ -344,6 +348,7 @@ impl Action {
             Action::GotoLists => ctrl(KeyCode::Digit6),
             Action::GotoClassifiers => ctrl(KeyCode::Digit7),
             Action::GotoTags => ctrl(KeyCode::Digit8),
+            Action::GotoFilters => ctrl(KeyCode::Digit9),
             Action::OpenSettings => ctrl(KeyCode::Comma),
             Action::FocusTerm => plain(KeyCode::Slash),
             Action::BucketOrdinal => plain(KeyCode::KeyO),

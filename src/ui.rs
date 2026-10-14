@@ -59,6 +59,7 @@ pub enum Route {
     Lists,
     Tags,
     Classifiers,
+    Filters,
 }
 
 #[derive(Resource, Default)]
@@ -348,6 +349,8 @@ fn root() -> impl Scene {
                 --
                 @crate::classify_ui::view()
                 --
+                @crate::filters_ui::view()
+                --
                 @crate::space_ui::view()
             ]
             --
@@ -415,6 +418,8 @@ fn nav() -> impl Scene {
             @nav_button(Icon::Classifier, "classifiers", Route::Classifiers, Action::GotoClassifiers)
             --
             @nav_button(Icon::Tags, "tags", Route::Tags, Action::GotoTags)
+            --
+            @nav_button(Icon::Filter, "filters", Route::Filters, Action::GotoFilters)
             --
             // the space's search line: what was searched and its sum's chain
             Node {
@@ -823,10 +828,12 @@ pub fn app_actions(
             | Action::GotoSpace
             | Action::GotoLists
             | Action::GotoTags
-            | Action::GotoClassifiers => {
+            | Action::GotoClassifiers
+            | Action::GotoFilters => {
                 let route = match action {
                     Action::GotoTags => Route::Tags,
                     Action::GotoClassifiers => Route::Classifiers,
+                    Action::GotoFilters => Route::Filters,
                     Action::GotoLists => Route::Lists,
                     Action::GotoEditor => Route::Editor,
                     Action::GotoReader => Route::Reader,
@@ -877,6 +884,7 @@ pub fn apply_route(
         Has<crate::lists_ui::ListsView>,
         Has<crate::tags_ui::TagsView>,
         Has<crate::classify_ui::ClsView>,
+        Has<crate::filters_ui::FiltersView>,
     )>,
     tabs: Query<(Entity, &NavTab)>,
     mut commands: Commands,
@@ -885,7 +893,7 @@ pub fn apply_route(
         return;
     }
     redraw.route = false;
-    for (mut node, editor, reader, memory, stats, space, lists, tags, cls) in views.iter_mut() {
+    for (mut node, editor, reader, memory, stats, space, lists, tags, cls, flt) in views.iter_mut() {
         let shown = match session.route {
             Route::Editor => editor,
             Route::Reader => reader,
@@ -895,8 +903,9 @@ pub fn apply_route(
             Route::Lists => lists,
             Route::Tags => tags,
             Route::Classifiers => cls,
+            Route::Filters => flt,
         };
-        if editor || reader || memory || stats || space || lists || tags || cls {
+        if editor || reader || memory || stats || space || lists || tags || cls || flt {
             node.display = if shown { Display::Flex } else { Display::None };
         }
     }

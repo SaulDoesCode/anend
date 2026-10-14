@@ -8,6 +8,7 @@
 mod bar;
 mod classify_ui;
 mod cls_widgets;
+mod filters_ui;
 mod index_panel;
 mod jobs;
 mod tint;
@@ -79,7 +80,7 @@ fn parse_args() -> Args {
                      (a JSON array or one JSON document per line), then exit\n  \
                      --import-weum <file>  import weum memories from its backup (all-of-it.json), then exit\n  \
                      --space           open in the space\n\n\
-                     ctrl+s save, ctrl+n new note, ctrl+e view/edit, ctrl+1..8 views (7 classifiers, 8 tags), ctrl+, settings (saves, fonts, zen, keys)",
+                     ctrl+s save, ctrl+n new note, ctrl+e view/edit, ctrl+1..9 views (7 classifiers, 8 tags, 9 filters), ctrl+, settings (saves, fonts, zen, keys)",
                     config::Config::load().current_save().display()
                 );
                 std::process::exit(0);
@@ -241,6 +242,7 @@ fn run(args: Args) {
     .init_resource::<hub_ui::HubState>()
     .init_resource::<tags_ui::TagsState>()
     .init_resource::<classify_ui::ClsState>()
+    .init_resource::<filters_ui::FiltersState>()
     .init_resource::<tint::Tints>()
     .init_resource::<index_panel::IndexPanel>()
     .init_resource::<jobs::Work>()
@@ -310,10 +312,11 @@ fn run(args: Args) {
             tags_ui::rebuild_tags,
             (
                 jobs::apply_done,
-                jobs::debug_wheel,
                 classify_ui::tick_classifiers,
                 classify_ui::rebuild_classifiers,
                 classify_ui::keep_form_name,
+                filters_ui::rebuild_filters,
+                filters_ui::keep_name,
                 index_panel::rebuild_index_panel,
                 tint::request_tints,
                 tint::apply_tints,

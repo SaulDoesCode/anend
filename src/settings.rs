@@ -625,6 +625,7 @@ fn install(world: &mut World, store: std::sync::Arc<Store>) {
     // jobs on the old save stop, and what they'd bring back is dropped
     world.resource_mut::<crate::jobs::Work>().new_save();
     world.insert_resource(crate::classify_ui::ClsState::default());
+    world.insert_resource(crate::filters_ui::FiltersState::default());
     world.resource_mut::<crate::tint::Tints>().reset();
     world.insert_resource(crate::index_panel::IndexPanel::default());
     world.insert_resource(Db(store));
