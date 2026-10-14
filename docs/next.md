@@ -342,49 +342,43 @@ by the store redesign below, apart from the keyboard bits, which may be reused.
 - **Parity:** the web app and the hub are kept up to date with the desktop app, and look
   the same.
 
-**Status (14 Oct, cut off by usage; nothing of it is in `hub/` yet).** The work so far is
-`docs/wip/server-modes.patch` (`git apply docs/wip/server-modes.patch`; it applies to
-this commit's `hub/`). It does NOT compile yet. What it holds:
-- `hub/Cargo.toml`: features `hub`, `app` (default both); tracing-subscriber `json`.
-- `hub/src/mode.rs` (new): `Mode {hub, app, local}`, `--mode hub|app|both`, `--local` =
-  the app alone with no login; `Mode::check` refuses a mode the build left out.
-- `hub/src/main.rs`: module declarations gated by feature; declares modules still to
-  write: `invites`, `ops`, `pages`, `modetests` (and uses `testkit`, `saves`, written).
-- `hub/src/saves.rs` (new): the save pages moved out of `web.rs` (grid/index, save page,
-  download, star, upload/edit/delete, leaderboard, admin save actions); imports not fixed.
-- `hub/src/web.rs`: `SetMode` hoop + `web::mode(depot)`; `Layout` gains `hub_on`,
-  `app_on`, `local`, `join`, `can_invite`, `about`; waiting counts use `waiting()`;
-  cards carry `visibility`; classifier cards/rows (`ClsCard`, `AdminCls`, `percent`,
-  `count`) moved here from `clsweb.rs`.
-- `hub/src/store.rs`: `Visibility {Private, Unlisted, Public(default)}` on `Save` and
-  `ClassifierRec`, `listed()`/`waiting()`, `store::may_see`; `Invite` (hashed code, id,
-  hint, by, note, expires, max_uses, used_by, revoked) with `put/invite/invites/
-  use_invite (atomic)/update_invite`; `meta`/`set_meta`; `User.invited_by`.
-- `hub/src/hub.rs`: `Config` (contact, share_quota, terms, privacy; `Default`), `Join
-  {Open, Apply, Invite}` kept in META (`join_policy`, `trusted_invite`, `may_invite`),
-  `shared_bytes`/`room_to_share` (`--share-quota`, private ones count), `Details.visibility`
-  + `seen_by`, `accept` sets visibility and checks the quota, rewards only when listed,
-  `set_save_visibility`, `find`/`star`/`downloaded` listed-only; hub logic gated.
-- `hub/src/clshub.rs`: the same for classifiers (`accept_classifier(_bytes)` take a `vis`
-  argument; `set_classifier_visibility`); `take_into`/`export_from` gated on `app`.
-- `hub/src/testkit.rs` (new): router-test helpers moved from `clstests.rs`, with
-  `service(mode)`, `get_in`, `post_form_in`, `cookie_of`.
+**Status (14 Oct, evening): built, tested, pushed.** In `hub/`:
+- **Modes** (`hub/src/mode.rs`): `--mode hub|app|both` (default both), `--local` = the app
+  alone, no login. `main.rs` `router(mode)`/`service(mode)`: routes outside the mode don't
+  exist (404); nav, front page, footer and the admin panel adapt (`Layout.hub_on/app_on/
+  local`). App-only `/` is a landing page (`pages.rs`); `/about`, `/terms`, `/privacy`
+  (markdown from `--terms`/`--privacy` or `<data>/terms.md`/`privacy.md`, placeholder
+  otherwise) in every mode. Cargo features `hub`, `app` (default both); all three builds
+  are clippy-clean and pass their tests. `x-anend: app` tells the web app there's no hub
+  (`hub/web/api.js` `api.noHub`; settings and classifiers hide hub browsing).
+- **Sign-in for the web app:** `/app/` redirects to `/login?next=/app/` (a waiting account
+  gets a 403 page); its files, `/app/api/*` and `/app/ws` answer 401 (no one) / 403
+  (waiting). `next` only goes to a local path.
+- **Joining** (`invites.rs`, `Hub::join_policy` in META): `--join invite|apply|open`
+  (`--open` kept); with no flag a new server is invite-only and an existing one with
+  people keeps `apply`. Invites: hashed codes `xxxx-xxxx-xxxx`, uses 1-100, 0-365 days,
+  shown once, `/invites` (admins; trusted members when the admin panel allows),
+  `/invite/{code}` fills the join form, revoke, all listed in `/admin#invites` with the
+  policy settings; a wrong code costs a try (10/h per address); `--invite` prints one.
+  `User.invited_by`.
+- **Visibility** (`store::Visibility`, `store::may_see`): private/unlisted/public on saves
+  and classifiers; only public+approved are listed (grids, search, feeds, profiles,
+  leaderboard, `/api/*` lists, counts); private/unlisted skip the queue; private is the
+  owner's alone (pages, downloads, API); downloads/stars/points only for listed ones;
+  `--share-quota` (512 MB) counts all. Forms have a visibility choice, pages an owner
+  control (`/saves/{id}/visibility`, `/classifiers/{id}/visibility`); API takes and
+  returns `visibility`; `GET /api/mine`.
+- **Ops** (`ops.rs`): `/health`, a log line per request (`--log json`; login/invite secrets
+  redacted), error pages for empty error answers, graceful stop on SIGTERM/Ctrl-C.
+- **Tests:** `hub/src/modetests.rs` (routes per mode, app sign-in incl. socket, invites,
+  visibility leaks); `testkit.rs` shared helpers.
 
-Left (in order): fix the call sites (`api.rs`, `appweb.rs`, `clsweb.rs`, `saves.rs`
-imports, `app::LOCAL` → `mode`, `app::owner(user, local)`); `main.rs` `router(mode)` /
-`service(mode)` with routes per mode, the new flags (`--mode`, `--join`, `--open` as
-`--join open`, `--invite`, `--share-quota`, `--contact`, `--terms`, `--privacy`, `--log
-json`), the join policy written at start (no stored policy: `apply` when users exist,
-else `invite`); `invites.rs` (pages `/invites`, `/invite/{code}`, revoke, admin section,
-join requiring a code under `invite`, rate limits); `pages.rs` (app-mode landing, `/about`,
-`/terms`, `/privacy` from `<data>/terms.md`/`privacy.md`); `ops.rs` (`/health`, request
-log hoop redacting `/login/` and `/invite/` paths, error catcher, graceful shutdown);
-app sign-in (`/app/` redirects to `/login?next=/app/`, 401 for the API and socket); the
-visibility controls in templates (eye-off/link/hub icons, tooltips) and on the API
-(`visibility` field, `GET /api/mine`); `x-anend: app` for an app-only server in
-`hub/web/api.js`; `modetests.rs`; docs (`docs/deploy.md`, `hub-api.md`, `security.md`),
-`hub/Dockerfile`, the systemd unit; clippy for each feature set; screenshots. The
-desktop build without the hub (`src/`) wasn't started.
+Left: docs (`docs/deploy.md`: modes, flags, TLS, backups, invites, quotas, running it as a
+paid service; `docs/hub-api.md` visibility/`/api/mine`/`/health`/`api/me`; `docs/
+security.md` rows for invites, visibility, app sign-in; note unlisted content is never
+reviewed); `hub/Dockerfile` and updating `hub/anend-hub.service`; config examples
+`hub/config/terms.example.md`/`privacy.example.md` (the placeholder text names them);
+Playwright screenshots; the desktop build without the hub (`src/`, not started).
 
 ### J. Docs
 - **README:** rewrite it, because it's very out of date (including the old blog import).

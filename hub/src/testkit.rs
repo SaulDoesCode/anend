@@ -118,7 +118,7 @@ pub fn both() -> Service {
 
 /// a GET in a mode
 pub async fn get_in(mode: Mode, path: &str, cookie: Option<&str>) -> (u16, String) {
-    let mut b = TestClient::get(format!("{BASE}{path}"));
+    let mut b = TestClient::get(format!("{BASE}{path}")).add_header("host", "127.0.0.1:5800", true);
     if let Some(c) = cookie {
         b = b.add_header("cookie", c, true);
     }
@@ -127,7 +127,9 @@ pub async fn get_in(mode: Mode, path: &str, cookie: Option<&str>) -> (u16, Strin
 
 /// a form POST in a mode, without a cookie when it's empty
 pub async fn post_form_in(mode: Mode, path: &str, cookie: &str, form: &str) -> (u16, String) {
-    let mut b = TestClient::post(format!("{BASE}{path}")).raw_form(form.to_string());
+    let mut b = TestClient::post(format!("{BASE}{path}"))
+        .add_header("host", "127.0.0.1:5800", true)
+        .raw_form(form.to_string());
     if !cookie.is_empty() {
         b = b.add_header("cookie", cookie, true);
     }

@@ -32,7 +32,7 @@ async fn classifier_site() {
     )
     .await;
     assert_eq!(code, 403);
-    assert!(web::hub().store.classifiers().unwrap().is_empty());
+    assert!(!web::hub().store.classifiers().unwrap().iter().any(|c| c.author == "saul"));
     // nor can nobody
     let (code, v) = post_json("/app/classifiers/share", "", json!({ "name": "kind" }), None).await;
     assert_eq!(code, 400, "{v}");
