@@ -101,6 +101,44 @@ buckets/bucket/near/tints/indexed/set_index/validators/disagreements/export/insp
 import, filters.list/save/delete/run/enlist; docs/app-api.md). The web app uses them all (docs/next.md item 4, "web UI"). Left (hub sharing site,
 web UI, screenshots): see docs/next.md item 4.
 
+## Phase 4 (in progress, 14 Oct): general models, generation, critics
+
+The user (14 Oct): transformers are general purpose, not gematria transformers; the byte
+sums are a separate measure; a high-level declarative spec is the primary interface;
+sizes are honest (tiny is for tests only).
+
+Done (tested; `cargo test -p anend-core classify` ~12 s in debug):
+
+| area | where | tests |
+|---|---|---|
+| byte sums (byte + 1, 256 − byte, digit sums, word sums), standalone, not a model input | `core/src/measure.rs` | `measure::tests` |
+| feature channels optional: `Config::{letters, words, side}` (`Config::gematria(on)`); files saved before keep theirs on | model.rs, io.rs | `version_1_files_still_load_bit_exact` (fixture `testdata/v1_tiny.anendcls`) |
+| NUM tokens (`text::NUM`, `Window::push_numbers`, `Config::numbers`): row + value × learned direction | text.rs, model.rs | in the generative gradient check |
+| causal attention (`Config::causal`, row by row via `attend_row`), causal word channels | model.rs, text.rs | gradient check; `causal_channels_and_numbers` |
+| generative head (`GenSpec`, `Net::{generator, gen_w, gen_b}`, `gen_logits`, `backward_gen`), next byte over 256 + END | model.rs | `generative_gradients_match_finite_differences` |
+| `Decoder`: KV cache, bit-equal to the full pass, restarts past `max_len` with the last half window | model.rs | `decoder_equals_the_full_pass` |
+| multi-output: heads + generative head share a trunk; `Example::and(head, target)`, `HeadSpec::weight` / `GenSpec::weight` loss weights; `Target::{Next{from}, Avoid{from}}`; `Example::raw` bytes; `Evaluation::bits_per_byte`; `train::{tune, nll, gen_loss}` | train.rs | `multi_output_models_train_heads_jointly` |
+| file format v2 (adds generator, flags; v1 reads) | io.rs | round trip in the tests above |
+| sampling (greedy, temperature, top-k, top-p, max length, stop byte, END), keyed by (seed, index) | generate.rs | `learns_sequences_and_samples_deterministically` (same seed same bytes, threads 2 = 3) |
+| critics (`Judge` for `Classifier`, `generate::Node` of a `Graph`, `classifiers::Stack`; `Want::{Class, Not, Near, Range}`), `Constraints` (gates must/must-not, sum ranges over `Measure::{Bytes, BytesReversed, Ordinal, Reversed, Length}`, length, contains/excludes), `draw` / `generate` (rank), `Guidance` (top-k next bytes reweighted by critics), `rewards` (score − mean), `reinforce` (reward-weighted likelihood + unlikelihood, replay), `Rewarded::{yes, no}` | generate.rs | `critics_rank_constrain_guide_and_reinforce` |
+| numbers as fixed-width text (`NumberCodec`), pictures as patch-codebook bytes (`Codebook::learn` integer k-means, `ROW` = 255, `encode/decode`), `png` writer (stored deflate), `toy` pictures | codec.rs | `codec::tests` |
+
+Left (in this order):
+- `classify/spec.rs`: the declarative `ModelSpec` (versioned serde: inputs text/bytes/image/numbers
+  with opt-in feature channels, trunk preset or sizes, heads classify/multi/regress/generate with
+  loss weights, data as queries over a `Source` (lists as classes, tags, pairs for
+  sequence-to-sequence, inline), critics by model name, sampling), `build / train / run`,
+  `Model::from_classifier`, validation with clear errors.
+- `classify/bench.rs`: one-time machine benchmark (`MachineProfile`), `suggest` sizes; the spec uses
+  it when sizes are left out.
+- `core/examples/generate.rs` (authors corpus: per-author generators, author classifier as critic,
+  before/after guidance, a reinforce round, timings, agreement) and `core/examples/pictures.rs`
+  (patch-codebook image generator, PNGs, measured cost vs sequence length).
+- `docs/models.md`: the spec format with examples (author classifier, steered text generator,
+  number regressor, image generator), every size limit labelled test-speed vs measured compute.
+- NUM tokens are in the engine but not yet fed from `Example` (numbers reach models as text or as
+  `extra` dense inputs for now).
+
 ## Next (not done)
 
 - ~~the desktop app's classifiers view~~: done (src/classify_ui.rs, filters_ui.rs, index_panel.rs, tint.rs; see docs/next.md item 4).

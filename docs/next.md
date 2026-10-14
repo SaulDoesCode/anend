@@ -386,10 +386,19 @@ Playwright screenshots; the desktop build without the hub (`src/`, not started).
 - **Guide:** touch it up after these changes land.
 
 ### K. Direction (under discussion, 14 Oct)
-- **Transformers that generate:**
-  - multi-output transformers, not only classifiers;
-  - generators shaped by classifiers, which act as the feedback that trains them;
-  - working over any data, not just text: bytes, numbers, images.
+- **Transformers that generate** (in progress; done/left in `core/src/classify/STATUS.md`,
+  phase 4):
+  - multi-output transformers, not only classifiers — done in the engine: heads and a
+    generative head share a trunk, trained jointly with per-head loss weights;
+  - generators shaped by classifiers, which act as the feedback that trains them — done in
+    the engine (`classify::generate`: critics, constraints, guidance, reinforce, yes/no);
+  - working over any data, not just text: bytes, numbers, images — codecs done (fixed-width
+    numbers, pictures as patch-codebook bytes, PNG writer);
+  - byte sums (bytes valued 1–256) are a separate measure (`core/src/measure.rs`), not a
+    model feature; gematria channels are opt-in model inputs, off for new models;
+  - left: the declarative model spec (`classify/spec.rs`, `docs/models.md`) as the primary
+    interface, the machine benchmark for honest default sizes, the examples (authors
+    generator, picture generator with measured cost).
 - **A small scripting/templating language** (cf. the user's s-lang):
   - built around references, transformer outputs, data types, mutation and closures;
   - transpiled to concatenated Rust calls over a state machine, linked against a
