@@ -746,9 +746,12 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
             if wait {
                 work();
             } else {
-                std::thread::Builder::new().name(format!("index {}", job_key(st, "")))
-                    .spawn(work)
-                    .map_err(|e| e.to_string())?;
+                // a thread's name can't hold the job key's \0
+                if let Err(e) = std::thread::Builder::new().name(format!("index {name}")).spawn(work) {
+                    let mut s = job.state.lock().unwrap_or_else(|e| e.into_inner());
+                    s["state"] = json!("failed");
+                    s["error"] = json!(e.to_string());
+                }
             }
             Ok(index_snapshot(&job))
         }
@@ -1058,6 +1061,17 @@ mod tests {
         // phase 3: buckets, near, tints, per-note indexing, validators, filters, modules
         let ix = c("classify.index", json!({ "name": "kind", "wait": true })).unwrap();
         assert_eq!(ix["state"], "done", "{ix}");
+        // in the background too: it finishes, and another can start after
+        c("classify.index", json!({ "name": "kind" })).unwrap();
+        let mut state = json!(null);
+        for _ in 0..600 {
+            state = c("classify.index_job", json!({ "name": "kind" })).unwrap();
+            if state["state"] != "running" {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert_eq!(state["state"], "done", "{state}");
         let bk = c("classify.buckets", json!({ "name": "kind" })).unwrap();
         let filed: u64 = bk["buckets"].as_array().unwrap().iter().map(|b| b["count"].as_u64().unwrap()).sum();
         assert_eq!(filed, bk["indexed"].as_u64().unwrap());

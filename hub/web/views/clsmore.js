@@ -66,32 +66,35 @@ async function loadBuckets() {
   }
 }
 
-// the indexing runs as a call that answers when it's done (`wait`), while its job is
-// polled for the progress bar; the answer, not a poll, says it has finished (a poll can
-// still see the last run's job before this one starts)
+// the indexing runs on the hub in the background: the call answers at once with the new
+// job, which is then polled for the progress bar until it ends (a waiting call would hold
+// up everything else on the socket)
 let indexing = null; // the classifier being indexed by this page
 async function index() {
   const d = ctx.detail();
   const name = d.name;
-  indexing = name;
-  st.job = { name, state: 'running', done: 0, total: 0 };
-  draw();
-  watch();
   let job;
   try {
-    job = await ctx.app.call('classify.index', { name, wait: true });
+    job = await ctx.app.call('classify.index', { name });
   } catch {
-    job = null;
+    return;
   }
+  if (st.name !== name) return;
+  indexing = name;
+  st.job = job;
+  draw();
+  if (job.state === 'running') watch();
+  else indexed(name, job);
+}
+
+function indexed(name, job) {
   indexing = null;
   clearTimeout(poll);
   if (st.name !== name) return;
   st.job = job;
-  if (job) {
-    const r = job.report;
-    if (job.state === 'done') ctx.app.status(`“${name}” indexed: ${r.computed} read, ${r.cached} already known, ${num(r.seconds, 1)} s`);
-    else ctx.app.status(`indexing “${name}”: ${job.state}${job.error ? ` (${job.error})` : ''}`, job.state === 'failed');
-  }
+  const r = job.report;
+  if (job.state === 'done' && r) ctx.app.status(`“${name}” indexed: ${r.computed} read, ${r.cached} already known, ${num(r.seconds, 1)} s`);
+  else ctx.app.status(`indexing “${name}”: ${job.state}${job.error ? ` (${job.error})` : ''}`, job.state === 'failed');
   st.buckets = null;
   loadBuckets();
 }
@@ -119,7 +122,10 @@ function watch() {
     if (st.name !== name) return;
     const mine = indexing === name;
     if (job.state === 'running') st.job = job;
-    else if (!mine) {
+    else if (mine) {
+      indexed(name, job);
+      return;
+    } else {
       // indexed from elsewhere (another tab): it has finished
       st.job = job;
       st.buckets = null;
