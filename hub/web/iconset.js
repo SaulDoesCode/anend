@@ -53,6 +53,7 @@ export default {
   "space": "<circle cx=\"12\" cy=\"12\" r=\"4\"/><ellipse cx=\"12\" cy=\"12\" rx=\"10\" ry=\"4\" transform=\"rotate(-25 12 12)\"/>",
   "star": "<path d=\"M12 3l2.8 5.8 6.2.9-4.5 4.4 1 6.2L12 17.4 6.5 20.3l1-6.2L3 9.7l6.2-.9z\"/>",
   "stats": "<path d=\"M3 21h18\"/><path d=\"M6 17v-4M10 17V8M14 17v-6M18 17V5\"/>",
+  "sun": "<circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4\"/>",
   "swap": "<path d=\"M7 4L3 8l4 4\"/><path d=\"M3 8h14\"/><path d=\"M17 12l4 4-4 4\"/><path d=\"M21 16H7\"/>",
   "tag": "<path d=\"M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z\"/><circle cx=\"8\" cy=\"8\" r=\"1.5\"/>",
   "tags": "<path d=\"M2 11V4a1 1 0 0 1 1-1h7l8 8-7 7z\"/><path d=\"M14 3l8 8-7 7\"/><circle cx=\"6.5\" cy=\"7.5\" r=\"1.2\"/>",
