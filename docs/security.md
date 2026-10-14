@@ -22,7 +22,12 @@ what's enforced where, and the limits that are still open. Written during the re
 |---|---|---|
 | login | `web.rs` `who_is_asking` | session cookie (HttpOnly, SameSite=Lax, Secure when `--url` is https, 30 days, only its hash is stored) or a bearer app token (hash stored, shown once); banned users count as nobody |
 | cross-site posts | `who_is_asking` | a POST off `/api/` is refused when `Sec-Fetch-Site: cross-site` or `Origin` isn't the hub's host. `/api/` takes bearer tokens only for writes (`POST /api/saves`, `POST /api/classifiers`), which other sites can't send |
-| WebSocket | `appweb::socket` | same-origin check; no socket without an owner (401) |
+| WebSocket | `appweb::socket` | same-origin check; no socket without a signed-in member (401), or for one still waiting (403) |
+| the web app | `appweb::files`, `appweb::page`, `appweb::api` | outside `--local`, the page redirects to `/login?next=/app/`, its files and calls answer 401/403; `next` only goes to a path on the server |
+| modes | `main::router` | routes outside `--mode` aren't routed at all (404); a build without a cargo feature has none of that half's handlers |
+| joining | `web::join`, `invites.rs` | `--join invite` (a new server's default): an account needs an invite code; codes are 60 random bits, kept as SHA-256 hashes, shown once, with uses (≤100), an end (≤365 days) and revocation; a use is taken in the same transaction that checks it; wrong codes cost 10/h per address; only admins (and trusted members if allowed) make them |
+| visibility | `store::may_see`, `Save::listed` | private: only the owner (not other members, not admins, not the API without the owner's token), pages and downloads 404 otherwise; unlisted: anyone with the id, never listed; lists, searches, feeds, profiles, the leaderboard and counts only hold public approved items; points, stars and download counts only for listed ones; `--share-quota` counts every visibility |
+| logs | `ops::log_requests` | method, path, status, time; no addresses, names or queries; `/login/{secret}` and `/invite/{code}` logged without the secret |
 | `--local` and DNS rebinding | `web::local_host_ok` | a local hub answers only when Host is `localhost`/`*.localhost`, an IP address, or its `--url`'s host; it warns at start when `--addr` isn't loopback |
 | framing, sniffing | `web::guard_headers` | `X-Frame-Options: DENY`, `frame-ancestors 'none'`, `nosniff`, `Referrer-Policy: same-origin` on every answer |
 | scripts in the web app | `web::APP_CSP` | `script-src 'self'` (no inline scripts; `hub/web/early.js` sets the theme before paint) |
@@ -39,6 +44,12 @@ what's enforced where, and the limits that are still open. Written during the re
 | sizes in calls | `app.rs`, `classify.rs` | forge ≤ 32 ingredients, the lists grid only up to 1000 lists, spreads ≤ 2000 texts, scans ≤ 20 000 texts, tints ≤ 5000 keys, limits clamped |
 
 ## Known limits (not fixed)
+
+- **Unlisted content isn't reviewed (accepted).** Anyone with an account can share a file
+  by link without an admin looking. Admins see every unlisted item in the admin panel and
+  can remove it; invite-only joining limits who can do this.
+- **Admins can't inspect private items (by design).** They see the name, owner and size
+  and can remove one, but not open it.
 
 - **redb on hostile files (accepted).** redb isn't hardened against crafted files. The hub
   opens uploads on a copy, on a blocking thread, inside `catch_unwind`, so a panic is a
