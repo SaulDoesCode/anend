@@ -16,12 +16,14 @@
 //! | `steer` | the player's knobs (bias, temperature, threshold, gains) and the bias metric |
 //! | `grow` | widening, deepening and pruning, and the policy deciding when |
 //! | `compose` | classifiers feeding classifiers, outputs as lists, feedback through a stack |
+//! | `generate` | sampling from a generative head, critics, constraints, guidance, reinforcement |
 //! | `io` | the versioned binary file format |
 //!
 //! Every numeric operation goes through `kernels` and `math`: they are the backend
 //! boundary a GPU implementation would replace.
 
 pub mod compose;
+pub mod generate;
 pub mod grow;
 pub mod io;
 pub mod kernels;
@@ -35,7 +37,7 @@ pub mod train;
 
 use serde::{Deserialize, Serialize};
 
-pub use model::{Config, Gains, HeadKind, HeadSpec, Net, Pooling};
+pub use model::{Config, Gains, GenSpec, HeadKind, HeadSpec, Net, Pooling};
 pub use pool::Pool;
 pub use steer::{BiasReport, HeadSteer, Output, Steer};
 pub use train::{Example, Flow, Progress, Target, TrainOpts, TrainReport};
@@ -82,7 +84,12 @@ pub struct Run {
 
 impl Classifier {
     pub fn new(cfg: Config, heads: &[HeadSpec], seed: u64) -> Result<Classifier, String> {
-        let net = Net::new(cfg, heads, seed)?;
+        Classifier::with_gen(cfg, heads, None, seed)
+    }
+
+    /// a model with pooled heads and optionally a generative head (causal configs only)
+    pub fn with_gen(cfg: Config, heads: &[HeadSpec], generator: Option<GenSpec>, seed: u64) -> Result<Classifier, String> {
+        let net = Net::with_gen(cfg, heads, generator, seed)?;
         let steer = Steer::neutral(&net.heads);
         Ok(Classifier {
             meta: Meta {
@@ -111,13 +118,24 @@ impl Classifier {
     }
 
     pub fn windows(&self, text: &str) -> Vec<Window> {
-        text::windows(text, self.net.cfg.max_len, self.net.cfg.stride)
+        self.windows_of(text.as_bytes())
+    }
+
+    /// the windows of any bytes (causal windows for a causal model)
+    pub fn windows_of(&self, data: &[u8]) -> Vec<Window> {
+        let c = &self.net.cfg;
+        text::windows_of(data, c.max_len, c.stride, c.causal)
     }
 
     /// every window of a text through the net with the given gains, averaged in window
     /// order; windows run in parallel on the pool, or a lone window's big products do
     pub fn run(&self, text: &str, extra: &[f32], gains: &Gains, pool: Option<&Pool>) -> Run {
-        let ws = self.windows(text);
+        self.run_bytes(text.as_bytes(), extra, gains, pool)
+    }
+
+    /// `run` over any bytes
+    pub fn run_bytes(&self, data: &[u8], extra: &[f32], gains: &Gains, pool: Option<&Pool>) -> Run {
+        let ws = self.windows_of(data);
         let heads = self.net.heads.len();
         let one = |w: &Window, p: Option<&Pool>| {
             let mut tr = self.net.forward(w, extra, gains, Mode::EVAL, p);
@@ -161,7 +179,12 @@ impl Classifier {
     }
 
     pub fn predict_on(&self, text: &str, extra: &[f32], pool: Option<&Pool>) -> Vec<Output> {
-        let r = self.run(text, extra, &self.gains(), pool);
+        self.predict_bytes(text.as_bytes(), extra, pool)
+    }
+
+    /// every head's steered output on any bytes
+    pub fn predict_bytes(&self, data: &[u8], extra: &[f32], pool: Option<&Pool>) -> Vec<Output> {
+        let r = self.run_bytes(data, extra, &self.gains(), pool);
         self.read(&r.logits)
     }
 

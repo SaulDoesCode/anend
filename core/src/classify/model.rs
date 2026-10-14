@@ -860,6 +860,11 @@ impl Drop for Trace {
 }
 
 impl Trace {
+    /// the window's tokens
+    pub fn tokens(&self) -> &[u16] {
+        &self.tokens
+    }
+
     /// block l's SwiGLU activations [n × ff]
     pub fn act(&self, l: usize) -> &[f32] {
         &self.blocks[l].act
@@ -901,9 +906,7 @@ impl Net {
             }
             if w.tokens[t] == NUM && !self.num.is_empty() {
                 let v = w.value(t);
-                for i in 0..d {
-                    xr[i] += v * self.num[i];
-                }
+                k::axpy(xr, v, &self.num);
             }
         }
         x
@@ -1092,7 +1095,7 @@ impl Net {
         assert!(self.generator.is_some(), "no generative head");
         let d = self.cfg.d_model;
         let mut y = matmul(rows(&tr.xf, d), &self.gen_w, tr.n, d, GEN_OUT, None);
-        for row in y.chunks_exact_mut(GEN_OUT) {
+        for row in y.as_chunks_mut::<GEN_OUT>().0 {
             row.iter_mut().zip(&self.gen_b).for_each(|(a, b)| *a += b);
         }
         y
@@ -1154,7 +1157,7 @@ impl Net {
         }
         if !dgen.is_empty() {
             k::gemm(&mut g.gen_w, transposed(&tr.xf, d), dgen, d, n, GEN_OUT, None);
-            for row in dgen.chunks_exact(GEN_OUT) {
+            for row in dgen.as_chunks::<GEN_OUT>().0 {
                 g.gen_b.iter_mut().zip(row).for_each(|(a, b)| *a += b);
             }
             let wt = transpose(&self.gen_w, d, GEN_OUT);
@@ -1530,7 +1533,7 @@ mod tests {
         };
         let tr = net.forward(&w, &[], &Gains::default(), Mode::EVAL, None);
         let mut g = net.zeros_like();
-        net.backward_gen(&tr, &[ch.clone()], &cg, &net.transposes(), &mut g);
+        net.backward_gen(&tr, std::slice::from_ref(&ch), &cg, &net.transposes(), &mut g);
         drop(tr);
         let grads: Vec<Vec<f32>> = g.params().into_iter().map(|(_, t)| t.clone()).collect();
         let eps = 4e-3f32;

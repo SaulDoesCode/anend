@@ -191,7 +191,7 @@ impl Graph {
             }
             let clf = &self.nodes[i].clf;
             let x = self.extra_from(i, &outs);
-            let (trs, avg) = train::forward_text(&clf.net, text, &x, &clf.gains());
+            let (trs, avg) = train::forward_text(&clf.net, text.as_bytes(), &x, &clf.gains());
             let o = clf.read(&avg);
             outs[i] = Some(o.clone());
             runs[i] = Some((trs, x, avg, o));
@@ -363,6 +363,8 @@ impl Graph {
             target,
             weight: f.weight,
             extra: x,
+            raw: Vec::new(),
+            also: Vec::new(),
         };
         let m = &mut self.nodes[node].clf.meta;
         m.feedback

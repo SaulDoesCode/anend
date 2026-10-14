@@ -226,3 +226,35 @@ fn version_1_files_still_load_bit_exact() {
     let again = Classifier::from_bytes(&clf.to_bytes()).unwrap();
     assert_eq!(again.logits("granite and peach, 1234!", &[]), l);
 }
+
+/// one trunk, two outputs trained together: a class head and a generative head, each
+/// example carrying both targets with per-head loss weights
+#[test]
+fn multi_output_models_train_heads_jointly() {
+    let cfg = Config {
+        causal: true,
+        pooling: Pooling::Mean,
+        ..Config::tiny().gematria(false)
+    };
+    let heads = [HeadSpec::single("kind", &["fruit", "rock"]).weighted(2.0)];
+    let mut m = Classifier::with_gen(cfg, &heads, Some(GenSpec::new("next")), 5).unwrap();
+    let data: Vec<Example> = synthetic(48, 4)
+        .into_iter()
+        .map(|e| e.and(0, Target::Next { from: 0 }))
+        .collect();
+    let o = TrainOpts {
+        epochs: 8,
+        val_fraction: 0.0,
+        ..quick_opts(2)
+    };
+    let all: Vec<usize> = (0..data.len()).collect();
+    let before = train::evaluate(&m, &data, &all, &Pool::new(1));
+    train::train(&mut m, &data, &o, |_| Flow::Go).unwrap();
+    let after = train::evaluate(&m, &data, &all, &Pool::new(1));
+    assert!(after.accuracy() >= 0.9, "{}", after.accuracy());
+    assert!(after.bits_per_byte.unwrap() < before.bits_per_byte.unwrap() - 1.0);
+    let back = Classifier::from_bytes(&m.to_bytes()).unwrap();
+    assert_eq!(back.net.generator, m.net.generator);
+    assert_eq!(back.net.heads[0].spec.weight, 2.0);
+    assert_eq!(back.predict("granite slate", &[]), m.predict("granite slate", &[]));
+}
