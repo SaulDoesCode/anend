@@ -15,6 +15,7 @@
 //! | `metrics` | accuracy, F1, confusion, log-loss, calibration |
 //! | `steer` | the player's knobs (bias, temperature, threshold, gains) and the bias metric |
 //! | `grow` | widening, deepening and pruning, and the policy deciding when |
+//! | `codec` | numbers and pictures (patch codebooks) as bytes, a minimal PNG writer |
 //! | `compose` | classifiers feeding classifiers, outputs as lists, feedback through a stack |
 //! | `generate` | sampling from a generative head, critics, constraints, guidance, reinforcement |
 //! | `io` | the versioned binary file format |
@@ -22,6 +23,7 @@
 //! Every numeric operation goes through `kernels` and `math`: they are the backend
 //! boundary a GPU implementation would replace.
 
+pub mod codec;
 pub mod compose;
 pub mod generate;
 pub mod grow;
