@@ -496,13 +496,14 @@ function viewSection() {
     el(
       'dl.keys',
       [
-        ['Ctrl+1 … 8', 'the views: editor, reader, memory, stats, space, lists, classifiers, tags'],
+        ['Ctrl+1 … 9', 'the views: editor, reader, memory, stats, space, lists, classifiers, tags, filters'],
         ['/', 'the command bar (Esc leaves it)'],
         ['Ctrl+,', 'settings'],
         ['Ctrl+S', 'save the note'],
         ['Ctrl+N', 'a new note'],
         ['Ctrl+E', 'view or edit the note'],
         ['Ctrl+B', 'the note list'],
+        ['Ctrl+I', 'the classifiers on the note (a drawer beside it)'],
         ['Tab', 'indents in the editor'],
         ['O R A F', 'the memory view’s buckets'],
         ['H', 'the space’s help'],

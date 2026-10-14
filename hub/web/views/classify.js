@@ -127,7 +127,9 @@ function draw() {
     el('div.clf-side', listCard(), newCard(), more.importCard()),
     el(
       'div.clf-main',
-      detail
+      more.importing()
+        ? more.importPanel()
+        : detail
         ? [headCard(), tabBar(), ...[].concat(tabCards())]
         : el('div.card.clf-none', el('span.big', icon('classifier')), el('p', all.length ? 'pick a classifier' : 'no classifiers yet'), el('p.dim.small', 'make one from two or more lists (each list a class), or bring one in from a .anendcls file')),
     ),

@@ -5,9 +5,10 @@ import { el, clear, debounce, confirmClick } from '../util.js';
 import { render } from '../markdown.js';
 import { lines as hlLines } from '../highlight.js';
 import { icon, iconButton, tip } from '../icons.js';
+import { drawer } from './notecls.js';
 
 let app;
-let wrap, listEl, chips, tagInput, pad, padWrap, mirror, rendered, toggleBtn, saveBtn, deleteBtn, count, hint;
+let nd, drawerBtn, wrap, listEl, chips, tagInput, pad, padWrap, mirror, rendered, toggleBtn, saveBtn, deleteBtn, count, hint;
 let notes = [];
 let q = '';
 let mode = 'edit';
@@ -178,6 +179,7 @@ function show_(state) {
   drawTags();
   drawBody();
   drawList();
+  nd.setKey(cur.note._key);
 }
 
 // leaving a note: save it if it changed (or keep it as a draft when it can't be yet)
@@ -235,6 +237,8 @@ async function save(quiet = false) {
       saveBtn.classList.toggle('dirty', cur.dirty);
       deleteBtn.disabled = false;
       if (isNew) history.replaceState(null, '', `#/editor/${encodeURIComponent(stored._key)}`);
+      nd.setKey(stored._key);
+      nd.refresh();
     }
     if (!quiet) app.status(`saved “${stored.title}”`);
     await load();
@@ -315,6 +319,14 @@ export default {
     saveBtn = iconButton('save', 'save', { key: 'Ctrl+S', onclick: () => save() });
     deleteBtn = confirmClick(iconButton('delete', 'delete this note (click twice)'), 'delete?', remove);
     hint = el('span.hint');
+    nd = drawer(app);
+    drawerBtn = iconButton('classifier', 'classifiers on this note', { key: 'Ctrl+I', onclick: () => nd.toggle() });
+    drawerBtn.classList.toggle('on', nd.open);
+    drawerBtn.setAttribute('aria-pressed', String(nd.open));
+    nd.onToggle = (on) => {
+      drawerBtn.classList.toggle('on', on);
+      drawerBtn.setAttribute('aria-pressed', String(on));
+    };
     pad = el('textarea.pad', {
       spellcheck: true,
       'aria-label': 'the note',
@@ -352,11 +364,12 @@ export default {
         el('span.grow'),
         hint,
         el('label.tagbox', { title: 'add tags: Enter or a comma after each' }, icon('tag'), tagInput),
+        drawerBtn,
         toggleBtn,
         saveBtn,
         deleteBtn,
       ),
-      el('div.editor-body', padWrap, rendered),
+      el('div.editor-body', padWrap, rendered, nd.el),
     );
     const edge = el('div.edge', { onmouseenter: () => wrap.classList.add('peek') });
     side.addEventListener('mouseleave', () => wrap.classList.remove('peek'));
@@ -411,6 +424,7 @@ export default {
     else if (k === 'n') newNote();
     else if (k === 'e') toggleMode();
     else if (k === 'b') toggleList();
+    else if (k === 'i') nd.toggle();
     else return false;
     return true;
   },

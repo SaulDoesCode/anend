@@ -12,13 +12,14 @@ import space from './views/space.js';
 import lists from './views/lists.js';
 import classifiers from './views/classify.js';
 import tags from './views/tags.js';
+import filters from './views/filters.js';
 import settings from './views/settings.js';
 import { icon, tip, startTips } from './icons.js';
 
-const VIEWS = { editor, reader, memory, stats, space, lists, classifiers, tags };
-const ORDER = ['editor', 'reader', 'memory', 'stats', 'space', 'lists', 'classifiers', 'tags'];
+const VIEWS = { editor, reader, memory, stats, space, lists, classifiers, tags, filters };
+const ORDER = ['editor', 'reader', 'memory', 'stats', 'space', 'lists', 'classifiers', 'tags', 'filters'];
 // each view's icon in the top bar (its name and shortcut show as the tip)
-const ICONS = { editor: 'editor', reader: 'reader', memory: 'memory', stats: 'stats', space: 'space', lists: 'list', classifiers: 'classifier', tags: 'tags' };
+const ICONS = { editor: 'editor', reader: 'reader', memory: 'memory', stats: 'stats', space: 'space', lists: 'list', classifiers: 'classifier', tags: 'tags', filters: 'filter' };
 
 const $ = (id) => document.getElementById(id);
 const barInput = $('bar-input');
@@ -206,7 +207,7 @@ window.addEventListener('keydown', (e) => {
     settings.toggle();
     return;
   }
-  if (ctrl && /^[1-8]$/.test(e.key)) {
+  if (ctrl && /^[1-9]$/.test(e.key)) {
     e.preventDefault();
     app.go(ORDER[+e.key - 1]);
     return;

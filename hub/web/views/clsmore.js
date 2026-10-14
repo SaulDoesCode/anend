@@ -585,17 +585,26 @@ export function importCard() {
       draw();
     },
   });
-  const pickBtn = iconButton('upload', 'bring in a classifier from a .anendcls file', { text: 'from a file', onclick: () => file.click() });
-  if (!module_) return el('div.card.clf-import', el('h3', 'bring one in'), el('p.dim.small', 'a classifier someone shared as a .anendcls file'), el('div.row', pickBtn, file));
+  const pickBtn = iconButton('upload', 'bring in a classifier from a .anendcls file', { text: module_ ? 'another file' : 'from a file', onclick: () => file.click() });
+  return el('div.card.clf-import', el('h3', 'bring one in'), el('p.dim.small', module_ ? `${module_.file}: beside` : 'a classifier someone shared as a .anendcls file'), el('div.row', pickBtn, file));
+}
+
+export function importing() {
+  return !!module_;
+}
+
+// what's in the file, and where its classes go (in the main column while it's open)
+export function importPanel() {
   const m = module_.summary;
+  const listName = (key) => ctx.lists().find((l) => l.list === key)?.name;
   if (module_.result) {
     const r = module_.result;
     return el(
       'div.card.clf-import',
       el('h3', `brought in “${r.name}”`),
       el('p.small', r.created.length ? `made ${r.created.join(', ')}` : '', r.reused.length ? ` · already here: ${r.reused.join(', ')}` : ''),
-      el('ul.small.imp-lists', r.lists.map(([c, key, isNew]) => el('li', `${c} → list ${key}${isNew ? ' (new)' : ''}`))),
-      el('div.row', iconButton('check', 'done', { text: 'open it', cls: 'primary', onclick: () => ((module_ = null), ctx.open(r.name)) }), el('span.grow'), pickBtn, file),
+      el('ul.small.imp-lists', r.lists.map(([c, key, isNew]) => el('li', `${c} → ${listName(key) ? `“${listName(key)}”` : `list ${key}`}${isNew ? ' (made new)' : ''}`))),
+      el('div.row', iconButton('check', 'open it', { text: 'open it', cls: 'primary', onclick: () => ((module_ = null), ctx.open(r.name)) })),
     );
   }
   const lists = ctx.lists();
