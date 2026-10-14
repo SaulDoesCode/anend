@@ -12,6 +12,7 @@ mod clsweb;
 #[cfg(test)]
 mod clstests;
 mod game;
+mod guide;
 mod hub;
 mod inspect;
 mod server;
@@ -148,6 +149,8 @@ pub fn router() -> Router {
         .push(Router::with_path("me/tokens").post(web::make_token))
         .push(Router::with_path("me/tokens/{hash}/revoke").post(web::revoke_token))
         .push(Router::with_path("leaderboard").get(web::leaderboard))
+        .push(Router::with_path("guide").get(guide::page))
+        .push(Router::with_path("guide/{name}").get(guide::picture))
         .push(Router::with_path("app").get(appweb::app_root))
         .push(Router::with_path("app/ws").goal(appweb::socket))
         .push(Router::with_path("app/api/{op}").post(appweb::api))
