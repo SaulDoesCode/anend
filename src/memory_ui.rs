@@ -156,9 +156,12 @@ impl Mem<'_> {
 
     fn saturate_and_show(&mut self, text: &str) {
         match self.db.0.saturate(text) {
-            Ok((k, _)) => {
-                let label = Ref::Memory(k.clone()).label();
-                self.toast(label);
+            Ok((k, new)) => {
+                // say so only when it's new, as the web app does
+                if new {
+                    let label = Ref::Memory(k.clone()).label();
+                    self.toast(format!("remembered “{}” under {}", text, label));
+                }
                 self.articulate(Hit {
                     r: Ref::Memory(k),
                     text: text.to_string(),
@@ -896,6 +899,7 @@ pub fn rebuild_chrome(
             chips,
             ChipFace::Letter(letter),
             bucket == mem.bucket,
+            true,
             tip,
             Some(key),
             &fonts,
@@ -918,6 +922,7 @@ pub fn rebuild_chrome(
         chips,
         ChipFace::Icon(Icon::Search),
         mem.gsearch_text,
+        true,
         "gsearch text: also gsearch what's typed",
         Some(Action::ToggleGsearch),
         &fonts,
@@ -931,6 +936,7 @@ pub fn rebuild_chrome(
         chips,
         ChipFace::Icon(Icon::Bolt),
         mem.also_saturate,
+        true,
         "saturate: each found memory searches on",
         Some(Action::ToggleSaturate),
         &fonts,
@@ -944,6 +950,7 @@ pub fn rebuild_chrome(
         chips,
         ChipFace::Icon(Icon::Sun),
         mem.white,
+        true,
         "white: dark text on white",
         Some(Action::WhiteMode),
         &fonts,

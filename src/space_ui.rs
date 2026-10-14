@@ -880,11 +880,13 @@ pub fn rebuild_termrow(
                 tip: &str,
                 key: Option<crate::keys::Action>,
                 f: fn(&mut crate::space::Chips)| {
-        spawn_chip(commands, holder, face, on, tip, key, &fonts).observe(move |_c: On<PointerClick>, mut sp: Sp| {
-            let mut c = sp.st.chips;
-            f(&mut c);
-            sp.set_chips(c);
-        });
+        spawn_chip(commands, holder, face, on, false, tip, key, &fonts).observe(
+            move |_c: On<PointerClick>, mut sp: Sp| {
+                let mut c = sp.st.chips;
+                f(&mut c);
+                sp.set_chips(c);
+            },
+        );
     };
     chip(
         &mut commands,
