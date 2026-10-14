@@ -103,7 +103,7 @@ web UI, screenshots): see docs/next.md item 4.
 
 ## Next (not done)
 
-- the desktop app's classifiers view (src/, uses `anend_core::classifiers`).
+- ~~the desktop app's classifiers view~~: done (src/classify_ui.rs, filters_ui.rs, index_panel.rs, tint.rs; see docs/next.md item 4).
 - JS port of inference for offline use; search filter panel; default classifiers for
   new saves; filter presets as lists.
 - GPU backend behind `kernels` (see its module doc for bit-exactness notes).

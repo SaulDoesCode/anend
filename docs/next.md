@@ -272,7 +272,7 @@ progress is in `core/src/classify/STATUS.md`. The plan:
   the bias metric live, classifier search with yes/no per contributing classifier,
   outputs as lists, near texts). Offline the web app says classifiers need a hub.
 - **Then:**
-  - the desktop app's classifiers view (src/), on `anend_core::classifiers`
+  - ~~the desktop app's classifiers view~~: done (item 4, "Desktop")
   - a JavaScript port of inference for offline use (as exact as `hub/web/local/` is for
     the sums)
   - classifier search inside the memory view's search modes, filter presets saved as
