@@ -136,12 +136,47 @@ interface, not stubs.
      upstream bundled). Ids checked (`store::id_ok`) before any path is made.
      Screenshots (grid, detail, upload, admin, profile, dark grid) were taken into the
      scratchpad `shots-hubcls/` against a non-`--local` hub.
-   - **web UI**: classifiers view (index button with progress, bucket counts, near by
-     outputs/embedding, validators editor, disagreements with yes/no, export/import,
-     hub browse with take), editor drawer (checkboxes of classifiers per note, verdict
-     chips, yes/no), memory and space colouring by a chosen classifier (legend;
-     `classify.tints`), a filters view (Ctrl+9: tree editor, presets, run, enlist).
-   - Playwright screenshots into the scratchpad `shots-phase3/`; docs.
+   - **web UI: done** (`hub/web/`; Playwright screenshots in the scratchpad
+     `shots-web3/`, at 1280 and 390 px wide, no console errors; parity all the same):
+     - classifiers view (Ctrl+7) in tabs, the choice kept (`anend.classifier.tab`):
+       learn (training, steering), use (search, outputs as lists, similar), buckets
+       (`views/clsmore.js`: "index the save" with a live progress bar and stop, a grid of
+       each class's counts by tenth of sureness in the classifier's palette plus
+       "uncertain", a click on a class or a column lists its texts with yes/no and "near
+       this", near texts by meaning or by verdict from the memo), checks (validators
+       editor: checked by / saying / at least / gate or scale, kept with "keep";
+       disagreements with yes/no for the classifier and for each validator), share
+       (download as `.anendcls` with description/author/upstream; share on the hub). The
+       side has "bring one in" (a file: `classify.inspect` summary, its name here, each
+       class to a list of yours or by name, then `classify.import`) and "from the hub"
+       (browse/search/sort `/api/classifiers`, "take…" with the same class→list mapping
+       through `POST /app/classifiers/{id}/take`, a warning when an upstream classifier
+       isn't bundled and isn't in the save). Share on the hub needs a login (a `--local`
+       hub says "log in to share on the hub").
+     - editor drawer (`views/notecls.js`, Ctrl+I or the classifier icon by view/save,
+       kept open or shut in `anend.drawer`): every classifier with a tick
+       (`classify.set_index`), each ticked one's verdict as chips (class colour, bar by
+       probability, the classes it counts the note in, validators passed or not) and ✓/✗
+       on its top class. On a phone it sits under the pad.
+     - colouring (`tints.js`): a palette picker in the memory view's head and at the
+       space's top right (off by default, per view in `anend.tint.memory` /
+       `anend.tint.space`), texts tinted by top class, strength by probability, grey when
+       unsure, a legend with counts. Hidden offline.
+     - filters view (`views/filters.js`, Ctrl+9, `#/filters/<name>`): presets at the side
+       (what each reads, last count, whether it's in a list, delete); the tree: all of /
+       any of groups, "not" on any node, "+ add a condition" (class with classifier,
+       class, "at least" (its own threshold until moved) and "its top class"; words;
+       sums; list; tags with any; memories/notes; another preset; a group), run live
+       (debounced; by name when unchanged so counts are kept), keep, write to a list.
+       Enter in the bar adds a words condition. Offline it says filters need a hub.
+     - icons added: not, shield, near, bolt, alert (rasterized for the desktop too).
+     - **hub bug to fix (hub/src, not touched here):** `classify.index` without `wait`
+       panics spawning its thread: the thread name is `format!("index {}", job_key(..))`
+       and `job_key` holds a `\0`, so `Builder::name` fails ("thread name may not contain
+       interior null bytes") and the job stays "running" forever, refusing every later
+       index until the hub restarts. The web app works around it by calling with
+       `wait: true` while polling `classify.index_job` for progress; once the name is
+       fixed it can go back to not waiting.
    - **Desktop classifiers view** (src/, next phase).
 5. **Guide:** `docs/guide.md` on what the app does and how to use it, linked from the
    README and the apps' help.

@@ -32,7 +32,7 @@ const TABS = [
   ['use', 'search', 'use', 'search by class, outputs as lists, near by meaning'],
   ['buckets', 'bucket', 'buckets', 'every text filed by class and sureness, and near texts'],
   ['checks', 'shield', 'checks', 'validators: classifiers that check this one, and where they disagree'],
-  ['share', 'export', 'share', 'download it as a file'],
+  ['share', 'export', 'share', 'download it as a file, or share it on the hub'],
 ];
 let tab = (() => {
   try {
@@ -124,11 +124,13 @@ function draw() {
   const y = body.parentElement?.scrollTop;
   clear(
     body,
-    el('div.clf-side', listCard(), newCard(), more.importCard()),
+    el('div.clf-side', listCard(), newCard(), more.importCard(), more.hubCard()),
     el(
       'div.clf-main',
       more.importing()
         ? more.importPanel()
+        : more.hubOpen()
+        ? more.hubPanel()
         : detail
         ? [headCard(), tabBar(), ...[].concat(tabCards())]
         : el('div.card.clf-none', el('span.big', icon('classifier')), el('p', all.length ? 'pick a classifier' : 'no classifiers yet'), el('p.dim.small', 'make one from two or more lists (each list a class), or bring one in from a .anendcls file')),

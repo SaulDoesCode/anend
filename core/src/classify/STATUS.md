@@ -98,7 +98,7 @@ Done in core (tested by `classifiers::phase3_tests::memo_filters_and_modules`):
 
 Hub ops done (`hub/src/classify.rs` `phase3`: classify.index/index_job/index_cancel/
 buckets/bucket/near/tints/indexed/set_index/validators/disagreements/export/inspect/
-import, filters.list/save/delete/run/enlist; docs/app-api.md). Left (hub sharing site,
+import, filters.list/save/delete/run/enlist; docs/app-api.md). The web app uses them all (docs/next.md item 4, "web UI"). Left (hub sharing site,
 web UI, screenshots): see docs/next.md item 4.
 
 ## Next (not done)

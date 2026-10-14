@@ -57,7 +57,6 @@ export default {
   "tag": "<path d=\"M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z\"/><circle cx=\"8\" cy=\"8\" r=\"1.5\"/>",
   "tags": "<path d=\"M2 11V4a1 1 0 0 1 1-1h7l8 8-7 7z\"/><path d=\"M14 3l8 8-7 7\"/><circle cx=\"6.5\" cy=\"7.5\" r=\"1.2\"/>",
   "text": "<path d=\"M5 6V4h14v2M12 4v16M9 20h6\"/>",
-  "tree": "<path d=\"M4 6h16M4 12h10M4 18h6\"/><circle cx=\"18\" cy=\"16\" r=\"3\"/>",
   "undo": "<path d=\"M9 14L4 9l5-5\"/><path d=\"M4 9h11a5 5 0 0 1 0 10h-4\"/>",
   "upload": "<path d=\"M12 15V3M7 8l5-5 5 5\"/><path d=\"M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4\"/>",
   "view": "<path d=\"M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/>",

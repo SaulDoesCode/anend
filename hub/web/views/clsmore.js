@@ -534,7 +534,7 @@ function disagreementsCard(d) {
 // ------------------------------------------------------------------ modules
 
 export function shareCards() {
-  return [exportCard()];
+  return [exportCard(), hubShareCard()];
 }
 
 function exportCard() {
@@ -575,6 +575,7 @@ export function importCard() {
     onchange: async () => {
       const f = file.files[0];
       if (!f) return;
+      hub.open = false;
       try {
         const data = await fileBase64(f);
         const summary = await ctx.app.call('classify.inspect', { data });
@@ -646,5 +647,190 @@ export function importPanel() {
       }),
     ),
     el('div.row', el('span.grow'), iconButton('download', 'bring it into this save', { text: 'bring it in', cls: 'primary', onclick: take })),
+  );
+}
+
+// ------------------------------------------------------------------ the hub
+
+const hub = { open: false, q: '', sort: 'new', page: 0, items: null, more: false, error: '', taking: null, took: null };
+
+export function hubOpen() {
+  return hub.open;
+}
+
+function showHub(on) {
+  hub.open = on;
+  if (on) {
+    module_ = null;
+    if (!hub.items) loadHub();
+  }
+  draw();
+}
+
+let hubAsked = 0;
+async function loadHub(more = false) {
+  hub.page = more ? hub.page + 1 : 0;
+  const me = ++hubAsked;
+  try {
+    const r = await ctx.app.api.send(`/api/classifiers?q=${encodeURIComponent(hub.q)}&sort=${encodeURIComponent(hub.sort)}&page=${hub.page}`);
+    if (me !== hubAsked) return;
+    hub.items = more ? [...(hub.items || []), ...r.classifiers] : r.classifiers;
+    hub.more = r.more;
+    hub.error = '';
+  } catch (e) {
+    if (me !== hubAsked) return;
+    hub.items = hub.items || [];
+    hub.error = e.message;
+  }
+  if (hub.open) {
+    const list = document.querySelector('.hub-cls-list');
+    if (list) list.replaceWith(hubList());
+    else draw();
+  }
+}
+
+// the side's card: browse what's shared on the hub
+export function hubCard() {
+  return el(
+    'div.card.clf-hubcard',
+    el('h3', 'from the hub'),
+    el('p.dim.small', 'classifiers others shared: take one into this save'),
+    el('div.row', iconButton('hub', 'browse the classifiers shared on the hub', { text: hub.open ? 'browsing' : 'browse', cls: hub.open ? 'primary' : '', onclick: () => showHub(!hub.open) })),
+  );
+}
+
+export function hubPanel() {
+  const q = el('input', { type: 'search', placeholder: 'search: names, classes, authors, #tags', value: hub.q, 'aria-label': 'search the hub’s classifiers' });
+  let t;
+  q.addEventListener('input', () => {
+    clearTimeout(t);
+    t = setTimeout(() => ((hub.q = q.value), loadHub()), 250);
+  });
+  const sort = el(
+    'select',
+    { 'aria-label': 'order', onchange: () => ((hub.sort = sort.value), loadHub()) },
+    ['new', 'stars', 'downloads', 'featured'].map((x) => el('option', { value: x, selected: hub.sort === x }, x)),
+  );
+  return el(
+    'div.card.clf-hub',
+    el('div.row', icon('hub'), el('h3', 'classifiers on the hub'), el('span.grow'), iconButton('close', 'back to my classifiers', { small: true, cls: 'plain', onclick: () => showHub(false) })),
+    el('div.row', q, sort),
+    hubList(),
+  );
+}
+
+function hubList() {
+  if (!hub.items) return el('div.hub-cls-list', el('p.dim.small', 'looking…'));
+  return el(
+    'div.hub-cls-list',
+    hub.error ? el('p.bad.small', hub.error) : null,
+    hub.items.length ? hub.items.map(hubItem) : hub.error ? null : el('p.dim.small', hub.q ? 'nothing on the hub matches' : 'no classifiers shared on this hub yet: share one of yours from its “share” tab'),
+    hub.more ? el('div.row', el('button.small', { type: 'button', onclick: () => loadHub(true) }, 'more')) : null,
+  );
+}
+
+function hubItem(c) {
+  const mine = ctx.all().map((x) => x.name);
+  const missing = c.upstream.filter((u) => !u.bundled && !mine.includes(u.name));
+  const taking = hub.taking && hub.taking.id === c.id;
+  const took = hub.took && hub.took.id === c.id ? hub.took.r : null;
+  return el(
+    'article.hub-cls',
+    el(
+      'div.row',
+      el('b.nm', c.name),
+      el('span.dim.small', `by ${c.author}`),
+      c.featured ? el('span.badge', 'featured') : null,
+      el('span.grow'),
+      el('span.dim.small', `★ ${c.stars} · ↓ ${c.downloads}`),
+    ),
+    c.description ? el('p.small', c.description) : null,
+    el('div.members', c.classes.map((x) => el('span.member.clf-class', x))),
+    el(
+      'div.dim.small',
+      `${c.head === 'multi' ? 'labels' : 'one class'} · ${c.preset} · ${c.weights.toLocaleString()} weights`,
+      c.accuracy != null ? ` · ${pct(c.accuracy)} accuracy on ${c.examples} texts` : ' · not measured',
+      c.upstream.length ? ` · builds on ${c.upstream.map((u) => u.name).join(', ')}` : '',
+      c.tags.length ? ' · ' + c.tags.map((x) => '#' + x).join(' ') : '',
+    ),
+    missing.length ? el('p.small.flt-warn', icon('alert'), ` needs ${missing.map((u) => `“${u.name}”`).join(', ')} in this save first (not in the file)`) : null,
+    took
+      ? el('p.small', icon('check'), ` took it as “${took.name}”: ${took.lists.map(([cl, key, isNew]) => `${cl} → ${ctx.lists().find((l) => l.list === key)?.name || key}${isNew ? ' (new)' : ''}`).join(', ')} `, el('a', { href: '#', onclick: (e) => (e.preventDefault(), (hub.open = false), ctx.open(took.name)) }, 'open it'))
+      : taking
+        ? takeForm(c)
+        : el(
+            'div.row',
+            iconButton('download', 'take it into this save (pick where its classes go)', { text: 'take…', cls: 'primary', small: true, disabled: missing.length > 0, onclick: () => ((hub.taking = { id: c.id, as: c.name, lists: {} }), draw()) }),
+            tip(el('a.btn.small.ibtn', { href: `/classifiers/${encodeURIComponent(c.id)}`, target: '_blank', rel: 'noopener' }, icon('link')), 'its page on the hub (a new tab)'),
+          ),
+  );
+}
+
+function takeForm(c) {
+  const t = hub.taking;
+  const as = el('input', { type: 'text', value: t.as, 'aria-label': 'its name here', oninput: () => (t.as = as.value) });
+  const go = async () => {
+    try {
+      const lists = Object.fromEntries(Object.entries(t.lists).filter(([, v]) => v));
+      const r = await ctx.app.api.send(`classifiers/${encodeURIComponent(c.id)}/take`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ as: t.as, lists }),
+      });
+      hub.took = { id: c.id, r };
+      hub.taking = null;
+      ctx.app.status(`took “${r.name}” into “${r.save || ctx.app.save}”`);
+      ctx.reloadAll();
+    } catch (e) {
+      ctx.app.fail(e);
+    }
+  };
+  return el(
+    'div.hub-take',
+    el('label.vfield', el('span.dim.small', 'its name here'), as),
+    el(
+      'div.imp-map',
+      c.classes.map((cl) => {
+        const s = el(
+          'select',
+          { 'aria-label': `the list for ${cl}`, onchange: () => (t.lists[cl] = s.value) },
+          el('option', { value: '' }, `“${cl}” (by name, or new)`),
+          ctx.lists().map((l) => el('option', { value: l.list, selected: t.lists[cl] === l.list }, `${l.name} (${l.count})`)),
+        );
+        return el('label.imp-row', el('span.cls', cl), el('span.dim', '→'), s);
+      }),
+    ),
+    el('div.row', iconButton('close', 'never mind', { small: true, text: 'cancel', onclick: () => ((hub.taking = null), draw()) }), el('span.grow'), iconButton('download', 'take it into this save', { text: 'take it', cls: 'primary', onclick: go })),
+  );
+}
+
+// the share tab: this classifier onto the hub
+export function hubShareCard() {
+  const d = ctx.detail();
+  const title = el('input', { type: 'text', placeholder: `its name on the hub (${d.name})`, 'aria-label': 'its name on the hub' });
+  const desc = el('input', { type: 'text', placeholder: 'what it tells apart', 'aria-label': 'description on the hub' });
+  const tags = el('input', { type: 'text', placeholder: 'tags, comma separated', 'aria-label': 'tags' });
+  const out = el('p.small');
+  const go = async () => {
+    try {
+      const r = await ctx.app.api.send('classifiers/share', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: d.name, title: title.value, description: desc.value, tags: tags.value }),
+      });
+      clear(out, r.status === 'approved' ? 'shared: ' : 'sent: an admin looks at it before others see it · ', el('a', { href: r.url, target: '_blank', rel: 'noopener' }, 'its page'));
+      ctx.app.status(r.status === 'approved' ? `“${d.name}” is on the hub` : `“${d.name}” waits for an admin`);
+      hub.items = null;
+    } catch (e) {
+      clear(out, el('span.bad', e.message));
+    }
+  };
+  return el(
+    'div.card.clf-export',
+    el('h3', 'on the hub'),
+    el('p.dim.small', `“${d.name}” for others to take, with everything it builds on${d.inputs.length ? ` (${d.inputs.map((i) => i.from).join(', ')})` : ''}. Its lists stay here.`),
+    el('div.row', title, desc),
+    el('div.row', tags, el('span.grow'), iconButton('upload', 'share it on the hub', { text: 'share', cls: 'primary', disabled: !d.trained, onclick: go })),
+    out,
   );
 }
