@@ -5,7 +5,7 @@ import { el, clear, typing, textOfOrdinal, KEY } from '../util.js';
 import { Space, triangle } from '../space.js';
 import { pick, listCommand, onPick, pickLine } from '../picks.js';
 import { colours } from '../theme.js';
-import { icon, iconButton, tip } from '../icons.js';
+import { icon, iconButton, tip, toggleChip } from '../icons.js';
 import { tinter } from '../tints.js';
 
 let app, section, host, engine, pos, card, help, helpBtn, empty, searchline, chips, tint;
@@ -46,14 +46,13 @@ async function measure(text) {
 }
 
 function drawChips() {
-  const t = (k, label, title) =>
-    el('button.toggle', { type: 'button', className: `toggle${st[k] ? ' on' : ''}`, title, onclick: () => flip(k) }, label);
+  const t = (k, name, label, opts = {}) => toggleChip(name, label, { on: st[k], onclick: () => flip(k), ...opts });
   clear(
     chips,
-    t('gsearch', 'gsearch', 'text gsearches its sum (off: searches its words)'),
-    t('reversed', 'reversed', 'buckets by the reversed sum (F)'),
-    t('saturate', 'saturate', 'searched texts are saved as memories'),
-    t('keep', 'keep', 'new results join the spread instead of replacing it'),
+    t('gsearch', 'search', 'gsearch: text by its sum, not its words'),
+    t('reversed', null, 'reversed: bucket by the reversed sum', { letter: 'R', key: 'F' }),
+    t('saturate', 'bolt', 'saturate: remember what is searched'),
+    t('keep', 'pin', 'keep: add new results to the spread'),
   );
 }
 

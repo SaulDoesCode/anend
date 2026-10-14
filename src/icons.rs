@@ -108,6 +108,8 @@ icons! {
     Classifier => "classifier",
     Shield => "shield",
     Alert => "alert",
+    Bolt => "bolt",
+    Sun => "sun",
 }
 
 /// the decoded icons
@@ -227,6 +229,78 @@ pub fn spawn_icon(commands: &mut Commands, parent: Entity, icon: Icon, size: f32
     commands
         .spawn((IconImg(icon), icon_node(size), TextColor(color), ChildOf(parent)))
         .id()
+}
+
+/// what a strip chip shows: an icon, or a letter or two
+#[derive(Clone, Copy)]
+pub enum ChipFace {
+    Icon(Icon),
+    Letter(&'static str),
+}
+
+/// a toggle in the strip over the command bar: the size of an icon button, lit while
+/// it's on, its full name (and key, if it has one) in its tooltip
+pub fn spawn_chip<'a>(
+    commands: &'a mut Commands,
+    parent: Entity,
+    face: ChipFace,
+    on: bool,
+    tip: impl Into<String>,
+    key: Option<Action>,
+    fonts: &crate::ui::Fonts,
+) -> EntityCommands<'a> {
+    let ink = if on { crate::bar::BAR_TEXT } else { crate::bar::BAR_DIM };
+    let chip = commands
+        .spawn((
+            Node {
+                width: px(28),
+                height: px(24),
+                flex_shrink: 0.0,
+                display: Display::Flex,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                border: UiRect::all(px(1)),
+                border_radius: BorderRadius::all(px(4)),
+                ..default()
+            },
+            BackgroundColor(if on {
+                crate::bar::WHITE.with_alpha(0.16)
+            } else {
+                Color::NONE
+            }),
+            BorderColor::all(if on {
+                crate::bar::WHITE.with_alpha(0.35)
+            } else {
+                Color::NONE
+            }),
+            Tip(tip.into()),
+            bevy::picking::cursor::EntityCursor::System(bevy::window::SystemCursorIcon::Pointer),
+            ChildOf(parent),
+        ))
+        .id();
+    if let Some(k) = key {
+        commands.entity(chip).insert(TipKey(k));
+    }
+    match face {
+        ChipFace::Icon(icon) => {
+            let i = spawn_icon(commands, chip, icon, 16.0, ink);
+            commands.entity(i).insert(Pickable::IGNORE);
+        }
+        ChipFace::Letter(l) => {
+            commands.spawn((
+                Text::new(l),
+                TextFont {
+                    font: (&fonts.bold).into(),
+                    font_size: FontSize::Px(13.0),
+                    ..default()
+                },
+                TextColor(ink),
+                Pickable::IGNORE,
+                ChildOf(chip),
+            ));
+        }
+    }
+    commands.entity(chip)
 }
 
 /// gives each new icon its image

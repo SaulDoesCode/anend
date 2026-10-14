@@ -174,15 +174,29 @@ function route_() {
     }
     const v = VIEWS[name];
     $('bar-name').textContent = v.barName || name;
-    barInput.placeholder = v.barPlaceholder || '';
+    placeholder();
     barInput.value = app.barText[name] ?? '';
-    clear($('bar-right'), v.barRight || null);
+    // the memory view and the space get a thin strip over the bar for their sums and
+    // toggles; every other view keeps one bar, its count small at the bar's right end
+    const strip = name === 'memory' || name === 'space';
+    clear($('bar-right'), strip ? v.barRight || null : null);
+    $('bar-right').hidden = !strip || !v.barRight;
+    clear($('bar-count'), strip ? null : v.barRight || null);
     $('searchline').hidden = name !== 'space' || !space.searchLineOn();
   }
   app.route = rest;
   VIEWS[name].show?.(rest);
 }
 window.addEventListener('hashchange', route_);
+
+// the bar's placeholder; on a phone the mode's name, hidden at the left, folds into it
+const narrow = window.matchMedia('(max-width: 700px)');
+function placeholder() {
+  const v = VIEWS[app.view];
+  const ph = v.barPlaceholder || '';
+  barInput.placeholder = narrow.matches ? `${v.barName || app.view}${ph ? ` · ${ph}` : ''}` : ph;
+}
+narrow.addEventListener?.('change', () => app.view && placeholder());
 
 barInput.addEventListener('input', () => {
   app.barText[app.view] = barInput.value;

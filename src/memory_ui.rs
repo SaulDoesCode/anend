@@ -20,7 +20,7 @@
 //! and its ordinal sum (the shade). A text alone with its reversed sum gets none.
 //!
 //! The term bar is the app's command bar (see bar.rs), with the sidecar and the toggles
-//! at its right. Escape leaves it, so the single key controls (buckets, sidecar arrows,
+//! in the strip over it. Escape leaves it, so the single key controls (buckets, sidecar arrows,
 //! ...) can be used; `/` goes back to it. All of them can be remapped in the keys menu.
 
 use bevy::ecs::system::SystemParam;
@@ -34,6 +34,7 @@ use bevy::text::{EditableText, FontSource, GenericFontFamily, TextEdit, TextEdit
 use bevy::ui::UiTransform;
 use bevy::ui_widgets::ScrollArea;
 
+use crate::icons::Icon;
 use crate::keys::{Action, Fired, modifiers};
 use crate::memory::{Bucket, BucketKey, Hit, Ref, measure};
 use crate::ui::{Ctx, Db, Fonts, Route, Session};
@@ -793,7 +794,7 @@ fn clickable_text(
     e.id()
 }
 
-/// the sidecar and the toggles (in the command bar) and the hover line
+/// the sidecar and the toggles (in the strip over the command bar) and the hover line
 pub fn rebuild_chrome(
     mut mem: ResMut<MemoryState>,
     side: Single<Entity, With<crate::bar::BarSide>>,
@@ -801,6 +802,7 @@ pub fn rebuild_chrome(
     session: Res<Session>,
     db: Res<Db>,
     serif: Res<SerifFont>,
+    fonts: Res<Fonts>,
     mut commands: Commands,
 ) {
     if !mem.redraw_chrome {
@@ -857,80 +859,101 @@ pub fn rebuild_chrome(
         clickable_text(&mut commands, sc, ")".into(), dim, false, &serif);
     }
 
-    // the buckets, then the toggles
-    let buckets = commands
+    // the buckets, then the toggles: chips, their names in their tooltips
+    use crate::icons::{ChipFace, spawn_chip};
+    let chips = commands
         .spawn((
             Node {
                 flex_direction: FlexDirection::Row,
-                column_gap: px(6),
+                align_items: AlignItems::Center,
+                column_gap: px(3),
                 ..default()
             },
             ChildOf(side),
         ))
         .id();
     for bucket in Bucket::ALL {
-        let on = bucket == mem.bucket;
-        let e = clickable_text(
-            &mut commands,
-            buckets,
-            bucket.name().into(),
-            if on { color } else { dim },
-            on,
-            &serif,
-        );
-        let (key, tip) = match bucket {
-            Bucket::Ordinal => (Action::BucketOrdinal, "list memories by their ordinal sums"),
-            Bucket::Reversed => (Action::BucketReversed, "list memories by their reversed sums"),
-            Bucket::Atbash => (Action::BucketAtbash, "list memories by their atbash sums"),
-            Bucket::Frequency => (Action::BucketFrequency, "list memories by their letters"),
+        let (letter, key, tip) = match bucket {
+            Bucket::Ordinal => (
+                "O",
+                Action::BucketOrdinal,
+                "ordinal: list memories by their ordinal sums",
+            ),
+            Bucket::Reversed => (
+                "R",
+                Action::BucketReversed,
+                "reversed: list memories by their reversed sums",
+            ),
+            Bucket::Atbash => ("A", Action::BucketAtbash, "atbash: list memories by their atbash sums"),
+            Bucket::Frequency => (
+                "F",
+                Action::BucketFrequency,
+                "frequency: list memories by their letters",
+            ),
         };
-        commands
-            .entity(e)
-            .insert((crate::icons::Tip(tip.into()), crate::icons::TipKey(key)))
-            .observe(move |_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {
-                mem.bucket = bucket;
-                mem.redraw_chrome = true;
-            });
+        spawn_chip(
+            &mut commands,
+            chips,
+            ChipFace::Letter(letter),
+            bucket == mem.bucket,
+            tip,
+            Some(key),
+            &fonts,
+        )
+        .observe(move |_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {
+            mem.bucket = bucket;
+            mem.redraw_chrome = true;
+        });
     }
-    let toggle = |commands: &mut Commands, label: &str, on: bool| {
-        clickable_text(commands, side, label.into(), if on { color } else { dim }, on, &serif)
-    };
-    let tip = |commands: &mut Commands, e: Entity, tip: &str, key: Action| {
-        commands
-            .entity(e)
-            .insert((crate::icons::Tip(tip.into()), crate::icons::TipKey(key)));
-    };
-    let g = toggle(&mut commands, "gsearch text", mem.gsearch_text);
-    tip(&mut commands, g, "also gsearch what's typed", Action::ToggleGsearch);
-    commands
-        .entity(g)
-        .observe(|_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {
-            mem.gsearch_text = !mem.gsearch_text;
-            mem.redraw_chrome = true;
-        });
-    let s = toggle(&mut commands, "saturate", mem.also_saturate);
-    tip(
+    // a hair of room between the buckets and the toggles
+    commands.spawn((
+        Node {
+            width: px(6),
+            ..default()
+        },
+        ChildOf(chips),
+    ));
+    spawn_chip(
         &mut commands,
-        s,
-        "searches saturate: each found memory searches on",
-        Action::ToggleSaturate,
-    );
-    commands
-        .entity(s)
-        .observe(|_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {
-            mem.also_saturate = !mem.also_saturate;
-            mem.redraw_chrome = true;
-        });
-    let w = toggle(&mut commands, "white", mem.white);
-    tip(&mut commands, w, "white mode: dark text on white", Action::WhiteMode);
-    commands
-        .entity(w)
-        .observe(|_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {
-            mem.white = !mem.white;
-            mem.redraw_results = true;
-            mem.redraw_toasts = true;
-            mem.redraw_chrome = true;
-        });
+        chips,
+        ChipFace::Icon(Icon::Search),
+        mem.gsearch_text,
+        "gsearch text: also gsearch what's typed",
+        Some(Action::ToggleGsearch),
+        &fonts,
+    )
+    .observe(|_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {
+        mem.gsearch_text = !mem.gsearch_text;
+        mem.redraw_chrome = true;
+    });
+    spawn_chip(
+        &mut commands,
+        chips,
+        ChipFace::Icon(Icon::Bolt),
+        mem.also_saturate,
+        "saturate: each found memory searches on",
+        Some(Action::ToggleSaturate),
+        &fonts,
+    )
+    .observe(|_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {
+        mem.also_saturate = !mem.also_saturate;
+        mem.redraw_chrome = true;
+    });
+    spawn_chip(
+        &mut commands,
+        chips,
+        ChipFace::Icon(Icon::Sun),
+        mem.white,
+        "white: dark text on white",
+        Some(Action::WhiteMode),
+        &fonts,
+    )
+    .observe(|_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {
+        mem.white = !mem.white;
+        mem.redraw_results = true;
+        mem.redraw_toasts = true;
+        mem.redraw_chrome = true;
+    });
 }
 
 pub fn rebuild_toasts(

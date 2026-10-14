@@ -809,7 +809,7 @@ pub fn rebuild_qline(
     }
 }
 
-/// the space's side of the command bar: the terminal's sums, the chips, the list state
+/// the space's strip over the command bar: the terminal's sums, the chips, the list state
 pub fn rebuild_termrow(
     mut st: ResMut<Space>,
     side: Single<Entity, With<BarSide>>,
@@ -860,29 +860,64 @@ pub fn rebuild_termrow(
     if !list.is_empty() {
         bar_text(&mut commands, t, list, BAR_DIM);
     }
+    // the chips: icons and a letter, their names in their tooltips
+    use crate::icons::{ChipFace, Icon, spawn_chip};
     let chips = st.chips;
-    let chip = |commands: &mut Commands, label: &str, on: bool, f: fn(&mut crate::space::Chips)| {
-        commands
-            .spawn((
-                Text::new(label),
-                text_font(&fonts, false, 13.0),
-                TextColor(if on { BAR_TEXT } else { BAR_DIM }),
-                EntityCursor::System(SystemCursorIcon::Pointer),
-                ChildOf(t),
-            ))
-            .insert_if(bevy::text::Underline, || on)
-            .observe(move |_c: On<PointerClick>, mut sp: Sp| {
-                let mut c = sp.st.chips;
-                f(&mut c);
-                sp.set_chips(c);
-            });
+    let holder = commands
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: px(3),
+                ..default()
+            },
+            ChildOf(t),
+        ))
+        .id();
+    let chip = |commands: &mut Commands,
+                face: ChipFace,
+                on: bool,
+                tip: &str,
+                key: Option<crate::keys::Action>,
+                f: fn(&mut crate::space::Chips)| {
+        spawn_chip(commands, holder, face, on, tip, key, &fonts).observe(move |_c: On<PointerClick>, mut sp: Sp| {
+            let mut c = sp.st.chips;
+            f(&mut c);
+            sp.set_chips(c);
+        });
     };
-    chip(&mut commands, "gsearch", chips.gsch, |c| c.gsch = !c.gsch);
-    chip(&mut commands, "reversed", chips.rtb, |c| c.rtb = !c.rtb);
-    chip(&mut commands, "saturate", chips.also_saturate, |c| {
-        c.also_saturate = !c.also_saturate
-    });
-    chip(&mut commands, "keep", chips.keep, |c| c.keep = !c.keep);
+    chip(
+        &mut commands,
+        ChipFace::Icon(Icon::Search),
+        chips.gsch,
+        "gsearch: what isn't a number gsearches its sum",
+        None,
+        |c| c.gsch = !c.gsch,
+    );
+    chip(
+        &mut commands,
+        ChipFace::Letter("R"),
+        chips.rtb,
+        "reversed: reversed ordinal sums",
+        Some(crate::keys::Action::Reversed),
+        |c| c.rtb = !c.rtb,
+    );
+    chip(
+        &mut commands,
+        ChipFace::Icon(Icon::Bolt),
+        chips.also_saturate,
+        "saturate: searches also saturate",
+        None,
+        |c| c.also_saturate = !c.also_saturate,
+    );
+    chip(
+        &mut commands,
+        ChipFace::Icon(Icon::Pin),
+        chips.keep,
+        "keep: new results join the current spread",
+        None,
+        |c| c.keep = !c.keep,
+    );
 }
 
 /// a clickable number in the bar

@@ -38,6 +38,15 @@ export function iconButton(name, label, { key, onclick, small, cls, text, ...pro
   return tip(b, label, key);
 }
 
+// a compact toggle for the strip over the command bar: an icon, or a letter when
+// `letter` is set, its full name and key in the tip, lit (and aria-pressed) when on
+export function toggleChip(name, label, { key, on, onclick, letter } = {}) {
+  const b = el('button.tchip', { type: 'button', onclick }, letter ? el('span.letter', letter) : icon(name));
+  b.classList.toggle('on', !!on);
+  b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  return tip(b, label, key);
+}
+
 // ------------------------------------------------------------------ the tooltip
 
 let box, at, timer, lastHidden = 0;
@@ -50,7 +59,8 @@ function place(target) {
   const vh = document.documentElement.clientHeight;
   let x = r.left + r.width / 2 - b.width / 2;
   x = Math.max(4, Math.min(vw - b.width - 4, x));
-  let y = r.bottom + 6;
+  // over the command bar's strip the tip goes up, never over the bar's text
+  let y = target.closest('#dock') ? r.top - b.height - 6 : r.bottom + 6;
   if (y + b.height > vh - 4) y = r.top - b.height - 6;
   box.style.transform = `translate(${Math.round(x)}px, ${Math.round(Math.max(4, y))}px)`;
 }
