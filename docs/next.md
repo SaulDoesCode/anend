@@ -92,6 +92,163 @@ Checks to run before every push:
 - `cargo test -p anend -p anend-core -p anend-hub`
 - `node hub/web/test/parity.mjs`, which must print "all the same"
 
+## Feedback after running the desktop app (14 Oct): the next round
+
+The user built and ran the app and imported their weum texts. Everything below comes from
+that feedback. Several items (the entry store, the gematria fixes, text quality) come
+first, because the rest builds on them. The unfinished work from the cut-off jobs (space
+placements in `core/src/places.rs`, partial keyboard passes in `src/` and `hub/web/`) is
+kept in `docs/wip/2026-10-14-unfinished.patch` (`git apply` it to look). It's superseded
+by the store redesign below, apart from the keyboard bits, which may be reused.
+
+### A. The data (first, the foundation)
+- **One flat entry table.** Notes, entries, memory texts, space texts and list names are
+  one concept, on the same keys in one flat redb table of texts.
+- **Timestamps** (created and edited) on every entry. Search, tags, classifier search and
+  filters get time filters.
+- **Compression and dedup.** The data is fat, and the user keeps many variants of a text
+  (with a prefix or suffix missing, written differently). An entry can be made of
+  references to other entries (borrowing), so variants share storage instead of
+  duplicating it.
+- **A 5-bit text encoding, bit-packed:**
+  - 26 lowercase letters plus space take 27 of the 32 codes.
+  - An escape code means the next token is a raw byte.
+  - An uppercase code makes the next token uppercase.
+  - A reference code means a replacement key follows. Decoding fetches that entry, which
+    is also how the editor's replacements/templating are represented.
+- **Notes are a relation, not a separate kind of thing.** As in weum, notes go on entries:
+  a graph with a single relation called "notes". Notes are chronological, not organised
+  by title. Rethink what a title is, since nothing else has one.
+- **Compatibility:**
+  - Drop all compatibility, forwards and backwards, including the old blog (writs)
+    import.
+  - Keep only importing weum's `all-of-it.json`.
+  - Importing must be a visual, per-save process in settings, because import and save
+    semantics conflict today.
+- **A backup button** per save: all the texts in one JSON and everything else in another,
+  like weum's `await memory.backup`.
+
+### B. Gematria correctness (weum is canonical)
+- **Atbash is wrong:** it currently gives the same values as reversed. The definition, as
+  the user's `alphavert`:
+  - each letter is the pair `[i, 27 - i]`, with a = 1 … z = 26 and space = 27; anything
+    else is skipped;
+  - the sum is the pair totals `b + t`; it also yields `h` (the f values), `i` (f − l),
+    `j` (the l values), `(b − n)(t − n)`, and `b − t`.
+- **Underline colours** for matches in the memory view:
+  - ordinal mode: colour by shared reversed groupings;
+  - reversed mode: the inverse, shared ordinal groupings;
+  - atbash mode: the normal gematria groupings;
+  - frequency mode: atbash groups.
+- **A bug to fix:** every entry in ordinal bucket 345 showed a purple underline (seen in
+  the reversed view). Study weum's memory to recreate its behaviour exactly.
+- **Frequency letters:** the sidecar's frequency letters grow long. Let them be toggled,
+  or shown smaller or in another form.
+- **Later idea:** generalise from lowercase gematria to summing bytes 1–256.
+
+### C. Memory view: parity with weum
+- **Ctrl+right click** is gone; restore weum's behaviour.
+- **Hovering a text:** it comes to the top so it isn't hidden under another entry. The way
+  text expands on hover is blurry and was always buggy; rethink it.
+- **Spacing:** spacing between texts as a setting. The texts sit too close to the digit
+  sums above them, and long texts need an overflow story (every view needs one for really
+  large texts).
+- **The centre square:** dragging its edge sets its default width, and it stays centered.
+- **Multi-select** texts: they stay highlighted, then pick a list visually to put them in.
+- **A left-edge strip**, shown only on hover and fading in and out: a line with circles,
+  one per sum bucket, each with its number and sized by how many entries it holds.
+  Hovering shows which bucket it is, for the active mode.
+- **The triangle** the space shows, here too.
+
+### D. Text quality and responsiveness (the main quality-of-life issue)
+- **Blurry text** everywhere: the memory view, the space popup, hover. Prefer no
+  antialiasing at all to bad antialiasing. Try other fonts and bigger sizes.
+- **A font size setting.**
+- **Typing feels sluggish** in the command bar: debounce the sum work, run it async, and
+  cut latency.
+- **Zoom:** Ctrl and Page Up / Page Down zoom in and out, like a website.
+
+### E. The space
+- **The triangle:**
+  - clicking a text should put its triangle in the top bar; it currently stays plain text;
+  - the triangle's middle bar should be centered.
+- **Colours:**
+  - the bracketed text at the right needs enough contrast against the space's
+    background;
+  - the background colour should be a setting;
+  - on a dark background, texts must keep readable contrast.
+- **The popup on the right:** it should be dismissable, and its text is blurry.
+- **Arrow keys** ease the camera onto the nearest text in that direction.
+- **Texts shrink** as the camera comes close, so they stay readable.
+- **For the editable space later:** the camera can't fly through blocks or glTF models.
+
+### F. Acting on texts
+- **A right-click menu** on any text in the memory view and the space:
+  - edit: the text goes into the bar and the result replaces it under the same key;
+  - tag: the next thing typed in the bar tags it;
+  - and other actions.
+- **Undo:** the bar's typing in the main views and the space can be undone back to the
+  previous state. There's also an undo button for any recent action, including yes/no/why
+  given to a classifier.
+
+### G. The views
+- **Lists:** redo the view.
+  - **Structure:** a list's page shows its name at the top and its members as editable
+    entries, with pagination. From there you go back out to the list of lists. A list's
+    figures go at the bottom.
+  - **Delete:** deleting a list takes two steps.
+  - **Clarity:** icons with titles, and a clear meaning for "unlist" and "choose" when
+    several lists are shown.
+  - **Classifiers depend on it:** you can't really make lists today, so the classifiers
+    are untested.
+- **Reader:**
+  - pagination;
+  - an expand mode for reading one thing big at a time;
+  - thousands of tiny texts flowing in a grid instead of one row each.
+- **Stats:** should cover the whole app, not just notes.
+- **Notes editor:**
+  - it resizes when the bars fade;
+  - long titles show in full on hover, like a website's title attribute.
+
+### H. The app's shell
+- **Collapsed menus:** remember which menus were collapsed.
+- **Settings:**
+  - it closes on a click outside it;
+  - the rebind menu closes the same way, with its close button in the same place;
+  - horizontal lines separate its sections;
+  - hub-related settings are collapsed, unless compiled out.
+- **Spacing:** smaller gaps between elements, none at the window's edges.
+
+### I. Build, server modes, security
+- **Desktop build:** a compile feature that leaves the hub out of the desktop app.
+- **Server modes, set by flags:** hub only, web app only, or both, coherent and complete.
+  This matters because the user is thinking of selling access as a cloud service.
+- **Web app:** sign-in required, even without the hub.
+- **Hub:**
+  - invite-only;
+  - public and private toggles on everything shared;
+  - a professional finish that works nicely with the app, with promise as the app's
+    social side.
+- **Parity:** the web app and the hub are kept up to date with the desktop app, and look
+  the same.
+
+### J. Docs
+- **README:** rewrite it, because it's very out of date (including the old blog import).
+  Redo the screenshots or remove them.
+- **Guide:** touch it up after these changes land.
+
+### K. Direction (under discussion, 14 Oct)
+- **Transformers that generate:**
+  - multi-output transformers, not only classifiers;
+  - generators shaped by classifiers, which act as the feedback that trains them;
+  - working over any data, not just text: bytes, numbers, images.
+- **A small scripting/templating language** (cf. the user's s-lang):
+  - built around references, transformer outputs, data types, mutation and closures;
+  - transpiled to concatenated Rust calls over a state machine, linked against a
+    precompiled preamble so it compiles fast.
+- **Views as templated modes of consumption,** like little websites over the core's API:
+  memory, space, notes, blog, and more.
+
 ## The queue (asked for on 13 Oct, in this order)
 
 Overall aim, in the user's words: "sensibilization, ergonomics, visual appeal of the app,
