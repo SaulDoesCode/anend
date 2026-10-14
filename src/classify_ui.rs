@@ -478,6 +478,8 @@ pub fn start_search(st: &mut ClsState, work: &Work, store: Arc<Store>) {
                     Ok(s) if st.selected.as_deref() == Some(s.name.as_str()) => {
                         st.why.clear();
                         st.searched = Some(s);
+                        // a search files what it reads
+                        st.buckets_reload = true;
                         None
                     }
                     Ok(_) => None,
@@ -724,6 +726,7 @@ fn start_near(st: &mut ClsState, work: &Work, store: Arc<Store>, key: Option<Ref
                 let mut st = w.resource_mut::<ClsState>();
                 st.near = Some(n);
                 st.near_dirty = true;
+                st.buckets_reload = true;
             }
             Err(e) => say(w, e),
         })
@@ -2441,7 +2444,20 @@ mod tests {
             ("Orchard walk", "Picked plums and pears; the apricots were not ripe yet.", vec!["garden"]),
             ("Quarry notes", "Granite and slate beds, a seam of quartz, some flint.", vec!["field"]),
             ("Night birds", "An owl called twice; a fox crossed the lane near the badger set.", vec!["field"]),
-        ] {
+        ]
+        .into_iter()
+        .chain([(
+            "A long day",
+            &*Box::leak(
+                (1..=160)
+                    .map(|i| format!("Line {i}: the path went on past the quarry and the orchard."))
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
+                    .into_boxed_str(),
+            ),
+            vec!["long"],
+        )])
+        {
             let n = crate::note::Note {
                 title: title.into(),
                 markdown: md.into(),

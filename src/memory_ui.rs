@@ -531,6 +531,7 @@ pub fn rebuild_results(
     main: Single<(Entity, &mut BackgroundColor), With<MemMain>>,
     mut view: Single<&mut BackgroundColor, (With<MemoryView>, Without<MemMain>)>,
     serif: Res<SerifFont>,
+    tints: Res<crate::tint::Tints>,
     mut commands: Commands,
 ) {
     if !mem.state.redraw_results {
@@ -643,20 +644,31 @@ pub fn rebuild_results(
         } else {
             hit.text.clone()
         };
+        // coloured by a classifier: a bar of its class's colour at the left
+        let tint = tints.color(&hit.r.label());
+        let under = if shared {
+            underline_color(m.ordinal, m.reversed)
+        } else {
+            Color::NONE
+        };
         let article = commands
             .spawn((
                 Node {
                     padding: UiRect::axes(px(7), px(4)),
                     margin: UiRect::all(px(0.51)),
                     max_width: percent(95),
-                    border: UiRect::bottom(px(if shared { 3.0 } else { 0.0 })),
+                    border: UiRect {
+                        bottom: px(if shared { 3.0 } else { 0.0 }),
+                        left: px(if tint.is_some() { 6.0 } else { 0.0 }),
+                        ..default()
+                    },
                     ..default()
                 },
-                BorderColor::all(if shared {
-                    underline_color(m.ordinal, m.reversed)
-                } else {
-                    Color::NONE
-                }),
+                BorderColor {
+                    bottom: under,
+                    left: tint.map(|(c, s)| c.with_alpha(0.35 + 0.65 * s)).unwrap_or(Color::NONE),
+                    ..BorderColor::all(under)
+                },
                 BackgroundColor(if white { WHITE } else { ARTICLE_BG }),
                 UiTransform::IDENTITY,
                 Article(hit.clone()),

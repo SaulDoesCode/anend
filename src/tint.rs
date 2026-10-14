@@ -235,6 +235,16 @@ pub fn rebuild_legend(
     if node.display != want {
         node.display = want;
     }
+    // the space's help sits at the right, so its legend goes left
+    let (left, right) = if session.route == Route::Space {
+        (px(14), Val::Auto)
+    } else {
+        (Val::Auto, px(14))
+    };
+    if node.left != left || node.right != right {
+        node.left = left;
+        node.right = right;
+    }
     let key = (tints.name.clone(), session.route, tints.classes.len());
     if !shown || tints.legend_for.as_ref() == Some(&key) {
         return;

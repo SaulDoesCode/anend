@@ -631,6 +631,7 @@ fn editor_view() -> impl Scene {
                 EntityCursor::System(SystemCursorIcon::Text)
                 EditorPad
                 on(pad_changed)
+                on(pad_scroll)
                 --
                 @crate::highlight::overlay_scene()
                 ]
@@ -700,6 +701,22 @@ fn pad_changed(change: On<TextEditChange>, pads: Query<&EditableText, With<Edito
     // the list shows the live title and an unsaved marker
     ctx.redraw.list |= title_changed || ctx.is_dirty();
     ctx.redraw.preview |= ctx.session.view_mode;
+}
+
+/// the wheel scrolls the pad (bevy's editable text only scrolls to follow the cursor)
+fn pad_scroll(
+    mut scroll: On<bevy::picking::events::PointerScroll>,
+    mut pads: Query<&mut EditableText, With<EditorPad>>,
+    ratio: Res<bevy::input::mouse::MouseScrollPixelsPerLine>,
+) {
+    let Ok(mut pad) = pads.get_mut(scroll.entity) else {
+        return;
+    };
+    scroll.propagate(false);
+    let d = scroll.to_pixels(&ratio);
+    if d.y != 0.0 || d.x != 0.0 {
+        pad.queue_edit(TextEdit::ScrollBy(Vec2::new(-d.x, -d.y)));
+    }
 }
 
 fn tag_input_key(
