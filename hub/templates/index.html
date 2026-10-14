@@ -15,7 +15,8 @@
   <form class="find" method="get" action="/">
     <input type="search" name="q" value="{{ q }}" placeholder="find saves: words, an author, or #tag">
     <input type="hidden" name="sort" value="{{ sort }}">
-    <button class="primary">find</button>
+    <button class="primary ibtn" data-tip="find" aria-label="find">{{ crate::web::icon("search") }}</button>
+    <span class="sorts with-icon dim small" data-tip="order" aria-hidden="true">{{ crate::web::icon("sort") }}</span>
     {% for s in sorts %}<a class="btn small{% if *s == sort %} on{% endif %}" href="/?sort={{ s }}&q={{ q_url }}">{{ s }}</a>{% endfor %}
   </form>
 </section>
@@ -27,13 +28,13 @@
 </section>
 {% endif %}
 <div class="row spread">
-  {% if page > 0 %}<a class="btn" href="/?sort={{ sort }}&q={{ q_url }}&page={{ page - 1 }}">← newer</a>{% else %}<span></span>{% endif %}
-  {% if more %}<a class="btn" href="/?sort={{ sort }}&q={{ q_url }}&page={{ page + 1 }}">more →</a>{% endif %}
+  {% if page > 0 %}<a class="btn with-text" href="/?sort={{ sort }}&q={{ q_url }}&page={{ page - 1 }}">{{ crate::web::icon("chevron-left") }}newer</a>{% else %}<span></span>{% endif %}
+  {% if more %}<a class="btn with-text more-page" href="/?sort={{ sort }}&q={{ q_url }}&page={{ page + 1 }}">more{{ crate::web::icon("chevron-right") }}</a>{% endif %}
 </div>
 {% if !events.is_empty() %}
 <section class="card">
   <h3>lately</h3>
-  <ul class="feed">{% for e in events %}<li><a href="/u/{{ e.user }}">{{ e.user }}</a> {{ e.what }}{% if !e.save_name.is_empty() %} <a href="/saves/{{ e.save }}">{{ e.save_name }}</a>{% endif %} <span class="dim small">{{ e.ago }}</span></li>{% endfor %}</ul>
+  <ul class="feed">{% for e in events %}<li><a href="/u/{{ e.user }}">{{ e.user }}</a> {{ e.what }}{% if !e.save_name.is_empty() %} <a href="{{ e.href }}">{{ e.save_name }}</a>{% endif %} <span class="dim small">{{ e.ago }}</span></li>{% endfor %}</ul>
 </section>
 {% endif %}
 {% endblock %}

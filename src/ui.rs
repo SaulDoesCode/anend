@@ -24,6 +24,7 @@ use bevy::text::{
 use bevy::ui_widgets::{Activate, RequestClose, ScrollArea, TextInput};
 use bevy::window::{SystemCursorIcon, WindowCloseRequested};
 
+use crate::icons::{Icon, IconImg, Tip, TipKey, icon_button, icon_label_button};
 use crate::keys::{Action, Fired, Keymap, Remap};
 use crate::markdown::{self, Block, Span};
 use crate::memory_ui::MemoryView;
@@ -35,7 +36,13 @@ use crate::theme::colors;
 // ------------------------------------------------------------------ state
 
 #[derive(Resource)]
-pub struct Db(pub Store);
+pub struct Db(pub std::sync::Arc<Store>);
+
+impl Db {
+    pub fn new(store: Store) -> Db {
+        Db(std::sync::Arc::new(store))
+    }
+}
 
 /// every stored note, newest first
 #[derive(Resource, Default)]
@@ -49,6 +56,10 @@ pub enum Route {
     Memory,
     Stats,
     Space,
+    Lists,
+    Tags,
+    Classifiers,
+    Filters,
 }
 
 #[derive(Resource, Default)]
@@ -269,6 +280,9 @@ pub struct NoteListPanel;
 pub struct ListToggle;
 #[derive(Component, Default, Clone)]
 pub struct EditorPad;
+/// the pad with its highlighting
+#[derive(Component, Default, Clone)]
+pub struct PadBox;
 #[derive(Component, Default, Clone)]
 pub struct Preview;
 /// the top bar
@@ -298,6 +312,9 @@ fn root() -> impl Scene {
         Node {
             width: percent(100),
             height: percent(100),
+            // a view's content never pushes the window's layout past its edge
+            min_height: px(0),
+            max_height: percent(100),
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
             padding: UiRect::all(px(6)),
@@ -326,6 +343,14 @@ fn root() -> impl Scene {
                 --
                 @stats_view()
                 --
+                @crate::lists_ui::view()
+                --
+                @crate::tags_ui::view()
+                --
+                @crate::classify_ui::view()
+                --
+                @crate::filters_ui::view()
+                --
                 @crate::space_ui::view()
             ]
             --
@@ -340,24 +365,28 @@ fn root() -> impl Scene {
     }
 }
 
-fn nav_button(label: &'static str, route: Route) -> impl Scene {
+/// a view's tab in the top bar: its icon, its name and key in the tooltip
+fn nav_button(icon: Icon, tip: &'static str, route: Route, action: Action) -> impl Scene {
     bsn! {
-        @FeathersButton {
-            @caption: bsn! { @caption(label) }
-        }
+        @icon_button(icon, tip)
+        TipKey(action)
         NavTab(route)
         on(|activate: On<Activate>, tabs: Query<&NavTab>, mut ctx: Ctx| {
             if let Ok(tab) = tabs.get(activate.event_target()) {
-                // the reader and stats read stored notes, so save titled changes first;
-                // an untitled draft just waits in the editor
-                if tab.0 != Route::Editor && ctx.is_dirty() && !ctx.session.active.title.trim().is_empty() {
-                    ctx.save();
-                }
-                ctx.session.route = tab.0;
-                ctx.redraw.route = true;
+                go_to(&mut ctx, tab.0);
             }
         })
     }
+}
+
+/// switches views; the other views read stored notes, so titled changes are saved first
+/// (an untitled draft just waits in the editor)
+pub fn go_to(ctx: &mut Ctx, route: Route) {
+    if route != Route::Editor && ctx.is_dirty() && !ctx.session.active.title.trim().is_empty() {
+        ctx.save();
+    }
+    ctx.session.route = route;
+    ctx.redraw.route = true;
 }
 
 fn nav() -> impl Scene {
@@ -374,15 +403,31 @@ fn nav() -> impl Scene {
         NavBar
         crate::zen::Chrome
         Children [
-            @nav_button("editor", Route::Editor)
+            // the app's own icon, as the hub and the web app show it
+            Node {
+                width: px(22),
+                height: px(22),
+                margin: UiRect::axes(px(4), px(0)),
+            }
+            crate::icons::AppMark
             --
-            @nav_button("reader", Route::Reader)
+            @nav_button(Icon::Editor, "editor", Route::Editor, Action::GotoEditor)
             --
-            @nav_button("memory", Route::Memory)
+            @nav_button(Icon::Reader, "reader", Route::Reader, Action::GotoReader)
             --
-            @nav_button("stats", Route::Stats)
+            @nav_button(Icon::Memory, "memory", Route::Memory, Action::GotoMemory)
             --
-            @nav_button("space", Route::Space)
+            @nav_button(Icon::Stats, "stats", Route::Stats, Action::GotoStats)
+            --
+            @nav_button(Icon::Space, "space", Route::Space, Action::GotoSpace)
+            --
+            @nav_button(Icon::List, "lists", Route::Lists, Action::GotoLists)
+            --
+            @nav_button(Icon::Classifier, "classifiers", Route::Classifiers, Action::GotoClassifiers)
+            --
+            @nav_button(Icon::Tags, "tags", Route::Tags, Action::GotoTags)
+            --
+            @nav_button(Icon::Filter, "filters", Route::Filters, Action::GotoFilters)
             --
             // the space's search line: what was searched and its sum's chain
             Node {
@@ -419,19 +464,10 @@ fn nav() -> impl Scene {
                 TextColor({crate::bar::BAR_TEXT})
             ]
             --
-            @FeathersButton {
-                @caption: bsn! { @caption("settings") }
-            }
+            @icon_button(Icon::Settings, "settings: saves, hub, fonts, colours, sizes")
+            TipKey(Action::OpenSettings)
             on(|_activate: On<Activate>, mut settings: ResMut<crate::settings::Settings>| settings.toggle())
         ]
-    }
-}
-
-fn tool_button(label: &'static str) -> impl Scene {
-    bsn! {
-        @FeathersButton {
-            @caption: bsn! { @caption(label) }
-        }
     }
 }
 
@@ -461,10 +497,9 @@ fn editor_view() -> impl Scene {
             crate::zen::Chrome
             NoteListPanel
             Children [
-                @FeathersButton {
-                    @caption: bsn! { @caption("+ new") },
-                    @variant: ButtonVariant::Primary,
-                }
+                @icon_label_button(Icon::New, "new note".into(), ButtonVariant::Primary)
+                Tip({"start a new note".to_string()})
+                TipKey(Action::NewNote)
                 on(|_activate: On<Activate>, mut ctx: Ctx| ctx.new_note())
                 --
                 Node {
@@ -500,7 +535,8 @@ fn editor_view() -> impl Scene {
                 }
                 crate::zen::Chrome
                 Children [
-                    @tool_button("‹")
+                    @icon_button(Icon::Sidebar, "slide the note list away / back")
+                    TipKey(Action::ToggleList)
                     ListToggle
                     on(|_activate: On<Activate>, mut config: ResMut<crate::config::Config>| {
                         config.hide_list = !config.hide_list;
@@ -518,8 +554,14 @@ fn editor_view() -> impl Scene {
                     }
                     TagChips
                     --
+                    IconImg(Icon::Tag)
+                    Node { width: px(15), height: px(15), flex_shrink: 0.0 }
+                    TextColor(colors::TEXT_DIM)
+                    Tip({"add a tag: type it, then Enter or a comma".to_string()})
+                    --
                     @FeathersTextInputContainer
                     Node { flex_grow: 0.0 }
+                    Tip({"add a tag: type it, then Enter or a comma".to_string()})
                     Children [
                         @FeathersTextInput {
                             @visible_width: 12f32,
@@ -528,7 +570,14 @@ fn editor_view() -> impl Scene {
                         on(tag_input_key)
                     ]
                     --
-                    @tool_button("view")
+                    @icon_button(Icon::Classifier, "the classifiers this note is indexed on, and what they say of it")
+                    on(|_activate: On<Activate>, mut panel: ResMut<crate::index_panel::IndexPanel>| {
+                        panel.open = !panel.open;
+                        panel.dirty = true;
+                    })
+                    --
+                    @icon_button(Icon::View, "view the note rendered")
+                    TipKey(Action::ToggleView)
                     ViewToggle
                     on(|_activate: On<Activate>, mut ctx: Ctx| {
                         ctx.session.view_mode = !ctx.session.view_mode;
@@ -536,16 +585,37 @@ fn editor_view() -> impl Scene {
                         ctx.redraw.preview = true;
                     })
                     --
-                    @tool_button("save")
+                    @icon_button(Icon::Save, "save the note")
+                    TipKey(Action::Save)
                     on(|_activate: On<Activate>, mut ctx: Ctx| { ctx.save(); })
                     --
-                    @tool_button("delete")
+                    @icon_button(Icon::Delete, "delete the note")
                     on(confirm_delete)
                 ]
                 --
-                // the writing pad
+                // the note's classifiers, when opened
+                Node {
+                    display: Display::None,
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(6),
+                    padding: UiRect::axes(px(10), px(8)),
+                    border_radius: BorderRadius::all(px(5)),
+                    flex_shrink: 0.0,
+                }
+                BackgroundColor(colors::CODE_BG)
+                crate::index_panel::IndexPanelBox
+                --
+                // the writing pad, and the highlighting painted over it
                 Node {
                     flex_grow: 1.0,
+                    min_height: px(0),
+                    display: Display::Flex,
+                }
+                PadBox
+                Children [
+                Node {
+                    flex_grow: 1.0,
+                    min_width: px(0),
                     min_height: px(0),
                     padding: UiRect::all(px(10)),
                     border_radius: BorderRadius::all(px(5)),
@@ -565,11 +635,19 @@ fn editor_view() -> impl Scene {
                     font_size: FontSize::Px(15.0),
                 }
                 TextColor(colors::TEXT)
-                TextCursorStyle
+                TextCursorStyle {
+                    color: colors::TEXT,
+                    selection_color: {colors::ACCENT.with_alpha(0.45)},
+                    unfocused_selection_color: {colors::ACCENT.with_alpha(0.25)},
+                }
                 TabIndex(0)
                 EntityCursor::System(SystemCursorIcon::Text)
                 EditorPad
                 on(pad_changed)
+                on(pad_scroll)
+                --
+                @crate::highlight::overlay_scene()
+                ]
                 --
                 // the rendered view
                 Node {
@@ -636,6 +714,22 @@ fn pad_changed(change: On<TextEditChange>, pads: Query<&EditableText, With<Edito
     // the list shows the live title and an unsaved marker
     ctx.redraw.list |= title_changed || ctx.is_dirty();
     ctx.redraw.preview |= ctx.session.view_mode;
+}
+
+/// the wheel scrolls the pad (bevy's editable text only scrolls to follow the cursor)
+fn pad_scroll(
+    mut scroll: On<bevy::picking::events::PointerScroll>,
+    mut pads: Query<&mut EditableText, With<EditorPad>>,
+    ratio: Res<bevy::input::mouse::MouseScrollPixelsPerLine>,
+) {
+    let Ok(mut pad) = pads.get_mut(scroll.entity) else {
+        return;
+    };
+    scroll.propagate(false);
+    let d = scroll.to_pixels(&ratio);
+    if d.y != 0.0 || d.x != 0.0 {
+        pad.queue_edit(TextEdit::ScrollBy(Vec2::new(-d.x, -d.y)));
+    }
 }
 
 fn tag_input_key(
@@ -735,19 +829,27 @@ pub fn app_actions(
                 ctx.redraw.meta = true;
                 ctx.redraw.preview = true;
             }
-            Action::GotoEditor | Action::GotoReader | Action::GotoMemory | Action::GotoStats | Action::GotoSpace => {
+            Action::GotoEditor
+            | Action::GotoReader
+            | Action::GotoMemory
+            | Action::GotoStats
+            | Action::GotoSpace
+            | Action::GotoLists
+            | Action::GotoTags
+            | Action::GotoClassifiers
+            | Action::GotoFilters => {
                 let route = match action {
+                    Action::GotoTags => Route::Tags,
+                    Action::GotoClassifiers => Route::Classifiers,
+                    Action::GotoFilters => Route::Filters,
+                    Action::GotoLists => Route::Lists,
                     Action::GotoEditor => Route::Editor,
                     Action::GotoReader => Route::Reader,
                     Action::GotoMemory => Route::Memory,
                     Action::GotoSpace => Route::Space,
                     _ => Route::Stats,
                 };
-                if route != Route::Editor && ctx.is_dirty() && !ctx.session.active.title.trim().is_empty() {
-                    ctx.save();
-                }
-                ctx.session.route = route;
-                ctx.redraw.route = true;
+                go_to(&mut ctx, route);
             }
             Action::OpenRemap => {
                 remap.open = !remap.open;
@@ -787,6 +889,10 @@ pub fn apply_route(
         Has<MemoryView>,
         Has<StatsView>,
         Has<SpaceView>,
+        Has<crate::lists_ui::ListsView>,
+        Has<crate::tags_ui::TagsView>,
+        Has<crate::classify_ui::ClsView>,
+        Has<crate::filters_ui::FiltersView>,
     )>,
     tabs: Query<(Entity, &NavTab)>,
     mut commands: Commands,
@@ -795,15 +901,19 @@ pub fn apply_route(
         return;
     }
     redraw.route = false;
-    for (mut node, editor, reader, memory, stats, space) in views.iter_mut() {
+    for (mut node, editor, reader, memory, stats, space, lists, tags, cls, flt) in views.iter_mut() {
         let shown = match session.route {
             Route::Editor => editor,
             Route::Reader => reader,
             Route::Memory => memory,
             Route::Stats => stats,
             Route::Space => space,
+            Route::Lists => lists,
+            Route::Tags => tags,
+            Route::Classifiers => cls,
+            Route::Filters => flt,
         };
-        if editor || reader || memory || stats || space {
+        if editor || reader || memory || stats || space || lists || tags || cls || flt {
             node.display = if shown { Display::Flex } else { Display::None };
         }
     }
@@ -884,8 +994,9 @@ pub fn rebuild_meta(
     mut redraw: ResMut<Redraw>,
     session: Res<Session>,
     chips: Single<Entity, With<TagChips>>,
-    toggle: Single<&Children, With<ViewToggle>>,
-    mut texts: Query<&mut Text>,
+    toggle: Single<(Entity, &Children), With<ViewToggle>>,
+    mut images: Query<(&mut IconImg, &mut ImageNode)>,
+    icons: Res<crate::icons::Icons>,
     mut commands: Commands,
 ) {
     if !redraw.meta {
@@ -893,13 +1004,20 @@ pub fn rebuild_meta(
     }
     redraw.meta = false;
 
-    for child in toggle.iter() {
-        if let Ok(mut t) = texts.get_mut(child) {
-            t.0 = if session.view_mode {
-                "edit".into()
-            } else {
-                "view".into()
-            };
+    // the toggle shows where it goes: the rendered view, or back to editing
+    let (toggle, children) = *toggle;
+    let (icon, tip) = if session.view_mode {
+        (Icon::Edit, "edit the note")
+    } else {
+        (Icon::View, "view the note rendered")
+    };
+    commands.entity(toggle).insert(Tip(tip.into()));
+    for child in children.iter() {
+        if let Ok((mut i, mut img)) = images.get_mut(child)
+            && i.0 != icon
+        {
+            i.0 = icon;
+            img.image = icons.get(icon);
         }
     }
 
@@ -919,8 +1037,8 @@ pub fn rebuild_meta(
 pub fn rebuild_preview(
     mut redraw: ResMut<Redraw>,
     session: Res<Session>,
-    preview: Single<(Entity, &mut Node), (With<Preview>, Without<EditorPad>)>,
-    mut pad: Single<&mut Node, With<EditorPad>>,
+    preview: Single<(Entity, &mut Node), (With<Preview>, Without<PadBox>)>,
+    mut pad: Single<&mut Node, With<PadBox>>,
     fonts: Res<Fonts>,
     mut commands: Commands,
     mut focus: ResMut<InputFocus>,
@@ -1046,7 +1164,11 @@ pub fn rebuild_reader(
         );
         let key = n.key.clone();
         commands
-            .spawn_scene(plain_scene_button("edit".into(), ButtonVariant::Plain))
+            .spawn_scene(crate::icons::icon_scene_button(
+                Icon::Edit,
+                "edit this note".into(),
+                ButtonVariant::Plain,
+            ))
             .insert(ChildOf(title_row))
             .observe(move |_activate: On<Activate>, mut ctx: Ctx| ctx.open(&key));
 
@@ -1140,25 +1262,47 @@ pub fn rebuild_stats(
                 note::long_date(&first),
                 note::relative(&last)
             ),
-            _ => "no notes yet, press \"+ new\" in the editor".into(),
+            _ => "no notes yet: start one with \"new note\" in the editor".into(),
         },
     ] {
         text(&mut commands, card, &line, &fonts.regular, 15.0, colors::TEXT);
     }
     if !tags.is_empty() {
         text(&mut commands, card, "tags", &fonts.bold, 18.0, colors::TEXT);
-        let list = tags
-            .iter()
-            .map(|(t, c)| format!("#{} ({})", t, c))
-            .collect::<Vec<_>>()
-            .join("   ");
-        text(&mut commands, card, &list, &fonts.regular, 15.0, colors::TEXT);
+        let row = commands
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: px(4),
+                    row_gap: px(4),
+                    ..default()
+                },
+                ChildOf(card),
+            ))
+            .id();
+        // each tag opens the tags view with it chosen
+        for (t, c) in tags {
+            commands
+                .spawn_scene(plain_scene_button(format!("#{}  {}", t, c), ButtonVariant::Normal))
+                .insert((
+                    ChildOf(row),
+                    Tip(format!("see the {} {} with #{}", c, plural(c, "note"), t)),
+                ))
+                .observe(
+                    move |_a: On<Activate>, mut ctx: Ctx, mut st: ResMut<crate::tags_ui::TagsState>| {
+                        st.chosen = vec![t.clone()];
+                        st.redraw = true;
+                        go_to(&mut ctx, Route::Tags);
+                    },
+                );
+        }
     }
 }
 
 // ------------------------------------------------------------------ markdown rendering
 
-fn card_node() -> Node {
+pub(crate) fn card_node() -> Node {
     Node {
         width: percent(100),
         max_width: px(820),

@@ -35,6 +35,14 @@ pub struct Config {
     pub space_sums: bool,
     /// slide the note list away until the pointer comes to the left edge
     pub hide_list: bool,
+    /// the top bar at the bottom and the command bar at the top
+    pub bars_swapped: bool,
+    /// the note list on the right of the editor
+    pub list_right: bool,
+    /// colour the editor's markdown
+    pub highlight: bool,
+    /// the classifier the memory view and the space are coloured by (none: not coloured)
+    pub tint_by: Option<String>,
     pub keymap: Option<serde_json::Value>,
     /// the anend hub saves are shared on, e.g. `http://localhost:8080`
     pub hub_url: String,
@@ -58,6 +66,10 @@ impl Default for Config {
             bottom_bar: 30.0,
             space_sums: true,
             hide_list: false,
+            bars_swapped: false,
+            list_right: false,
+            highlight: true,
+            tint_by: None,
             keymap: None,
             hub_url: String::new(),
             hub_token: String::new(),
@@ -91,7 +103,7 @@ fn config_path() -> PathBuf {
 
 impl Config {
     pub fn load() -> Config {
-        std::fs::read(config_path())
+        crate::vfs::read(&config_path())
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default()
@@ -100,10 +112,10 @@ impl Config {
     pub fn save(&self) {
         let path = config_path();
         if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
+            let _ = crate::vfs::create_dir_all(dir);
         }
         if let Ok(bytes) = serde_json::to_vec_pretty(self) {
-            let _ = std::fs::write(path, bytes);
+            let _ = crate::vfs::write(&path, &bytes);
         }
     }
 

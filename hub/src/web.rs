@@ -40,10 +40,72 @@ pub fn client_ip(req: &Request) -> IpAddr {
     req.remote_addr().ip().unwrap_or(IpAddr::from([0, 0, 0, 0]))
 }
 
+/// whether a request's `Host` may reach a `--local` hub, which answers anyone without a
+/// login. A page on another site can make the browser send requests to a name it
+/// controls that resolves to this machine (DNS rebinding); such a request carries that
+/// name as its Host. So a local hub answers only to loopback names (`localhost`,
+/// `*.localhost`), IP addresses (which no other site can rebind), and the host of its
+/// own `--url`.
+pub fn local_host_ok(host: &str, url: &str) -> bool {
+    fn name(h: &str) -> String {
+        let h = h.trim().to_ascii_lowercase();
+        if let Some(rest) = h.strip_prefix('[') {
+            // [v6]:port
+            return rest.split(']').next().unwrap_or("").to_string();
+        }
+        match h.rsplit_once(':') {
+            Some((n, port)) if port.bytes().all(|b| b.is_ascii_digit()) && !n.contains(':') => n.to_string(),
+            _ => h,
+        }
+    }
+    let host = name(host);
+    if host.is_empty() {
+        return false;
+    }
+    let own = url.split("://").nth(1).unwrap_or("").split('/').next().unwrap_or("");
+    host == "localhost"
+        || host.ends_with(".localhost")
+        || host.parse::<IpAddr>().is_ok()
+        || (!own.is_empty() && host == name(own))
+}
+
+/// headers every answer carries: no framing by other sites (the admin panel's buttons
+/// can't be clicked through a disguise), no sniffing a download into a page, and
+/// addresses kept to the hub when following a link out. The web app's page also gets a
+/// content security policy: scripts only from the hub, so a note that slipped some html
+/// past the markdown renderer still couldn't run anything.
+fn guard_headers(req: &Request, res: &mut Response) {
+    let h = res.headers_mut();
+    h.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    h.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    h.insert("referrer-policy", HeaderValue::from_static("same-origin"));
+    let csp = if req.uri().path().starts_with("/app") {
+        APP_CSP
+    } else {
+        "frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
+    };
+    h.insert("content-security-policy", HeaderValue::from_static(csp));
+}
+
+/// the web app's policy: its own scripts only; styles inline too (the editor's mirror and
+/// the views set them); pictures in notes from anywhere on the web; calls to the hub
+pub const APP_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' ws: wss:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
+
 /// loads the user behind the session cookie (or app token), turns away forms posted from
 /// other sites, and picks up the message left by the last redirect
 #[handler]
 pub async fn who_is_asking(req: &mut Request, depot: &mut Depot, res: &mut Response, ctrl: &mut FlowCtrl) {
+    guard_headers(req, res);
+    if *crate::app::LOCAL.get().unwrap_or(&false)
+        && !local_host_ok(&req.header::<String>("host").unwrap_or_default(), &hub().config.url)
+    {
+        res.status_code(StatusCode::FORBIDDEN);
+        res.render(Text::Plain(
+            "this hub runs with --local and only answers to localhost, an IP address or its --url",
+        ));
+        ctrl.skip_rest();
+        return;
+    }
     if req.method() == salvo::http::Method::POST && !req.uri().path().starts_with("/api/") {
         let cross = req
             .header::<String>("sec-fetch-site")
@@ -168,7 +230,7 @@ pub fn hue(name: &str) -> u64 {
     (o * 37 + r * 11) % 360
 }
 
-fn render(res: &mut Response, t: impl Template) {
+pub fn render(res: &mut Response, t: impl Template) {
     match t.render() {
         Ok(html) => res.render(Text::Html(html)),
         Err(e) => {
@@ -196,7 +258,7 @@ pub struct Layout {
     pub waiting: usize,
 }
 
-fn layout(depot: &Depot, tab: &'static str) -> Layout {
+pub fn layout(depot: &Depot, tab: &'static str) -> Layout {
     let flash = depot.get::<String>("flash").cloned().unwrap_or_default();
     let (flash, flash_bad) = match flash.strip_prefix('!') {
         Some(f) => (f.to_string(), true),
@@ -215,7 +277,9 @@ fn layout(depot: &Depot, tab: &'static str) -> Layout {
     let waiting = if me.as_ref().is_some_and(|m| m.admin) {
         let s = hub().store.saves().unwrap_or_default();
         let u = hub().store.users().unwrap_or_default();
+        let c = hub().store.classifiers().unwrap_or_default();
         s.iter().filter(|s| s.status == Status::Pending).count()
+            + c.iter().filter(|c| c.status == Status::Pending).count()
             + u.iter().filter(|u| u.standing == Standing::Applied).count()
     } else {
         0
@@ -254,7 +318,7 @@ pub fn message(res: &mut Response, depot: &Depot, code: StatusCode, heading: &st
     );
 }
 
-fn not_found(res: &mut Response, depot: &Depot) {
+pub(crate) fn not_found(res: &mut Response, depot: &Depot) {
     message(
         res,
         depot,
@@ -265,7 +329,7 @@ fn not_found(res: &mut Response, depot: &Depot) {
 }
 
 /// the logged in, active user, or a message saying why not
-fn need_active<'a>(res: &mut Response, depot: &'a Depot) -> Option<&'a User> {
+pub(crate) fn need_active<'a>(res: &mut Response, depot: &'a Depot) -> Option<&'a User> {
     match me(depot) {
         None => {
             go(res, "/login", "!log in first");
@@ -285,7 +349,7 @@ fn need_active<'a>(res: &mut Response, depot: &'a Depot) -> Option<&'a User> {
     }
 }
 
-fn need_admin<'a>(res: &mut Response, depot: &'a Depot) -> Option<&'a User> {
+pub fn need_admin<'a>(res: &mut Response, depot: &'a Depot) -> Option<&'a User> {
     match me(depot) {
         Some(u) if u.is_admin() => Some(u),
         _ => {
@@ -338,8 +402,9 @@ pub fn card(s: &Save) -> Card {
 pub struct EventView {
     pub user: String,
     pub what: String,
-    pub save: String,
     pub save_name: String,
+    /// where the save or classifier it's about lives
+    pub href: String,
     pub ago: String,
 }
 
@@ -371,6 +436,7 @@ pub async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     let all = h.store.saves().unwrap_or_default();
     let approved: Vec<&Save> = all.iter().filter(|s| s.status == Status::Approved).collect();
     let users = h.store.users().unwrap_or_default();
+    let classifiers = h.store.classifiers().unwrap_or_default();
     let events = h
         .store
         .events(30)
@@ -388,18 +454,23 @@ pub async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) {
         })
         .into_iter()
         .filter_map(|e| {
-            let save_name = if e.save.is_empty() {
-                String::new()
+            // only point at saves and classifiers everyone can see
+            let (save_name, href) = if e.save.is_empty() {
+                (String::new(), String::new())
+            } else if let Some(id) = e.save.strip_prefix(crate::store::CLS) {
+                let c = classifiers
+                    .iter()
+                    .find(|c| c.id == id && c.status == Status::Approved)?;
+                (format!("{} (a classifier)", c.name), format!("/classifiers/{id}"))
             } else {
-                // only point at saves everyone can see
                 let s = approved.iter().find(|s| s.id == e.save)?;
-                s.name.clone()
+                (s.name.clone(), format!("/saves/{}", s.id))
             };
             Some(EventView {
                 user: e.user,
                 what: e.what,
-                save: e.save,
                 save_name,
+                href,
                 ago: ago(e.at),
             })
         })
@@ -583,7 +654,7 @@ pub struct Field {
     pub required: bool,
 }
 
-fn field(name: &'static str, label: &'static str, kind: &'static str, value: &str) -> Field {
+pub(crate) fn field(name: &'static str, label: &'static str, kind: &'static str, value: &str) -> Field {
     Field {
         name,
         label,
@@ -596,15 +667,15 @@ fn field(name: &'static str, label: &'static str, kind: &'static str, value: &st
 
 #[derive(Template)]
 #[template(path = "form.html")]
-struct Form {
-    l: Layout,
-    heading: String,
-    intro: String,
-    action: String,
-    multipart: bool,
-    fields: Vec<Field>,
-    submit: &'static str,
-    after: String,
+pub(crate) struct Form {
+    pub l: Layout,
+    pub heading: String,
+    pub intro: String,
+    pub action: String,
+    pub multipart: bool,
+    pub fields: Vec<Field>,
+    pub submit: &'static str,
+    pub after: String,
 }
 
 fn upload_form(depot: &Depot, action: String, heading: String, s: Option<&Save>, intro: String) -> Form {
@@ -673,14 +744,14 @@ pub async fn upload_page(depot: &mut Depot, res: &mut Response) {
 }
 
 /// what an upload form sent
-struct Sent {
-    name: String,
-    description: String,
-    tags: String,
-    file: Option<(std::path::PathBuf, u64)>,
+pub(crate) struct Sent {
+    pub name: String,
+    pub description: String,
+    pub tags: String,
+    pub file: Option<(std::path::PathBuf, u64)>,
 }
 
-async fn read_upload(req: &mut Request) -> Result<Sent, String> {
+pub(crate) async fn read_upload(req: &mut Request) -> Result<Sent, String> {
     let limit = hub().config.max_upload as usize + 256 * 1024;
     let form = req.form_data_max_size(limit).await.map_err(|e| {
         let e = e.to_string();
@@ -977,7 +1048,13 @@ pub async fn login(req: &mut Request, res: &mut Response) {
             log_in(res, &u.name);
             go(res, "/", &format!("welcome back, {}", u.name));
         }
-        _ => go(res, "/login", "!that name and password don't match"),
+        other => {
+            // as slow as a real check, so the answer's time doesn't say who has an account
+            if other.is_none_or(|u| u.password.is_empty()) {
+                auth::check_password(&password, auth::dummy_hash());
+            }
+            go(res, "/login", "!that name and password don't match")
+        }
     }
 }
 
@@ -1041,7 +1118,9 @@ struct Profile {
     standing: &'static str,
     badges: Vec<BadgeView>,
     cards: Vec<Card>,
+    cls_cards: Vec<crate::clsweb::ClsCard>,
     shared: usize,
+    shared_cls: usize,
     stars: u64,
     downloads: u64,
     own: bool,
@@ -1089,6 +1168,17 @@ fn show_profile(name: &str, depot: &Depot, res: &mut Response) {
         .collect();
     approved.sort_by(|a, b| b.stars.cmp(&a.stars).then(b.updated.cmp(&a.updated)));
     let given = hub().store.stars_given(&u.name).unwrap_or(0);
+    let all_cls = hub().store.classifiers().unwrap_or_default();
+    let their_cls: Vec<&crate::store::ClassifierRec> = all_cls
+        .iter()
+        .filter(|c| c.author.eq_ignore_ascii_case(&u.name))
+        .collect();
+    let mut cls_approved: Vec<&crate::store::ClassifierRec> = their_cls
+        .iter()
+        .copied()
+        .filter(|c| c.status == Status::Approved)
+        .collect();
+    cls_approved.sort_by(|a, b| b.stars.cmp(&a.stars).then(b.updated.cmp(&a.updated)));
     let level = game::level(u.points);
     let new_token = depot.get::<String>("new_token").cloned().unwrap_or_default();
     let tokens = if own {
@@ -1105,7 +1195,22 @@ fn show_profile(name: &str, depot: &Depot, res: &mut Response) {
     let pending = theirs
         .iter()
         .filter(|s| s.status != Status::Approved)
-        .map(|s| (s.id.clone(), s.name.clone(), status_name(s.status), s.note.clone()))
+        .map(|s| {
+            (
+                format!("/saves/{}", s.id),
+                s.name.clone(),
+                status_name(s.status),
+                s.note.clone(),
+            )
+        })
+        .chain(their_cls.iter().filter(|c| c.status != Status::Approved).map(|c| {
+            (
+                format!("/classifiers/{}", c.id),
+                format!("{} (a classifier)", c.name),
+                status_name(c.status),
+                c.note.clone(),
+            )
+        }))
         .collect();
     let no_password = u.password.is_empty();
     if !own && !admin {
@@ -1129,7 +1234,7 @@ fn show_profile(name: &str, depot: &Depot, res: &mut Response) {
             next: game::points_for(level + 1) - u.points,
             joined: ago(u.joined),
             standing: standing_name(u.standing),
-            badges: game::badges(&u, &theirs, given)
+            badges: game::badges(&u, &theirs, &their_cls, given)
                 .into_iter()
                 .map(|b| BadgeView {
                     name: b.name,
@@ -1138,9 +1243,12 @@ fn show_profile(name: &str, depot: &Depot, res: &mut Response) {
                 })
                 .collect(),
             cards: approved.iter().map(|s| card(s)).collect(),
+            cls_cards: cls_approved.iter().map(|c| crate::clsweb::cls_card(c)).collect(),
             shared: approved.len(),
-            stars: approved.iter().map(|s| s.stars).sum(),
-            downloads: approved.iter().map(|s| s.downloads).sum(),
+            shared_cls: cls_approved.len(),
+            stars: approved.iter().map(|s| s.stars).sum::<u64>() + cls_approved.iter().map(|c| c.stars).sum::<u64>(),
+            downloads: approved.iter().map(|s| s.downloads).sum::<u64>()
+                + cls_approved.iter().map(|c| c.downloads).sum::<u64>(),
             own,
             pending,
             tokens,
@@ -1363,6 +1471,8 @@ struct Admin {
     applied: Vec<AdminUser>,
     users: Vec<AdminUser>,
     all_saves: Vec<AdminSave>,
+    waiting_cls: Vec<crate::clsweb::AdminCls>,
+    all_cls: Vec<crate::clsweb::AdminCls>,
     open: bool,
 }
 
@@ -1408,6 +1518,8 @@ pub async fn admin_page(depot: &mut Depot, res: &mut Response) {
     saves.sort_by_key(|s| std::cmp::Reverse(s.updated));
     let mut users = hub().store.users().unwrap_or_default();
     users.sort_by_key(|u| u.number);
+    let mut cls = hub().store.classifiers().unwrap_or_default();
+    cls.sort_by_key(|c| std::cmp::Reverse(c.updated));
     render(
         res,
         Admin {
@@ -1428,6 +1540,12 @@ pub async fn admin_page(depot: &mut Depot, res: &mut Response) {
                 .map(admin_user)
                 .collect(),
             all_saves: saves.iter().map(admin_save).collect(),
+            waiting_cls: cls
+                .iter()
+                .filter(|c| c.status == Status::Pending)
+                .map(crate::clsweb::admin_cls)
+                .collect(),
+            all_cls: cls.iter().map(crate::clsweb::admin_cls).collect(),
             open: hub().config.open,
         },
     );
@@ -1497,12 +1615,69 @@ pub async fn admin_user_action(req: &mut Request, depot: &mut Depot, res: &mut R
 // ------------------------------------------------------------------ files
 
 #[handler]
-pub async fn css(res: &mut Response) {
+pub async fn css(req: &mut Request, res: &mut Response) {
     res.headers_mut()
         .insert(CONTENT_TYPE, HeaderValue::from_static("text/css; charset=utf-8"));
-    res.headers_mut()
-        .insert(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600"));
+    versioned(req, res, CSS_V);
     res.write_body(include_str!("../static/hub.css")).ok();
+}
+
+/// a version for each static file, from what's in it, so pages ask for `?v=` and the
+/// files can be cached for long: a new build that changes them changes the version
+const fn fnv(b: &[u8]) -> u32 {
+    let mut h: u32 = 0x811c_9dc5;
+    let mut i = 0;
+    while i < b.len() {
+        h = (h ^ b[i] as u32).wrapping_mul(0x0100_0193);
+        i += 1;
+    }
+    h
+}
+pub const CSS_V: u32 = fnv(include_bytes!("../static/hub.css"));
+pub const ICONS_V: u32 = fnv(include_bytes!("../static/icons.svg"));
+
+fn versioned(req: &Request, res: &mut Response, version: u32) {
+    // asked for with this build's version: keep it for a year; otherwise for an hour
+    let long = req.query::<String>("v") == Some(version.to_string());
+    res.headers_mut().insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static(if long {
+            "public, max-age=31536000, immutable"
+        } else {
+            "public, max-age=3600"
+        }),
+    );
+}
+
+/// an icon of the shared set (assets/icons), drawn from the sprite: in a template,
+/// `{{ crate::web::icon("star") }}`. It is only a picture: the control it sits in carries
+/// the name (its words, or an aria-label and a data-tip when it is only the icon)
+pub fn icon(name: &str) -> askama::filters::Safe<String> {
+    debug_assert!(name.bytes().all(|b| b.is_ascii_lowercase() || b == b'-'), "{name}");
+    askama::filters::Safe(format!(
+        r#"<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><use href="/static/icons.svg?v={ICONS_V}#i-{name}"/></svg>"#
+    ))
+}
+
+/// the icon beside a form's button, by what the button says
+pub fn submit_icon(submit: &str) -> &'static str {
+    match submit {
+        "save" => "save",
+        "share" => "upload",
+        "log in" => "keys",
+        _ => "new",
+    }
+}
+
+/// the shared icon set (assets/icons) as a sprite, made by hub/web/tools/icons.mjs
+#[handler]
+pub async fn icons(req: &mut Request, res: &mut Response) {
+    res.headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("image/svg+xml"));
+    res.headers_mut()
+        .insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    versioned(req, res, ICONS_V);
+    res.write_body(include_str!("../static/icons.svg")).ok();
 }
 
 #[handler]
@@ -1523,11 +1698,77 @@ pub async fn missing(depot: &mut Depot, res: &mut Response) {
 mod tests {
     use super::*;
 
+    /// a --local hub answers to loopback names, addresses and its own --url only
+    #[test]
+    fn local_hosts() {
+        let url = "http://notes.example:8080";
+        for ok in [
+            "localhost:8231",
+            "LOCALHOST",
+            "app.localhost:1",
+            "127.0.0.1:8231",
+            "[::1]:8231",
+            "192.168.1.4:80",
+            "notes.example:8080",
+            "notes.example",
+        ] {
+            assert!(local_host_ok(ok, url), "{ok}");
+        }
+        for bad in [
+            "",
+            "evil.example:8231",
+            "localhost.evil.example",
+            "127.0.0.1.nip.io:8231",
+            "notes.example.evil:8080",
+        ] {
+            assert!(!local_host_ok(bad, url), "{bad}");
+        }
+        assert!(!local_host_ok("notes.example", "http://127.0.0.1:8080"));
+    }
+
     #[test]
     fn flash_round_trip() {
         for s in ["", "plain", "!bad news: “quoted” & 100%", "%zz", "%4"] {
             assert_eq!(decode(&encode(s)), s);
         }
         assert_eq!(decode("%zz"), "%zz");
+    }
+
+    /// every icon a page asks for is in the sprite (hub/web/tools/icons.mjs makes it from
+    /// assets/icons), and the sprite is only shapes
+    #[test]
+    fn icons_in_the_sprite() {
+        let sprite = include_str!("../static/icons.svg");
+        assert!(!sprite.contains("<script") && !sprite.contains("href=") && !sprite.contains("<foreignObject"));
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/templates");
+        let mut asked = vec![];
+        for e in std::fs::read_dir(dir).unwrap() {
+            let page = std::fs::read_to_string(e.unwrap().path()).unwrap();
+            for part in page.split("crate::web::icon(\"").skip(1) {
+                asked.push(part.split('"').next().unwrap().to_string());
+            }
+        }
+        for s in ["save", "share", "log in", "join", "apply"] {
+            asked.push(submit_icon(s).to_string());
+        }
+        assert!(asked.len() > 20, "{asked:?}");
+        for name in asked {
+            assert!(
+                sprite.contains(&format!("<symbol id=\"i-{name}\"")),
+                "no icon {name} in the sprite"
+            );
+        }
+        // the sprite has the whole set: run hub/web/tools/icons.mjs when it changes
+        let set = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/icons");
+        for e in std::fs::read_dir(set).unwrap() {
+            let f = e.unwrap().file_name().into_string().unwrap();
+            if let Some(name) = f.strip_suffix(".svg") {
+                assert!(
+                    sprite.contains(&format!("<symbol id=\"i-{name}\"")),
+                    "{name} isn't in the sprite: run node hub/web/tools/icons.mjs"
+                );
+            }
+        }
+        assert!(icon("star").0.contains(&format!("icons.svg?v={ICONS_V}#i-star")));
     }
 }

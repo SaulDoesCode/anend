@@ -15,6 +15,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use crate::config::{Config, save_name};
 use crate::hub::{self, HubInfo, HubSave, Me, SavesPage, Sort, Uploaded};
+use crate::icons::Icon;
 use crate::settings::{Settings, human_size, keep_note};
 use crate::theme::colors;
 use crate::ui::{Ctx, Db, Fonts, Status, plain_scene_button, text};
@@ -100,10 +101,10 @@ impl Default for HubState {
 
 impl HubState {
     /// runs a call on its own thread; its answer turns up in `poll_hub`
-    fn run(&self, f: impl FnOnce() -> Reply + Send + 'static) {
+    fn run(&self, f: impl std::future::Future<Output = Reply> + Send + 'static) {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let _ = tx.send(f());
+            let _ = tx.send(bevy::tasks::block_on(f));
         });
     }
 
@@ -123,15 +124,19 @@ impl HubState {
         self.connecting = true;
         self.changed = true;
         let token = config.hub_token.clone();
-        self.run(move || {
-            Reply::Connected(hub::hub_info(&url).map(|info| {
-                let me = if token.is_empty() {
-                    Err("add an app token to share saves".into())
-                } else {
-                    hub::me(&url, &token)
-                };
-                (info, me)
-            }))
+        self.run(async move {
+            let info = hub::hub_info(&url).await;
+            Reply::Connected(match info {
+                Ok(info) => {
+                    let me = if token.is_empty() {
+                        Err("add an app token to share saves".into())
+                    } else {
+                        hub::me(&url, &token).await
+                    };
+                    Ok((info, me))
+                }
+                Err(e) => Err(e),
+            })
         });
         self.browse(0);
     }
@@ -148,10 +153,12 @@ impl HubState {
         self.browsing = true;
         self.changed = true;
         let (generation, q, sort) = (self.generation, self.query.clone(), self.sort);
-        self.run(move || Reply::Saves {
-            generation,
-            page,
-            result: hub::saves(&url, &q, sort, page),
+        self.run(async move {
+            Reply::Saves {
+                generation,
+                page,
+                result: hub::saves(&url, &q, sort, page).await,
+            }
         });
     }
 
@@ -163,7 +170,7 @@ impl HubState {
         self.downloading = Some(save.id.clone());
         self.browse_note.clear();
         self.changed = true;
-        self.run(move || Reply::Downloaded(hub::download(&url, &save, &dir)));
+        self.run(async move { Reply::Downloaded(hub::download(&url, &save, &dir).await) });
     }
 
     /// fetches a save into a hidden folder, to merge it into the open one
@@ -176,7 +183,7 @@ impl HubState {
         self.browse_note.clear();
         self.changed = true;
         let dir = saves_dir.join(".merging");
-        self.run(move || Reply::Fetched(hub::download(&url, &save, &dir)));
+        self.run(async move { Reply::Fetched(hub::download(&url, &save, &dir).await) });
     }
 }
 
@@ -190,7 +197,7 @@ pub fn merge_into_open(world: &mut World) {
     let result = crate::store::Store::open(&path)
         .and_then(|src| crate::forge::read(&src))
         .and_then(|c| crate::forge::write_into(&world.resource::<Db>().0, &c));
-    let _ = std::fs::remove_file(&path);
+    let _ = crate::vfs::remove(&path);
     let msg = match result {
         Ok(w) => {
             crate::settings::reload_open(world);
@@ -364,7 +371,7 @@ pub fn section() -> impl Scene {
                     on(enter_field)
                 ]
                 --
-                @plain_scene_button("connect".into(), ButtonVariant::Primary)
+                @crate::icons::icon_label_button(Icon::Hub, "connect".into(), ButtonVariant::Primary)
                 on(|_a: On<Activate>, mut hub: ResMut<HubState>, mut config: ResMut<Config>| {
                     hub.connect(&mut config);
                 })
@@ -390,7 +397,7 @@ pub fn section() -> impl Scene {
                     on(enter_field)
                 ]
                 --
-                @plain_scene_button("search".into(), ButtonVariant::Normal)
+                @crate::icons::icon_button(Icon::Search, "search the hub")
                 on(|_a: On<Activate>, mut hub: ResMut<HubState>| hub.browse(0))
             ]
             --
@@ -456,7 +463,8 @@ pub fn section() -> impl Scene {
                     on(edit_field)
                 ]
                 --
-                @plain_scene_button("upload".into(), ButtonVariant::Primary)
+                @crate::icons::icon_label_button(Icon::Upload, "upload".into(), ButtonVariant::Primary)
+                crate::icons::Tip({"share this save on the hub".to_string()})
                 on(upload)
             ]
             --
@@ -506,7 +514,7 @@ fn upload(_a: On<Activate>, mut ctx: Ctx, mut hub: ResMut<HubState>, config: Res
             hub.share_name.clone()
         };
         let (description, tags) = (hub.share_description.clone(), hub.share_tags.clone());
-        hub.run(move || Reply::Uploaded(hub::upload(&url, &token, &name, &description, &tags, &bytes)));
+        hub.run(async move { Reply::Uploaded(hub::upload(&url, &token, &name, &description, &tags, &bytes).await) });
     });
 }
 
@@ -603,6 +611,21 @@ fn clip(s: &str, n: usize) -> String {
 
 fn plural(n: u64, one: &str, many: &str) -> String {
     format!("{} {}", n, if n == 1 { one } else { many })
+}
+
+/// an icon button, or "…" while what it started is under way
+fn icon_or_wait(commands: &mut Commands, parent: Entity, busy: bool, icon: Icon, tip: &str) -> Entity {
+    if busy {
+        return button(commands, parent, "…", ButtonVariant::Normal);
+    }
+    commands
+        .spawn_scene(crate::icons::icon_scene_button(
+            icon,
+            tip.to_string(),
+            ButtonVariant::Normal,
+        ))
+        .insert(ChildOf(parent))
+        .id()
 }
 
 fn button(commands: &mut Commands, parent: Entity, label: &str, variant: ButtonVariant) -> Entity {
@@ -750,25 +773,43 @@ pub fn rebuild_hub(
             ))
             .id();
         let busy = hub.downloading.as_ref() == Some(&save.id);
-        let b = button(
-            &mut commands,
-            foot,
-            if busy { "…" } else { "download" },
-            ButtonVariant::Normal,
-        );
-        let stats = format!(
-            "{} · {}",
-            plural(save.stars, "star", "stars"),
-            plural(save.downloads, "download", "downloads")
-        );
+        let b = icon_or_wait(&mut commands, foot, busy, Icon::Download, "download as a new save");
         let merging = hub.merging.as_ref() == Some(&save.id);
-        let m = button(
-            &mut commands,
-            foot,
-            if merging { "…" } else { "merge" },
-            ButtonVariant::Normal,
-        );
-        text(&mut commands, foot, &stats, &fonts.regular, 12.0, colors::TEXT_DIM);
+        let m = icon_or_wait(&mut commands, foot, merging, Icon::Merge, "merge into the open save");
+        commands.spawn((
+            Node {
+                flex_grow: 1.0,
+                ..default()
+            },
+            ChildOf(foot),
+        ));
+        // its stars and downloads, as counts beside their icons
+        for (icon, n, one, many) in [
+            (Icon::Star, save.stars, "star", "stars"),
+            (Icon::Download, save.downloads, "download", "downloads"),
+        ] {
+            let stat = commands
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: px(3),
+                        ..default()
+                    },
+                    crate::icons::Tip(plural(n, one, many)),
+                    ChildOf(foot),
+                ))
+                .id();
+            crate::icons::spawn_icon(&mut commands, stat, icon, 13.0, colors::TEXT_DIM);
+            text(
+                &mut commands,
+                stat,
+                &n.to_string(),
+                &fonts.regular,
+                12.0,
+                colors::TEXT_DIM,
+            );
+        }
         let for_merge = save.clone();
         let save = save.clone();
         commands.entity(b).observe(

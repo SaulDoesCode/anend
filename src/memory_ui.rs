@@ -531,6 +531,7 @@ pub fn rebuild_results(
     main: Single<(Entity, &mut BackgroundColor), With<MemMain>>,
     mut view: Single<&mut BackgroundColor, (With<MemoryView>, Without<MemMain>)>,
     serif: Res<SerifFont>,
+    tints: Res<crate::tint::Tints>,
     mut commands: Commands,
 ) {
     if !mem.state.redraw_results {
@@ -539,7 +540,14 @@ pub fn rebuild_results(
     mem.state.redraw_results = false;
     let white = mem.state.white;
     let (main, mut main_bg) = main.into_inner();
-    main_bg.0 = if white { WHITE } else { MAIN_BG };
+    let empty = mem.state.header.is_none() && mem.state.results.is_empty();
+    main_bg.0 = if empty {
+        Color::NONE
+    } else if white {
+        WHITE
+    } else {
+        MAIN_BG
+    };
     view.0 = if white { WHITE } else { BLACK };
     commands.entity(main).despawn_related::<Children>();
 
@@ -600,6 +608,30 @@ pub fn rebuild_results(
         }
     }
 
+    // nothing searched yet: say how to start, rather than show an empty page
+    if empty {
+        let dim = fg(white).with_alpha(0.55);
+        for (line, size) in [
+            ("type in the bar below", 20.0),
+            (
+                "a number gsearches it in the bucket · text finds what sums the same · \
+                 Shift+Enter remembers it under a key · Ctrl+Enter saturates it",
+                14.0,
+            ),
+        ] {
+            commands.spawn((
+                serif_text(line, size, dim, &serif),
+                Node {
+                    width: percent(100),
+                    margin: UiRect::top(px(if size > 15.0 { 0.0 } else { 6.0 })),
+                    ..default()
+                },
+                TextLayout::justify(Justify::Center),
+                ChildOf(main),
+            ));
+        }
+    }
+
     // which texts share a reversed sum with something else in the database
     let measures: Vec<_> = mem.state.results.iter().map(|h| measure(&h.text)).collect();
     let sums: Vec<u32> = measures.iter().map(|m| m.reversed).collect();
@@ -612,20 +644,31 @@ pub fn rebuild_results(
         } else {
             hit.text.clone()
         };
+        // coloured by a classifier: a bar of its class's colour at the left
+        let tint = tints.color(&hit.r.label());
+        let under = if shared {
+            underline_color(m.ordinal, m.reversed)
+        } else {
+            Color::NONE
+        };
         let article = commands
             .spawn((
                 Node {
                     padding: UiRect::axes(px(7), px(4)),
                     margin: UiRect::all(px(0.51)),
                     max_width: percent(95),
-                    border: UiRect::bottom(px(if shared { 3.0 } else { 0.0 })),
+                    border: UiRect {
+                        bottom: px(if shared { 3.0 } else { 0.0 }),
+                        left: px(if tint.is_some() { 6.0 } else { 0.0 }),
+                        ..default()
+                    },
                     ..default()
                 },
-                BorderColor::all(if shared {
-                    underline_color(m.ordinal, m.reversed)
-                } else {
-                    Color::NONE
-                }),
+                BorderColor {
+                    bottom: under,
+                    left: tint.map(|(c, s)| c.with_alpha(0.35 + 0.65 * s)).unwrap_or(Color::NONE),
+                    ..BorderColor::all(under)
+                },
                 BackgroundColor(if white { WHITE } else { ARTICLE_BG }),
                 UiTransform::IDENTITY,
                 Article(hit.clone()),
@@ -835,8 +878,15 @@ pub fn rebuild_chrome(
             on,
             &serif,
         );
+        let (key, tip) = match bucket {
+            Bucket::Ordinal => (Action::BucketOrdinal, "list memories by their ordinal sums"),
+            Bucket::Reversed => (Action::BucketReversed, "list memories by their reversed sums"),
+            Bucket::Atbash => (Action::BucketAtbash, "list memories by their atbash sums"),
+            Bucket::Frequency => (Action::BucketFrequency, "list memories by their letters"),
+        };
         commands
             .entity(e)
+            .insert((crate::icons::Tip(tip.into()), crate::icons::TipKey(key)))
             .observe(move |_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {
                 mem.bucket = bucket;
                 mem.redraw_chrome = true;
@@ -845,7 +895,13 @@ pub fn rebuild_chrome(
     let toggle = |commands: &mut Commands, label: &str, on: bool| {
         clickable_text(commands, side, label.into(), if on { color } else { dim }, on, &serif)
     };
+    let tip = |commands: &mut Commands, e: Entity, tip: &str, key: Action| {
+        commands
+            .entity(e)
+            .insert((crate::icons::Tip(tip.into()), crate::icons::TipKey(key)));
+    };
     let g = toggle(&mut commands, "gsearch text", mem.gsearch_text);
+    tip(&mut commands, g, "also gsearch what's typed", Action::ToggleGsearch);
     commands
         .entity(g)
         .observe(|_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {
@@ -853,6 +909,12 @@ pub fn rebuild_chrome(
             mem.redraw_chrome = true;
         });
     let s = toggle(&mut commands, "saturate", mem.also_saturate);
+    tip(
+        &mut commands,
+        s,
+        "searches saturate: each found memory searches on",
+        Action::ToggleSaturate,
+    );
     commands
         .entity(s)
         .observe(|_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {
@@ -860,6 +922,7 @@ pub fn rebuild_chrome(
             mem.redraw_chrome = true;
         });
     let w = toggle(&mut commands, "white", mem.white);
+    tip(&mut commands, w, "white mode: dark text on white", Action::WhiteMode);
     commands
         .entity(w)
         .observe(|_c: On<PointerClick>, mut mem: ResMut<MemoryState>| {

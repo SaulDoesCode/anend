@@ -334,7 +334,7 @@ pub fn menu() -> impl Scene {
 }
 
 fn same(a: &Path, b: &Path) -> bool {
-    a == b || std::fs::canonicalize(a).ok() == std::fs::canonicalize(b).ok()
+    crate::vfs::same(a, b)
 }
 
 /// what a save holds: the open one from the open store, others read once
@@ -406,7 +406,7 @@ fn forge_new(
             msg
         }
         Err(e) => {
-            let _ = std::fs::remove_file(&path);
+            let _ = crate::vfs::remove(&path);
             format!("couldn't forge it: {e}")
         }
     };
@@ -503,13 +503,10 @@ pub fn rebuild_forge(
     }
     let (saves_box, ingredients_box, result_box, kinds_box) = (*parts.0, *parts.1, *parts.2, *parts.3);
     if std::mem::take(&mut f.fill_inputs) {
-        f.saves = std::fs::read_dir(&config.saves_dir)
-            .map(|rd| {
-                rd.filter_map(|e| e.ok().map(|e| e.path()))
-                    .filter(|p| p.extension().is_some_and(|x| x == "redb"))
-                    .collect()
-            })
-            .unwrap_or_default();
+        f.saves = crate::vfs::list(&config.saves_dir)
+            .into_iter()
+            .filter(|p| p.extension().is_some_and(|x| x == "redb"))
+            .collect();
         if !f.saves.iter().any(|p| same(p, db.0.path())) {
             f.saves.push(db.0.path().to_path_buf());
         }

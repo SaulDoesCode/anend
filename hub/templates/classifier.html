@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} · {% endblock %}
+{% block main %}
+<div class="savepage cls">
+  <section class="card">
+    <h1>{{ c.name }}</h1>
+    <p class="dim small">a classifier by <a href="/u/{{ c.author }}">{{ c.author }}</a> · version {{ c.version }} · updated {{ updated }} · shared {{ created }} · {{ size }}
+    {% if status != "approved" %} · <span class="pill {{ status }}">{{ status }}</span>{% endif %}</p>
+    {% if !c.note.is_empty() %}<div class="flash bad">the admins said: {{ c.note }}</div>{% endif %}
+    {% if !c.description.is_empty() %}<p style="white-space: pre-wrap">{{ c.description }}</p>{% endif %}
+    {% if !c.tags.is_empty() %}<p class="tags">{% for t in c.tags %}<a class="tag" href="/classifiers?q=%23{{ t }}">#{{ t }}</a>{% endfor %}</p>{% endif %}
+    <h3>its {{ c.classes.len() }} classes</h3>
+    <div class="chips big">{% for k in c.classes %}<span class="chip">{{ k }}</span>{% endfor %}</div>
+    <p class="dim small">Taken into a save, each class goes to the list of that name (a new list when there's none).</p>
+    <h3>how it does</h3>
+    <table class="facts">
+      <tr><th>right</th><td>{% if accuracy.is_empty() %}<span class="dim">not measured</span>{% else %}{{ accuracy }}{% endif %}</td></tr>
+      <tr><th>macro F1</th><td>{% if macro_f1.is_empty() %}<span class="dim">—</span>{% else %}{{ macro_f1 }}{% endif %}</td></tr>
+      <tr><th>examples</th><td>{{ c.examples }}{% if !c.measured_on.is_empty() %} <span class="dim small">measured on {{ c.measured_on }}</span>{% endif %}</td></tr>
+    </table>
+    <h3>inside</h3>
+    <table class="facts">
+      <tr><th>preset</th><td>{{ c.preset }}</td></tr>
+      <tr><th>head</th><td>{{ c.head }}</td></tr>
+      <tr><th>weights</th><td>{{ weights }}</td></tr>
+      <tr><th>its own name</th><td>{{ c.module }}</td></tr>
+      <tr><th>weights hash</th><td><code>{{ c.hash }}</code></td></tr>
+      {% if !c.upstream.is_empty() %}<tr><th>builds on</th><td>{% for u in c.upstream %}<span class="chip">{{ u.0 }}{% if !u.1 %} · not bundled{% endif %}</span> {% endfor %}</td></tr>{% endif %}
+    </table>
+    {% if !missing.is_empty() %}<p class="flash bad small">It builds on classifiers it doesn't carry ({% for m in missing %}{{ m }}{% if !loop.last %}, {% endif %}{% endfor %}): a save needs those already to take it.</p>{% endif %}
+  </section>
+  <aside style="display:flex; flex-direction:column; gap:8px">
+    <div class="sigil" style="--h: {{ hue }}"><span class="n">{{ c.classes.len() }}<small> classes</small></span><span class="r">{% if !accuracy.is_empty() %}{{ accuracy }} right{% else %}{{ c.preset }}{% endif %}</span></div>
+    <section class="card">
+      <div class="stats" style="margin-bottom: 10px">
+        <div class="stat"><b>{{ c.stars }}</b><span>stars</span></div>
+        <div class="stat"><b>{{ c.downloads }}</b><span>taken</span></div>
+        <div class="stat"><b>{{ weights }}</b><span>weights</span></div>
+      </div>
+      <div class="row">
+        {% if can_take %}<button class="primary with-text" id="take" data-id="{{ c.id }}">{{ crate::web::icon("download") }}take into my save</button>{% endif %}
+        <a class="btn with-text{% if !can_take %} primary{% endif %}" href="/classifiers/{{ c.id }}/download" download data-tip="download it as a .anendcls file">{{ crate::web::icon("download") }}download</a>
+        {% if can_star %}<form class="inline" method="post" action="/classifiers/{{ c.id }}/star"><button class="with-text{% if starred %} on-star{% endif %}" aria-pressed="{% if starred %}true{% else %}false{% endif %}" data-tip="{% if starred %}starred: click to take your star back{% else %}star it: tell its maker you like it{% endif %}">{{ crate::web::icon("star") }}{% if starred %}starred{% else %}star{% endif %}</button></form>{% endif %}
+      </div>
+      <p class="dim small" id="took">{% if can_take %}“Take” puts it in the save open in <a href="/app/">the app</a> here. {% endif %}Or download the .anendcls and import it in the app's classifiers view.</p>
+    </section>
+    {% if can_edit %}
+    <section class="card">
+      <h3>{% if is_admin %}admin{% else %}yours{% endif %}</h3>
+      <div class="row">
+        <a class="btn small with-text" href="/classifiers/{{ c.id }}/edit" data-tip="edit it, or send a new version">{{ crate::web::icon("edit") }}edit</a>
+        <form class="inline" method="post" action="/classifiers/{{ c.id }}/delete" onsubmit="return confirm('Delete this classifier for good?')"><button class="small bad ibtn" data-tip="delete this classifier for good" aria-label="delete this classifier for good">{{ crate::web::icon("delete") }}</button></form>
+      </div>
+      {% if is_admin %}
+      <div class="row" style="margin-top: 8px">
+        {% if status != "approved" %}<form class="inline" method="post" action="/admin/classifiers/{{ c.id }}"><input type="hidden" name="action" value="approve"><button class="small primary with-text">{{ crate::web::icon("check") }}approve</button></form>{% endif %}
+        {% if status == "approved" %}<form class="inline" method="post" action="/admin/classifiers/{{ c.id }}"><input type="hidden" name="action" value="{% if c.featured %}unfeature{% else %}feature{% endif %}"><button class="small with-text" data-tip="{% if c.featured %}stop featuring it{% else %}feature it: it shows among the featured{% endif %}">{{ crate::web::icon("pin") }}{% if c.featured %}unfeature{% else %}feature{% endif %}</button></form>{% endif %}
+      </div>
+      {% if status != "rejected" %}
+      <form class="row" style="margin-top: 8px" method="post" action="/admin/classifiers/{{ c.id }}"><input type="text" name="note" placeholder="why not" style="flex:1"><button class="small bad with-text" name="action" value="reject">{{ crate::web::icon("close") }}turn down</button></form>
+      {% endif %}
+      {% endif %}
+    </section>
+    {% endif %}
+  </aside>
+</div>
+{% if can_take %}
+<script>
+document.getElementById('take').addEventListener('click', async (e) => {
+  const b = e.currentTarget, out = document.getElementById('took');
+  b.disabled = true;
+  try {
+    const r = await fetch('/app/classifiers/' + b.dataset.id + '/take', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const j = await r.json();
+    out.textContent = j.ok ? 'In your save “' + j.data.save + '” as “' + j.data.name + '”.' : 'Couldn’t take it: ' + j.error;
+  } catch (err) {
+    out.textContent = 'Couldn’t take it: ' + err;
+  }
+  b.disabled = false;
+});
+</script>
+{% endif %}
+{% endblock %}

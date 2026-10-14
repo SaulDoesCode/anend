@@ -35,7 +35,7 @@ pub enum FontTarget {
 pub struct SaveInfo {
     pub path: PathBuf,
     pub counts: Option<(u64, u64)>,
-    pub modified: Option<std::time::SystemTime>,
+    pub modified: Option<chrono::DateTime<chrono::Local>>,
     pub size: u64,
     pub current: bool,
 }
@@ -290,19 +290,31 @@ pub fn menu() -> impl Scene {
                     TextColor(colors::TEXT)
                     Node { flex_grow: 1.0 }
                     --
-                    @crate::ui::plain_scene_button("forge".into(), ButtonVariant::Normal)
+                    @crate::icons::icon_button(crate::icons::Icon::Forge, "the forge: build a save from lists and texts")
                     on(|_a: On<Activate>, mut forge: ResMut<crate::forge_ui::ForgeState>, mut s: ResMut<Settings>| {
                         s.toggle();
                         forge.toggle();
                     })
                     --
-                    @crate::ui::plain_scene_button("keys".into(), ButtonVariant::Normal)
+                    @crate::icons::icon_label_button(crate::icons::Icon::Help, "guide".to_string(), ButtonVariant::Normal)
+                    crate::icons::Tip({"the guide: what each part does and how to use it (opens in the browser)".to_string()})
+                    on(|_a: On<Activate>, config: Res<Config>, mut status: ResMut<Status>, time: Res<Time>| {
+                        let url = crate::hub::guide_url(&config.hub_url);
+                        status.text = match crate::hub::open_url(&url) {
+                            Ok(()) => format!("opening the guide: {}", url),
+                            Err(e) => format!("{} · the guide is at {}", e, url),
+                        };
+                        status.until = time.elapsed_secs_f64() + 8.0;
+                    })
+                    --
+                    @crate::icons::icon_button(crate::icons::Icon::Keys, "keys: rebind any action")
+                    crate::icons::TipKey({crate::keys::Action::OpenRemap})
                     on(|_a: On<Activate>, mut remap: ResMut<crate::keys::Remap>| {
                         remap.open = true;
                         remap.changed = true;
                     })
                     --
-                    @crate::ui::plain_scene_button("close".into(), ButtonVariant::Primary)
+                    @crate::icons::icon_button(crate::icons::Icon::Close, "close the settings (Escape)")
                     on(|_a: On<Activate>, mut s: ResMut<Settings>| s.toggle())
                 ]
                 --
@@ -536,20 +548,17 @@ pub fn menu() -> impl Scene {
 
 fn scan(config: &Config, db: &Store) -> Vec<SaveInfo> {
     let current = db.path().to_path_buf();
-    let mut paths: Vec<PathBuf> = std::fs::read_dir(&config.saves_dir)
-        .map(|rd| {
-            rd.filter_map(|e| e.ok().map(|e| e.path()))
-                .filter(|p| p.extension().is_some_and(|x| x == "redb"))
-                .collect()
-        })
-        .unwrap_or_default();
+    let mut paths: Vec<PathBuf> = crate::vfs::list(&config.saves_dir)
+        .into_iter()
+        .filter(|p| p.extension().is_some_and(|x| x == "redb"))
+        .collect();
     if !paths.iter().any(|p| same(p, &current)) {
         paths.push(current.clone());
     }
     let mut saves: Vec<SaveInfo> = paths
         .into_iter()
         .map(|path| {
-            let meta = std::fs::metadata(&path).ok();
+            let meta = crate::vfs::meta(&path);
             let is_current = same(&path, &current);
             SaveInfo {
                 counts: if is_current {
@@ -557,8 +566,8 @@ fn scan(config: &Config, db: &Store) -> Vec<SaveInfo> {
                 } else {
                     Store::summary(&path)
                 },
-                modified: meta.as_ref().and_then(|m| m.modified().ok()),
-                size: meta.map(|m| m.len()).unwrap_or(0),
+                modified: meta.as_ref().and_then(|m| m.modified),
+                size: meta.map(|m| m.len).unwrap_or(0),
                 current: is_current,
                 path,
             }
@@ -570,7 +579,7 @@ fn scan(config: &Config, db: &Store) -> Vec<SaveInfo> {
 }
 
 fn same(a: &Path, b: &Path) -> bool {
-    a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y)
+    crate::vfs::same(a, b)
 }
 
 pub(crate) fn human_size(n: u64) -> String {
@@ -616,14 +625,20 @@ pub fn switch_save(world: &mut World, path: PathBuf) {
         Ok(s) => s,
         Err(e) => return say(world, format!("couldn't open {}: {}", path.display(), e)),
     };
-    install(world, store);
+    install(world, std::sync::Arc::new(store));
     say(world, format!("loaded {}", save_name(&path)));
 }
 
 /// puts a store in place of the open one and resets what was read from the old one
-fn install(world: &mut World, store: Store) {
+fn install(world: &mut World, store: std::sync::Arc<Store>) {
     let path = store.path().to_path_buf();
     let notes = store.all().unwrap_or_default();
+    // jobs on the old save stop, and what they'd bring back is dropped
+    world.resource_mut::<crate::jobs::Work>().new_save();
+    world.insert_resource(crate::classify_ui::ClsState::default());
+    world.insert_resource(crate::filters_ui::FiltersState::default());
+    world.resource_mut::<crate::tint::Tints>().reset();
+    world.insert_resource(crate::index_panel::IndexPanel::default());
     world.insert_resource(Db(store));
     {
         let mut session = world.resource_mut::<Session>();
@@ -671,7 +686,7 @@ fn use_folder(commands: &mut Commands, ctx: &mut Ctx, s: &mut Settings, config: 
         commands.queue(move |w: &mut World| switch_save(w, path));
         return;
     }
-    if let Err(e) = std::fs::create_dir_all(&path) {
+    if let Err(e) = crate::vfs::create_dir_all(&path) {
         ctx.say(format!("can't use {}: {}", path.display(), e));
         return;
     }
@@ -693,7 +708,7 @@ fn shellexpand(p: &str) -> String {
 pub(crate) fn unique(dir: &Path, name: &str) -> PathBuf {
     let mut p = dir.join(format!("{}.redb", name));
     let mut i = 2;
-    while p.exists() {
+    while crate::vfs::meta(&p).is_some() {
         p = dir.join(format!("{} {}.redb", name, i));
         i += 1;
     }
@@ -703,7 +718,7 @@ pub(crate) fn unique(dir: &Path, name: &str) -> PathBuf {
 fn duplicate(world: &mut World, path: PathBuf) {
     let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
     let to = unique(&dir, &format!("{} copy", save_name(&path)));
-    match std::fs::copy(&path, &to) {
+    match crate::vfs::copy(&path, &to) {
         Ok(_) => say(world, format!("copied {} to {}", save_name(&path), save_name(&to))),
         Err(e) => say(world, format!("couldn't copy {}: {}", save_name(&path), e)),
     }
@@ -715,16 +730,20 @@ fn rename(world: &mut World, path: PathBuf, name: String) {
         return say(world, "a save needs a name");
     };
     let to = path.with_file_name(format!("{}.redb", name));
-    if to.exists() {
+    if crate::vfs::meta(&to).is_some() {
         return say(world, format!("there's already a save called {}", name));
     }
     let current = same(world.resource::<Db>().0.path(), &path);
+    if current && std::sync::Arc::strong_count(&world.resource::<Db>().0) > 1 {
+        return say(world, "a classifier is busy with this save; rename it when it's done");
+    }
     if current {
-        // redb holds the file while it's open
+        // redb holds the file while it's open; jobs holding it stop
+        world.resource_mut::<crate::jobs::Work>().new_save();
         let db = world.remove_resource::<Db>();
         drop(db);
     }
-    let moved = std::fs::rename(&path, &to);
+    let moved = crate::vfs::rename(&path, &to);
     if current {
         let path = if moved.is_ok() { &to } else { &path };
         if let Err(e) = reopen(world, path) {
@@ -743,7 +762,7 @@ fn rename(world: &mut World, path: PathBuf, name: String) {
 fn reopen(world: &mut World, path: &Path) -> Result<(), String> {
     match Store::open(path) {
         Ok(store) => {
-            world.insert_resource(Db(store));
+            world.insert_resource(Db::new(store));
             let mut config = world.resource_mut::<Config>();
             config.current = Some(path.to_path_buf());
             config.save();
@@ -752,7 +771,7 @@ fn reopen(world: &mut World, path: &Path) -> Result<(), String> {
         Err(e) => {
             let fresh = unique(&world.resource::<Config>().saves_dir.clone(), "recovered");
             if let Ok(store) = Store::open(&fresh) {
-                install(world, store);
+                install(world, std::sync::Arc::new(store));
             }
             Err(format!("couldn't reopen the save: {}", e))
         }
@@ -763,11 +782,14 @@ fn reopen(world: &mut World, path: &Path) -> Result<(), String> {
 /// (and marks it unfinished) while it's open, then opened again
 pub(crate) fn read_open_save(world: &mut World, max: u64) -> Result<(String, Vec<u8>), String> {
     let path = world.resource::<Db>().0.path().to_path_buf();
-    if std::fs::metadata(&path).is_ok_and(|m| m.len() > max) {
+    if std::sync::Arc::strong_count(&world.resource::<Db>().0) > 1 {
+        return Err("a classifier is busy with this save; try again when it's done".into());
+    }
+    if crate::vfs::meta(&path).is_some_and(|m| m.len > max) {
         return Err(format!("this save is over {}", human_size(max)));
     }
     drop(world.remove_resource::<Db>());
-    let bytes = std::fs::read(&path).map_err(|e| format!("couldn't read the save: {}", e));
+    let bytes = crate::vfs::read(&path).map_err(|e| format!("couldn't read the save: {}", e));
     reopen(world, &path)?;
     bytes.map(|b| (save_name(&path), b))
 }
@@ -777,7 +799,7 @@ fn delete(world: &mut World, path: PathBuf) {
         return say(world, "load another save before deleting this one");
     }
     world.resource_mut::<Settings>().confirm_delete = None;
-    match std::fs::remove_file(&path) {
+    match crate::vfs::remove(&path) {
         Ok(()) => say(world, format!("deleted {}", save_name(&path))),
         Err(e) => say(world, format!("couldn't delete {}: {}", save_name(&path), e)),
     }
@@ -797,6 +819,23 @@ fn button(
     f: impl FnOnce(&mut EntityCommands),
 ) {
     let mut e = commands.spawn_scene(plain_scene_button(label.to_string(), variant));
+    e.insert(ChildOf(parent));
+    f(&mut e);
+}
+
+/// an icon button, its name in a tooltip
+fn icon_btn(
+    commands: &mut Commands,
+    parent: Entity,
+    icon: crate::icons::Icon,
+    tip: &str,
+    f: impl FnOnce(&mut EntityCommands),
+) {
+    let mut e = commands.spawn_scene(crate::icons::icon_scene_button(
+        icon,
+        tip.to_string(),
+        ButtonVariant::Normal,
+    ));
     e.insert(ChildOf(parent));
     f(&mut e);
 }
@@ -956,11 +995,7 @@ pub fn rebuild_settings(
             };
             let when = save
                 .modified
-                .map(|t| {
-                    chrono::DateTime::<chrono::Local>::from(t)
-                        .format("%Y-%m-%d %H:%M")
-                        .to_string()
-                })
+                .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
                 .unwrap_or_default();
             small(
                 &mut commands,
@@ -1014,29 +1049,41 @@ pub fn rebuild_settings(
             });
         }
         let p = path.clone();
-        button(&mut commands, card, "copy", ButtonVariant::Normal, |e| {
+        icon_btn(&mut commands, card, crate::icons::Icon::Copy, "copy this save", |e| {
             e.observe(move |_a: On<Activate>, mut commands: Commands| {
                 let p = p.clone();
                 commands.queue(move |w: &mut World| duplicate(w, p));
             });
         });
         let p = path.clone();
-        button(&mut commands, card, "rename", ButtonVariant::Normal, |e| {
-            e.observe(move |_a: On<Activate>, mut s: ResMut<Settings>| {
-                s.renaming = Some(p.clone());
-                s.confirm_delete = None;
-                s.changed = true;
-            });
-        });
-        if !save.current {
-            let p = path.clone();
-            button(&mut commands, card, "delete", ButtonVariant::Normal, |e| {
+        icon_btn(
+            &mut commands,
+            card,
+            crate::icons::Icon::Rename,
+            "rename this save",
+            |e| {
                 e.observe(move |_a: On<Activate>, mut s: ResMut<Settings>| {
-                    s.confirm_delete = Some(p.clone());
-                    s.renaming = None;
+                    s.renaming = Some(p.clone());
+                    s.confirm_delete = None;
                     s.changed = true;
                 });
-            });
+            },
+        );
+        if !save.current {
+            let p = path.clone();
+            icon_btn(
+                &mut commands,
+                card,
+                crate::icons::Icon::Delete,
+                "delete this save",
+                |e| {
+                    e.observe(move |_a: On<Activate>, mut s: ResMut<Settings>| {
+                        s.confirm_delete = Some(p.clone());
+                        s.renaming = None;
+                        s.changed = true;
+                    });
+                },
+            );
         }
     }
 
@@ -1309,13 +1356,55 @@ pub fn rebuild_settings(
     let list = toggle(
         &mut commands,
         toggles,
-        "slide the note list away until the pointer comes to the left edge",
+        "slide the note list away until the pointer comes to its edge of the window",
         config.hide_list,
         &fonts,
     );
     commands.entity(list).observe(
         |_c: On<PointerClick>, mut config: ResMut<Config>, mut s: ResMut<Settings>| {
             config.hide_list = !config.hide_list;
+            config.save();
+            s.changed = true;
+        },
+    );
+    let swapped = toggle(
+        &mut commands,
+        toggles,
+        "the top bar at the bottom, and the command bar at the top",
+        config.bars_swapped,
+        &fonts,
+    );
+    commands.entity(swapped).observe(
+        |_c: On<PointerClick>, mut config: ResMut<Config>, mut s: ResMut<Settings>| {
+            config.bars_swapped = !config.bars_swapped;
+            config.save();
+            s.changed = true;
+        },
+    );
+    let right = toggle(
+        &mut commands,
+        toggles,
+        "the note list on the right",
+        config.list_right,
+        &fonts,
+    );
+    commands.entity(right).observe(
+        |_c: On<PointerClick>, mut config: ResMut<Config>, mut s: ResMut<Settings>| {
+            config.list_right = !config.list_right;
+            config.save();
+            s.changed = true;
+        },
+    );
+    let highlight = toggle(
+        &mut commands,
+        toggles,
+        "colour the markdown in the editor (headings, emphasis, code, links, tags...)",
+        config.highlight,
+        &fonts,
+    );
+    commands.entity(highlight).observe(
+        |_c: On<PointerClick>, mut config: ResMut<Config>, mut s: ResMut<Settings>| {
+            config.highlight = !config.highlight;
             config.save();
             s.changed = true;
         },

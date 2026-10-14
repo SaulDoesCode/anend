@@ -15,28 +15,33 @@
     {% if !u.bio.is_empty() %}<p style="white-space: pre-wrap; margin-top: 12px">{{ u.bio }}</p>{% endif %}
     {% if !badges.is_empty() %}
     <h3 style="margin-top: 14px">badges</h3>
-    <div class="badges">{% for b in badges %}<span class="badge" title="{{ b.about }}"><b>{{ b.glyph }}</b>{{ b.name }}</span>{% endfor %}</div>
+    <div class="badges">{% for b in badges %}<span class="badge" tabindex="0" data-tip="{{ b.about }}"><b>{{ b.glyph }}</b>{{ b.name }}</span>{% endfor %}</div>
     {% endif %}
   </section>
   <section class="card">
     <div class="stats">
       <div class="stat"><b>{{ shared }}</b><span>saves</span></div>
+      <div class="stat"><b>{{ shared_cls }}</b><span>classifiers</span></div>
       <div class="stat"><b>{{ stars }}</b><span>stars</span></div>
       <div class="stat"><b>{{ downloads }}</b><span>downloads</span></div>
     </div>
-    <p class="dim small" style="margin-top: 10px">Points: {{ approved_pts }} for each save let in, {{ star_pts }} a star, {{ download_pts }} each person who takes one, {{ featured_pts }} when one is featured, {{ curate_pts }} for each save you star.</p>
+    <p class="dim small" style="margin-top: 10px">Points: {{ approved_pts }} for each save or classifier let in, {{ star_pts }} a star, {{ download_pts }} each person who takes one, {{ featured_pts }} when one is featured, {{ curate_pts }} for each save you star.</p>
   </section>
 </div>
 {% if cards.is_empty() %}
-<section class="card dim">No saves shared yet.</section>
+{% if cls_cards.is_empty() %}<section class="card dim">Nothing shared yet.</section>{% endif %}
 {% else %}
 <section class="grid">{% for c in cards %}{% include "card.html" %}{% endfor %}</section>
+{% endif %}
+{% if !cls_cards.is_empty() %}
+<h3 class="with-icon" style="color: var(--bar-text); margin: 6px 4px 0">{{ crate::web::icon("classifier") }}classifiers</h3>
+<section class="grid">{% for c in cls_cards %}{% include "clscard.html" %}{% endfor %}</section>
 {% endif %}
 {% if own %}
 {% if !pending.is_empty() %}
 <section class="card">
   <h3>waiting or turned down</h3>
-  <table>{% for p in pending %}<tr><td><a href="/saves/{{ p.0 }}">{{ p.1 }}</a></td><td><span class="pill {{ p.2 }}">{{ p.2 }}</span></td><td class="dim small">{{ p.3 }}</td></tr>{% endfor %}</table>
+  <table>{% for p in pending %}<tr><td><a href="{{ p.0 }}">{{ p.1 }}</a></td><td><span class="pill {{ p.2 }}">{{ p.2 }}</span></td><td class="dim small">{{ p.3 }}</td></tr>{% endfor %}</table>
 </section>
 {% endif %}
 <div class="cols">
@@ -49,16 +54,16 @@
       <input id="email" name="email" type="email" value="{{ u.email }}" style="width:100%">
       <label for="password">{% if no_password %}set a password, so you can log in without a link{% else %}new password (leave empty to keep yours){% endif %}</label>
       <input id="password" name="password" type="password" style="width:100%" autocomplete="new-password">
-      <p><button class="primary">save</button></p>
+      <p><button class="primary with-text">{{ crate::web::icon("save") }}save</button></p>
     </form>
   </section>
   <section class="card">
     <h3>app tokens</h3>
     <p class="dim small">The app shares and browses saves with a token: make one, paste it in the app (settings → hub). It's shown once.</p>
     {% if !new_token.is_empty() %}<p class="token">{{ new_token }}</p>{% endif %}
-    <form class="row" method="post" action="/me/tokens"><input type="text" name="label" placeholder="what it's for, e.g. laptop" style="flex:1"><button>make a token</button></form>
+    <form class="row" method="post" action="/me/tokens"><input type="text" name="label" placeholder="what it's for, e.g. laptop" style="flex:1"><button class="with-text">{{ crate::web::icon("keys") }}make a token</button></form>
     {% if !tokens.is_empty() %}
-    <table style="margin-top: 8px">{% for t in tokens %}<tr><td>{{ t.1 }}</td><td class="dim small">{{ t.2 }}… · {{ t.3 }}</td><td><form class="inline" method="post" action="/me/tokens/{{ t.0 }}/revoke"><button class="small bad">revoke</button></form></td></tr>{% endfor %}</table>
+    <table style="margin-top: 8px">{% for t in tokens %}<tr><td>{{ t.1 }}</td><td class="dim small">{{ t.2 }}… · {{ t.3 }}</td><td><form class="inline" method="post" action="/me/tokens/{{ t.0 }}/revoke"><button class="small bad ibtn tip-end" data-tip="revoke it: the app using it can't any more" aria-label="revoke {{ t.1 }}">{{ crate::web::icon("delete") }}</button></form></td></tr>{% endfor %}</table>
     {% endif %}
   </section>
 </div>

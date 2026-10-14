@@ -6,28 +6,34 @@
 #![allow(clippy::type_complexity, clippy::too_many_arguments)] // bevy queries and systems are naturally verbose
 
 mod bar;
+mod classify_ui;
+mod cls_more;
+mod cls_widgets;
+mod filters_ui;
+mod index_panel;
+mod jobs;
+mod tint;
+
+// the saves themselves live in anend-core, shared with the hub
+pub use anend_core::{forge, lists, markdown, memory, note, simd, spread, store, vfs, weum};
 mod config;
-mod forge;
 mod forge_ui;
+mod highlight;
 mod hub;
 mod hub_ui;
+mod icons;
 mod keys;
-mod markdown;
-mod memory;
+mod lists_ui;
 mod memory_ui;
-mod note;
 mod palette;
 mod settings;
-mod simd;
 mod sizing;
 mod space;
 mod space_ui;
-mod spread;
-mod store;
+mod tags_ui;
 mod theme;
 mod typeface;
 mod ui;
-mod weum;
 mod zen;
 
 use bevy::feathers::FeathersPlugins;
@@ -75,7 +81,7 @@ fn parse_args() -> Args {
                      (a JSON array or one JSON document per line), then exit\n  \
                      --import-weum <file>  import weum memories from its backup (all-of-it.json), then exit\n  \
                      --space           open in the space\n\n\
-                     ctrl+s save, ctrl+n new note, ctrl+e view/edit, ctrl+1..5 views, ctrl+, settings (saves, fonts, zen, keys)",
+                     ctrl+s save, ctrl+n new note, ctrl+e view/edit, ctrl+1..9 views (7 classifiers, 8 tags, 9 filters), ctrl+, settings (saves, fonts, zen, keys)",
                     config::Config::load().current_save().display()
                 );
                 std::process::exit(0);
@@ -126,8 +132,42 @@ fn screenshot(
     }
 }
 
+/// the window's icon, from the embedded assets/icon.png; winit wants it on the main thread
+fn window_icon(_main_thread: bevy::ecs::system::NonSendMarker, mut done: Local<bool>) {
+    if *done {
+        return;
+    }
+    let Ok(img) = bevy::image::Image::from_buffer(
+        include_bytes!("../assets/icon.png"),
+        bevy::image::ImageType::Extension("png"),
+        bevy::image::CompressedImageFormats::NONE,
+        true,
+        bevy::image::ImageSampler::Default,
+        bevy::asset::RenderAssetUsages::MAIN_WORLD,
+    ) else {
+        *done = true;
+        return;
+    };
+    let (w, h) = (img.width(), img.height());
+    let Some(rgba) = img.data.clone() else {
+        *done = true;
+        return;
+    };
+    bevy::winit::WINIT_WINDOWS.with_borrow(|windows| {
+        for window in windows.windows.values() {
+            if let Ok(icon) = winit::window::Icon::from_rgba(rgba.clone(), w, h) {
+                window.set_window_icon(Some(icon));
+                *done = true;
+            }
+        }
+    });
+}
+
 fn main() {
-    let args = parse_args();
+    run(parse_args());
+}
+
+fn run(args: Args) {
     let mut config = config::Config::load();
     let db_path = args.db.clone().unwrap_or_else(|| config.current_save());
     let store = Store::open(&db_path).unwrap_or_else(|e| fail(&format!("cannot open {}: {}", db_path.display(), e)));
@@ -180,7 +220,7 @@ fn main() {
     .insert_resource(UiTheme(theme::sand_theme(&palette::Palette::default())))
     .insert_resource(ClearColor(theme::colors::MOOD_DARK))
     .init_resource::<palette::Palette>()
-    .insert_resource(Db(store))
+    .insert_resource(Db::new(store))
     // start on the most recent note, like picking the top writ in the old editor
     .insert_resource(Session {
         active: notes.first().cloned().unwrap_or_default(),
@@ -199,13 +239,31 @@ fn main() {
     .init_resource::<bar::BarState>()
     .init_resource::<settings::Settings>()
     .init_resource::<forge_ui::ForgeState>()
+    .init_resource::<lists_ui::ListsState>()
     .init_resource::<hub_ui::HubState>()
+    .init_resource::<tags_ui::TagsState>()
+    .init_resource::<classify_ui::ClsState>()
+    .init_resource::<filters_ui::FiltersState>()
+    .init_resource::<tint::Tints>()
+    .init_resource::<index_panel::IndexPanel>()
+    .init_resource::<jobs::Work>()
     .init_resource::<typeface::Typeface>()
     .init_resource::<zen::Zen>()
+    .init_resource::<icons::Icons>()
     .insert_resource(keymap)
     .insert_resource(config)
     .add_message::<keys::Fired>()
-    .add_systems(Startup, (ui::scene.spawn(), space::setup))
+    .add_systems(
+        Startup,
+        (
+            ui::scene.spawn(),
+            space::setup,
+            icons::spawn_tooltip,
+            tint::spawn_legend,
+        ),
+    )
+    .add_systems(Update, window_icon)
+    .add_systems(Update, icons::fill_app_mark)
     .add_systems(
         Update,
         (
@@ -220,6 +278,7 @@ fn main() {
                 rebuild_preview,
                 rebuild_reader,
                 rebuild_stats,
+                lists_ui::rebuild_lists,
                 rebuild_remap,
             ),
             bar::bar_route,
@@ -260,6 +319,20 @@ fn main() {
         Update,
         (
             bar::notes_side,
+            tags_ui::rebuild_tags,
+            (
+                jobs::apply_done,
+                classify_ui::tick_classifiers,
+                classify_ui::rebuild_classifiers,
+                classify_ui::keep_form_name,
+                filters_ui::rebuild_filters,
+                filters_ui::keep_name,
+                index_panel::rebuild_index_panel,
+                tint::request_tints,
+                tint::apply_tints,
+                tint::rebuild_legend,
+            )
+                .chain(),
             settings::rebuild_settings,
             forge_ui::rebuild_forge,
             forge_ui::pour,
@@ -275,9 +348,22 @@ fn main() {
             zen::zen_fade,
             zen::nav_autohide,
             zen::list_autohide,
+            zen::apply_placement,
+            (
+                theme::plain_button_text,
+                icons::attach_icons,
+                icons::tint_icons,
+                icons::tooltips,
+            )
+                .chain(),
         )
             .chain()
             .after(space_ui::build_opts),
+    );
+    // the highlighting copies the pad's glyphs once they're laid out, before they're drawn
+    app.add_systems(Update, highlight::setup_overlay).add_systems(
+        PostUpdate,
+        highlight::paint_overlay.after(bevy::ui::UiSystems::PostLayout),
     );
     if let Some(path) = args.screenshot {
         app.insert_resource(ScreenshotPath(path))

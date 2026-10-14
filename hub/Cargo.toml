@@ -7,11 +7,15 @@ license-file = "../LICENSE"
 publish = false
 
 [dependencies]
-salvo = { version = "1.0", default-features = false, features = ["server", "http1", "cookie", "fix-http1-request-uri", "test"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "signal"] }
+anend-core = { path = "../core" }
+futures-util = "0.3"
+rust-embed = "8"
+salvo = { version = "1.0", default-features = false, features = ["server", "http1", "cookie", "fix-http1-request-uri", "test", "websocket", "rustls", "ring"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "signal", "sync"] }
 redb = "4.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+pulldown-cmark = { version = "0.13", default-features = false }
 askama = "0.16"
 argon2 = "0.6"
 rand = "0.9"
