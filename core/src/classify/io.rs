@@ -13,11 +13,13 @@
 use serde::{Deserialize, Serialize};
 
 use super::math::fnv;
-use super::model::{Config, HeadSpec, Net, Rope};
+use super::model::{Config, GenSpec, HeadSpec, Net, Rope};
 use super::{Classifier, Meta, Steer};
 
 pub const MAGIC: &[u8; 8] = b"ANENDCLS";
-pub const VERSION: u32 = 1;
+/// 2 adds optional feature channels, NUM tokens, causal models and the generative head;
+/// version 1 files read as version 2 files with the gematria channels on
+pub const VERSION: u32 = 2;
 
 /// the largest shapes a file may claim, so a damaged or hostile header can't make the
 /// reader allocate more than the file itself could hold
@@ -37,6 +39,9 @@ struct Header {
     /// (heads, ff) of each block, which growth and pruning change
     blocks: Vec<(usize, usize)>,
     heads: Vec<HeadSpec>,
+    /// the generative head (version 2)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    generator: Option<GenSpec>,
     steer: Steer,
     meta: Meta,
 }
@@ -47,6 +52,7 @@ impl Classifier {
             config: self.net.cfg.clone(),
             blocks: self.net.blocks.iter().map(|b| (b.heads, b.ff)).collect(),
             heads: self.net.heads.iter().map(|h| h.spec.clone()).collect(),
+            generator: self.net.generator.clone(),
             steer: self.steer.clone(),
             meta: self.meta.clone(),
         };
@@ -80,7 +86,7 @@ impl Classifier {
             return Err("not a classifier file".into());
         }
         let version = u32::from_le_bytes(take(8, 4)?.try_into().unwrap());
-        if version != VERSION {
+        if version != 1 && version != VERSION {
             return Err(format!(
                 "classifier format version {version}, this build reads {VERSION}"
             ));
@@ -103,7 +109,7 @@ impl Classifier {
         }
         let mut cfg = h.config.clone();
         cfg.layers = h.blocks.len();
-        let mut net = Net::new(cfg, &h.heads, 0)?;
+        let mut net = Net::with_gen(cfg, &h.heads, h.generator.clone(), 0)?;
         // reshape the blocks to what was saved, then fill every tensor
         for (blk, &(heads, ff)) in net.blocks.iter_mut().zip(&h.blocks) {
             let (d, a) = (h.config.d_model, heads * h.config.head_dim);
@@ -166,7 +172,7 @@ impl Classifier {
 
 /// how many weights a header's shapes hold, refusing shapes past the limits above
 fn expected_weights(h: &Header) -> Result<usize, String> {
-    use super::model::Pooling;
+    use super::model::{GEN_OUT, Pooling};
     use super::text::{LETTERS, ROOT_BUCKETS, SIDE, SUM_BUCKETS, VOCAB};
     let c = &h.config;
     let bad = |what: &str| Err(format!("the classifier file's {what} is out of range"));
@@ -200,7 +206,7 @@ fn expected_weights(h: &Header) -> Result<usize, String> {
     if ![g.letter, g.word, g.side, g.extra].iter().all(|x| x.is_finite()) {
         return bad("gains");
     }
-    if h.heads.is_empty()
+    if (h.heads.is_empty() && h.generator.is_none())
         || h.heads.len() > MAX_OUT_HEADS
         || h.heads
             .iter()
@@ -220,7 +226,17 @@ fn expected_weights(h: &Header) -> Result<usize, String> {
         return bad("steering");
     }
     let d = c.d_model;
-    let mut n: usize = (VOCAB + LETTERS + 3 * SUM_BUCKETS + ROOT_BUCKETS) * d;
+    let mut n: usize = (VOCAB + c.numbers as usize) * d;
+    n += if c.letters { LETTERS * d } else { 0 } + if c.words { (3 * SUM_BUCKETS + ROOT_BUCKETS) * d } else { 0 };
+    if c.numbers {
+        n += d;
+    }
+    if h.generator.is_some() {
+        if !c.causal {
+            return bad("generative head (needs a causal model)");
+        }
+        n += (d + 1) * GEN_OUT;
+    }
     for &(heads, ff) in &h.blocks {
         if heads == 0 || heads > MAX_HEADS || ff == 0 || ff > MAX_FF {
             return bad("block shape");

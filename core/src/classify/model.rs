@@ -1,7 +1,14 @@
-//! The network: an embedder (bytes plus the gematria channels), pre-norm encoder blocks
-//! (RMSNorm, multi-head self-attention with rotary positions and optional QK-norm, SwiGLU
-//! feed-forward, no biases), a final RMSNorm, a pooler, and one or more heads reading
-//! the pooled vector with the side vector and any inputs from other classifiers.
+//! The network: an embedder (bytes, optional NUM tokens, optional feature channels),
+//! pre-norm blocks (RMSNorm, multi-head self-attention with rotary positions and
+//! optional QK-norm, SwiGLU feed-forward, no biases), a final RMSNorm, a pooler, any
+//! number of heads reading the pooled vector (with the side vector and inputs from
+//! other models when configured), and optionally a generative head reading every
+//! position for the next byte.
+//!
+//! A causal model (`Config::causal`) masks attention so each position sees only itself
+//! and earlier ones; that is what lets the generative head be trained on every position
+//! at once and decoded one byte at a time with a cache (`Decoder`), bit for bit equal to
+//! the full pass.
 //!
 //! Weights are row-major `[in × out]`, so every layer is `y = x · W` (see `kernels` for
 //! the summation order). Forward passes keep a `Trace`; `backward` walks it in reverse
@@ -14,7 +21,20 @@ use super::kernels::{
 };
 use super::math::{self, Rng, key, mix, unit};
 use super::pool::Pool;
-use super::text::{self, LETTERS, ROOT_BUCKETS, SIDE, SUM_BUCKETS, VOCAB, Window};
+use super::text::{self, LETTERS, NUM, ROOT_BUCKETS, SIDE, SUM_BUCKETS, VOCAB, Window};
+
+/// the generative head's outputs: the 256 byte values, then END
+pub const GEN_OUT: usize = 257;
+/// the generative head's "the data ends here" (SEP in the input)
+pub const END: usize = 256;
+
+fn yes() -> bool {
+    true
+}
+
+fn one() -> f32 {
+    1.0
+}
 
 /// how the encoder's token vectors become one vector
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,10 +112,26 @@ pub struct Config {
     pub gains: Gains,
     /// residual output projections start at zero (each block starts as the identity)
     pub zero_out: bool,
+    /// the letter value channel (a = 1 .. z = 26) added to each token; off for new
+    /// models, on in files saved before it was optional
+    #[serde(default = "yes")]
+    pub letters: bool,
+    /// the word sum channels (ordinal, reversed, Atbash, digit roots); same defaults
+    #[serde(default = "yes")]
+    pub words: bool,
+    /// causal attention: each position sees only itself and what came before
+    /// (needed by a generative head)
+    #[serde(default)]
+    pub causal: bool,
+    /// NUM tokens: a token row plus value × a learned direction
+    #[serde(default)]
+    pub numbers: bool,
 }
 
 impl Config {
-    /// for tests: a few thousand weights
+    /// for tests and CI only: a few thousand weights, so the suite runs in seconds in a
+    /// debug build. Not a size to offer anyone; it is chosen for test speed, not for
+    /// what the hardware can do (see `bench::suggest` for that)
     pub fn tiny() -> Config {
         Config {
             d_model: 16,
@@ -114,7 +150,25 @@ impl Config {
             extra: 0,
             gains: Gains::default(),
             zero_out: false,
+            letters: false,
+            words: false,
+            causal: false,
+            numbers: false,
         }
+        .gematria(true)
+    }
+
+    /// the gematria features (letter channel, word sum channels, side vector) on or off
+    pub fn gematria(mut self, on: bool) -> Config {
+        self.letters = on;
+        self.words = on;
+        self.side = on;
+        self
+    }
+
+    /// tokens in the embedding table
+    pub fn vocab(&self) -> usize {
+        VOCAB + self.numbers as usize
     }
 
     /// about 0.6M weights; trains on a laptop in minutes
@@ -160,6 +214,9 @@ impl Config {
         if !(0.0..1.0).contains(&self.dropout) {
             return Err("dropout must be in [0, 1)".into());
         }
+        if self.causal && matches!(self.pooling, Pooling::Cls | Pooling::ClsMean) {
+            return Err("a causal model pools by mean or attention (CLS sees only itself)".into());
+        }
         Ok(())
     }
 
@@ -198,6 +255,27 @@ pub struct HeadSpec {
     pub kind: HeadKind,
     /// class, label or value names; their count is the head's width
     pub classes: Vec<String>,
+    /// how much this head's loss counts when heads train together
+    #[serde(default = "one")]
+    pub weight: f32,
+}
+
+/// the generative head: next byte (or END) at every position of a causal model
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GenSpec {
+    pub name: String,
+    /// how much its loss counts when heads train together
+    #[serde(default = "one")]
+    pub weight: f32,
+}
+
+impl GenSpec {
+    pub fn new(name: &str) -> GenSpec {
+        GenSpec {
+            name: name.into(),
+            weight: 1.0,
+        }
+    }
 }
 
 impl HeadSpec {
@@ -210,7 +288,13 @@ impl HeadSpec {
             name: name.into(),
             kind,
             classes: classes.iter().map(|c| c.to_string()).collect(),
+            weight: 1.0,
         }
+    }
+
+    pub fn weighted(mut self, w: f32) -> HeadSpec {
+        self.weight = w;
+        self
     }
 }
 
@@ -322,11 +406,12 @@ impl Rope {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Net {
     pub cfg: Config,
-    /// byte and special token embeddings [VOCAB × d]
+    /// byte and special token embeddings [vocab × d]
     pub tok: Vec<f32>,
-    /// letter value [27 × d]
+    /// letter value [27 × d] (empty without the letter channel)
     pub letter: Vec<f32>,
-    /// word sum buckets [97 × d] each, and digit roots [101 × d]
+    /// word sum buckets [97 × d] each, and digit roots [101 × d] (empty without the
+    /// word channels)
     pub word_ord: Vec<f32>,
     pub word_rev: Vec<f32>,
     pub word_atb: Vec<f32>,
@@ -337,6 +422,13 @@ pub struct Net {
     /// attention pooling query [d] (empty for other poolings)
     pub pool_q: Vec<f32>,
     pub heads: Vec<Head>,
+    /// the NUM value direction [d] (empty without numbers)
+    pub num: Vec<f32>,
+    /// the generative head, if any, and its weights [d × GEN_OUT] and [GEN_OUT]
+    /// (empty without one)
+    pub generator: Option<GenSpec>,
+    pub gen_w: Vec<f32>,
+    pub gen_b: Vec<f32>,
     pub rope: Rope,
 }
 
@@ -404,18 +496,31 @@ impl Block {
 
 impl Net {
     pub fn new(cfg: Config, heads: &[HeadSpec], seed: u64) -> Result<Net, String> {
+        Net::with_gen(cfg, heads, None, seed)
+    }
+
+    /// a net with pooled heads and optionally a generative head (which needs `causal`)
+    pub fn with_gen(cfg: Config, heads: &[HeadSpec], generator: Option<GenSpec>, seed: u64) -> Result<Net, String> {
         cfg.validate()?;
-        if heads.is_empty() || heads.iter().any(|h| h.classes.is_empty()) {
-            return Err("a classifier needs at least one head of at least one class".into());
+        if (heads.is_empty() && generator.is_none()) || heads.iter().any(|h| h.classes.is_empty()) {
+            return Err("a model needs at least one head, each of at least one class".into());
+        }
+        if generator.is_some() && !cfg.causal {
+            return Err("a generative head needs a causal model".into());
+        }
+        let fine = |w: f32| w >= 0.0 && w.is_finite();
+        if !heads.iter().all(|h| fine(h.weight)) || generator.as_ref().is_some_and(|g| !fine(g.weight)) {
+            return Err("head loss weights must be finite and not negative".into());
         }
         let mut r = Rng::new(key(&[seed, 0x1417]));
         let d = cfg.d_model;
         let tok = init(&mut r, VOCAB * d, 0.5);
-        let letter = init(&mut r, LETTERS * d, 0.25);
-        let word_ord = init(&mut r, SUM_BUCKETS * d, 0.25);
-        let word_rev = init(&mut r, SUM_BUCKETS * d, 0.25);
-        let word_atb = init(&mut r, SUM_BUCKETS * d, 0.25);
-        let word_root = init(&mut r, ROOT_BUCKETS * d, 0.25);
+        let mut table = |on: bool, rows: usize| if on { init(&mut r, rows * d, 0.25) } else { Vec::new() };
+        let letter = table(cfg.letters, LETTERS);
+        let word_ord = table(cfg.words, SUM_BUCKETS);
+        let word_rev = table(cfg.words, SUM_BUCKETS);
+        let word_atb = table(cfg.words, SUM_BUCKETS);
+        let word_root = table(cfg.words, ROOT_BUCKETS);
         let blocks = (0..cfg.layers)
             .map(|_| Block::new(&cfg, &mut r, cfg.zero_out))
             .collect();
@@ -433,8 +538,25 @@ impl Net {
                 b: vec![0.0; s.classes.len()],
             })
             .collect();
+        // tensors new since the first file version draw last, so older shapes start as before
+        let mut tok = tok;
+        let num = if cfg.numbers {
+            tok.extend(init(&mut r, d, 0.5));
+            init(&mut r, d, 0.5)
+        } else {
+            Vec::new()
+        };
+        let (gen_w, gen_b) = if generator.is_some() {
+            (init(&mut r, d * GEN_OUT, 1.0 / (d as f32).sqrt()), vec![0.0; GEN_OUT])
+        } else {
+            (Vec::new(), Vec::new())
+        };
         let rope = Rope::new(cfg.max_len, cfg.head_dim, cfg.rope_base);
         Ok(Net {
+            num,
+            generator,
+            gen_w,
+            gen_b,
             tok,
             letter,
             word_ord,
@@ -473,8 +595,19 @@ impl Net {
                     b: z(&h.b),
                 })
                 .collect(),
+            num: z(&self.num),
+            generator: self.generator.clone(),
+            gen_w: z(&self.gen_w),
+            gen_b: z(&self.gen_b),
             rope: self.rope.clone(),
         }
+    }
+
+    /// what each output is called: the pooled heads, then the generative head
+    pub fn head_names(&self) -> Vec<&str> {
+        let mut v: Vec<&str> = self.heads.iter().map(|h| h.spec.name.as_str()).collect();
+        v.extend(self.generator.iter().map(|g| g.name.as_str()));
+        v
     }
 
     /// every weight tensor in the fixed order the optimizer and the file format use
@@ -505,6 +638,8 @@ impl Net {
         for h in &self.heads {
             v.extend([(Matrix, &h.w), (Bias, &h.b)]);
         }
+        // added in file version 2; empty when unused, so version 1 files read unchanged
+        v.extend([(Embedding, &self.num), (Matrix, &self.gen_w), (Bias, &self.gen_b)]);
         v
     }
 
@@ -535,6 +670,11 @@ impl Net {
         for h in &mut self.heads {
             v.extend([(Matrix, &mut h.w), (Bias, &mut h.b)]);
         }
+        v.extend([
+            (Embedding, &mut self.num),
+            (Matrix, &mut self.gen_w),
+            (Bias, &mut self.gen_b),
+        ]);
         v
     }
 
@@ -643,6 +783,7 @@ pub struct BlockTrace {
 pub struct Trace {
     pub n: usize,
     tokens: Vec<u16>,
+    values: Vec<f32>,
     chan: [Vec<u8>; 5],
     gains: Gains,
     m0: Option<Vec<f32>>,
@@ -721,15 +862,28 @@ impl Net {
                 &tab[i as usize * d..(i as usize + 1) * d]
             }
             let tk = &self.tok[w.tokens[t] as usize * d..(w.tokens[t] as usize + 1) * d];
-            let le = row(&self.letter, w.letter[t], d);
-            let wo = row(&self.word_ord, w.ordinal[t], d);
-            let wr = row(&self.word_rev, w.reversed[t], d);
-            let wa = row(&self.word_atb, w.atbash[t], d);
-            let wq = row(&self.word_root, w.root[t], d);
             let xr = &mut x[t * d..(t + 1) * d];
-            for i in 0..d {
-                let word = ((wo[i] + wr[i]) + wa[i]) + wq[i];
-                xr[i] = (tk[i] + gains.letter * le[i]) + gains.word * word;
+            xr.copy_from_slice(tk);
+            if self.cfg.letters {
+                let le = row(&self.letter, w.letter[t], d);
+                for i in 0..d {
+                    xr[i] += gains.letter * le[i];
+                }
+            }
+            if self.cfg.words {
+                let wo = row(&self.word_ord, w.ordinal[t], d);
+                let wr = row(&self.word_rev, w.reversed[t], d);
+                let wa = row(&self.word_atb, w.atbash[t], d);
+                let wq = row(&self.word_root, w.root[t], d);
+                for i in 0..d {
+                    xr[i] += gains.word * (((wo[i] + wr[i]) + wa[i]) + wq[i]);
+                }
+            }
+            if w.tokens[t] == NUM && !self.num.is_empty() {
+                let v = w.value(t);
+                for i in 0..d {
+                    xr[i] += v * self.num[i];
+                }
             }
         }
         x
@@ -871,6 +1025,7 @@ impl Net {
         Trace {
             n,
             tokens: w.tokens.clone(),
+            values: w.values.clone(),
             chan: [
                 w.letter.clone(),
                 w.ordinal.clone(),
@@ -1032,17 +1187,25 @@ impl Net {
             let rows_of = |i: u8| i as usize * d..(i as usize + 1) * d;
             let tk = tr.tokens[t] as usize;
             g.tok[tk * d..(tk + 1) * d].iter_mut().zip(r).for_each(|(a, b)| *a += b);
+            if tr.tokens[t] == NUM && !g.num.is_empty() {
+                let v = tr.values.get(t).copied().unwrap_or(0.0);
+                g.num.iter_mut().zip(r).for_each(|(a, b)| *a += v * b);
+            }
             let dl: Vec<f32> = r.iter().map(|v| gn.letter * v).collect();
             let dw: Vec<f32> = r.iter().map(|v| gn.word * v).collect();
             let [cl, co, cr, ca, cq] = &tr.chan;
             let add = |tab: &mut Vec<f32>, idx: u8, v: &[f32]| {
                 tab[rows_of(idx)].iter_mut().zip(v).for_each(|(a, b)| *a += b);
             };
-            add(&mut g.letter, cl[t], &dl);
-            add(&mut g.word_ord, co[t], &dw);
-            add(&mut g.word_rev, cr[t], &dw);
-            add(&mut g.word_atb, ca[t], &dw);
-            add(&mut g.word_root, cq[t], &dw);
+            if self.cfg.letters {
+                add(&mut g.letter, cl[t], &dl);
+            }
+            if self.cfg.words {
+                add(&mut g.word_ord, co[t], &dw);
+                add(&mut g.word_rev, cr[t], &dw);
+                add(&mut g.word_atb, ca[t], &dw);
+                add(&mut g.word_root, cq[t], &dw);
+            }
         }
         dextra
     }

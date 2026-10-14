@@ -213,3 +213,16 @@ fn feedback_moves_the_judged_result() {
     .unwrap();
     assert_eq!(before, clf.net.blocks);
 }
+
+#[test]
+fn version_1_files_still_load_bit_exact() {
+    // saved by the engine before format version 2 (gematria channels then always on)
+    let clf = Classifier::from_bytes(include_bytes!("testdata/v1_tiny.anendcls")).unwrap();
+    assert!(clf.net.cfg.letters && clf.net.cfg.words && !clf.net.cfg.causal);
+    let l = clf.logits("granite and peach, 1234!", &[]);
+    let bits: Vec<Vec<u32>> = l.iter().map(|h| h.iter().map(|v| v.to_bits()).collect()).collect();
+    assert_eq!(bits, vec![vec![3190351502, 1041852471], vec![1049337253]]);
+    // and round-trips as version 2
+    let again = Classifier::from_bytes(&clf.to_bytes()).unwrap();
+    assert_eq!(again.logits("granite and peach, 1234!", &[]), l);
+}

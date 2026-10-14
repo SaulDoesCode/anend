@@ -1,9 +1,16 @@
-//! From text to model input. Tokens are the UTF-8 bytes (0..=255) plus three specials;
-//! no vocabulary is learned or stored. Next to each token run the gematria channels:
-//! the letter's ordinal value, and the sums of the word the token sits in (ordinal,
-//! reversed and Atbash, each bucketed by modulo, and their digit roots), which the
-//! embedder adds onto the token. A whole window also gets a side vector of text level
-//! measures (letter frequencies, the sums, the prime factor chain, shape of the text).
+//! From data to model input. Tokens are bytes (0..=255) plus four specials (CLS, SEP,
+//! PAD, and NUM for a number whose value rides along); no vocabulary is learned or
+//! stored. Any data is bytes: text, binary, pictures through `codec`, numbers as text or
+//! as NUM tokens.
+//!
+//! Optional feature channels run next to each token. They are opt-in per model
+//! (`Config::letters`, `Config::words`, `Config::side`), off for new models and on for
+//! classifiers saved before they became optional: the letter's ordinal value, the sums
+//! of the word the token sits in (ordinal, reversed and Atbash, each bucketed by modulo,
+//! and their digit roots), and a whole-window side vector of text level measures (letter
+//! frequencies, the sums, the prime factor chain, shape of the text). In a causal model
+//! (one that generates) the word channels are the sums of the word so far, so no token
+//! sees a byte after it.
 
 use super::math::ln;
 use crate::simd;
@@ -12,6 +19,9 @@ use crate::weum;
 pub const CLS: u16 = 256;
 pub const SEP: u16 = 257;
 pub const PAD: u16 = 258;
+/// a number: the token's embedding is its row plus value × a learned direction
+pub const NUM: u16 = 259;
+/// tokens without NUM (the table size of models without number inputs)
 pub const VOCAB: usize = 259;
 
 /// rows of the letter value table: 0 for "not a letter", then a = 1 .. z = 26
@@ -33,6 +43,8 @@ pub struct Window {
     pub atbash: Vec<u8>,
     pub root: Vec<u8>,
     pub side: Vec<f32>,
+    /// per token, the value of a NUM token (0 elsewhere); empty when there are none
+    pub values: Vec<f32>,
 }
 
 impl Window {
@@ -56,7 +68,13 @@ fn in_word(b: u8) -> bool {
 
 /// `[CLS] bytes [SEP]` with every channel filled in; `bytes` should fit the window
 pub fn window(bytes: &[u8]) -> Window {
-    let n = bytes.len() + 2;
+    window_with(bytes, false, true)
+}
+
+/// `[CLS] bytes`, then `[SEP]` when `end`. `causal`: each token's word channels are the
+/// sums of its word up to and including it (what a generator may see)
+pub fn window_with(bytes: &[u8], causal: bool, end: bool) -> Window {
+    let n = bytes.len() + 1 + end as usize;
     let mut w = Window {
         tokens: Vec::with_capacity(n),
         letter: vec![0; n],
@@ -65,10 +83,13 @@ pub fn window(bytes: &[u8]) -> Window {
         atbash: vec![0; n],
         root: vec![0; n],
         side: side(bytes),
+        values: Vec::new(),
     };
     w.tokens.push(CLS);
     w.tokens.extend(bytes.iter().map(|&b| b as u16));
-    w.tokens.push(SEP);
+    if end {
+        w.tokens.push(SEP);
+    }
     for (i, &b) in bytes.iter().enumerate() {
         let lc = b | 0x20;
         if lc.is_ascii_lowercase() {
@@ -85,17 +106,46 @@ pub fn window(bytes: &[u8]) -> Window {
         while i < bytes.len() && in_word(bytes[i]) {
             i += 1;
         }
-        let s = simd::sums(&bytes[start..i]);
         let bucket = |v: u64| (1 + v % 96) as u8;
-        let root = (1 + 10 * digit_root(s.ordinal) + digit_root(s.reversed)) as u8;
-        for t in start + 1..i + 1 {
+        let mut fill = |t: usize, s: simd::Sums| {
             w.ordinal[t] = bucket(s.ordinal);
             w.reversed[t] = bucket(s.reversed);
             w.atbash[t] = bucket(s.atbash);
-            w.root[t] = root;
+            w.root[t] = (1 + 10 * digit_root(s.ordinal) + digit_root(s.reversed)) as u8;
+        };
+        if causal {
+            for t in start..i {
+                fill(t + 1, simd::sums(&bytes[start..t + 1]));
+            }
+        } else {
+            let s = simd::sums(&bytes[start..i]);
+            for t in start + 1..i + 1 {
+                fill(t, s);
+            }
         }
     }
     w
+}
+
+impl Window {
+    /// appends NUM tokens carrying `values` (no channels)
+    pub fn push_numbers(&mut self, values: &[f32]) {
+        if self.values.is_empty() {
+            self.values = vec![0.0; self.tokens.len()];
+        }
+        for &v in values {
+            self.tokens.push(NUM);
+            for c in [&mut self.letter, &mut self.ordinal, &mut self.reversed, &mut self.atbash, &mut self.root] {
+                c.push(0);
+            }
+            self.values.push(v);
+        }
+    }
+
+    /// the value at token t (0 when the window has no numbers)
+    pub fn value(&self, t: usize) -> f32 {
+        self.values.get(t).copied().unwrap_or(0.0)
+    }
 }
 
 /// where the windows of a `len` byte text start, for windows of `room` bytes advancing by
@@ -113,11 +163,19 @@ pub fn starts(len: usize, room: usize, stride: usize) -> Vec<usize> {
 
 /// every window of a text for a model whose sequences are `max_len` tokens long
 pub fn windows(text: &str, max_len: usize, stride: usize) -> Vec<Window> {
+    windows_of(text.as_bytes(), max_len, stride, false)
+}
+
+/// every window of some bytes; `causal` windows have causal word channels and end in
+/// SEP only where the data ends
+pub fn windows_of(b: &[u8], max_len: usize, stride: usize, causal: bool) -> Vec<Window> {
     let room = max_len.saturating_sub(2).max(1);
-    let b = text.as_bytes();
     starts(b.len(), room, stride)
         .into_iter()
-        .map(|s| window(&b[s..(s + room).min(b.len())]))
+        .map(|s| {
+            let e = (s + room).min(b.len());
+            window_with(&b[s..e], causal, !causal || e == b.len())
+        })
         .collect()
 }
 
@@ -191,6 +249,24 @@ mod tests {
         assert_eq!(w.side.len(), SIDE);
         assert!(w.side.iter().all(|x| x.is_finite()));
         assert_eq!(window(b"").tokens, vec![CLS, SEP]);
+    }
+
+    #[test]
+    fn causal_channels_and_numbers() {
+        let c = window_with(b"Ab c", true, false);
+        assert_eq!(c.tokens, vec![CLS, 65, 98, 32, 99]);
+        // "A" so far sums to 1, "Ab" to 3
+        assert_eq!((c.ordinal[1], c.ordinal[2]), (2, 4));
+        let full = window(b"Ab c");
+        assert_eq!(full.ordinal[1], 4);
+        let mut n = window(b"x");
+        n.push_numbers(&[1.5, -2.0]);
+        assert_eq!(n.tokens, vec![CLS, 120, SEP, NUM, NUM]);
+        assert_eq!(n.values, vec![0.0, 0.0, 0.0, 1.5, -2.0]);
+        assert_eq!(n.root.len(), 5);
+        let ws = windows_of(&[b'a'; 100], 32, 15, true);
+        assert!(ws[..ws.len() - 1].iter().all(|w| *w.tokens.last().unwrap() != SEP));
+        assert_eq!(*ws.last().unwrap().tokens.last().unwrap(), SEP);
     }
 
     #[test]
