@@ -2,7 +2,7 @@
 // the term bar at the bottom, its sidecar of the term's four keys at the right.
 
 import { el, clear, debounce, typing, underline, textOfOrdinal, KEY } from '../util.js';
-import { icon, tip } from '../icons.js';
+import { icon, tip, toggleChip } from '../icons.js';
 import { picks, pick, pickLine, listCommand, onPick } from '../picks.js';
 import { tinter } from '../tints.js';
 
@@ -163,14 +163,19 @@ const measureTerm = debounce(async (text) => {
 }, 120);
 
 function drawToggles() {
-  const t = (label, on, f, title) => el('button.toggle', { type: 'button', className: `toggle${on ? ' on' : ''}`, title, onclick: f }, label);
   clear(
     toggles,
-    BUCKETS.map((b) => t(b, st.bucket === b, () => setBucket(b), `the ${b} bucket (${b[0].toUpperCase()})`)),
+    el(
+      'span.chipgroup',
+      { role: 'group', 'aria-label': 'bucket' },
+      BUCKETS.map((b) =>
+        toggleChip(null, `the ${b} bucket`, { letter: b[0].toUpperCase(), key: b[0].toUpperCase(), on: st.bucket === b, onclick: () => setBucket(b) }),
+      ),
+    ),
     el('span.gap'),
-    t('gsearch text', st.gsearchText, () => flip('gsearchText'), 'Enter on text: gsearch its key, or a word search (G)'),
-    t('saturate', st.saturate, () => flip('saturate'), 'save searched texts as memories (S)'),
-    t('white', st.white, () => flip('white'), 'white mode (W)'),
+    toggleChip('search', 'gsearch text: by its sum, not its words', { key: 'G', on: st.gsearchText, onclick: () => flip('gsearchText') }),
+    toggleChip('bolt', 'saturate: remember what is searched', { key: 'S', on: st.saturate, onclick: () => flip('saturate') }),
+    toggleChip('sun', 'white', { key: 'W', on: st.white, onclick: () => flip('white') }),
   );
 }
 

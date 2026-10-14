@@ -174,15 +174,26 @@ function route_() {
     }
     const v = VIEWS[name];
     $('bar-name').textContent = v.barName || name;
-    barInput.placeholder = v.barPlaceholder || '';
+    placeholder();
     barInput.value = app.barText[name] ?? '';
+    // the view's extras (counts, sums, toggles) in the thin strip over the bar, never beside it
     clear($('bar-right'), v.barRight || null);
+    $('bar-right').hidden = !v.barRight;
     $('searchline').hidden = name !== 'space' || !space.searchLineOn();
   }
   app.route = rest;
   VIEWS[name].show?.(rest);
 }
 window.addEventListener('hashchange', route_);
+
+// the bar's placeholder; on a phone the mode's name, hidden at the left, folds into it
+const narrow = window.matchMedia('(max-width: 700px)');
+function placeholder() {
+  const v = VIEWS[app.view];
+  const ph = v.barPlaceholder || '';
+  barInput.placeholder = narrow.matches ? `${v.barName || app.view}${ph ? ` · ${ph}` : ''}` : ph;
+}
+narrow.addEventListener?.('change', () => app.view && placeholder());
 
 barInput.addEventListener('input', () => {
   app.barText[app.view] = barInput.value;

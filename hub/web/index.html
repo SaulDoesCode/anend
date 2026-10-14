@@ -19,10 +19,12 @@
   <button id="settings-button" type="button">settings</button>
 </header>
 <main id="views"></main>
-<footer id="bar" class="bar">
-  <label id="bar-name" for="bar-input">notes</label>
-  <input id="bar-input" type="text" autocomplete="off" spellcheck="false" aria-label="command bar">
-  <div id="bar-right"></div>
+<footer id="dock">
+  <div id="bar-right" hidden></div>
+  <div id="bar" class="bar">
+    <label id="bar-name" for="bar-input">notes</label>
+    <input id="bar-input" type="text" autocomplete="off" spellcheck="false" aria-label="command bar">
+  </div>
 </footer>
 <div id="settings" class="overlay" hidden></div>
 <noscript><p style="padding:20px">the app needs javascript</p></noscript>
