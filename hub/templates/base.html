@@ -9,7 +9,7 @@
 </head>
 <body>
 <nav class="bar">
-  <a class="brand" href="/" aria-label="{{ l.hub }}">{{ crate::web::icon("hub") }}<span class="name">{{ l.hub }}</span></a>
+  <a class="brand" href="/" aria-label="{{ l.hub }}"><img class="mark" src="/static/favicon.svg" alt="" width="20" height="20"><span class="name">{{ l.hub }}</span></a>
   <a class="btn tab with-text{% if l.tab == "saves" %} on{% endif %}" href="/" data-tip="saves" aria-label="saves">{{ crate::web::icon("folder") }}<span class="lab">saves</span></a>
   <a class="btn tab with-text{% if l.tab == "classifiers" %} on{% endif %}" href="/classifiers" data-tip="classifiers" aria-label="classifiers">{{ crate::web::icon("classifier") }}<span class="lab">classifiers</span></a>
   <a class="btn tab with-text{% if l.tab == "leaderboard" %} on{% endif %}" href="/leaderboard" data-tip="leaderboard" aria-label="leaderboard">{{ crate::web::icon("stats") }}<span class="lab">leaderboard</span></a>

@@ -45,6 +45,7 @@ nav.bar {
 }
 nav.bar .brand { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; padding: 0 10px 0 6px; color: var(--bar-text); letter-spacing: .02em; }
 nav.bar .brand svg.icon { width: 18px; height: 18px; color: var(--accent); }
+nav.bar .brand img.mark { width: 20px; height: 20px; display: block; }
 nav.bar .grow { flex: 1; }
 nav.bar .who { font-size: 13px; color: var(--bar-text); opacity: .85; padding: 0 6px; border-radius: var(--radius); }
 /* its tabs, like the app's: the icon in the bar's dim colour, the one you're on lit */
