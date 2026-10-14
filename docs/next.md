@@ -301,6 +301,16 @@ by the store redesign below, apart from the keyboard bits, which may be reused.
     precompiled preamble so it compiles fast.
 - **Views as templated modes of consumption,** like little websites over the core's API:
   memory, space, notes, blog, and more.
+- **Lifting the model ceiling (queued for when the generative job finishes, 14 Oct).** The
+  user doesn't want preference-driven "toy" limits. Next:
+  - **A GPU backend:** wgpu, behind the engine's kernel boundary; checked against the CPU
+    results; benchmarked on the user's hardware, since this container has no GPU.
+  - **Importing pretrained open models:** safetensors weights plus a BPE tokenizer. The
+    engine already has Llama-family blocks (RMSNorm, SwiGLU, RoPE), so it can run real
+    pretrained LMs, steered by the user's classifiers as critics. Downloads happen on the
+    user's machine (model hubs are blocked here); test the loader with synthetic weights.
+  - **Rule:** small sizes only where measured compute requires them, and never gematria
+    by default.
 
 ## The queue (asked for on 13 Oct, in this order)
 
