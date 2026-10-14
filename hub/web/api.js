@@ -147,18 +147,22 @@ export class Api extends EventTarget {
 // where the page is: the hub serves it at /app/, a static copy can be anywhere
 export const base = new URL('.', location.href).pathname;
 
-// whether a hub served the page: its files come with an `x-anend: hub` header, which a
-// static server's don't (asking for the page again costs no failed request, so the
+// whether a hub served the page: its files come with an `x-anend: hub` header (`local` from
+// a --local hub, which has no accounts to share under), which a static server's don't (asking for the page again costs no failed request, so the
 // console stays clean). Only a page no hub served runs offline; a hub that goes away
 // later is still the hub (the socket reconnects), and ?offline forces it.
 async function hubBehind() {
   if (new URLSearchParams(location.search).has('offline')) return false;
   try {
     const r = await fetch(base, { method: 'GET', cache: 'no-store', credentials: 'same-origin' });
-    return r.headers.get('x-anend') === 'hub';
+    const h = r.headers.get('x-anend');
+    return h === 'hub' || h === 'local' ? h : false;
   } catch {
     return false;
   }
 }
 
-export const api = (await hubBehind()) ? new Api(base) : await (await import('./local/index.js')).offline(ApiError);
+const behind = await hubBehind();
+export const api = behind ? new Api(base) : await (await import('./local/index.js')).offline(ApiError);
+// a --local hub: one workspace and no logins, so "share this save" can't work there
+api.localHub = behind === 'local';

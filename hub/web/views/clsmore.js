@@ -813,6 +813,13 @@ function takeForm(c) {
 // the share tab: this classifier onto the hub
 export function hubShareCard() {
   const d = ctx.detail();
+  if (ctx.app.api.localHub) {
+    return el(
+      'div.card.clf-export',
+      el('h3', 'on the hub'),
+      el('p.dim.small', 'This hub runs --local, for you alone with no accounts, so nothing is shared on it: download the classifier as a file and upload it to a hub you’ve joined.'),
+    );
+  }
   const title = el('input', { type: 'text', placeholder: `its name on the hub (${d.name})`, 'aria-label': 'its name on the hub' });
   const desc = el('input', { type: 'text', placeholder: 'what it tells apart', 'aria-label': 'description on the hub' });
   const tags = el('input', { type: 'text', placeholder: 'tags, comma separated', 'aria-label': 'tags' });

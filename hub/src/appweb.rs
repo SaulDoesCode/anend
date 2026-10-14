@@ -52,8 +52,11 @@ fn serve(res: &mut Response, path: &str) {
                 .insert(CONTENT_TYPE, HeaderValue::from_static(kind(path)));
             res.headers_mut()
                 .insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-            // how the page knows a hub served it (api.js), and not a static server
-            res.headers_mut().insert("x-anend", HeaderValue::from_static("hub"));
+            // how the page knows a hub served it (api.js), and not a static server; "local"
+            // for a --local hub (no accounts, so nothing to share on it)
+            let local = *app::LOCAL.get().unwrap_or(&false);
+            res.headers_mut()
+                .insert("x-anend", HeaderValue::from_static(if local { "local" } else { "hub" }));
             res.write_body(f.data.into_owned()).ok();
         }
         None => {

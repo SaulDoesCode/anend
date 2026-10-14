@@ -384,6 +384,16 @@ function hubSection() {
   );
   hubList = el('div.hub-list', el('p.dim', 'looking…'));
   loadHub();
+  // a --local hub has no accounts: nothing can be shared on it
+  if (app.api.localHub) {
+    return section(
+      'the hub',
+      el('div.row', q, sort),
+      hubList,
+      el('h4', 'share this save'),
+      el('p.dim.small', 'This hub runs --local, for you alone with no accounts, so nothing is shared on it: to share a save, download it (saves, above) and upload it to a hub you’ve joined.'),
+    );
+  }
   const sName = el('input', { type: 'text', placeholder: `name (${app.save || 'the open save'})`, 'aria-label': 'shared name' });
   const sDesc = el('input', { type: 'text', placeholder: 'what’s in it', 'aria-label': 'description' });
   const sTags = el('input', { type: 'text', placeholder: 'tags, comma separated', 'aria-label': 'tags' });
