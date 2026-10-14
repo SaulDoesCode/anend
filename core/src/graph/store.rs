@@ -962,7 +962,7 @@ fn terms_of(r: &Record, rendered: &str) -> GResult<Vec<Term>> {
             out.push(Term::Sum(mode as u8, m.get(mode)));
         }
         if !m.frequency.is_empty() {
-            out.push(Term::Freq(rec::content_hash(&m.frequency)));
+            out.push(post::freq_term(&m.frequency));
         }
     }
     for tk in crate::simd::unique_tokens(rendered.as_bytes()).into_iter().take(4096) {

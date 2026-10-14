@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use super::gematria::{Measure, Mode};
 use super::postings::{TIME_BUCKET_BITS, Term};
-use super::record::{self as rec, mime};
+use super::record::mime;
 use super::store::{GResult, Reader, View, rel};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,7 +123,7 @@ impl View<'_> {
         if key.is_empty() {
             return Ok(Vec::new());
         }
-        let ids = self.postings(&Term::Freq(rec::content_hash(&key)))?;
+        let ids = self.postings(&super::postings::freq_term(&key))?;
         let texts = self.render_many(&ids);
         Ok(ids
             .into_iter()

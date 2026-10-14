@@ -110,35 +110,19 @@ New module beside the old store (apps not rewired yet; nothing old deleted). 38 
   or in memory, compact, per-table storage stats, in-memory backend, injectable clock);
   `query` (words, sums, letters, tags, time, mime, relations, order, paging, stats);
   `backup` (weum `all-of-it.json` import, texts.json + other.json backup and restore).
-- **Left:** `core/examples/graph_bench.rs` and its numbers (sizes per table vs the old
-  store vs raw packed bytes, latencies, borrowing's effect, memory-index rebuild time);
-  `docs/format.md` (the module docs hold the format meanwhile); a wasm check (the
-  wasm32 target isn't installed here).
-
-## The Dioxus app (`app/`, package `anend-app`): status
-
-Started 14 Oct. Dioxus 0.7.10 (pinned), desktop through dioxus-desktop/wry (needs
-`libwebkit2gtk-4.1-dev libxdo-dev`), web through WebAssembly. Features: `desktop` (default),
-`web`, `hub` (default; the hub's settings).
-- **Done:** the crate in the workspace and CI (build, clippy, a wasm32 build step);
-  `app/src/gem.rs`: weum's numbers checked against api.js/memory.js (gsum line letter for
-  letter, pfR via core, seedCLR as JavaScript's string hash, underline groups per mode with
-  weum's `key.length >= 2` rule, the triangle, ⌊√(s·r)⌋, the byte sum), tested;
-  `app/src/backend/mod.rs`: the `Backend` trait (one `call(op, args)` over the app API, typed
-  methods for entries/search by sum and words/tags/time/lists/notes/models/filters/settings,
-  backups as texts + other JSON, weum `all-of-it.json` → bundle), tested. A window opens
-  under Xvfb (webkit2gtk installed with apt).
-- **Found:** "every text in ordinal bucket 345 underlined purple" is weum's own behaviour:
-  in reversed mode the grouping sum is the ordinal one, and seedCLR("345") is hue 276.
-- **Left, in order:** `backend/local.rs` (core `Store` on worker threads, the hub's ops
-  ported plus `mem.put`, `mem.buckets`, `settings.get/set`, `classify.unfeedback`) and
-  `backend/hub.rs` (WebSocket); the shell (top bar, centered command bar with the strip in
-  memory/space, settings dialog, palettes, font size, zoom, keyboard); the memory view with
-  weum parity and the additions; lists, reader, notes, tags, stats, models (a general model
-  builder over the coming spec, docs/models.md; minimal until then), filters, settings with
-  saves/import/backup; the space through three.js interop; screenshots under Xvfb.
-- **Note:** core's uncommitted work in progress (classify `gen`, graph clippy) can break the
-  workspace build meanwhile; `app/` was checked against the committed core in a worktree.
+- **Bench** (`cargo run --release -p anend-core --example graph_bench`, 100k texts with
+  many prefix/suffix variants + 2k notes, 9.1 MB of UTF-8): old store 54.0 MB; new store
+  17.1 MB with disk indexes (19.8 MB without borrowing), 9.1 MB with indexes in memory;
+  packed bodies 5.84 MB, 4.45 MB with borrowing (48k of 102k entries borrow). Durable
+  insert 3.1 ms (fsync), batched 0.18 ms; sum lookup 8 µs; word search 3 ms; render
+  5.8 µs per entry. Rebuilding the indexes into memory at open: 2.6 s for 102k entries.
+- **Format:** `docs/format.md`.
+- **Left for later:** the indexes' B-tree pages are about half full (redb splits pages
+  50/50; a bulk rebuild in key order doesn't help); the memory-mode rebuild needs to get
+  faster (or be persisted as a snapshot) before it's the default; borrowing only finds
+  sources the new text contains (a shorter variant saved after its longer form isn't
+  stored as a slice); structured entries are indexed by their render at save time; no
+  wasm check (the wasm32 target isn't installed here).
 
 ## Decisions (14 Oct): the redesign
 

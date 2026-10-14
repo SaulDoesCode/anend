@@ -137,12 +137,19 @@ pub fn update_pairs(old: Option<&[u8]>, add: &[(u32, u64)], remove: &[(u32, u64)
     (!pairs.is_empty()).then(|| encode_pairs(&pairs))
 }
 
+/// the letter frequency term of a frequency key: its hash's top 14 bits, so a row holds
+/// a few anagram classes and readers check the key (most texts are alone in their class,
+/// and a row per class would be a row per entry)
+pub fn freq_term(key: &str) -> Term {
+    Term::Freq(super::record::content_hash(key) >> (64 - HASH_BUCKET_BITS))
+}
+
 /// what an entry is filed under in the derived indexes
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Term {
     /// a sum mode (`gematria::Mode as u8`) and value
     Sum(u8, i64),
-    /// the hash of a letter frequency key (anagrams share it)
+    /// the bucket of a letter frequency key (see `freq_term`)
     Freq(u64),
     /// a word (a token from `simd::tokenize`)
     Word(Vec<u8>),
