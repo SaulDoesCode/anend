@@ -49,7 +49,7 @@ Rendering a body decodes it, transcludes `REF`s and evaluates `CALL`s. A functio
 entry (by convention mime `application/x-anend-fn`) whose body is a template; it reads
 its arguments with `arg(n)`. Arguments are evaluated before a call, except `if`'s
 branches. Builtins (codes): `arg` 0, `if` 1, `eq` 2, `concat` 3, `len` 4, `sum` 5
-(ordinal, reversed or atbash), `slice` 6, `lookup` 7, `add` 8, `sub` 9, `mul` 10, `div`
+(ordinal or reversed), `slice` 6, `lookup` 7, `add` 8, `sub` 9, `mul` 10, `div`
 11, `mod` 12, `lt` 13, `not` 14, `argc` 15; 16–31 reserved. Numbers are decimal `i64`
 text (empty is 0); truth is non-empty text.
 
@@ -116,16 +116,12 @@ when smaller.
 
 | table | key | holds |
 |---|---|---|
-| `graph sums` | (mode, value, chunk) | ordinal, reversed and atbash sums |
+| `graph sums` | (mode, value, chunk) | ordinal (mode 0) and reversed (mode 1) sums |
 | `graph frequency` | (letter-frequency-key hash bucket, chunk) | anagram classes (readers check the key) |
 | `graph words` | (word bytes, chunk) | tokens from the SIMD tokenizer |
 | `graph created` | (created ms >> 22, chunk) | creation time buckets (readers check exact times) |
 | `graph mentions` | (entry, chunk) | who refers to or borrows from an entry |
 | `graph hashes` | top 14 bits of the content hash | `(next 32 bits, id)` pairs |
-
-**Atbash** is weum's `alphavert`: each character upper-cased alone, A–Z 1–26, space 27,
-others skipped; pairs `[i, 27 − i]`; the bucket is `(b − n)(t − n)`, with `b` the sum of
-the second values and `t` of the first.
 
 **Index modes** (`graph meta` `index`): `disk` keeps the tables above; `memory` keeps
 only entries, edges and history on disk and rebuilds the indexes into memory at open.

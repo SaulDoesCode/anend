@@ -38,7 +38,7 @@
 //! | 2 | `eq(a, b, …)` | whether all are equal |
 //! | 3 | `concat(…)` | the arguments joined |
 //! | 4 | `len(a)` | how many characters |
-//! | 5 | `sum(a, mode)` | `a`'s ordinal (the default), `reversed` or `atbash` sum |
+//! | 5 | `sum(a, mode)` | `a`'s ordinal (the default) or `reversed` sum |
 //! | 6 | `slice(a, from, to)` | characters `from..to`; negative counts from the end, `to` defaults to the end |
 //! | 7 | `lookup(id)` | the rendered text of the entry with that (decimal) id |
 //! | 8–12 | `add`, `sub`, `mul`, `div`, `mod` | arithmetic over all the arguments, left to right; overflow and division by zero are errors |
@@ -730,7 +730,7 @@ mod tests {
             (4, b("len", vec![r(3)])),
             (5, b("slice", vec![r(2), t("-5")])),
             (6, b("sum", vec![t("hello")])),
-            (7, b("sum", vec![t("hello"), t("atbash")])),
+            (7, b("sum", vec![t("hello"), t("reversed")])),
             (8, b("lookup", vec![t("1")])),
             (9, b("concat", vec![t("a"), t("b"), t("c")])),
             (10, b("if", vec![t(""), t("yes"), t("no")])),
@@ -743,6 +743,7 @@ mod tests {
             (17, vec![Seg::call(Callee::Builtin(20), vec![])]),
             (18, b("if", vec![t("x"), t("only")])),
             (19, b("if", vec![t(""), t("only")])),
+            (20, b("sum", vec![t("hello"), t("atbash")])),
         ]);
         let mut i = Interp::new(&s);
         assert_eq!(i.render(2).unwrap(), "hello world");
@@ -750,7 +751,7 @@ mod tests {
         assert_eq!(i.render(4).unwrap(), "13");
         assert_eq!(i.render(5).unwrap(), "world");
         assert_eq!(i.render(6).unwrap(), "52");
-        assert_eq!(i.render(7).unwrap(), ((83 - 5) * (52 - 5)).to_string());
+        assert_eq!(i.render(7).unwrap(), "83");
         assert_eq!(i.render(8).unwrap(), "hello");
         assert_eq!(i.render(9).unwrap(), "abc");
         assert_eq!(i.render(10).unwrap(), "no");
@@ -763,6 +764,7 @@ mod tests {
         assert!(matches!(i.render(17), Err(EvalError::Builtin(..))));
         assert_eq!(i.render(18).unwrap(), "only");
         assert_eq!(i.render(19).unwrap(), "");
+        assert!(matches!(i.render(20), Err(EvalError::Builtin("sum", _))));
         assert_eq!(i.render(99), Err(EvalError::Missing(99)));
     }
 

@@ -94,14 +94,14 @@ Checks to run before every push:
 
 ## Step 1 status: the entry graph store (`core/src/graph/`)
 
-New module beside the old store (apps not rewired yet; nothing old deleted). 38 tests,
+New module beside the old store (apps not rewired yet; nothing old deleted). 37 tests,
 `cargo test -p anend-core graph::` (about 15 s in debug). Clippy clean on the module.
 - **Done:** `codec` (5-bit tokens, ESC payloads incl. UTF-8 lead runs and digit runs,
   caps lock, REF/CALL, fuzzed); `interp` (explicit continuation stack, tail calls in
   constant stack incl. through `if` and the last `concat` argument, memo, fuel/depth/output
   limits, cycle-safe refs; counter to 1,000,000, mutual even/odd, factorial, Fibonacci);
-  `gematria` (alphavert atbash exactly: pairs, h/i/j, product, difference; the atbash
-  bucket is the product); `record` (varint record header, blocks of 32 entries per row,
+  `gematria` (ordinal and reversed sums and the frequency key; atbash removed 14 Oct,
+  it gave the same groupings as reversed); `record` (varint record header, blocks of 32 entries per row,
   past versions as deltas, weum key ⇄ id mapping, content hash); `postings` (one row per
   term and id chunk, varint deltas or a bitmap; bucketed hash pairs); `place` (34-byte
   transform, rotation re-pack now idempotent); `store` (Graph/View/Tx: dedup, borrowing of
@@ -214,17 +214,13 @@ by the store redesign below, apart from the keyboard bits, which may be reused.
   like weum's `await memory.backup`.
 
 ### B. Gematria correctness (weum is canonical)
-- **Atbash is wrong:** it currently gives the same values as reversed. The definition, as
-  the user's `alphavert`:
-  - each letter is the pair `[i, 27 - i]`, with a = 1 … z = 26 and space = 27; anything
-    else is skipped;
-  - the sum is the pair totals `b + t`; it also yields `h` (the f values), `i` (f − l),
-    `j` (the l values), `(b − n)(t − n)`, and `b − t`.
-- **Underline colours** for matches in the memory view:
-  - ordinal mode: colour by shared reversed groupings;
-  - reversed mode: the inverse, shared ordinal groupings;
-  - atbash mode: the normal gematria groupings;
-  - frequency mode: atbash groups.
+- **Atbash removed (14 Oct):** it gave the same values as reversed, so only ordinal and
+  reversed remain (the store's modes are ordinal 0 and reversed 1).
+- **Underline colours** for matches in the memory view (as weum's
+  `docs/weum-reference/memory.js`):
+  - ordinal mode: colour by shared reversed sums;
+  - reversed mode: colour by shared ordinal sums;
+  - frequency mode: colour by ordinal sums.
 - **A bug to fix:** every entry in ordinal bucket 345 showed a purple underline (seen in
   the reversed view). Study weum's memory to recreate its behaviour exactly.
 - **Frequency letters:** the sidecar's frequency letters grow long. Let them be toggled,
