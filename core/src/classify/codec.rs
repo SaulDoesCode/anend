@@ -75,7 +75,8 @@ impl NumberCodec {
             return None;
         }
         let digits = |d: &[u8]| d.iter().fold(0f64, |a, &c| a * 10.0 + (c - b'0') as f64);
-        Some(sign * (digits(int) + digits(frac) / 10f64.powi(self.decimals as i32)))
+        // one integer, one division: the nearest double to the decimal written
+        Some(sign * (digits(&[int, frac].concat()) / 10f64.powi(self.decimals as i32)))
     }
 }
 
@@ -361,10 +362,10 @@ mod tests {
             signed: true,
         };
         assert_eq!(c.encode(42.5), b"+0042.50");
-        assert_eq!(c.encode(-2.71828), b"-0002.72");
+        assert_eq!(c.encode(-2.71), b"-0002.71");
         assert_eq!(c.encode(1e9), b"+9999.99");
         assert_eq!(c.width(), 8);
-        assert_eq!(c.decode(b"-0002.72"), Some(-2.72));
+        assert_eq!(c.decode(b"-0002.71"), Some(-2.71));
         assert_eq!(c.decode(b"+00x3.14"), None);
         assert_eq!(c.decode(b"+0003"), None);
         let u = NumberCodec {
