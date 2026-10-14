@@ -21,9 +21,10 @@ use crate::store::User;
 
 pub type Res = Result<Value, String>;
 
-/// whose saves a call works on
-pub fn owner(user: Option<&User>) -> Result<String, String> {
-    if *LOCAL.get().unwrap_or(&false) {
+/// whose saves a call works on: on a `--local` server (`local`) the one workspace;
+/// otherwise the signed-in, active member's own
+pub fn owner(user: Option<&User>, local: bool) -> Result<String, String> {
+    if local {
         return Ok("local".into());
     }
     match user {
@@ -32,9 +33,6 @@ pub fn owner(user: Option<&User>) -> Result<String, String> {
         None => Err("log in to use the app here".into()),
     }
 }
-
-/// one workspace for everyone, no login (a daemon on your own machine)
-pub static LOCAL: OnceLock<bool> = OnceLock::new();
 
 pub struct Workspace {
     pub dir: PathBuf,
@@ -167,7 +165,7 @@ impl Workspace {
     /// whether the workspace may grow (and, with `new_save`, hold one more save): on a
     /// shared hub its saves stay under the quota and [`MAX_SAVES`]
     pub fn room(&self, new_save: bool) -> Result<(), String> {
-        if *LOCAL.get().unwrap_or(&false) {
+        if crate::mode::local() {
             return Ok(());
         }
         self.room_under(QUOTA.get().copied().unwrap_or(0), new_save)

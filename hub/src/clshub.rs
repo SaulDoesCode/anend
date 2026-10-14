@@ -5,16 +5,18 @@
 //! it. Points and badges come the same way as for saves.
 
 use chrono::Utc;
+#[cfg(feature = "app")]
 use serde_json::{Value, json};
 use std::path::Path;
 
 use anend_core::clsmodule;
 
+#[cfg(feature = "app")]
 use crate::app::Workspace;
 use crate::auth;
 use crate::game;
 use crate::hub::{Details, Hub, PAGE, Sort, human_size};
-use crate::store::{ClassifierRec, Role, Status, User};
+use crate::store::{ClassifierRec, Role, Status, User, Visibility};
 
 /// the largest module the hub reads, whatever the upload limit
 pub const MODULE_CAP: u64 = 64 << 20;
@@ -52,6 +54,7 @@ impl Hub {
         &self,
         user: &User,
         words: (&str, &str, &str),
+        vis: Option<Visibility>,
         file: &Path,
         replace: Option<&ClassifierRec>,
     ) -> Result<ClassifierRec, String> {
@@ -68,16 +71,18 @@ impl Hub {
             ));
         }
         let bytes = std::fs::read(file).map_err(|e| e.to_string())?;
-        self.accept_classifier_bytes(user, words, bytes, replace).await
+        self.accept_classifier_bytes(user, words, vis, bytes, replace).await
     }
 
     /// takes a module in: reads it strictly, files it, and queues it for review (or lets
     /// it straight in for trusted users). `words` are its name, description and tags; an
-    /// empty name or description comes from the module. `replace` is a new version.
+    /// empty name or description comes from the module. `vis` is who may see it (none:
+    /// as before, or public). `replace` is a new version.
     pub async fn accept_classifier_bytes(
         &self,
         user: &User,
         words: (&str, &str, &str),
+        vis: Option<Visibility>,
         bytes: Vec<u8>,
         replace: Option<&ClassifierRec>,
     ) -> Result<ClassifierRec, String> {
@@ -104,6 +109,8 @@ impl Hub {
             Some(old) => Some(self.store.classifier(&old.id)?.ok_or("that classifier is gone")?),
             None => None,
         };
+        let author = current.as_ref().map(|c| c.author.clone()).unwrap_or(user.name.clone());
+        self.room_to_share(&author, bytes.len() as u64, current.as_ref().map(|c| c.size).unwrap_or(0))?;
         let mut c = match current.as_ref() {
             Some(old) => ClassifierRec {
                 version: old.version + 1,
@@ -137,6 +144,7 @@ impl Hub {
         c.hash = main.hash.clone();
         c.size = bytes.len() as u64;
         c.status = if trusted { Status::Approved } else { Status::Pending };
+        c.visibility = vis.or(current.as_ref().map(|o| o.visibility)).unwrap_or_default();
         let path = self.store.classifier_path(&c.id).ok_or("a bad id")?;
         // written beside, then moved in, so a half written file is never served
         let incoming = self.store.incoming();
@@ -147,15 +155,16 @@ impl Hub {
             std::fs::remove_file(&tmp).ok();
             return Err(e.to_string());
         }
-        if c.status == Status::Approved && !c.rewarded {
+        if c.listed() && !c.rewarded {
             c.rewarded = true;
             self.store.add_points(&c.author, game::APPROVED)?;
         }
         self.store.put_classifier(&c)?;
-        let what = match (replace.is_some(), c.status) {
-            (false, Status::Approved) => "shared a classifier",
-            (false, _) => "sent in a classifier",
-            (true, _) => "updated a classifier",
+        let what = match (replace.is_some(), c.listed(), c.waiting()) {
+            (true, _, _) => "updated a classifier",
+            (false, true, _) => "shared a classifier",
+            (false, _, true) => "sent in a classifier",
+            (false, _, _) => "kept a classifier",
         };
         self.store.log(&user.name, what, &c.key())?;
         Ok(c)
@@ -170,7 +179,19 @@ impl Hub {
         }
     }
 
-    /// approved classifiers matching a search (words in its name, description, author,
+    /// who may see a classifier (as `set_save_visibility` for saves)
+    pub fn set_classifier_visibility(&self, user: &User, id: &str, vis: Visibility) -> Result<ClassifierRec, String> {
+        let c = self.store.update_classifier(id, |c| c.visibility = vis)?;
+        if c.listed() && !c.rewarded {
+            self.store.update_classifier(id, |c| c.rewarded = true)?;
+            self.store.add_points(&c.author, game::APPROVED)?;
+        }
+        self.store
+            .log(&user.name, format!("made a classifier {}", vis.name()), &c.key())?;
+        Ok(c)
+    }
+
+    /// listed classifiers (public and let in) matching a search (words in its name, description, author,
     /// classes or tags; `#tag` for a tag), sorted, one page; and whether there's more
     pub fn find_classifiers(&self, q: &str, sort: Sort, page: usize) -> Result<(Vec<ClassifierRec>, bool), String> {
         let q = q.trim().to_lowercase();
@@ -180,7 +201,7 @@ impl Hub {
             .store
             .classifiers()?
             .into_iter()
-            .filter(|c| c.status == Status::Approved)
+            .filter(|c| c.listed())
             .filter(|c| match tag {
                 Some(t) => c.tags.iter().any(|x| x == t),
                 None => words.iter().all(|w| {
@@ -212,8 +233,8 @@ impl Hub {
         if c.author.eq_ignore_ascii_case(&user.name) {
             return Err("that's your own classifier".into());
         }
-        if c.status != Status::Approved {
-            return Err("it isn't in yet".into());
+        if !c.listed() {
+            return Err("only classifiers in the grid take stars".into());
         }
         let (on, n) = self.store.toggle_classifier_star(&c.id, &user.name)?;
         let sign = if on { 1 } else { -1 };
@@ -228,6 +249,9 @@ impl Hub {
     /// counts a download (or a take into a save); the author gets a point the first time
     /// each person takes it
     pub fn classifier_downloaded(&self, c: &ClassifierRec, who: &str) -> Result<(), String> {
+        if !c.listed() {
+            return Ok(());
+        }
         let first = self.store.count_classifier_download(&c.id, who)?;
         if first && !c.author.eq_ignore_ascii_case(who) {
             self.store.add_points(&c.author, game::DOWNLOAD)?;
@@ -242,12 +266,14 @@ impl Hub {
         let key = c.key();
         match action {
             "approve" => {
-                self.store.update_classifier(id, |x| {
+                let x = self.store.update_classifier(id, |x| {
                     x.status = Status::Approved;
                     x.note.clear();
-                    x.rewarded = true;
+                    if x.listed() {
+                        x.rewarded = true;
+                    }
                 })?;
-                if !c.rewarded {
+                if !c.rewarded && x.rewarded {
                     self.store.add_points(&c.author, game::APPROVED)?;
                 }
                 self.store.log(&admin.name, "approved", &key)?;
@@ -305,6 +331,7 @@ pub fn may_edit(user: Option<&User>, c: &ClassifierRec) -> bool {
     user.is_some_and(|u| Hub::active(u) && (u.is_admin() || u.name.eq_ignore_ascii_case(&c.author)))
 }
 
+#[cfg(feature = "app")]
 /// takes a hub classifier's module into a workspace's open save: classes go to lists by
 /// name (or `lists`: {class: key}), and `as` names it. Runs on a blocking thread.
 pub fn take_into(ws: &Workspace, file: &Path, max: u64, args: &Value) -> Result<Value, String> {
@@ -322,6 +349,7 @@ pub fn take_into(ws: &Workspace, file: &Path, max: u64, args: &Value) -> Result<
     Ok(done)
 }
 
+#[cfg(feature = "app")]
 /// a classifier from a workspace's open save as module bytes, everything it builds on
 /// bundled. Runs on a blocking thread.
 pub fn export_from(ws: &Workspace, name: &str, description: &str, author: &str) -> Result<Vec<u8>, String> {
@@ -336,7 +364,7 @@ pub fn export_from(ws: &Workspace, name: &str, description: &str, author: &str) 
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "app"))]
 pub(crate) mod tests {
     use super::*;
     use crate::app::call as app_call;
@@ -350,10 +378,9 @@ pub(crate) mod tests {
             store: Store::open(&dir).unwrap(),
             config: Config {
                 name: "test".into(),
-                description: String::new(),
                 url: "http://localhost:8080".into(),
-                open: false,
                 max_upload: 8 << 20,
+                ..Default::default()
             },
             limiter: Limiter::new(true),
         };
@@ -413,7 +440,7 @@ pub(crate) mod tests {
         let bytes = export_from(&ws, "kind", "fruit or rocks", "saul").unwrap();
 
         let c = hub
-            .accept_classifier_bytes(&saul, ("", "", "nature, test"), bytes.clone(), None)
+            .accept_classifier_bytes(&saul, ("", "", "nature, test"), None, bytes.clone(), None)
             .await
             .unwrap();
         assert_eq!(c.status, Status::Pending);
@@ -468,7 +495,7 @@ pub(crate) mod tests {
         hub.manage(&admin, "saul", "trusted").unwrap();
         let saul = hub.store.user("saul").unwrap().unwrap();
         let v2 = hub
-            .accept_classifier_bytes(&saul, ("kind 2", "", ""), bytes.clone(), Some(&c))
+            .accept_classifier_bytes(&saul, ("kind 2", "", ""), None, bytes.clone(), Some(&c))
             .await
             .unwrap();
         assert_eq!(
@@ -534,19 +561,19 @@ pub(crate) mod tests {
         f[16] = b'!';
         bad.push(reseal(f));
         for b in bad {
-            let r = hub.accept_classifier_bytes(&saul, ("x", "", ""), b, None).await;
+            let r = hub.accept_classifier_bytes(&saul, ("x", "", ""), None, b, None).await;
             assert!(r.is_err());
         }
         // too big for the hub
         let big = vec![0u8; (hub.classifier_max() + 1) as usize];
-        let r = hub.accept_classifier_bytes(&saul, ("x", "", ""), big, None).await;
+        let r = hub.accept_classifier_bytes(&saul, ("x", "", ""), None, big, None).await;
         assert!(r.unwrap_err().contains("up to"));
         // nothing filed, nothing left in the scratch place
         assert!(hub.store.classifiers().unwrap().is_empty());
         assert_eq!(std::fs::read_dir(dir.join("classifiers")).unwrap().count(), 0);
         // the good one still goes in
         assert!(
-            hub.accept_classifier_bytes(&saul, ("x", "", ""), good, None)
+            hub.accept_classifier_bytes(&saul, ("x", "", ""), None, good, None)
                 .await
                 .is_ok()
         );
@@ -559,7 +586,7 @@ pub(crate) mod tests {
             })
             .unwrap();
         assert!(
-            hub.accept_classifier_bytes(&new, ("x", "", ""), b"x".to_vec(), None)
+            hub.accept_classifier_bytes(&new, ("x", "", ""), None, b"x".to_vec(), None)
                 .await
                 .is_err()
         );

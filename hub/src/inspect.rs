@@ -16,6 +16,8 @@ const MEMORIES: TableDefinition<&[u8], &[u8]> = TableDefinition::new("memories")
 const SAMPLE: usize = 24;
 const TITLES: usize = 40;
 
+/// (the web app only checks a file is a save; the hub keeps what it found)
+#[cfg_attr(not(feature = "hub"), allow(dead_code))]
 #[derive(Debug, Default)]
 pub struct Inside {
     pub notes: u64,

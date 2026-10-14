@@ -1,0 +1,10 @@
+{% if !new_invite.is_empty() %}<p class="token" id="new-invite">{{ new_invite }}</p>{% endif %}
+<form class="row" method="post" action="/invites">
+  <label class="small" for="uses">for</label><input id="uses" type="number" name="uses" value="1" min="1" max="{{ max_uses }}" style="width: 70px" aria-label="how many people">
+  <label class="small" for="days">people, for</label><input id="days" type="number" name="days" value="14" min="0" max="{{ max_days }}" style="width: 70px" aria-label="days it lasts">
+  <span class="small">days</span>
+  <input type="text" name="note" placeholder="who it's for (only you see it)" style="flex: 1; min-width: 140px" aria-label="who it's for">
+  {{ extra|safe }}
+  <button class="primary with-text" data-tip="make an invite link: shown once">{{ crate::web::icon("link") }}make an invite</button>
+</form>
+<p class="dim small">0 days: it lasts until it's used up or taken back. Anyone with the link can join while it lasts; nothing is emailed, you pass the link on yourself.</p>

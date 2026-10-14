@@ -1,0 +1,3 @@
+<form class="seg vis-control" method="post" action="{{ vis_action }}" role="group" aria-label="who sees it">
+  {% for v in crate::web::vis_choices() %}<button class="small with-text{% if visibility == v.name %} on{% endif %}" name="visibility" value="{{ v.name }}" data-tip="{{ v.tip }}" aria-pressed="{% if visibility == v.name %}true{% else %}false{% endif %}">{{ crate::web::icon(v.icon) }}{{ v.name }}</button>{% endfor %}
+</form>

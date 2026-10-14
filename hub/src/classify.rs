@@ -148,7 +148,7 @@ fn hub_jobs() -> usize {
 }
 
 fn shared() -> bool {
-    !*crate::app::LOCAL.get().unwrap_or(&false)
+    !crate::mode::local()
 }
 
 /// the workspace folder a job key's save is in

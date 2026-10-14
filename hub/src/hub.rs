@@ -1,23 +1,52 @@
-//! What the hub does, apart from how it's asked: taking uploads in, finding and sorting
-//! saves, stars, downloads, the review queue. The web pages and the API both call these.
+//! What the server does, apart from how it's asked: accounts and how people join (the
+//! join policy), and for the hub, taking uploads in, finding and sorting saves, stars,
+//! downloads, visibility and the review queue. The web pages and the API both call these.
+#![cfg_attr(not(feature = "hub"), allow(dead_code))]
 
 use chrono::Utc;
+#[cfg(feature = "hub")]
 use std::path::Path;
+use std::path::PathBuf;
 
 use crate::auth::{self, Limiter};
+#[cfg(feature = "hub")]
 use crate::game;
+#[cfg(feature = "hub")]
 use crate::inspect;
-use crate::store::{Role, Save, Standing, Status, Store, User};
+#[cfg(feature = "hub")]
+use crate::store::{Save, Status, Visibility};
+use crate::store::{Role, Standing, Store, User};
 
 pub struct Config {
     pub name: String,
     pub description: String,
-    /// the address people reach the hub at, for links printed in the terminal
+    /// the address people reach the server at, for links printed in the terminal
     pub url: String,
-    /// new accounts are active at once instead of waiting for an admin
-    pub open: bool,
+    /// how to reach whoever runs the server, for the about page (may be empty)
+    pub contact: String,
     /// largest upload in bytes
     pub max_upload: u64,
+    /// how many bytes of saves and classifiers each member may keep on the hub, private
+    /// and unlisted ones included (0: no limit)
+    pub share_quota: u64,
+    /// the terms of use and the privacy note, as markdown files (they may be missing)
+    pub terms: PathBuf,
+    pub privacy: PathBuf,
+}
+
+impl Default for Config {
+    fn default() -> Config {
+        Config {
+            name: "anend hub".into(),
+            description: String::new(),
+            url: "http://127.0.0.1:8080".into(),
+            contact: String::new(),
+            max_upload: 64 << 20,
+            share_quota: 512 << 20,
+            terms: PathBuf::new(),
+            privacy: PathBuf::new(),
+        }
+    }
 }
 
 pub struct Hub {
@@ -26,8 +55,48 @@ pub struct Hub {
     pub limiter: Limiter,
 }
 
+/// how people get an account
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Join {
+    /// anyone may join, and is in at once
+    Open,
+    /// anyone may apply; an admin lets them in (an invite code skips the wait)
+    Apply,
+    /// only with an invite code from an admin (or a trusted member, if the admins allow it)
+    Invite,
+}
+
+impl Join {
+    pub fn parse(s: &str) -> Option<Join> {
+        match s.trim() {
+            "open" => Some(Join::Open),
+            "apply" => Some(Join::Apply),
+            "invite" => Some(Join::Invite),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Join::Open => "open",
+            Join::Apply => "apply",
+            Join::Invite => "invite",
+        }
+    }
+
+    /// in a few words, for the about page and the admin panel
+    pub fn about(self) -> &'static str {
+        match self {
+            Join::Open => "anyone may join",
+            Join::Apply => "anyone may apply, and an admin lets them in",
+            Join::Invite => "by invitation only",
+        }
+    }
+}
+
 pub const PAGE: usize = 24;
 
+#[cfg(feature = "hub")]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Sort {
     New,
@@ -36,6 +105,7 @@ pub enum Sort {
     Featured,
 }
 
+#[cfg(feature = "hub")]
 impl Sort {
     pub fn parse(s: &str) -> Sort {
         match s {
@@ -57,13 +127,17 @@ impl Sort {
 }
 
 /// what an uploader says about a save
+#[cfg(feature = "hub")]
 pub struct Details {
     pub name: String,
     pub description: String,
     pub tags: Vec<String>,
+    /// who may see it; none keeps what a new version replaces (or public, for a new one)
+    pub visibility: Option<Visibility>,
 }
 
 /// tags typed as `a, b c` → `["a", "b-c"]`, lowercase, at most 8
+#[cfg(feature = "hub")]
 pub fn parse_tags(s: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for t in s.split(',') {
@@ -84,7 +158,18 @@ pub fn parse_tags(s: &str) -> Vec<String> {
     out
 }
 
+#[cfg(feature = "hub")]
 impl Details {
+    /// with a visibility as sent: empty keeps it, anything else must be private,
+    /// unlisted or public
+    pub fn seen_by(mut self, vis: &str) -> Result<Details, String> {
+        if !vis.trim().is_empty() {
+            self.visibility =
+                Some(Visibility::parse(vis).ok_or("visibility is private, unlisted or public")?);
+        }
+        Ok(self)
+    }
+
     pub fn new(name: &str, description: &str, tags: &str) -> Result<Details, String> {
         let name = name.trim();
         if name.is_empty() {
@@ -101,15 +186,86 @@ impl Details {
             name: name.to_string(),
             description: description.to_string(),
             tags: parse_tags(tags),
+            visibility: None,
         })
     }
 }
 
 impl Hub {
-    /// whether a user may share saves and star them
+    /// whether a user may share saves and star them, and use the web app
     pub fn active(user: &User) -> bool {
         user.standing == Standing::Active
     }
+
+    /// how people join, kept in the database (`--join` sets it, and so does the admin panel)
+    pub fn join_policy(&self) -> Join {
+        self.store
+            .meta("join")
+            .ok()
+            .flatten()
+            .and_then(|s| Join::parse(&s))
+            .unwrap_or(Join::Invite)
+    }
+
+    pub fn set_join_policy(&self, j: Join) -> Result<(), String> {
+        self.store.set_meta("join", j.name())
+    }
+
+    /// whether trusted members may make invites too (admins always may)
+    pub fn trusted_invite(&self) -> bool {
+        self.store.meta("trusted_invite").ok().flatten().as_deref() == Some("1")
+    }
+
+    pub fn set_trusted_invite(&self, on: bool) -> Result<(), String> {
+        self.store.set_meta("trusted_invite", if on { "1" } else { "0" })
+    }
+
+    /// whether a user may make invite codes
+    pub fn may_invite(&self, u: &User) -> bool {
+        Hub::active(u) && (u.is_admin() || (u.role == Role::Trusted && self.trusted_invite()))
+    }
+
+    /// how many bytes a member keeps shared on the hub: every save and classifier of
+    /// theirs, private and unlisted ones too
+    pub fn shared_bytes(&self, name: &str) -> Result<u64, String> {
+        let saves: u64 = self
+            .store
+            .saves()?
+            .iter()
+            .filter(|s| s.author.eq_ignore_ascii_case(name))
+            .map(|s| s.size)
+            .sum();
+        let cls: u64 = self
+            .store
+            .classifiers()?
+            .iter()
+            .filter(|c| c.author.eq_ignore_ascii_case(name))
+            .map(|c| c.size)
+            .sum();
+        Ok(saves + cls)
+    }
+
+    /// whether `author` may keep `adding` more bytes on the hub, `replacing` an old
+    /// version's (`--share-quota`)
+    pub fn room_to_share(&self, author: &str, adding: u64, replacing: u64) -> Result<(), String> {
+        let quota = self.config.share_quota;
+        if quota == 0 {
+            return Ok(());
+        }
+        let used = self.shared_bytes(author)?.saturating_sub(replacing);
+        if used + adding > quota {
+            return Err(format!(
+                "that would make what you keep on the hub {} of the {} it keeps for each member (private ones count too): delete some first",
+                human_size(used + adding),
+                human_size(quota)
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "hub")]
+impl Hub {
 
     /// takes an uploaded file in: checks it's a save, files it, and queues it for review
     /// (or lets it straight in for trusted users). `replace` uploads a new version.
@@ -155,6 +311,11 @@ impl Hub {
             Some(old) => Some(self.store.save(&old.id)?.ok_or("that save is gone")?),
             None => None,
         };
+        let author = current.as_ref().map(|c| c.author.clone()).unwrap_or(user.name.clone());
+        if let Err(e) = self.room_to_share(&author, size, current.as_ref().map(|c| c.size).unwrap_or(0)) {
+            std::fs::remove_file(&tmp).ok();
+            return Err(e);
+        }
         let mut save = match current.as_ref() {
             Some(old) => Save {
                 version: old.version + 1,
@@ -174,6 +335,10 @@ impl Hub {
         save.name = details.name;
         save.description = details.description;
         save.tags = details.tags;
+        save.visibility = details
+            .visibility
+            .or(current.as_ref().map(|c| c.visibility))
+            .unwrap_or_default();
         save.notes = inside.notes;
         save.memories = inside.memories;
         save.sample = inside.sample;
@@ -184,15 +349,16 @@ impl Hub {
             std::fs::remove_file(&tmp).ok();
             return Err(e.to_string());
         }
-        if save.status == Status::Approved && !save.rewarded {
+        if save.listed() && !save.rewarded {
             save.rewarded = true;
             self.store.add_points(&save.author, game::APPROVED)?;
         }
         self.store.put_save(&save)?;
-        let what = match (replace.is_some(), save.status) {
-            (false, Status::Approved) => "shared",
-            (false, _) => "sent in for review",
-            (true, _) => "updated",
+        let what = match (replace.is_some(), save.listed(), save.waiting()) {
+            (true, _, _) => "updated",
+            (false, true, _) => "shared",
+            (false, _, true) => "sent in for review",
+            (false, _, _) => "kept a save",
         };
         self.store.log(&user.name, what, &save.id)?;
         Ok(save)
@@ -207,7 +373,21 @@ impl Hub {
         }
     }
 
-    /// approved saves matching a search, sorted, one page of them; and whether there's more
+    /// who may see a save: private, unlisted or public. A public one that wasn't let in
+    /// yet waits for an admin (private and unlisted ones skip the review); one let in
+    /// before earns its points the first time it's public.
+    pub fn set_save_visibility(&self, user: &User, id: &str, vis: Visibility) -> Result<Save, String> {
+        let s = self.store.update_save(id, |s| s.visibility = vis)?;
+        if s.listed() && !s.rewarded {
+            self.store.update_save(id, |s| s.rewarded = true)?;
+            self.store.add_points(&s.author, game::APPROVED)?;
+        }
+        self.store.log(&user.name, format!("made a save {}", vis.name()), &s.id)?;
+        Ok(s)
+    }
+
+    /// listed saves (public and let in) matching a search, sorted, one page of them; and
+    /// whether there's more
     pub fn find(&self, q: &str, sort: Sort, page: usize) -> Result<(Vec<Save>, bool), String> {
         let q = q.trim().to_lowercase();
         let words: Vec<&str> = q.split_whitespace().collect();
@@ -216,7 +396,7 @@ impl Hub {
             .store
             .saves()?
             .into_iter()
-            .filter(|s| s.status == Status::Approved)
+            .filter(|s| s.listed())
             .filter(|s| match tag {
                 Some(t) => s.tags.iter().any(|x| x == t),
                 None => words.iter().all(|w| {
@@ -246,6 +426,9 @@ impl Hub {
         if save.author.eq_ignore_ascii_case(&user.name) {
             return Err("that's your own save".into());
         }
+        if !save.listed() {
+            return Err("only saves in the grid take stars".into());
+        }
         let (on, n) = self.store.toggle_star(&save.id, &user.name)?;
         let sign = if on { 1 } else { -1 };
         self.store.add_points(&save.author, sign * game::STAR)?;
@@ -256,8 +439,12 @@ impl Hub {
         Ok((on, n))
     }
 
-    /// counts a download; the author gets a point the first time each person takes it
+    /// counts a download of a listed save; the author gets a point the first time each
+    /// person takes it (private and unlisted ones aren't counted)
     pub fn downloaded(&self, save: &Save, who: &str) -> Result<(), String> {
+        if !save.listed() {
+            return Ok(());
+        }
         let first = self.store.count_download(&save.id, who)?;
         if first && !save.author.eq_ignore_ascii_case(who) {
             self.store.add_points(&save.author, game::DOWNLOAD)?;
@@ -270,14 +457,16 @@ impl Hub {
         let save = self.store.save(id)?.ok_or("no such save")?;
         match action {
             "approve" => {
+                // the points come with its first approval in public (a private one's when
+                // it's made public)
                 let s = self.store.update_save(id, |s| {
                     s.status = Status::Approved;
                     s.note.clear();
-                    if !s.rewarded {
+                    if s.listed() {
                         s.rewarded = true;
                     }
                 })?;
-                if !save.rewarded {
+                if !save.rewarded && s.rewarded {
                     self.store.add_points(&s.author, game::APPROVED)?;
                 }
                 self.store.log(&admin.name, "approved", id)?;
@@ -326,7 +515,9 @@ impl Hub {
         std::fs::remove_file(self.store.save_path(id)).ok();
         Ok(())
     }
+}
 
+impl Hub {
     /// an admin's verdict on an account
     pub fn manage(&self, admin: &User, name: &str, action: &str) -> Result<String, String> {
         let user = self.store.user(name)?.ok_or("no such user")?;
@@ -410,6 +601,7 @@ pub fn human_size(n: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "hub")]
     use crate::inspect::tests::make_save;
 
     fn hub() -> (Hub, std::path::PathBuf) {
@@ -418,10 +610,9 @@ mod tests {
             store: Store::open(&dir).unwrap(),
             config: Config {
                 name: "test".into(),
-                description: String::new(),
                 url: "http://localhost:8080".into(),
-                open: false,
                 max_upload: 8 << 20,
+                ..Default::default()
             },
             limiter: Limiter::new(true),
         };
@@ -439,6 +630,7 @@ mod tests {
             .unwrap()
     }
 
+    #[cfg(feature = "hub")]
     #[test]
     fn tags() {
         assert_eq!(
@@ -448,6 +640,7 @@ mod tests {
         assert!(Details::new("  ", "", "").is_err());
     }
 
+    #[cfg(feature = "hub")]
     #[tokio::test]
     async fn upload_review_star_download() {
         let (hub, dir) = hub();

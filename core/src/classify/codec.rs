@@ -361,10 +361,10 @@ mod tests {
             signed: true,
         };
         assert_eq!(c.encode(42.5), b"+0042.50");
-        assert_eq!(c.encode(-3.14159), b"-0003.14");
+        assert_eq!(c.encode(-2.71828), b"-0002.72");
         assert_eq!(c.encode(1e9), b"+9999.99");
         assert_eq!(c.width(), 8);
-        assert_eq!(c.decode(b"-0003.14"), Some(-3.14));
+        assert_eq!(c.decode(b"-0002.72"), Some(-2.72));
         assert_eq!(c.decode(b"+00x3.14"), None);
         assert_eq!(c.decode(b"+0003"), None);
         let u = NumberCodec {
@@ -388,7 +388,7 @@ mod tests {
         assert_eq!(cb.encode(&back), b);
         // uniform patches are reproduced exactly when the codebook holds them
         let flat = Image::new(32, 32, [250, 248, 240]);
-        let cb2 = Codebook::learn(&[flat.clone()], 8, 4, 2, 0).unwrap();
+        let cb2 = Codebook::learn(std::slice::from_ref(&flat), 8, 4, 2, 0).unwrap();
         assert_eq!(cb2.decode(&cb2.encode(&flat), 32, 32), flat);
         // ragged bytes still decode
         assert_eq!(cb.decode(&[1, 2, ROW, 3], 32, 32).width, 32);

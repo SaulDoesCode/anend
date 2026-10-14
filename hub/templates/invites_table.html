@@ -1,0 +1,11 @@
+{% if invites.is_empty() %}<p class="dim">No invites yet.</p>{% else %}
+<div class="scroll"><table>
+  <tr><th>code</th><th>for</th><th>by</th><th>made</th><th>ends</th><th>used</th><th>state</th><th></th></tr>
+  {% for i in invites %}
+  <tr><td><code>{{ i.hint }}…</code></td><td class="small">{{ i.note }}</td><td><a href="/u/{{ i.by }}">{{ i.by }}</a></td><td class="dim small">{{ i.made }}</td><td class="small">{{ i.expires }}</td>
+    <td class="small"{% if !i.used_by.is_empty() %} data-tip="{{ i.used_by }}" tabindex="0"{% endif %}>{{ i.uses }}</td>
+    <td><span class="pill {% if i.live %}active{% else %}rejected{% endif %}">{{ i.state }}</span></td>
+    <td>{% if i.live %}<form class="inline" method="post" action="/invites/{{ i.id }}/revoke"><button class="small bad ibtn tip-end" data-tip="take it back: no one else can join with it" aria-label="take back the invite {{ i.hint }}">{{ crate::web::icon("close") }}</button></form>{% endif %}</td></tr>
+  {% endfor %}
+</table></div>
+{% endif %}
