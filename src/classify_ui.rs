@@ -639,14 +639,28 @@ fn start_index(st: &mut ClsState, work: &Work, store: Arc<Store>) {
     work.spawn("index", move || {
         let r = (|| {
             let stack = store.stack(&name)?;
-            store.memo_index(&stack, None, SCAN, &pool(), |d, t| {
-                *done.lock().unwrap_or_else(|e| e.into_inner()) = (d, t);
+            let refs: Vec<Ref> = store.candidates(SCAN)?.into_iter().map(|c| c.0).collect();
+            let total = refs.len();
+            let pool = pool();
+            let mut all = memo::IndexReport {
+                total,
+                ..Default::default()
+            };
+            let started = std::time::Instant::now();
+            // in small steps, so the bar moves and a stop is quick
+            for chunk in refs.chunks(24) {
                 if cancel.load(Ordering::Relaxed) || stop.load(Ordering::Relaxed) {
-                    Flow::Stop
-                } else {
-                    Flow::Go
+                    all.stopped = true;
+                    break;
                 }
-            })
+                let rep = store.memo_index(&stack, Some(chunk), SCAN, &pool, |_, _| Flow::Go)?;
+                all.computed += rep.computed;
+                all.cached += rep.cached;
+                *done.lock().unwrap_or_else(|e| e.into_inner()) = (all.computed + all.cached, total);
+            }
+            all.total = total;
+            all.seconds = started.elapsed().as_secs_f64();
+            Ok::<_, String>(all)
         })();
         Box::new(move |w: &mut World| {
             let msg = match &r {
