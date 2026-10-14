@@ -176,9 +176,12 @@ function route_() {
     $('bar-name').textContent = v.barName || name;
     placeholder();
     barInput.value = app.barText[name] ?? '';
-    // the view's extras (counts, sums, toggles) in the thin strip over the bar, never beside it
-    clear($('bar-right'), v.barRight || null);
-    $('bar-right').hidden = !v.barRight;
+    // the memory view and the space get a thin strip over the bar for their sums and
+    // toggles; every other view keeps one bar, its count small at the bar's right end
+    const strip = name === 'memory' || name === 'space';
+    clear($('bar-right'), strip ? v.barRight || null : null);
+    $('bar-right').hidden = !strip || !v.barRight;
+    clear($('bar-count'), strip ? null : v.barRight || null);
     $('searchline').hidden = name !== 'space' || !space.searchLineOn();
   }
   app.route = rest;
