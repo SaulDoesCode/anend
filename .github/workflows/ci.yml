@@ -17,7 +17,7 @@ jobs:
       - name: system packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev libfontconfig1-dev
+          sudo apt-get install -y --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev libfontconfig1-dev libwebkit2gtk-4.1-dev libxdo-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -25,6 +25,10 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - name: the Dioxus app builds for the web too
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo build -p anend-app --target wasm32-unknown-unknown --no-default-features --features web
       - uses: actions/setup-node@v4
         with:
           node-version: 22

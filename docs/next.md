@@ -115,6 +115,31 @@ New module beside the old store (apps not rewired yet; nothing old deleted). 38 
   `docs/format.md` (the module docs hold the format meanwhile); a wasm check (the
   wasm32 target isn't installed here).
 
+## The Dioxus app (`app/`, package `anend-app`): status
+
+Started 14 Oct. Dioxus 0.7.10 (pinned), desktop through dioxus-desktop/wry (needs
+`libwebkit2gtk-4.1-dev libxdo-dev`), web through WebAssembly. Features: `desktop` (default),
+`web`, `hub` (default; the hub's settings).
+- **Done:** the crate in the workspace and CI (build, clippy, a wasm32 build step);
+  `app/src/gem.rs`: weum's numbers checked against api.js/memory.js (gsum line letter for
+  letter, pfR via core, seedCLR as JavaScript's string hash, underline groups per mode with
+  weum's `key.length >= 2` rule, the triangle, ⌊√(s·r)⌋, the byte sum), tested;
+  `app/src/backend/mod.rs`: the `Backend` trait (one `call(op, args)` over the app API, typed
+  methods for entries/search by sum and words/tags/time/lists/notes/models/filters/settings,
+  backups as texts + other JSON, weum `all-of-it.json` → bundle), tested. A window opens
+  under Xvfb (webkit2gtk installed with apt).
+- **Found:** "every text in ordinal bucket 345 underlined purple" is weum's own behaviour:
+  in reversed mode the grouping sum is the ordinal one, and seedCLR("345") is hue 276.
+- **Left, in order:** `backend/local.rs` (core `Store` on worker threads, the hub's ops
+  ported plus `mem.put`, `mem.buckets`, `settings.get/set`, `classify.unfeedback`) and
+  `backend/hub.rs` (WebSocket); the shell (top bar, centered command bar with the strip in
+  memory/space, settings dialog, palettes, font size, zoom, keyboard); the memory view with
+  weum parity and the additions; lists, reader, notes, tags, stats, models (a general model
+  builder over the coming spec, docs/models.md; minimal until then), filters, settings with
+  saves/import/backup; the space through three.js interop; screenshots under Xvfb.
+- **Note:** core's uncommitted work in progress (classify `gen`, graph clippy) can break the
+  workspace build meanwhile; `app/` was checked against the committed core in a worktree.
+
 ## Decisions (14 Oct): the redesign
 
 The user asked for "the route that provides the most feature coverage and performance and

@@ -1,0 +1,36 @@
+[package]
+name = "anend-app"
+version = "0.1.0"
+edition = "2024"
+description = "anend's app in Rust with Dioxus: the desktop app and, from the same code, the web app"
+license-file = "../LICENSE"
+publish = false
+
+[[bin]]
+name = "anend-app"
+path = "src/main.rs"
+
+[features]
+default = ["desktop", "hub"]
+# the desktop app: the system webview (wry), the saves on disk through anend-core's Store
+desktop = ["dioxus/desktop", "dep:tokio"]
+# the web app: WebAssembly in the browser, talking to the hub's app API over a WebSocket
+web = ["dioxus/web", "dep:wasm-bindgen", "dep:web-sys", "dep:js-sys", "dep:wasm-bindgen-futures"]
+# the hub's settings (its address, the app token); leave out for a hub-free build
+hub = []
+
+[dependencies]
+anend-core = { path = "../core" }
+dioxus = { version = "=0.7.10", default-features = false, features = ["launch", "lib"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+futures-channel = "0.3"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+chrono = "0.4"
+
+tokio = { version = "1", features = ["rt", "time"], optional = true }
+
+wasm-bindgen = { version = "=0.2.129", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["WebSocket", "MessageEvent", "Window", "Storage", "Location", "CloseEvent", "BinaryType"] }

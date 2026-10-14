@@ -7,7 +7,7 @@ license-file = "LICENSE"
 publish = false
 
 [workspace]
-members = ["core", "hub"]
+members = ["core", "hub", "app"]
 
 [dependencies]
 anend-core = { path = "core" }
