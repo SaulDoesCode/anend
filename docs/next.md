@@ -125,6 +125,11 @@ ergonomics" and approved this plan.
    - **The space:** a canvas in the app, starting with the existing three.js space through
      interop; a wgpu/Rust renderer later if it earns it.
    - **Bevy and the old JS app:** retired once the Dioxus app reaches parity.
+   - **Priority:** the desktop app is the primary product; the browser version exists for
+     reach (the user: "only reason I desire the browser action is because it might not
+     be as popular otherwise"). Build and polish the desktop first. The web build follows
+     from the same code, and where something only works well on the desktop, the desktop
+     wins and the web gets a lighter version.
 4. **One API:** the app ops (WebSocket/REST) are the API. The desktop, web app, scripts and
    lenses all use the same calls.
 5. **Views are lenses over one query model:** words, sums, tags, time, classifiers and
