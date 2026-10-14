@@ -614,14 +614,19 @@ pub fn switch_save(world: &mut World, path: PathBuf) {
         Ok(s) => s,
         Err(e) => return say(world, format!("couldn't open {}: {}", path.display(), e)),
     };
-    install(world, store);
+    install(world, std::sync::Arc::new(store));
     say(world, format!("loaded {}", save_name(&path)));
 }
 
 /// puts a store in place of the open one and resets what was read from the old one
-fn install(world: &mut World, store: Store) {
+fn install(world: &mut World, store: std::sync::Arc<Store>) {
     let path = store.path().to_path_buf();
     let notes = store.all().unwrap_or_default();
+    // jobs on the old save stop, and what they'd bring back is dropped
+    world.resource_mut::<crate::jobs::Work>().new_save();
+    world.insert_resource(crate::classify_ui::ClsState::default());
+    world.resource_mut::<crate::tint::Tints>().reset();
+    world.insert_resource(crate::index_panel::IndexPanel::default());
     world.insert_resource(Db(store));
     {
         let mut session = world.resource_mut::<Session>();
@@ -717,8 +722,12 @@ fn rename(world: &mut World, path: PathBuf, name: String) {
         return say(world, format!("there's already a save called {}", name));
     }
     let current = same(world.resource::<Db>().0.path(), &path);
+    if current && std::sync::Arc::strong_count(&world.resource::<Db>().0) > 1 {
+        return say(world, "a classifier is busy with this save; rename it when it's done");
+    }
     if current {
-        // redb holds the file while it's open
+        // redb holds the file while it's open; jobs holding it stop
+        world.resource_mut::<crate::jobs::Work>().new_save();
         let db = world.remove_resource::<Db>();
         drop(db);
     }
@@ -741,7 +750,7 @@ fn rename(world: &mut World, path: PathBuf, name: String) {
 fn reopen(world: &mut World, path: &Path) -> Result<(), String> {
     match Store::open(path) {
         Ok(store) => {
-            world.insert_resource(Db(store));
+            world.insert_resource(Db::new(store));
             let mut config = world.resource_mut::<Config>();
             config.current = Some(path.to_path_buf());
             config.save();
@@ -750,7 +759,7 @@ fn reopen(world: &mut World, path: &Path) -> Result<(), String> {
         Err(e) => {
             let fresh = unique(&world.resource::<Config>().saves_dir.clone(), "recovered");
             if let Ok(store) = Store::open(&fresh) {
-                install(world, store);
+                install(world, std::sync::Arc::new(store));
             }
             Err(format!("couldn't reopen the save: {}", e))
         }
@@ -761,6 +770,9 @@ fn reopen(world: &mut World, path: &Path) -> Result<(), String> {
 /// (and marks it unfinished) while it's open, then opened again
 pub(crate) fn read_open_save(world: &mut World, max: u64) -> Result<(String, Vec<u8>), String> {
     let path = world.resource::<Db>().0.path().to_path_buf();
+    if std::sync::Arc::strong_count(&world.resource::<Db>().0) > 1 {
+        return Err("a classifier is busy with this save; try again when it's done".into());
+    }
     if crate::vfs::meta(&path).is_some_and(|m| m.len > max) {
         return Err(format!("this save is over {}", human_size(max)));
     }

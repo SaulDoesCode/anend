@@ -36,7 +36,13 @@ use crate::theme::colors;
 // ------------------------------------------------------------------ state
 
 #[derive(Resource)]
-pub struct Db(pub Store);
+pub struct Db(pub std::sync::Arc<Store>);
+
+impl Db {
+    pub fn new(store: Store) -> Db {
+        Db(std::sync::Arc::new(store))
+    }
+}
 
 /// every stored note, newest first
 #[derive(Resource, Default)]
@@ -52,6 +58,7 @@ pub enum Route {
     Space,
     Lists,
     Tags,
+    Classifiers,
 }
 
 #[derive(Resource, Default)]
@@ -336,6 +343,8 @@ fn root() -> impl Scene {
                 --
                 @crate::tags_ui::view()
                 --
+                @crate::classify_ui::view()
+                --
                 @crate::space_ui::view()
             ]
             --
@@ -399,6 +408,8 @@ fn nav() -> impl Scene {
             @nav_button(Icon::Space, "space", Route::Space, Action::GotoSpace)
             --
             @nav_button(Icon::List, "lists", Route::Lists, Action::GotoLists)
+            --
+            @nav_button(Icon::Classifier, "classifiers", Route::Classifiers, Action::GotoClassifiers)
             --
             @nav_button(Icon::Tags, "tags", Route::Tags, Action::GotoTags)
             --
@@ -543,6 +554,12 @@ fn editor_view() -> impl Scene {
                         on(tag_input_key)
                     ]
                     --
+                    @icon_button(Icon::Classifier, "the classifiers this note is indexed on, and what they say of it")
+                    on(|_activate: On<Activate>, mut panel: ResMut<crate::index_panel::IndexPanel>| {
+                        panel.open = !panel.open;
+                        panel.dirty = true;
+                    })
+                    --
                     @icon_button(Icon::View, "view the note rendered")
                     TipKey(Action::ToggleView)
                     ViewToggle
@@ -559,6 +576,18 @@ fn editor_view() -> impl Scene {
                     @icon_button(Icon::Delete, "delete the note")
                     on(confirm_delete)
                 ]
+                --
+                // the note's classifiers, when opened
+                Node {
+                    display: Display::None,
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(6),
+                    padding: UiRect::axes(px(10), px(8)),
+                    border_radius: BorderRadius::all(px(5)),
+                    flex_shrink: 0.0,
+                }
+                BackgroundColor(colors::CODE_BG)
+                crate::index_panel::IndexPanelBox
                 --
                 // the writing pad, and the highlighting painted over it
                 Node {
@@ -773,9 +802,11 @@ pub fn app_actions(
             | Action::GotoStats
             | Action::GotoSpace
             | Action::GotoLists
-            | Action::GotoTags => {
+            | Action::GotoTags
+            | Action::GotoClassifiers => {
                 let route = match action {
                     Action::GotoTags => Route::Tags,
+                    Action::GotoClassifiers => Route::Classifiers,
                     Action::GotoLists => Route::Lists,
                     Action::GotoEditor => Route::Editor,
                     Action::GotoReader => Route::Reader,
@@ -825,6 +856,7 @@ pub fn apply_route(
         Has<SpaceView>,
         Has<crate::lists_ui::ListsView>,
         Has<crate::tags_ui::TagsView>,
+        Has<crate::classify_ui::ClsView>,
     )>,
     tabs: Query<(Entity, &NavTab)>,
     mut commands: Commands,
@@ -833,7 +865,7 @@ pub fn apply_route(
         return;
     }
     redraw.route = false;
-    for (mut node, editor, reader, memory, stats, space, lists, tags) in views.iter_mut() {
+    for (mut node, editor, reader, memory, stats, space, lists, tags, cls) in views.iter_mut() {
         let shown = match session.route {
             Route::Editor => editor,
             Route::Reader => reader,
@@ -842,8 +874,9 @@ pub fn apply_route(
             Route::Space => space,
             Route::Lists => lists,
             Route::Tags => tags,
+            Route::Classifiers => cls,
         };
-        if editor || reader || memory || stats || space || lists || tags {
+        if editor || reader || memory || stats || space || lists || tags || cls {
             node.display = if shown { Display::Flex } else { Display::None };
         }
     }

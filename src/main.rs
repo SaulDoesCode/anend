@@ -6,6 +6,11 @@
 #![allow(clippy::type_complexity, clippy::too_many_arguments)] // bevy queries and systems are naturally verbose
 
 mod bar;
+mod classify_ui;
+mod cls_widgets;
+mod index_panel;
+mod jobs;
+mod tint;
 
 // the saves themselves live in anend-core, shared with the hub
 pub use anend_core::{forge, lists, markdown, memory, note, simd, spread, store, vfs, weum};
@@ -74,7 +79,7 @@ fn parse_args() -> Args {
                      (a JSON array or one JSON document per line), then exit\n  \
                      --import-weum <file>  import weum memories from its backup (all-of-it.json), then exit\n  \
                      --space           open in the space\n\n\
-                     ctrl+s save, ctrl+n new note, ctrl+e view/edit, ctrl+1..7 views, ctrl+, settings (saves, fonts, zen, keys)",
+                     ctrl+s save, ctrl+n new note, ctrl+e view/edit, ctrl+1..8 views (7 classifiers, 8 tags), ctrl+, settings (saves, fonts, zen, keys)",
                     config::Config::load().current_save().display()
                 );
                 std::process::exit(0);
@@ -213,7 +218,7 @@ fn run(args: Args) {
     .insert_resource(UiTheme(theme::sand_theme(&palette::Palette::default())))
     .insert_resource(ClearColor(theme::colors::MOOD_DARK))
     .init_resource::<palette::Palette>()
-    .insert_resource(Db(store))
+    .insert_resource(Db::new(store))
     // start on the most recent note, like picking the top writ in the old editor
     .insert_resource(Session {
         active: notes.first().cloned().unwrap_or_default(),
@@ -235,13 +240,17 @@ fn run(args: Args) {
     .init_resource::<lists_ui::ListsState>()
     .init_resource::<hub_ui::HubState>()
     .init_resource::<tags_ui::TagsState>()
+    .init_resource::<classify_ui::ClsState>()
+    .init_resource::<tint::Tints>()
+    .init_resource::<index_panel::IndexPanel>()
+    .init_resource::<jobs::Work>()
     .init_resource::<typeface::Typeface>()
     .init_resource::<zen::Zen>()
     .init_resource::<icons::Icons>()
     .insert_resource(keymap)
     .insert_resource(config)
     .add_message::<keys::Fired>()
-    .add_systems(Startup, (ui::scene.spawn(), space::setup, icons::spawn_tooltip))
+    .add_systems(Startup, (ui::scene.spawn(), space::setup, icons::spawn_tooltip, tint::spawn_legend))
     .add_systems(Update, window_icon)
     .add_systems(
         Update,
@@ -299,6 +308,16 @@ fn run(args: Args) {
         (
             bar::notes_side,
             tags_ui::rebuild_tags,
+            (
+                jobs::apply_done,
+                classify_ui::tick_classifiers,
+                classify_ui::rebuild_classifiers,
+                index_panel::rebuild_index_panel,
+                tint::request_tints,
+                tint::apply_tints,
+                tint::rebuild_legend,
+            )
+                .chain(),
             settings::rebuild_settings,
             forge_ui::rebuild_forge,
             forge_ui::pour,

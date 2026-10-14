@@ -27,6 +27,7 @@ pub enum Action {
     GotoSpace,
     GotoLists,
     GotoTags,
+    GotoClassifiers,
     OpenSettings,
     FocusTerm,
     BucketOrdinal,
@@ -124,7 +125,7 @@ const fn shift(key: KeyCode) -> Binding {
 }
 
 impl Action {
-    pub const ALL: [Action; 55] = [
+    pub const ALL: [Action; 56] = [
         Action::Save,
         Action::NewNote,
         Action::ToggleView,
@@ -136,6 +137,7 @@ impl Action {
         Action::GotoSpace,
         Action::GotoLists,
         Action::GotoTags,
+        Action::GotoClassifiers,
         Action::OpenSettings,
         Action::FocusTerm,
         Action::BucketOrdinal,
@@ -185,7 +187,8 @@ impl Action {
     pub fn scope(self) -> Scope {
         use Action::*;
         match self {
-            GotoEditor | GotoReader | GotoMemory | GotoStats | GotoSpace | GotoLists | GotoTags | OpenSettings => {
+            GotoEditor | GotoReader | GotoMemory | GotoStats | GotoSpace | GotoLists | GotoTags | GotoClassifiers
+            | OpenSettings => {
                 Scope::Global
             },
             Save | NewNote | ToggleView | ToggleList | FocusTerm | BucketOrdinal | BucketReversed | BucketAtbash
@@ -218,6 +221,7 @@ impl Action {
             Action::GotoSpace => "goto_space",
             Action::GotoLists => "goto_lists",
             Action::GotoTags => "goto_tags",
+            Action::GotoClassifiers => "goto_classifiers",
             Action::OpenSettings => "open_settings",
             Action::FocusTerm => "focus_term",
             Action::BucketOrdinal => "bucket_ordinal",
@@ -278,6 +282,7 @@ impl Action {
             Action::GotoSpace => "go to the space",
             Action::GotoLists => "go to the lists",
             Action::GotoTags => "go to the tags",
+            Action::GotoClassifiers => "go to the classifiers",
             Action::OpenSettings => "open the settings (saves, fonts, zen)",
             Action::FocusTerm => "focus the command bar",
             Action::BucketOrdinal => "memory: ordinal bucket",
@@ -337,7 +342,8 @@ impl Action {
             Action::GotoStats => ctrl(KeyCode::Digit4),
             Action::GotoSpace => ctrl(KeyCode::Digit5),
             Action::GotoLists => ctrl(KeyCode::Digit6),
-            Action::GotoTags => ctrl(KeyCode::Digit7),
+            Action::GotoClassifiers => ctrl(KeyCode::Digit7),
+            Action::GotoTags => ctrl(KeyCode::Digit8),
             Action::OpenSettings => ctrl(KeyCode::Comma),
             Action::FocusTerm => plain(KeyCode::Slash),
             Action::BucketOrdinal => plain(KeyCode::KeyO),
@@ -555,6 +561,13 @@ impl Keymap {
                     keymap.0.insert(a, b);
                 }
             }
+            // kept before the classifiers came: tags moved from Ctrl+7 to Ctrl+8, as in
+            // the web app, unless the player had chosen another key for them
+            if !map.contains_key(Action::GotoClassifiers.id())
+                && map.get(Action::GotoTags.id()).map(String::as_str) == Some("Ctrl+7")
+            {
+                keymap.0.insert(Action::GotoTags, ctrl(KeyCode::Digit8));
+            }
         }
         keymap
     }
@@ -696,6 +709,13 @@ mod tests {
                 );
             }
         }
+        // a keymap kept before the classifiers moves tags to Ctrl+8
+        let old = br#"{"goto_tags":"Ctrl+7","save":"Ctrl+S"}"#;
+        let m = Keymap::from_json(old);
+        assert_eq!(m.get(Action::GotoTags).to_string(), "Ctrl+8");
+        assert_eq!(m.get(Action::GotoClassifiers).to_string(), "Ctrl+7");
+        let mine = br#"{"goto_tags":"Ctrl+T"}"#;
+        assert_eq!(Keymap::from_json(mine).get(Action::GotoTags).to_string(), "Ctrl+T");
         // the space's keys don't push the memory view's out
         k.rebind(Action::Settle, plain(KeyCode::KeyG));
         assert_eq!(k.get(Action::ToggleGsearch), plain(KeyCode::KeyG));

@@ -303,6 +303,8 @@ pub struct SpaceText {
     pub underline: Option<Color>,
     pub underline_dirty: bool,
     pub tint: Color,
+    /// the colour of its class, when the views are coloured by a classifier
+    pub class_color: Option<Color>,
 }
 
 impl SpaceText {
@@ -749,6 +751,7 @@ impl Sp<'_, '_> {
             underline: None,
             underline_dirty: true,
             tint: color,
+            class_color: None,
         };
         let e = self
             .commands
@@ -2241,7 +2244,7 @@ pub fn space_physics(mut sp: Sp, session: Res<Session>, mut override_cursor: Res
         let tint = if Some(e) == hover || Some(e) == selected {
             ACCENT
         } else {
-            t.color
+            t.class_color.unwrap_or(t.color)
         };
         if t.tint != tint {
             t.tint = tint;

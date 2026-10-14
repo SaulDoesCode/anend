@@ -105,6 +105,7 @@ icons! {
     Swap => "swap",
     Open => "open",
     Hash => "hash",
+    Classifier => "classifier",
 }
 
 /// the decoded icons

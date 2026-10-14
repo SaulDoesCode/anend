@@ -41,6 +41,8 @@ pub struct Config {
     pub list_right: bool,
     /// colour the editor's markdown
     pub highlight: bool,
+    /// the classifier the memory view and the space are coloured by (none: not coloured)
+    pub tint_by: Option<String>,
     pub keymap: Option<serde_json::Value>,
     /// the anend hub saves are shared on, e.g. `http://localhost:8080`
     pub hub_url: String,
@@ -67,6 +69,7 @@ impl Default for Config {
             bars_swapped: false,
             list_right: false,
             highlight: true,
+            tint_by: None,
             keymap: None,
             hub_url: String::new(),
             hub_token: String::new(),

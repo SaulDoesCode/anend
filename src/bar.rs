@@ -57,7 +57,7 @@ impl BarState {
 }
 
 fn notes_route(r: Route) -> bool {
-    !matches!(r, Route::Memory | Route::Space | Route::Lists | Route::Tags)
+    !matches!(r, Route::Memory | Route::Space | Route::Lists | Route::Tags | Route::Classifiers)
 }
 
 pub fn bar() -> impl Scene {
@@ -116,6 +116,8 @@ pub fn bar() -> impl Scene {
             on(crate::lists_ui::bar_key)
             on(crate::tags_ui::bar_key)
             on(crate::tags_ui::bar_changed)
+            on(crate::classify_ui::bar_key)
+            on(crate::classify_ui::bar_changed)
             --
             Node {
                 display: Display::Flex,
@@ -193,6 +195,7 @@ pub fn bar_route(
     mut mem: ResMut<MemoryState>,
     mut space: ResMut<Space>,
     mut tags: ResMut<crate::tags_ui::TagsState>,
+    cls: Res<crate::classify_ui::ClsState>,
     serif: Res<SerifFont>,
     fonts: Res<Fonts>,
     mut focus: ResMut<InputFocus>,
@@ -223,6 +226,7 @@ pub fn bar_route(
         },
         Route::Lists => String::new(),
         Route::Tags => tags.query.clone(),
+        Route::Classifiers => cls.query.clone(),
         _ => bar.notes.clone(),
     };
     input.editor_mut().set_text(&text);
@@ -237,6 +241,7 @@ pub fn bar_route(
         Route::Space => "space",
         Route::Lists => "lists",
         Route::Tags => "tags",
+        Route::Classifiers => "classifiers",
         _ => "notes",
     }
     .into();
