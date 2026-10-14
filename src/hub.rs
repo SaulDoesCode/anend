@@ -424,6 +424,153 @@ pub async fn upload(
     )
 }
 
+// ------------------------------------------------------------------ classifiers
+
+/// the biggest classifier module a download may be (the hub keeps them at 64 MB)
+pub const MAX_MODULE: u64 = 64 << 20;
+
+/// a classifier shared on the hub (docs/hub-api.md, "A classifier")
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct HubClassifier {
+    pub id: String,
+    pub name: String,
+    pub author: String,
+    pub description: String,
+    pub tags: Vec<String>,
+    pub classes: Vec<String>,
+    pub head: String,
+    pub preset: String,
+    pub weights: u64,
+    pub accuracy: Option<f64>,
+    pub macro_f1: Option<f64>,
+    pub examples: u64,
+    pub size: u64,
+    pub upstream: Vec<Upstream>,
+    pub stars: u64,
+    pub downloads: u64,
+    pub featured: bool,
+    pub version: u64,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct Upstream {
+    pub name: String,
+    pub bundled: bool,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct ClassifiersPage {
+    pub classifiers: Vec<HubClassifier>,
+    pub more: bool,
+}
+
+/// a hub's ids are lowercase letters and digits
+pub fn id_ok(id: &str) -> bool {
+    (1..=16).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+}
+
+pub fn classifiers_url(hub: &str, q: &str, sort: Sort, page: u32) -> Result<String, String> {
+    join(
+        hub,
+        &format!("/api/classifiers?q={}&sort={}&page={}", encode(q.trim()), sort.name(), page),
+    )
+}
+
+/// a page of approved classifiers
+pub async fn classifiers(hub: &str, q: &str, sort: Sort, page: u32) -> Result<ClassifiersPage, String> {
+    get_json(&classifiers_url(hub, q, sort, page)?, None).await
+}
+
+/// a shared classifier's `.anendcls` module, as bytes (read strictly by the caller)
+pub async fn classifier_module(hub: &str, id: &str) -> Result<Vec<u8>, String> {
+    if !id_ok(id) {
+        return Err("the hub sent a bad classifier id".into());
+    }
+    let url = join(hub, &format!("/api/classifiers/{}/download", id))?;
+    let a = request("GET", &url, None, None, MAX_MODULE, Duration::from_secs(10 * 60)).await?;
+    if !(200..300).contains(&a.status) {
+        return Err(failure(a.status, &a.body));
+    }
+    Ok(a.body)
+}
+
+/// shares a classifier module: pending until an admin approves it (unless trusted); an
+/// empty name or description is taken from the module
+pub async fn share_classifier(
+    hub: &str,
+    token: &str,
+    name: &str,
+    description: &str,
+    tags: &str,
+    bytes: &[u8],
+) -> Result<Uploaded, String> {
+    let token = need_token(token)?;
+    let url = join(hub, "/api/classifiers")?;
+    let name: String = name.trim().chars().filter(|c| !c.is_control()).take(80).collect();
+    let tags: Vec<String> = tags
+        .split(',')
+        .map(|t| t.trim().to_lowercase())
+        .filter(|t| !t.is_empty())
+        .collect();
+    let tags = tags.join(",");
+    let description = description.trim();
+    let boundary = boundary_for(&[bytes, name.as_bytes(), description.as_bytes(), tags.as_bytes()]);
+    let file = clean_name(&name).unwrap_or_else(|| "classifier".into());
+    let filename = format!("{}.{}", file, anend_core::clsmodule::EXTENSION);
+    let body = multipart(
+        &boundary,
+        &[("name", &name), ("description", description), ("tags", &tags)],
+        ("file", &filename, bytes),
+    );
+    let kind = format!("multipart/form-data; boundary={}", boundary);
+    read_json(request("POST", &url, token, Some((kind, body)), MAX_JSON, Duration::from_secs(10 * 60)).await?)
+}
+
+// ------------------------------------------------------------------ the guide
+
+/// the repository's copy of the guide, for when no hub is set
+pub const GUIDE_ONLINE: &str = "https://github.com/SaulDoesCode/anend/blob/main/docs/guide.md";
+
+/// the guide: the connected hub's `/guide`, or the repository's copy
+pub fn guide_url(hub_url: &str) -> String {
+    if hub_url.trim().is_empty() {
+        return GUIDE_ONLINE.into();
+    }
+    join(hub_url, "/guide").unwrap_or_else(|_| GUIDE_ONLINE.into())
+}
+
+/// opens an http(s) address in the browser: the system's opener with the address as its
+/// one argument, never through a shell
+pub fn open_url(url: &str) -> Result<(), String> {
+    use std::process::{Command, Stdio};
+    let ok = (url.starts_with("http://") || url.starts_with("https://"))
+        && !url.chars().any(|c| c.is_whitespace() || c.is_control() || c == '"');
+    if !ok {
+        return Err("that isn't a web address".into());
+    }
+    #[cfg(target_os = "macos")]
+    let mut cmd = Command::new("open");
+    #[cfg(target_os = "windows")]
+    let mut cmd = Command::new("explorer");
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let mut cmd = Command::new("xdg-open");
+    let mut child = cmd
+        .arg(url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("couldn't open the browser: {}", e))?;
+    // reaped off the frame, so it leaves nothing behind
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -448,6 +595,15 @@ mod tests {
             "http://h/api/saves?q=the%20psalms%26x%3D1&sort=stars&page=2"
         );
         assert_eq!(encode("é"), "%C3%A9");
+        assert_eq!(
+            classifiers_url("http://h", "#nature", Sort::Downloads, 1).unwrap(),
+            "http://h/api/classifiers?q=%23nature&sort=downloads&page=1"
+        );
+        assert!(id_ok("q7m2kd4") && !id_ok("../x") && !id_ok("") && !id_ok("A1"));
+        assert_eq!(guide_url(""), GUIDE_ONLINE);
+        assert_eq!(guide_url("http://h:8/"), "http://h:8/guide");
+        assert_eq!(guide_url("not a hub"), GUIDE_ONLINE);
+        assert!(open_url("file:///etc/passwd").is_err() && open_url("https://a b").is_err());
     }
 
     #[test]
@@ -483,6 +639,15 @@ Content-Type: application/octet-stream\r\n\r\nredb\x00bytes\r\n--XX--\r\n";
         assert_eq!((me.level, me.points, me.title.as_str()), (3, 120, "scribe"));
         let hub: HubInfo = parse(br#"{"name": "home", "saves": 12}"#).unwrap();
         assert_eq!((hub.name.as_str(), hub.saves, hub.users), ("home", 12, 0));
+        let cls: ClassifiersPage = parse(
+            br#"{"classifiers": [{"id": "q7m2kd4", "name": "fruit or rock", "author": "saul",
+            "classes": ["fruit", "rocks"], "accuracy": 0.97, "macro_f1": null, "stars": 4,
+            "upstream": [{"name": "kind", "bundled": false}], "take_url": "/x"}], "more": false}"#,
+        )
+        .unwrap();
+        let c = &cls.classifiers[0];
+        assert_eq!((c.accuracy, c.macro_f1, c.classes.len()), (Some(0.97), None, 2));
+        assert!(!c.upstream[0].bundled);
         let up: Uploaded = parse(br#"{"id": "a1", "status": "pending"}"#).unwrap();
         assert_eq!(up.status, "pending");
         assert!(parse::<SavesPage>(b"<html>").is_err());

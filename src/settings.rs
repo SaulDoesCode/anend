@@ -296,6 +296,17 @@ pub fn menu() -> impl Scene {
                         forge.toggle();
                     })
                     --
+                    @crate::icons::icon_label_button(crate::icons::Icon::Help, "guide".to_string(), ButtonVariant::Normal)
+                    crate::icons::Tip({"the guide: what each part does and how to use it (opens in the browser)".to_string()})
+                    on(|_a: On<Activate>, config: Res<Config>, mut status: ResMut<Status>, time: Res<Time>| {
+                        let url = crate::hub::guide_url(&config.hub_url);
+                        status.text = match crate::hub::open_url(&url) {
+                            Ok(()) => format!("opening the guide: {}", url),
+                            Err(e) => format!("{} · the guide is at {}", e, url),
+                        };
+                        status.until = time.elapsed_secs_f64() + 8.0;
+                    })
+                    --
                     @crate::icons::icon_button(crate::icons::Icon::Keys, "keys: rebind any action")
                     crate::icons::TipKey({crate::keys::Action::OpenRemap})
                     on(|_a: On<Activate>, mut remap: ResMut<crate::keys::Remap>| {

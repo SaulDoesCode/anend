@@ -143,6 +143,40 @@ fn toggle_mode(st: &mut FiltersState, path: &[usize]) {
     st.redraw = true;
 }
 
+/// a sum or a range of sums typed in the bar: `72`, `50-90`, `50–90`, `50..90`, `50-`
+/// (at least), `-90` (at most)
+fn sum_range(q: &str) -> Option<(Option<i64>, Option<i64>)> {
+    let q = q.trim().replace('–', "-").replace("..", "-");
+    let num = |s: &str| -> Result<Option<i64>, ()> {
+        let s = s.trim();
+        if s.is_empty() {
+            return Ok(None);
+        }
+        s.parse::<i64>().map(Some).map_err(|_| ())
+    };
+    let (a, b) = match q.split_once('-') {
+        Some((a, b)) => (num(a).ok()?, num(b).ok()?),
+        None => {
+            let n = num(&q).ok()??;
+            (Some(n), Some(n))
+        }
+    };
+    if a.is_none() && b.is_none() || a.zip(b).is_some_and(|(a, b)| a > b) {
+        return None;
+    }
+    Some((a, b))
+}
+
+fn show_range(a: Option<i64>, b: Option<i64>) -> String {
+    match (a, b) {
+        (Some(a), Some(b)) if a == b => a.to_string(),
+        (Some(a), Some(b)) => format!("{}–{}", a, b),
+        (Some(a), None) => format!("≥ {}", a),
+        (None, Some(b)) => format!("≤ {}", b),
+        (None, None) => String::new(),
+    }
+}
+
 // ------------------------------------------------------------------ scene
 
 pub fn view() -> impl Scene {
@@ -443,6 +477,39 @@ pub fn rebuild_filters(
         }
         add(&mut st, Expr::Words { q });
     });
+    // sums: a number or a range typed in the bar
+    let r2 = row(c, k, 6.0);
+    let range = sum_range(&q);
+    dim(
+        c,
+        r2,
+        match range {
+            Some(_) => "sum",
+            None => "sum (type a number or a range like 50-90 in the bar)",
+        },
+        f,
+    );
+    for bucket in ["ordinal", "reversed", "atbash"] {
+        let word = match range {
+            Some((a, b)) => format!("+ {} {}", bucket, show_range(a, b)),
+            None => format!("+ {}", bucket),
+        };
+        button(c, r2, word, ButtonVariant::Normal, &format!("texts whose {} sum is in the range typed in the bar", bucket)).observe(
+            move |_a: On<Activate>, mut st: ResMut<FiltersState>, mut status: ResMut<Status>, time: Res<Time>| {
+                match sum_range(&st.query) {
+                    Some((from, to)) => add(
+                        &mut st,
+                        Expr::Sum {
+                            bucket: bucket.into(),
+                            from,
+                            to,
+                        },
+                    ),
+                    None => say(&mut status, &time, "type a number or a range like 50-90 in the bar first"),
+                }
+            },
+        );
+    }
     for (kind, word) in [("memories", "+ memories only"), ("notes", "+ notes only")] {
         button(c, r, word.into(), ButtonVariant::Normal, "").observe(move |_a: On<Activate>, mut st: ResMut<FiltersState>| {
             add(&mut st, Expr::Kind { kind: kind.into() });
@@ -729,6 +796,20 @@ pub fn bar_key(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sums_from_the_bar() {
+        assert_eq!(sum_range(" 72 "), Some((Some(72), Some(72))));
+        assert_eq!(sum_range("50-90"), Some((Some(50), Some(90))));
+        assert_eq!(sum_range("50 – 90"), Some((Some(50), Some(90))));
+        assert_eq!(sum_range("50..90"), Some((Some(50), Some(90))));
+        assert_eq!(sum_range("50-"), Some((Some(50), None)));
+        assert_eq!(sum_range("-90"), Some((None, Some(90))));
+        for bad in ["", "-", "plum", "90-50", "5-x"] {
+            assert_eq!(sum_range(bad), None, "{}", bad);
+        }
+        assert_eq!(show_range(Some(50), None), "≥ 50");
+    }
 
     #[test]
     fn paths_edit_the_tree() {

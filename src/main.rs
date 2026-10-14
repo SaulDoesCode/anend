@@ -7,6 +7,7 @@
 
 mod bar;
 mod classify_ui;
+mod cls_more;
 mod cls_widgets;
 mod filters_ui;
 mod index_panel;

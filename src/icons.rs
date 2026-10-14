@@ -106,6 +106,8 @@ icons! {
     Open => "open",
     Hash => "hash",
     Classifier => "classifier",
+    Shield => "shield",
+    Alert => "alert",
 }
 
 /// the decoded icons

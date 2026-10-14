@@ -29,6 +29,42 @@ To pick up:
   in" sighting; the root is now `min_height: 0, max_height: 100%`. Not seen again with a
   160-line note.
 
+- **Desktop gaps, guide link, guide update (14 Oct, unfinished; pick up here).** Built,
+  clippy clean, `cargo test -p anend` passes; NOT yet verified by driving except where said.
+  - Done in code: `src/cls_more.rs` (new): validators editor (card "validators" in a
+    trained classifier's page: checked by / saying / at least slider / gate|scale /
+    remove / "+ checked by"; edits kept by `tick_classifiers` 0.5 s later through
+    `Store::set_validators`, then tints/panel/search refreshed), disagreements card
+    ("find them" on a thread via `Store::disagreements`, ✓/✗ for the classifier and for
+    each validator through `classify_ui::judge_pair`, re-found after a judge); hub
+    classifiers: side button "from the hub" (`HubBrowse` in `ClsState.hub`), sorts,
+    refresh, bar Enter searches, cards with classes/accuracy/stars/downloads/upstream
+    warnings, "more", "take" (download `/api/classifiers/{id}/download`, cap 64 MB,
+    `clsmodule::read` + `import_module` with default opts = classes to lists by name);
+    "share on the hub" icon (Upload) in the classifier's header (`POST /api/classifiers`,
+    bearer app token). `src/hub.rs`: `HubClassifier`, `classifiers()`,
+    `classifier_module()`, `share_classifier()`, `id_ok`, `guide_url`, `open_url`
+    (xdg-open / open / explorer with the URL as one argument, no shell; tested).
+    Settings header has a "guide" button (Icon::Help) opening the hub's `/guide` or the
+    GitHub copy. Filters view: sum conditions ("+ ordinal/reversed/atbash" from a number
+    or range typed in the bar, `sum_range`, tested). Icons `Shield`, `Alert` added to
+    `src/icons.rs`. The classifier list's names no longer wrap word by word (NoWrap).
+    `seed_demo` with `ANEND_SEED_TRAIN=1` also trains "kind" and "fruit or not" (tiny).
+  - **Bug found while driving, not fixed:** buttons inside the validators card don't get
+    hover or clicks (the "kind" button under "+ checked by"); a hover probe showed the
+    pointer hitting the card node (1452) but not its child button, while buttons in the
+    cards above and below (near texts, outputs) work. Look at what differs (maybe the
+    card's row children vs `Pickable`, or the long dim text after the row); a debug
+    system logging `HoverMap` entities was used (removed).
+  - Left: fix that bug, then drive and screenshot (scratchpad `shots-desktop4/`, demo save
+    there `demo.redb`): validators + disagreements, hub browse/take/share against a fresh
+    `anend-hub --admin you --addr 127.0.0.1:18221 --data <scratch>` with a seeded
+    classifier, sums in filters, the guide button. The "indented text in name boxes after
+    a redraw" is NOT investigated yet. docs/guide.md NOT updated yet (item 3 of the brief:
+    desktop filters Ctrl+9, validators, hub classifiers, tags Ctrl+8, classifier strip
+    button, "colour views", export to Downloads / take in; fix "where the apps differ"
+    and the shortcut tables).
+
 - **Hub icons (asked for on 14 Oct): done.** `hub/web/tools/icons.mjs` also writes the
   sprite `hub/static/icons.svg` (served at `/static/icons.svg?v=…`, cached for a year);
   templates draw an icon with `{{ crate::web::icon("name") }}`. Icon and words for primary

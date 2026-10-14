@@ -187,6 +187,15 @@ pub struct ClsState {
     // outputs
     pub out_class: usize,
     pub out_threshold: f32,
+    // validators (a draft kept by the tick) and the texts they disagree on
+    pub vals: Vec<anend_core::filters::Validator>,
+    vals_of: Option<String>,
+    pub vals_save: bool,
+    vals_due: Option<f64>,
+    pub disagree: Option<Vec<crate::cls_more::Disputed>>,
+    pub disagree_busy: bool,
+    // classifiers on the hub
+    pub hub: crate::cls_more::HubBrowse,
     pub boxes: Boxes,
     side: String,
 }
@@ -237,6 +246,13 @@ impl Default for ClsState {
             near_dirty: false,
             out_class: 0,
             out_threshold: 0.5,
+            vals: vec![],
+            vals_of: None,
+            vals_save: false,
+            vals_due: None,
+            disagree: None,
+            disagree_busy: false,
+            hub: Default::default(),
             boxes: Boxes::default(),
             side: String::new(),
         }
@@ -266,7 +282,12 @@ impl ClsState {
             self.class = 0;
             self.out_class = 0;
             self.last_run = None;
+            self.disagree = None;
+            self.vals_of = None;
+            self.vals_save = false;
+            self.vals_due = None;
         }
+        self.hub.open = false;
         self.selected = name;
         self.steer = None;
         self.bias = None;
@@ -279,7 +300,7 @@ impl ClsState {
     }
 }
 
-fn say(world: &mut World, msg: impl Into<String>) {
+pub fn say(world: &mut World, msg: impl Into<String>) {
     let now = world.resource::<Time>().elapsed_secs_f64();
     let mut status = world.resource_mut::<Status>();
     status.text = msg.into();
@@ -564,6 +585,9 @@ pub fn start_judge(work: &Work, store: Arc<Store>, name: String, f: (Ref, String
                 let work = w.resource::<Work>();
                 if st.searched.is_some() {
                     start_search(&mut st, work, store.clone());
+                }
+                if st.disagree.is_some() {
+                    crate::cls_more::start_disagree(&mut st, work, store.clone());
                 }
             });
             w.resource_mut::<crate::index_panel::IndexPanel>().reread = true;
@@ -851,7 +875,12 @@ fn start_import(work: &Work, store: Arc<Store>, path: PathBuf) {
             let m = anend_core::clsmodule::read(&b, anend_core::clsmodule::MAX_SIZE)?;
             store.import_module(&m, &anend_core::clsmodule::ImportOpts::default())
         })();
-        Box::new(move |w: &mut World| {
+        Box::new(move |w: &mut World| after_import(w, r))
+    });
+}
+
+/// what taking a module in did, said, and the classifier opened
+pub fn after_import(w: &mut World, r: Result<anend_core::clsmodule::Imported, String>) {
             match &r {
                 Ok(i) => {
                     let lists: Vec<String> = i
@@ -880,8 +909,6 @@ fn start_import(work: &Work, store: Arc<Store>, path: PathBuf) {
                 Err(e) => say(w, format!("couldn't take it in: {}", e)),
             }
             classifiers_changed(w);
-        })
-    });
 }
 
 // ------------------------------------------------------------------ ticking
@@ -895,6 +922,8 @@ pub fn tick_classifiers(
     time: Res<Time>,
     mut tints: ResMut<crate::tint::Tints>,
     mut panel: ResMut<crate::index_panel::IndexPanel>,
+    config: Res<crate::config::Config>,
+    mut status: ResMut<Status>,
 ) {
     let now = time.elapsed_secs_f64();
     if (st.training.is_some() || st.indexing.is_some()) && now - st.live_at > 0.25 {
@@ -935,6 +964,44 @@ pub fn tick_classifiers(
         st.bias_due = None;
         start_bias(&mut st, &work, db.0.clone());
     }
+    // the open classifier's validators: read when it opens, kept a moment after an edit
+    if st.vals_of != st.selected {
+        st.vals_of = st.selected.clone();
+        st.vals = match &st.selected {
+            Some(n) => db.0.validators(n).unwrap_or_default(),
+            None => vec![],
+        };
+        st.vals_due = None;
+        st.redraw = true;
+    }
+    if std::mem::take(&mut st.vals_save) {
+        st.vals_due = Some(now + 0.5);
+    }
+    if let Some(due) = st.vals_due
+        && now >= due
+    {
+        st.vals_due = None;
+        match crate::cls_more::keep_validators(&mut st, &db.0) {
+            Ok(()) => {
+                tints.reset();
+                panel.reread = true;
+                st.disagree = None;
+                st.redraw = true;
+                if st.searched.is_some() {
+                    start_search(&mut st, &work, db.0.clone());
+                }
+            }
+            Err(e) => {
+                st.redraw = true;
+                warn!("validators didn't keep: {}", e);
+                say_ctx(&mut status, &time, e);
+            }
+        }
+    }
+    if std::mem::take(&mut st.hub.reload) {
+        st.hub.page = 0;
+        crate::cls_more::start_hub(&mut st, &work, config.hub_url.clone());
+    }
     if st.indexing.is_none() && std::mem::take(&mut st.buckets_reload) {
         start_buckets(&mut st, &work, db.0.clone());
     }
@@ -948,7 +1015,8 @@ fn name_row(name: String, status: String, variant: ButtonVariant) -> impl Scene 
         @bevy::feathers::controls::FeathersButton {
             @caption: bsn_list! {
                 @bevy::feathers::display::caption(name)
-                Node { flex_shrink: 1.0, min_width: px(0) }
+                Node { flex_shrink: 1.0, min_width: px(0), overflow: Overflow::clip() }
+                TextLayout { linebreak: bevy::text::LineBreak::NoWrap }
                 --
                 Node { flex_grow: 1.0 }
                 --
@@ -999,6 +1067,7 @@ pub fn rebuild_classifiers(
 
     // the bar's side
     let line = match st.def() {
+        _ if st.hub.open => "classifiers on the hub · Enter searches them for the words typed here".to_string(),
         Some(d) if d.trained() => format!(
             "{} classifiers · Enter searches “{}” for {}",
             st.defs.len(),
@@ -1077,7 +1146,7 @@ fn draw_side(st: &mut ClsState, c: &mut Commands, side: Entity, f: &Fonts) {
     }
     let training = st.training_name();
     for d in &st.defs {
-        let on = st.selected.as_deref() == Some(d.name.as_str()) && !st.creating && !st.importing;
+        let on = st.selected.as_deref() == Some(d.name.as_str()) && !st.creating && !st.importing && !st.hub.open;
         let name = d.name.clone();
         c.spawn_scene(name_row(
             d.name.clone(),
@@ -1122,6 +1191,7 @@ fn draw_side(st: &mut ClsState, c: &mut Commands, side: Entity, f: &Fonts) {
     .observe(|_a: On<Activate>, mut st: ResMut<ClsState>| {
         st.creating = !st.creating;
         st.importing = false;
+        st.hub.open = false;
         st.reload = true;
     });
     icon_label(
@@ -1136,10 +1206,28 @@ fn draw_side(st: &mut ClsState, c: &mut Commands, side: Entity, f: &Fonts) {
         |_a: On<Activate>, mut st: ResMut<ClsState>, config: Res<crate::config::Config>| {
             st.importing = !st.importing;
             st.creating = false;
+            st.hub.open = false;
             st.imports = import_paths(&config);
             st.redraw = true;
         },
     );
+    icon_label(
+        c,
+        r,
+        Icon::Hub,
+        "from the hub".into(),
+        if st.hub.open { ButtonVariant::Primary } else { ButtonVariant::Normal },
+        "browse the classifiers shared on the hub and take one in",
+    )
+    .observe(|_a: On<Activate>, mut st: ResMut<ClsState>| {
+        st.hub.open = !st.hub.open;
+        st.creating = false;
+        st.importing = false;
+        if st.hub.open {
+            st.hub.reload = true;
+        }
+        st.redraw = true;
+    });
 }
 
 fn draw_main(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, config: &crate::config::Config) {
@@ -1151,6 +1239,10 @@ fn draw_main(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, confi
     }
     if st.importing {
         draw_import(st, c, main, f);
+        return;
+    }
+    if st.hub.open {
+        crate::cls_more::draw_hub(st, c, main, f, config);
         return;
     }
     let Some(d) = st.def().cloned() else {
@@ -1171,6 +1263,8 @@ fn draw_main(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, confi
         draw_search(st, c, main, f, &d);
         draw_buckets_card(st, c, main, f, &d);
         draw_near_card(st, c, main, f, &d);
+        crate::cls_more::draw_checks(st, c, main, f, &d);
+        crate::cls_more::draw_disagree(st, c, main, f, &d);
         draw_outputs(st, c, main, f, &d);
     }
 }
@@ -1224,6 +1318,29 @@ fn draw_head(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, d: &D
                     crate::vfs::save_download(&format!("{}.{}", name, anend_core::clsmodule::EXTENSION), &b)
                 }) {
                     Ok(to) => format!("saved “{}” to {}", name, to),
+                    Err(e) => e,
+                };
+                say_ctx(&mut status, &time, msg);
+            },
+        );
+        let name = d.name.clone();
+        icon_button(
+            c,
+            top,
+            Icon::Upload,
+            "share it on the hub (with the app token from the settings' hub section)",
+            ButtonVariant::Normal,
+        )
+        .observe(
+            move |_a: On<Activate>,
+                  mut st: ResMut<ClsState>,
+                  work: Res<Work>,
+                  db: Res<Db>,
+                  config: Res<crate::config::Config>,
+                  mut status: ResMut<Status>,
+                  time: Res<Time>| {
+                let msg = match crate::cls_more::start_share(&mut st, &work, db.0.clone(), &config, name.clone()) {
+                    Ok(()) => format!("sharing “{}” on the hub…", name),
                     Err(e) => e,
                 };
                 say_ctx(&mut status, &time, msg);
@@ -1837,6 +1954,11 @@ fn draw_results(st: &ClsState, c: &mut Commands, b: Entity, f: &Fonts) {
 }
 
 fn judge_buttons(c: &mut Commands, parent: Entity, name: &str, r: &Found, class: &str, stack: bool) {
+    judge_pair(c, parent, name, r.r.clone(), r.reads.clone(), class, stack);
+}
+
+/// ✓ and ✗ on a text (what the classifier reads of it) for a class
+pub fn judge_pair(c: &mut Commands, parent: Entity, name: &str, key: Ref, text: String, class: &str, stack: bool) {
     for yes in [true, false] {
         let (icon, tip) = if yes {
             (
@@ -1857,7 +1979,7 @@ fn judge_buttons(c: &mut Commands, parent: Entity, name: &str, r: &Found, class:
                 },
             )
         };
-        let (name, class, key, text) = (name.to_string(), class.to_string(), r.r.clone(), r.reads.clone());
+        let (name, class, key, text) = (name.to_string(), class.to_string(), key.clone(), text.clone());
         icon_button(c, parent, icon, &tip, ButtonVariant::Normal).observe(
             move |_a: On<Activate>, mut st: ResMut<ClsState>, work: Res<Work>, db: Res<Db>, mut status: ResMut<Status>, time: Res<Time>| {
                 if st.judging {
@@ -2391,6 +2513,11 @@ pub fn bar_key(
         Key::Escape => focus.clear(),
         Key::Enter => {
             let q = st.query.trim().to_string();
+            if st.hub.open {
+                st.hub.q = q;
+                st.hub.reload = true;
+                return;
+            }
             if q.ends_with(&format!(".{}", anend_core::clsmodule::EXTENSION)) {
                 say_ctx(&mut status, &time, "taking it in…");
                 start_import(&work, db.0.clone(), PathBuf::from(q));
@@ -2482,6 +2609,28 @@ mod tests {
                 ..Default::default()
             };
             store.save(&n).unwrap();
+        }
+        // `ANEND_SEED_TRAIN=1`: two small classifiers trained, the second checking the first
+        if std::env::var_os("ANEND_SEED_TRAIN").is_some() {
+            let heads: Vec<Ref> = ["fruit", "stones", "animals"]
+                .iter()
+                .map(|h| Ref::Memory(store.saturate(h).unwrap().0))
+                .collect();
+            for (name, classes, not) in [
+                ("kind", heads.clone(), None),
+                ("fruit or not", vec![heads[0].clone()], Some(heads[1].clone())),
+            ] {
+                store
+                    .create_classifier(name, &classes, not.as_ref(), HeadKind::Single, "tiny", vec![])
+                    .unwrap();
+                let args = TrainArgs {
+                    epochs: Some(12),
+                    ..TrainArgs::default()
+                };
+                let mut t = store.prepare(name, &args).unwrap();
+                let s = t.run(|_| Flow::Go).unwrap();
+                store.commit(&t, &s).unwrap();
+            }
         }
     }
 }
