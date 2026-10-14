@@ -13,7 +13,8 @@
 //! the same way: `Local`'s dispatcher compiles to wasm32 (anend-core does), over a store on
 //! OPFS/IndexedDB, picked in `main.rs` when the page has no hub.
 
-// the backends (`local`: core's Store on a worker thread; `hub`: the WebSocket) are next
+#[cfg(not(target_arch = "wasm32"))]
+pub mod local;
 
 use futures_util::future::LocalBoxFuture;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
