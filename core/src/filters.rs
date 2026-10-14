@@ -464,8 +464,10 @@ impl Store {
         }
         match e {
             Expr::And { of } | Expr::Or { of } => {
-                if of.is_empty() {
-                    return Err("an and / or needs something in it".into());
+                // an empty "all of" holds for everything (a filter not yet narrowed); an
+                // empty "any of" could only ever match nothing
+                if of.is_empty() && matches!(e, Expr::Or { .. }) {
+                    return Err("an \"any of\" needs something in it".into());
                 }
                 for x in of {
                     self.check_expr(x, path)?;

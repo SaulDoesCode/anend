@@ -1434,6 +1434,10 @@ mod phase3_tests {
         assert_eq!(res.matched + res2.matched, res.scanned);
         let and = Expr::And { of: vec![fruit.clone(), Expr::Words { q: "plum".into() }] };
         let res3 = s.run_filter(&and, 1000, 10_000, &pool).unwrap();
+        // an empty "all of" is everything; an empty "any of" is refused
+        let every = s.run_filter(&Expr::And { of: vec![] }, 1000, 10_000, &pool).unwrap();
+        assert_eq!(every.matched, every.scanned);
+        assert!(s.run_filter(&Expr::Or { of: vec![] }, 1000, 10_000, &pool).is_err());
         assert!(res3.matched <= res.matched);
         assert!(res3.results.iter().all(|x| x.note || x.text.contains("plum")));
         s.save_filter("fruity", fruit.clone(), "").unwrap();

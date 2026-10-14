@@ -180,7 +180,9 @@ const changed = debounce(() => {
 
 let asked = 0;
 async function run() {
-  const expr = clean(root);
+  let expr = clean(root);
+  // nothing chosen yet: every memory and note, as the tree says
+  if (!expr.of?.length && (expr.op === 'and' || expr.op === 'or')) expr = { op: 'and', of: [] };
   const me = ++asked;
   running = true;
   drawResults();
@@ -502,7 +504,9 @@ function drawResults() {
             ),
           )
         : el('p.dim.small', 'nothing matches')
-      : el('p.dim.small', 'running…'),
+      : running
+        ? el('p.dim.small', 'running…')
+        : null,
   );
 }
 
