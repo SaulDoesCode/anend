@@ -124,6 +124,35 @@ New module beside the old store (apps not rewired yet; nothing old deleted). 37 
   stored as a slice); structured entries are indexed by their render at save time; no
   wasm check (the wasm32 target isn't installed here).
 
+## The Dioxus app (`app/`, package `anend-app`): status
+
+Dioxus 0.7.10 (pinned); desktop through dioxus-desktop/wry (needs `libwebkit2gtk-4.1-dev
+libxdo-dev`), web through WebAssembly. Features: `desktop` (default), `web`, `hub`
+(default; the hub's settings). In the workspace and CI (build, clippy, a wasm32 build).
+- **Done:** `gem.rs`: weum's numbers checked against api.js/memory.js (the gsum line letter
+  for letter, pfR via core, seedCLR as JavaScript's string hash, underline groups per mode
+  with weum's `key.length >= 2` rule, the triangle, ⌊√(s·r)⌋, the byte sum), tested.
+  `backend/mod.rs`: the `Backend` trait (one `call(op, args)` over the app API, typed
+  methods for entries, search by sum/words/tags/time, lists, notes, tags, models, filters,
+  settings, backup, weum import). **The desktop backend is the entry graph**
+  (`backend/local.rs`): the ops answered from `graph::Graph` in process on worker threads
+  (keys are weum labels of ids, notes markdown entries, lists member edges, tags tag edges),
+  plus `mem.put`, `mem.buckets`, `tags.*`, `notes.on`, `entries.query`, `saves.backup`
+  (texts.json + other.json in `backups/`), `saves.import_texts` (weum all-of-it.json),
+  `settings.*`; saves in `<data dir>/anend/saves/*.redb`, default `main`; tested. Models
+  answer "not yet" until the model spec lands (docs/models.md). Atbash is gone (the user's
+  decision): modes are ordinal, reversed and frequency; frequency underlines by ordinal.
+- **Found:** "every text in ordinal bucket 345 underlined purple" is weum's own behaviour:
+  in reversed mode the grouping sum is the ordinal one, and seedCLR("345") is hue 276.
+- **Written, not yet wired:** `prefs.rs`, `theme.rs` (sand/night/paper/sea + custom),
+  `icons.rs` (assets/icons embedded), `ui.rs` (shared signals, status, toasts, the bar's own
+  undo, picks, pending edit/tag, right-click menu, undo of recent actions), `style.css`.
+- **Left, in order:** `backend/hub.rs` (WebSocket); the shell (top bar, centered command bar
+  with the strip in memory/space, settings dialog, font size, zoom, keyboard); the memory
+  view with weum parity and the additions; lists, reader, notes, tags, stats, models (a
+  general model builder over the coming spec), filters, settings with saves, import and
+  backup; the space through three.js interop; screenshots under Xvfb.
+
 ## Decisions (14 Oct): the redesign
 
 The user asked for "the route that provides the most feature coverage and performance and
