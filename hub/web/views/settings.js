@@ -375,6 +375,13 @@ function hubSection() {
       el('p.dim.small', 'browsing, sharing and taking saves from a hub, and .redb files, need the app served by a hub; here, export a bundle and import it in a hub’s app.'),
     );
   }
+  // a server running the app alone: no hub to browse or share on here
+  if (app.api.noHub) {
+    return section(
+      'the hub',
+      el('p.dim.small', 'This server runs the app without a hub, so there are no shared saves here. Download a save (saves, above) to share it on a hub you’ve joined, or take one from there into the desktop app.'),
+    );
+  }
   const q = el('input', { type: 'search', placeholder: 'search the hub', value: hubState.q, 'aria-label': 'search the hub' });
   q.addEventListener('input', debounce(() => ((hubState.q = q.value), loadHub()), 250));
   const sort = el(

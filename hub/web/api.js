@@ -156,7 +156,7 @@ async function hubBehind() {
   try {
     const r = await fetch(base, { method: 'GET', cache: 'no-store', credentials: 'same-origin' });
     const h = r.headers.get('x-anend');
-    return h === 'hub' || h === 'local' ? h : false;
+    return h === 'hub' || h === 'local' || h === 'app' ? h : false;
   } catch {
     return false;
   }
@@ -166,3 +166,5 @@ const behind = await hubBehind();
 export const api = behind ? new Api(base) : await (await import('./local/index.js')).offline(ApiError);
 // a --local hub: one workspace and no logins, so "share this save" can't work there
 api.localHub = behind === 'local';
+// a server running the app alone (--mode app, or --local): no hub here to browse or share on
+api.noHub = behind === 'app' || behind === 'local';

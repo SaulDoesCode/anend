@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block main %}
+<section class="card hero">
+  <div>
+    <h1 class="with-icon">{{ crate::web::icon("editor") }}{{ l.hub }}</h1>
+    <p class="dim">{% if about.is_empty() %}The anend notes app in your browser: notes, memories and their gematria, the space, lists and classifiers, kept on this server in saves of your own.{% else %}{{ about }}{% endif %}</p>
+    <p class="row">
+      {% if signed_in %}{% if waiting %}<span class="pill applied">your account is waiting for an admin</span>{% else %}<a class="btn primary with-text" href="/app/">{{ crate::web::icon("open") }}open the app</a>{% endif %}
+      {% else %}<a class="btn primary with-text" href="/login?next=/app/">{{ crate::web::icon("keys") }}log in</a>
+      <a class="btn with-text" href="/join">{{ crate::web::icon("new") }}{% if l.join == "invite" %}join with an invite{% else if l.join == "apply" %}apply to join{% else %}join{% endif %}</a>{% endif %}
+      <a class="btn with-text" href="/about">{{ crate::web::icon("help") }}about this server</a>
+    </p>
+  </div>
+</section>
+<section class="cols">
+  <div class="card"><h3 class="with-icon">{{ crate::web::icon("shield") }}yours alone</h3><p class="dim small">Every account has its own workspace of saves. Nobody else, not even the other members, can open them.</p></div>
+  <div class="card"><h3 class="with-icon">{{ crate::web::icon("memory") }}the whole app</h3><p class="dim small">Notes in markdown, memories and their sums, the space, lists, filters and classifiers you train yourself: the same app as on the desktop.</p></div>
+  <div class="card"><h3 class="with-icon">{{ crate::web::icon("download") }}take it home</h3><p class="dim small">Download any save as a file the desktop app opens, or bring one in from your computer.</p></div>
+</section>
+{% endblock %}

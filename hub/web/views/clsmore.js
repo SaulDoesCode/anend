@@ -697,6 +697,7 @@ async function loadHub(more = false) {
 
 // the side's card: browse what's shared on the hub
 export function hubCard() {
+  if (ctx.app.api.noHub) return null;
   return el(
     'div.card.clf-hubcard',
     el('h3', 'from the hub'),
@@ -813,11 +814,11 @@ function takeForm(c) {
 // the share tab: this classifier onto the hub
 export function hubShareCard() {
   const d = ctx.detail();
-  if (ctx.app.api.localHub) {
+  if (ctx.app.api.localHub || ctx.app.api.noHub) {
     return el(
       'div.card.clf-export',
       el('h3', 'on the hub'),
-      el('p.dim.small', 'This hub runs --local, for you alone with no accounts, so nothing is shared on it: download the classifier as a file and upload it to a hub you’ve joined.'),
+      el('p.dim.small', 'This server has no hub to share on, for you alone with no accounts, so nothing is shared on it: download the classifier as a file and upload it to a hub you’ve joined.'),
     );
   }
   const title = el('input', { type: 'text', placeholder: `its name on the hub (${d.name})`, 'aria-label': 'its name on the hub' });
