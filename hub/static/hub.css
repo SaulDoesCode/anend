@@ -99,7 +99,10 @@ label { display: block; font-size: 13px; color: var(--dim); margin: 10px 0 3px; 
 .sigil .star { position: absolute; top: 6px; right: 8px; font-size: 12px; background: hsl(0 0% 100% / .2); padding: 1px 6px; border-radius: 9px; }
 .save .body { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
 .save .name { font-weight: 700; font-size: 16px; }
-.save .desc { font-size: 13px; color: var(--dim); max-height: 3.9em; overflow: hidden; }
+.save .desc {
+  font-size: 13px; color: var(--dim); overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+}
 .save .meta { margin-top: auto; display: flex; gap: 10px; font-size: 12px; color: var(--dim); }
 .tags { display: flex; gap: 4px; flex-wrap: wrap; }
 .tag { font-size: 12px; background: var(--pad); color: var(--text); border-radius: 3px; padding: 0 6px; }
@@ -157,4 +160,5 @@ footer a { color: inherit; text-decoration: underline; }
 .cls .sigil { background: linear-gradient(160deg, hsl(var(--h) 35% 40%), hsl(calc(var(--h) + 180) 30% 28%)); }
 table.facts { margin-bottom: 10px; }
 table.facts th { width: 9em; }
+table.facts tr:last-child th { border-bottom: 0; }
 form.find .grow { flex: 1; }

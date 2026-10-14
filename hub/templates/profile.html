@@ -29,7 +29,7 @@
   </section>
 </div>
 {% if cards.is_empty() %}
-<section class="card dim">No saves shared yet.</section>
+{% if cls_cards.is_empty() %}<section class="card dim">Nothing shared yet.</section>{% endif %}
 {% else %}
 <section class="grid">{% for c in cards %}{% include "card.html" %}{% endfor %}</section>
 {% endif %}

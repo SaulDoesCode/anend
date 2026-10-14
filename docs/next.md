@@ -134,6 +134,8 @@ interface, not stubs.
      (import_module, classes to lists by name, optional `as`/`lists`) and
      `POST /app/classifiers/share` (`{name, title?, description?, tags?}`, exports with
      upstream bundled). Ids checked (`store::id_ok`) before any path is made.
+     Screenshots (grid, detail, upload, admin, profile, dark grid) were taken into the
+     scratchpad `shots-hubcls/` against a non-`--local` hub.
    - **web UI**: classifiers view (index button with progress, bucket counts, near by
      outputs/embedding, validators editor, disagreements with yes/no, export/import,
      hub browse with take), editor drawer (checkboxes of classifiers per note, verdict
