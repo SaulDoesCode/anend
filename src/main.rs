@@ -348,7 +348,7 @@ fn run(args: Args) {
             zen::zen_fade,
             zen::nav_autohide,
             zen::list_autohide,
-            zen::apply_placement,
+            (zen::apply_placement, bar::bar_look).chain(),
             (
                 theme::plain_button_text,
                 icons::attach_icons,
@@ -361,6 +361,7 @@ fn run(args: Args) {
             .after(space_ui::build_opts),
     );
     // the highlighting copies the pad's glyphs once they're laid out, before they're drawn
+    app.add_systems(PostUpdate, bar::strip_visibility.before(bevy::ui::UiSystems::Layout));
     app.add_systems(Update, highlight::setup_overlay).add_systems(
         PostUpdate,
         highlight::paint_overlay.after(bevy::ui::UiSystems::PostLayout),

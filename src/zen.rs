@@ -233,6 +233,14 @@ pub fn apply_placement(
     config: Res<Config>,
     mut root: Single<&mut Node, (With<crate::ui::AppRoot>, Without<crate::ui::EditorView>)>,
     mut editor: Single<&mut Node, (With<crate::ui::EditorView>, Without<crate::ui::AppRoot>)>,
+    mut dock: Single<
+        &mut Node,
+        (
+            With<crate::bar::BarDock>,
+            Without<crate::ui::AppRoot>,
+            Without<crate::ui::EditorView>,
+        ),
+    >,
 ) {
     let column = if config.bars_swapped {
         FlexDirection::ColumnReverse
@@ -241,6 +249,10 @@ pub fn apply_placement(
     };
     if root.flex_direction != column {
         root.flex_direction = column;
+    }
+    // the strip stays on the content's side of the bar
+    if dock.flex_direction != column {
+        dock.flex_direction = column;
     }
     let row = if config.list_right {
         FlexDirection::RowReverse

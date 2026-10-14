@@ -2,8 +2,10 @@
 //! there's a single place to type. In the editor, reader and stats it finds notes (Enter
 //! opens the first); in the memory view it's weum's term bar; in the space it's the
 //! terminal. Each view keeps its own text, so switching views doesn't lose what you typed.
-//! The right side shows what the view needs: the note count, the memory sidecar and
-//! toggles, or the space's sums and chips.
+//! The bar is the input, its text centered, the view's name small over its left end. What
+//! the view adds sits at its right end (the note count, a hint), except in the memory view
+//! and the space, where the sums and toggles go in a thin strip over the bar so nothing
+//! takes width from the input there.
 
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -23,19 +25,30 @@ use crate::ui::{Ctx, Fonts, Route, Session};
 
 pub const BAR_TEXT: Color = Color::hsl(0.0, 0.0, 0.92);
 pub const BAR_DIM: Color = Color::hsl(0.0, 0.0, 0.62);
+/// white a hair off the cards' white, so the palette leaves it white (weum's underline,
+/// a lit chip)
+pub const WHITE: Color = Color::srgb(0.995, 0.995, 0.995);
 
 /// the input
 #[derive(Component, Default, Clone)]
 pub struct Bar;
-/// the strip it sits in
+/// the bar's row
 #[derive(Component, Default, Clone)]
 pub struct BarRow;
+/// the bar and the strip over it
+#[derive(Component, Default, Clone)]
+pub struct BarDock;
+/// room at each end of the input, so its centered text clears the view's name
+pub const MODE_ROOM: f32 = 84.0;
 /// the view's name at the left
 #[derive(Component, Default, Clone)]
 pub struct BarMode;
-/// the view's controls at the right
+/// what the view adds to the bar: its counts, sums and toggles
 #[derive(Component, Default, Clone)]
 pub struct BarSide;
+/// the strip over the bar, which holds the [`BarSide`] in the memory view and the space
+#[derive(Component, Default, Clone)]
+pub struct BarStrip;
 
 #[derive(Resource, Default)]
 pub struct BarState {
@@ -67,74 +80,231 @@ pub fn bar() -> impl Scene {
     bsn! {
         Node {
             display: Display::Flex,
-            flex_direction: FlexDirection::Row,
-            align_items: AlignItems::Center,
-            column_gap: px(10),
-            padding: UiRect::axes(px(10), px(2)),
-            min_height: px(30),
+            flex_direction: FlexDirection::Column,
+            row_gap: px(2),
             border_radius: BorderRadius::all(px(4)),
         }
-        BackgroundColor(colors::NAV)
-        BarRow
+        BackgroundColor(Color::NONE)
+        BarDock
         crate::zen::Chrome
         Children [
-            Text("notes")
-            TextFont {
-                font: FontSourceTemplate::Handle(bevy::feathers::constants::fonts::REGULAR),
-                font_size: FontSize::Px(12.0),
-            }
-            TextColor(BAR_DIM)
-            Pickable::IGNORE
-            BarMode
-            --
+            // the strip: the memory view's and the space's sums and toggles
             Node {
-                flex_grow: 1.0,
-                min_width: px(80),
-                padding: UiRect::axes(px(2), px(4)),
+                display: Display::None,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::End,
+                padding: UiRect::axes(px(8), px(1)),
             }
-            TextInput
-            EditableText
-            TextLayout {
-                linebreak: LineBreak::WordBoundary,
-            }
-            TextFont {
-                font: FontSourceTemplate::Handle(bevy::feathers::constants::fonts::REGULAR),
-                font_size: FontSize::Px(15.0),
-            }
-            TextColor(BAR_TEXT)
-            TextCursorStyle {
-                color: BAR_TEXT,
-            }
-            TabIndex(0)
-            EntityCursor::System(SystemCursorIcon::Text)
-            Bar
-            MemTerm
-            SpTerm
-            on(notes_key)
-            on(notes_changed)
-            on(crate::memory_ui::term_key)
-            on(crate::memory_ui::term_changed)
-            on(crate::space_ui::term_key)
-            on(crate::space_ui::term_changed)
-            on(crate::lists_ui::bar_key)
-            on(crate::tags_ui::bar_key)
-            on(crate::tags_ui::bar_changed)
-            on(crate::classify_ui::bar_key)
-            on(crate::classify_ui::bar_changed)
-            on(crate::filters_ui::bar_key)
-            on(crate::filters_ui::bar_changed)
+            BarStrip
             --
+            // the bar: the input spans it, its text centered; the view's name sits over
+            // its left end without taking width from it
             Node {
                 display: Display::Flex,
                 flex_direction: FlexDirection::Row,
-                flex_wrap: FlexWrap::Wrap,
                 align_items: AlignItems::Center,
-                justify_content: JustifyContent::End,
-                column_gap: px(12),
-                row_gap: px(2),
+                min_height: px(30),
+                border_radius: BorderRadius::all(px(4)),
             }
-            BarSide
+            BackgroundColor(colors::NAV)
+            BarRow
+            Children [
+                Node {
+                    flex_grow: 1.0,
+                    min_width: px(80),
+                    padding: UiRect::axes(px(MODE_ROOM), px(4)),
+                    border: UiRect::bottom(px(0)),
+                }
+                BorderColor::all(WHITE)
+                TextInput
+                EditableText
+                TextLayout {
+                    linebreak: LineBreak::WordBoundary,
+                    justify: Justify::Center,
+                }
+                TextFont {
+                    font: FontSourceTemplate::Handle(bevy::feathers::constants::fonts::REGULAR),
+                    font_size: FontSize::Px(15.0),
+                }
+                TextColor(BAR_TEXT)
+                TextCursorStyle {
+                    color: BAR_TEXT,
+                }
+                TabIndex(0)
+                EntityCursor::System(SystemCursorIcon::Text)
+                Bar
+                MemTerm
+                SpTerm
+                on(notes_key)
+                on(notes_changed)
+                on(crate::memory_ui::term_key)
+                on(crate::memory_ui::term_changed)
+                on(crate::space_ui::term_key)
+                on(crate::space_ui::term_changed)
+                on(crate::lists_ui::bar_key)
+                on(crate::tags_ui::bar_key)
+                on(crate::tags_ui::bar_changed)
+                on(crate::classify_ui::bar_key)
+                on(crate::classify_ui::bar_changed)
+                on(crate::filters_ui::bar_key)
+                on(crate::filters_ui::bar_changed)
+                --
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(10),
+                    top: px(0),
+                    bottom: px(0),
+                    display: Display::Flex,
+                    align_items: AlignItems::Center,
+                }
+                Pickable::IGNORE
+                Children [
+                    Text("notes")
+                    TextFont {
+                        font: FontSourceTemplate::Handle(bevy::feathers::constants::fonts::REGULAR),
+                        font_size: FontSize::Px(12.0),
+                    }
+                    TextColor(BAR_DIM)
+                    Pickable::IGNORE
+                    BarMode
+                ]
+                --
+                // what the view adds: here at the bar's right end in the note views and
+                // the lists and the like, moved up into the strip in the memory view and
+                // the space
+                Node {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    flex_shrink: 1.0,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::End,
+                    column_gap: px(10),
+                    row_gap: px(2),
+                    padding: UiRect::right(px(10)),
+                    border_radius: BorderRadius::all(px(4)),
+                }
+                BackgroundColor(Color::NONE)
+                BarSide
+            ]
         ]
+    }
+}
+
+/// the views whose additions sit in the strip over the bar rather than in it
+pub fn strip_route(r: Route) -> bool {
+    matches!(r, Route::Memory | Route::Space)
+}
+
+/// the strip shows only in the memory view and the space, while it has something in it
+pub fn strip_visibility(
+    session: Res<Session>,
+    mut strip: Single<&mut Node, With<BarStrip>>,
+    side: Single<Option<&Children>, With<BarSide>>,
+) {
+    let want = if strip_route(session.route) && side.is_some_and(|c| !c.is_empty()) {
+        Display::Flex
+    } else {
+        Display::None
+    };
+    if strip.display != want {
+        strip.display = want;
+    }
+}
+
+/// the memory view's bar is weum's: black, white text over a white underline, the strip
+/// on the same black, joined to the view's black field; elsewhere it's the bars' colour
+#[allow(clippy::type_complexity)]
+pub fn bar_look(
+    session: Res<Session>,
+    palette: Res<crate::palette::Palette>,
+    config: Res<crate::config::Config>,
+    dock: Single<(Entity, &mut BackgroundColor, &mut Node), (With<BarDock>, Without<BarRow>, Without<Bar>)>,
+    row: Single<(Entity, &mut BackgroundColor), (With<BarRow>, Without<BarDock>)>,
+    input: Single<&mut Node, (With<Bar>, Without<BarDock>)>,
+    side: Single<
+        (Entity, &ChildOf, &mut BackgroundColor, &mut Node),
+        (With<BarSide>, Without<BarDock>, Without<BarRow>, Without<Bar>),
+    >,
+    strip: Single<Entity, With<BarStrip>>,
+    mut last: Local<Option<Route>>,
+    mut commands: Commands,
+) {
+    let mem = session.route == Route::Memory;
+    // colours are set when the view or the palette changes, never in between, so zen's
+    // fade (which scales their alpha) is left alone; a colour set here is whole and zen
+    // measures it again
+    let recolor = *last != Some(session.route) || palette.is_changed() || config.is_changed();
+    *last = Some(session.route);
+    let up = strip_route(session.route);
+    // the view's additions go up into the strip, or stay at the bar's right end
+    let (side, parent, mut side_bg, mut side_node) = side.into_inner();
+    let home = if up { *strip } else { row.0 };
+    if parent.parent() != home {
+        commands.entity(side).insert(ChildOf(home));
+    }
+    // over the space's room the strip is a small pill in the bars' colour, so it reads
+    let pill = session.route == Route::Space;
+    let want = if pill {
+        palette.get(crate::palette::Role::Bars)
+    } else {
+        Color::NONE
+    };
+    if recolor {
+        side_bg.0 = want;
+        commands.entity(side).try_remove::<crate::zen::ZenBase>();
+    }
+    let pad = if pill {
+        UiRect::axes(px(8), px(2))
+    } else {
+        UiRect::right(px(10))
+    };
+    if side_node.padding != pad {
+        side_node.padding = pad;
+    }
+    let (dock_e, mut dock_bg, mut dock_node) = dock.into_inner();
+    let (row_e, mut row_bg) = row.into_inner();
+    let mut input_node = input.into_inner();
+    let mut set = |bg: &mut BackgroundColor, e: Entity, want: Color| {
+        if recolor {
+            bg.0 = want;
+            commands.entity(e).try_remove::<crate::zen::ZenBase>();
+        }
+    };
+    set(&mut dock_bg, dock_e, if mem { Color::BLACK } else { Color::NONE });
+    set(
+        &mut row_bg,
+        row_e,
+        if mem {
+            Color::BLACK
+        } else {
+            palette.get(crate::palette::Role::Bars)
+        },
+    );
+    // the root's gap between the view and the bar closes over the memory view's black
+    // (and its rounded corners)
+    let gap = if mem { px(-10) } else { px(0) };
+    let (top, bottom) = if config.bars_swapped {
+        (px(0), gap)
+    } else {
+        (gap, px(0))
+    };
+    if dock_node.margin.top != top || dock_node.margin.bottom != bottom {
+        dock_node.margin.top = top;
+        dock_node.margin.bottom = bottom;
+        let pad = if mem { px(10) } else { px(0) };
+        dock_node.padding.top = if config.bars_swapped { px(0) } else { pad };
+        dock_node.padding.bottom = if config.bars_swapped { pad } else { px(0) };
+    }
+    // centered over the whole bar when nothing shares its row; else just clear of the end
+    let right = if up { input_node.padding.left } else { px(8) };
+    if input_node.padding.right != right {
+        input_node.padding.right = right;
+    }
+    // weum's underline: always white, only there in the memory view
+    let line = if mem { px(1) } else { px(0) };
+    if input_node.border.bottom != line {
+        input_node.border.bottom = line;
     }
 }
 

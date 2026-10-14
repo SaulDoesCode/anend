@@ -5,7 +5,7 @@
 use bevy::feathers::font_styles::InheritableFont;
 use bevy::prelude::*;
 
-use crate::bar::BarRow;
+use crate::bar::{Bar, BarRow, MODE_ROOM};
 use crate::config::Config;
 use crate::ui::NavBar;
 
@@ -30,7 +30,16 @@ pub fn apply_sizes(
     nav: Single<(Entity, &mut Node), (With<NavBar>, Without<BarRow>)>,
     bar: Single<(Entity, &mut Node), (With<BarRow>, Without<NavBar>)>,
     children: Query<&Children>,
-    mut nodes: Query<&mut Node, (With<bevy::ui_widgets::Button>, Without<NavBar>, Without<BarRow>)>,
+    mut nodes: Query<
+        &mut Node,
+        (
+            With<bevy::ui_widgets::Button>,
+            Without<NavBar>,
+            Without<BarRow>,
+            Without<Bar>,
+        ),
+    >,
+    mut input: Single<&mut Node, (With<Bar>, Without<NavBar>, Without<BarRow>)>,
     inheritable: Query<&InheritableFont>,
     mut texts: ParamSet<(
         Query<Entity, Added<TextFont>>,
@@ -70,6 +79,12 @@ pub fn apply_sizes(
 
     // text grows slower than its bar, so a tall bar gets breathing room, like a panel's
     let fit = |r: f32| r.powf(0.6);
+    // the input's ends keep clear of the view's name as it grows
+    let room = px((MODE_ROOM * fit(bottom / BOTTOM)).round());
+    if input.padding.left != room {
+        // the right end follows it where nothing shares the row (bar::bar_look)
+        input.padding.left = room;
+    }
     for (root, k, buttons) in [
         (nav, fit(btn / button_height(TOP)), true),
         (bar, fit(bottom / BOTTOM), false),
