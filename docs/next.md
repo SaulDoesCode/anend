@@ -271,8 +271,7 @@ interface, not stubs.
    (src/), and keeping the guide in step as features land (filters and validators on the
    desktop, the web space's editing and maps).
 6. **Review pass** (security (hub upload and op limits, classifier file checks),
-   ergonomics, visual consistency, and no stubs): **security part done, the rest not
-   started.** The findings and what's enforced where are in `docs/security.md`.
+   ergonomics, visual consistency, and no stubs): **security and CI done, a first UX walk done.** The findings and what's enforced where are in `docs/security.md`.
    - **Fixed and tested (14 Oct):** `POST /api/saves` takes only a bearer token (it was
      open to CSRF through the cookie); a `--local` hub answers only to localhost, IP
      addresses and its `--url` (DNS rebinding) and warns when it listens beyond
@@ -302,11 +301,20 @@ interface, not stubs.
    - The note under item 4 about `classify.index` panicking on its thread name is stale:
      the thread names no longer carry the job key, and the web app doesn't wait.
    - **Left, in this order:**
-     1. The quality sweep: clippy was clean before these changes and after; no TODOs or
-        stubs were found in hub/ or core/ by grep. Still to do: the UX walk of every web
-        view at 1280 and 390 px and keyboard-only (Playwright, seeded with
-        `scratchpad/seed.mjs`), checking there are no CSP errors in the console now,
-        wording in the app's voice, and fixes; screenshots into `shots-review/`.
+   - **Quality sweep (14 Oct, first walk):** clippy clean, tests and parity pass, no
+     TODOs or stubs in hub/ or core/. Playwright over every web view at 1280 and 390 px
+     against a seeded `--local` hub (screenshots in the scratchpad `shots-review/`): no
+     console errors under the new content security policy, no sideways scrolling, every
+     top-bar and editor control reachable by Tab with a visible focus ring, Ctrl+1/2/3/7/8/9
+     switch views. Fixed: the classifier's five tabs now fit across a phone (the last hid
+     past the edge), the tags view said "no tags yet" twice, a list card's letters line
+     ran out of its card.
+   - **Left:** a deeper keyboard-only pass inside views (the filter builder, buckets grid,
+     the space); settings' "share this save" on a `--local` hub offers a form that can
+     only answer "log in to share on the hub" (hide it, or say so up front); "one class" /
+     "labels" for a classifier's head reads oddly beside two classes, but the guide and
+     the desktop use the same words, so change all three together if at all; the hub's
+     own pages (not the app) weren't re-walked in this pass.
 
 ## In progress: classifiers (`core/src/classify/`)
 

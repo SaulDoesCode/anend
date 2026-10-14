@@ -75,7 +75,8 @@ function drawTags() {
             ),
           );
         })
-      : el('li.dim.empty', tags.length ? `no tag has “${find.trim()}”` : 'no tags yet: give a note tags in the editor'),
+      : // with no tags at all, the card beside says so (once)
+        tags.length ? el('li.dim.empty', `no tag has “${find.trim()}”`) : null,
   );
   drawPicked();
 }
@@ -136,8 +137,12 @@ async function loadNotes() {
       el(
         'div.card.tags-empty',
         el('div.big', icon('tag')),
-        el('p', tags.length ? 'Pick a tag to see the notes it tags. Pick more to narrow (all of them) or widen (any of them).' : 'No tags yet.'),
-        el('p.dim.small', 'Type in the bar below to find a tag; Enter picks the first one, Backspace on an empty bar unpicks the last.'),
+        tags.length
+          ? [
+              el('p', 'Pick a tag to see the notes it tags. Pick more to narrow (all of them) or widen (any of them).'),
+              el('p.dim.small', 'Type in the bar below to find a tag; Enter picks the first one, Backspace on an empty bar unpicks the last.'),
+            ]
+          : el('p', 'No tags yet. Give a note tags in the box at the top of the editor, and they gather here.'),
       ),
     );
     return;

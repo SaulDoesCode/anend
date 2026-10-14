@@ -373,6 +373,7 @@ table.nums { border-collapse: collapse; font-variant-numeric: tabular-nums; font
 table.nums th { text-align: left; font-weight: 400; color: var(--dim); padding: 0 12px 0 0; }
 table.nums td { padding: 0 12px 0 0; text-align: right; }
 .list-card .gsum, .list-card .pf { font: 11.5px var(--mono); overflow-wrap: anywhere; }
+.list-card .letters { overflow-wrap: anywhere; }
 .members, .sample { display: flex; flex-wrap: wrap; gap: 4px; }
 .member { display: inline-flex; align-items: center; gap: 2px; background: var(--pad); border-radius: var(--radius); padding: 0 2px 0 7px; height: 22px; font-size: 13px; }
 .sample .member { padding-right: 7px; }
@@ -751,8 +752,9 @@ body.login #bar, body.login #tabs, body.login #settings-button { visibility: hid
   .flt-group { padding-left: 6px; }
   .bk-row { grid-template-columns: minmax(84px, 110px) minmax(0, 1fr); gap: 6px; }
   .bk-axis { grid-template-columns: minmax(84px, 110px) auto 1fr auto; gap: 6px; }
-  nav.clf-tabs button { padding: 0 9px; }
-  nav.clf-tabs button .lab { font-size: 13px; }
+  /* all five parts fit across a phone, rather than the last hiding past the edge */
+  nav.clf-tabs button { flex: 1 1 auto; justify-content: center; padding: 0 5px; gap: 4px; }
+  nav.clf-tabs button .lab { font-size: 12.5px; }
   .checks { margin-left: 0; }
   .space-tint { top: 32px; right: 4px; max-width: calc(100% - 8px); }
   .poscard { max-width: calc(100% - 44px); overflow: hidden; text-overflow: ellipsis; }
