@@ -11,6 +11,7 @@ pub mod forge;
 pub mod graph;
 pub mod lists;
 pub mod markdown;
+pub mod measure;
 pub mod memo;
 pub mod memory;
 pub mod note;
