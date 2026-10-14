@@ -19,11 +19,15 @@ To pick up:
 4. Then item 5 (the guide) and item 6 (the review pass).
 5. Then the backlog under "Not started".
 
-- **Shortcuts differ between the apps:** the desktop has tags on Ctrl+7, while the web
-  app has classifiers on Ctrl+7 and tags on Ctrl+8. Match them when the desktop
-  classifiers view lands: classifiers on Ctrl+7 and tags on Ctrl+8 in both.
-- **Desktop to check:** the editor doesn't scroll with the mouse wheel (bevy's editable
-  text), and a long note once showed every note-list row filled in.
+- **Desktop classifiers (14 Oct): done**, in `src/` (details under item 4, "Desktop").
+  Shortcuts now match the web app: classifiers Ctrl+7, tags Ctrl+8, filters Ctrl+9 (a
+  keymap kept from before moves tags off Ctrl+7 unless the player had rebound them).
+- **Desktop follow-ups: done.** The wheel scrolls the editor (`ui::pad_scroll`, through
+  `TextEdit::ScrollBy`). The window's root node could grow past the window when a view's
+  content was tall (taffy took the content's height for `height: 100%`), which kept
+  scroll areas from scrolling and is the likely cause of the "every note-list row filled
+  in" sighting; the root is now `min_height: 0, max_height: 100%`. Not seen again with a
+  160-line note.
 
 - **Hub icons (asked for on 14 Oct): done.** `hub/web/tools/icons.mjs` also writes the
   sprite `hub/static/icons.svg` (served at `/static/icons.svg?v=…`, cached for a year);
@@ -185,7 +189,38 @@ interface, not stubs.
        index until the hub restarts. The web app works around it by calling with
        `wait: true` while polling `classify.index_job` for progress; once the name is
        fixed it can go back to not waiting.
-   - **Desktop classifiers view** (src/, next phase).
+   - **Desktop: done** (14 Oct), using the core `Store` API directly; heavy work runs on
+     threads through `src/jobs.rs` (`Work::spawn` returns a closure applied to the world;
+     results from a closed save are dropped; `Db` holds an `Arc<Store>`, and closing or
+     renaming the open save is refused while a job holds it).
+     - `src/classify_ui.rs`, the classifiers view (Ctrl+7, top bar icon `classifier`):
+       list with accuracy; new from lists (classes, "not" list, builds-on, preset, one
+       class / labels); training on a thread with a live bar, the loss as bars, held-out
+       metrics, stop, epochs and growth-round sliders, from-scratch; accuracy, macro-F1,
+       log-loss, confusion grid, growth and history events; steering sliders (bias per
+       class, temperature, threshold, gains, coupling per upstream link) with the bias
+       report measured live on a thread and kept after the hand stops; search by class
+       (memoized, validators applied; bar words narrow it) with ✓/✗ per result, "why"
+       (each classifier's share with its own ✓/✗, and end to end); near texts by
+       embedding or verdict; buckets: index the save with a moving bar and stop, counts
+       per class with confidence histograms, open a bucket; outputs to a list; export
+       `.anendcls` to Downloads, take in from Downloads / saves folder / home or a path
+       typed in the bar; delete (asks).
+     - `src/index_panel.rs`: the editor's classifier button opens a strip: pick the
+       classifiers the note is indexed on, verdict chips in the class colours, ✓/✗.
+     - `src/tint.rs`: "colour views" in a classifier's header (setting `tint_by` in the
+       config, off by default): memory results get a class-coloured bar, space texts take
+       the class colour (fainter: less sure), legend with a close button.
+     - `src/filters_ui.rs`, the filters view (Ctrl+9): all-of / any-of groups,
+       include/exclude per condition, class conditions with a min slider, words (from the
+       bar), lists, tags, memories/notes, other presets; run on a thread; keep under a
+       name; presets list with run, write-as-list, delete.
+     - Demo save for trying it: `ANEND_SEED=<file.redb> cargo test -p anend seed_demo --
+       --ignored` (three lists, notes, one long note).
+     - Left: validators editor and disagreements (core has them; the web app shows
+       them), hub browse/take of shared classifiers, sum conditions in the filter
+       builder, a file dialog (no dialog crate; Downloads is used), the name inputs show
+       their text indented after a redraw (cosmetic).
 5. **Guide: done.** `docs/guide.md`, for players: what anend is, then every part task-first
    (notes, memories and gsearch, the space, lists, classifiers with training figures,
    steering and bias, feedback per classifier and end to end, stacking, buckets,

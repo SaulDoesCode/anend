@@ -893,6 +893,8 @@ pub fn tick_classifiers(
     db: Res<Db>,
     work: Res<Work>,
     time: Res<Time>,
+    mut tints: ResMut<crate::tint::Tints>,
+    mut panel: ResMut<crate::index_panel::IndexPanel>,
 ) {
     let now = time.elapsed_secs_f64();
     if (st.training.is_some() || st.indexing.is_some()) && now - st.live_at > 0.25 {
@@ -918,6 +920,9 @@ pub fn tick_classifiers(
                         *x = d;
                     }
                     st.buckets_reload = true;
+                    // what the views were tinted with, and the note's verdicts, changed
+                    tints.reset();
+                    panel.reread = true;
                 }
                 Err(e) => warn!("steering didn't keep: {}", e),
             }
