@@ -4,10 +4,11 @@
 import { el, clear, debounce, typing, underline, textOfOrdinal, KEY } from '../util.js';
 import { icon, tip } from '../icons.js';
 import { picks, pick, pickLine, listCommand, onPick } from '../picks.js';
+import { tinter } from '../tints.js';
 
 const BUCKETS = ['ordinal', 'reversed', 'atbash', 'frequency'];
 
-let app, root, head, band, intro, toast, sidecar, toggles;
+let app, root, head, headText, band, intro, toast, sidecar, toggles, tint;
 const st = {
   bucket: 'ordinal',
   gsearchText: true,
@@ -36,7 +37,7 @@ function savePrefs() {
 
 function drawHead() {
   const p = pickLine();
-  clear(head, `${app.counts.memories} memories · `, tip(el('span.bucket', { tabindex: '0' }, icon('bucket'), st.bucket), `the ${st.bucket} bucket: what Enter gsearches (O R A F)`), p ? el('span.picks', ` · ${p}`) : null);
+  clear(headText, `${app.counts.memories} memories · `, tip(el('span.bucket', { tabindex: '0' }, icon('bucket'), st.bucket), `the ${st.bucket} bucket: what Enter gsearches (O R A F)`), p ? el('span.picks', ` · ${p}`) : null);
 }
 
 // the prime factor chain with its numbers clickable
@@ -90,14 +91,31 @@ function drawResults() {
       },
       h.note ? `✎ ${h.text}` : h.text,
     );
+    a.dataset.key = h.key;
     return a;
   });
+  colour(arts);
   clear(
     band,
     st.header ? el('div.big', st.header.title) : null,
     st.header ? pfLine(st.header.pf) : null,
     el('div.arts', arts.length ? arts : el('span.none', 'nothing in this bucket yet')),
   );
+}
+
+// the texts tinted by the chosen classifier (off unless one is picked)
+async function colour(arts) {
+  const tints = await tint.load(arts.map((a) => a.dataset.key));
+  for (const a of arts) {
+    const t = tints && tints.get(a.dataset.key);
+    a.classList.toggle('tinted', !!t);
+    if (t) {
+      a.style.setProperty('--tint', t.colour);
+      a.style.setProperty('--s', t.strength.toFixed(3));
+      a.removeAttribute('title');
+      a.dataset.tip = `${a.dataset.key} · ${t.label}${t.class == null ? '' : ` ${Math.round(t.strength * 100)}%`}`;
+    }
+  }
 }
 
 const measures = new Map();
@@ -277,7 +295,9 @@ export default {
     app = a;
     loadPrefs();
     root = section;
-    head = el('div.mem-head');
+    headText = el('span.mem-headtext');
+    tint = tinter(app, 'memory', () => drawResults());
+    head = el('div.mem-head', headText, el('span.grow'), tint.picker);
     band = el('div.mem-band', { hidden: true });
     toast = el('div.mem-toast');
     intro = el(
@@ -285,7 +305,7 @@ export default {
       el('p', 'Type a word below and press Enter: it is remembered, and everything sharing its sum comes up.'),
       el('p', 'A number gsearches that bucket; a key (like 0,12) brings back one memory. Shift+click a text to head a list.'),
     );
-    section.append(head, el('div.mem-main', intro, band, toast));
+    section.append(head, tint.legend, el('div.mem-main', intro, band, toast));
     sidecar = el('span.sidecar');
     toggles = el('span.toggles');
     this.barRight = el('div.mem-right', sidecar, toggles);
@@ -302,6 +322,7 @@ export default {
   },
 
   async show() {
+    tint.refresh();
     await app.hello();
     drawHead();
     drawResults();

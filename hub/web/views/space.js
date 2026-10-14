@@ -6,8 +6,9 @@ import { Space, triangle } from '../space.js';
 import { pick, listCommand, onPick, pickLine } from '../picks.js';
 import { colours } from '../theme.js';
 import { icon, iconButton, tip } from '../icons.js';
+import { tinter } from '../tints.js';
 
-let app, section, host, engine, pos, card, help, helpBtn, empty, searchline, chips;
+let app, section, host, engine, pos, card, help, helpBtn, empty, searchline, chips, tint;
 const st = { gsearch: true, reversed: false, saturate: true, keep: false };
 let texts = []; // [{id, text, hit}] in the spread now
 let term = null; // the last search: {n, bucket, pf, s, r, t, buckets}
@@ -76,11 +77,27 @@ async function spread(list, again = false) {
     const sp = await app.call('space.spread', { texts: list.map((t) => ({ id: t.id, text: t.text })), reversed: st.reversed });
     texts = list;
     engine.place(list, sp, again);
+    colour();
     if (term) term.buckets = sp.buckets;
     drawLine();
     engine.info();
   } catch {
     /* reported */
+  }
+}
+
+// the labels tinted by the chosen classifier (off unless one is picked)
+async function colour() {
+  const items = [...engine.items.values()];
+  const tints = await tint.load(items.map((it) => it.hit.key));
+  for (const it of engine.items.values()) {
+    const t = tints && tints.get(it.hit.key);
+    it.el.classList.toggle('tinted', !!t);
+    if (t) {
+      it.el.style.setProperty('--tint', t.colour);
+      it.el.style.setProperty('--s', t.strength.toFixed(3));
+    }
+    it.tint = t || null;
   }
 }
 
@@ -218,6 +235,7 @@ async function hover(it, e) {
     ),
     el('div.gsum', m.gsum),
     el('div.dim', `${it.hit.key} · bucket `, el('span.swatch', { style: { background: `hsl(${it.node?.hue ?? 0} 70% 45%)` } }), ` ${st.reversed ? 'ordinal' : 'reversed'} ${it.node?.q ?? ''}`),
+    it.tint ? el('div.dim', el('span.swatch', { style: { background: it.tint.colour } }), ` ${it.tint.label}${it.tint.class == null ? '' : ` · ${Math.round(it.tint.strength * 100)}%`}`) : null,
     pickLine() ? el('div.dim', pickLine()) : null,
   );
   card.hidden = false;
@@ -299,7 +317,8 @@ export default {
       el('p', 'The room is empty.'),
       el('p.dim', 'Type a word, a number or a key in the bar below and press Enter: its bucket spreads out here. Right-drag to look around, W A S D to fly.'),
     );
-    section.append(host, pos, card, help, empty, helpBtn);
+    tint = tinter(app, 'space', () => colour());
+    section.append(host, pos, card, help, empty, helpBtn, el('div.space-tint', tint.picker, tint.legend));
     searchline = document.getElementById('searchline');
     chips = el('span.toggles');
     this.barRight = chips;
@@ -332,6 +351,7 @@ export default {
   },
 
   show() {
+    tint.refresh();
     engine.start();
     drawLine();
   },

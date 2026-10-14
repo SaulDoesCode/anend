@@ -4,7 +4,8 @@
 // their outputs written back as lists, and texts near each other by what they represent
 
 import { el, clear, confirmClick, debounce } from '../util.js';
-import { iconButton } from '../icons.js';
+import { iconButton, icon, tip } from '../icons.js';
+import * as more from './clsmore.js';
 
 let app, body, count;
 let selected = null; // the open classifier's name
@@ -24,6 +25,32 @@ let enlisted = null;
 const pct = (x) => (x == null ? '–' : `${(x * 100).toFixed(1)}%`);
 const num = (x, d = 3) => (x == null || !isFinite(x) ? '–' : (+x).toFixed(d));
 const SEL_KEY = 'anend.classifier';
+const TAB_KEY = 'anend.classifier.tab';
+// the open classifier's parts, one at a time
+const TABS = [
+  ['train', 'sliders', 'learn', 'training and steering'],
+  ['use', 'search', 'use', 'search by class, outputs as lists, near by meaning'],
+  ['buckets', 'bucket', 'buckets', 'every text filed by class and sureness, and near texts'],
+  ['checks', 'shield', 'checks', 'validators: classifiers that check this one, and where they disagree'],
+  ['share', 'export', 'share', 'download it as a file'],
+];
+let tab = (() => {
+  try {
+    const t = localStorage.getItem(TAB_KEY);
+    return TABS.some((x) => x[0] === t) ? t : 'train';
+  } catch {
+    return 'train';
+  }
+})();
+function setTab(t) {
+  tab = t;
+  try {
+    localStorage.setItem(TAB_KEY, t);
+  } catch {
+    /* private window */
+  }
+  draw();
+}
 
 function remember(name) {
   selected = name;
@@ -76,6 +103,7 @@ async function open(name, keep = false) {
     searchClass = 0;
   }
   remember(name);
+  more.reset(name);
   let d = null;
   if (name) {
     try {
@@ -93,16 +121,39 @@ async function open(name, keep = false) {
 // ------------------------------------------------------------------ drawing
 
 function draw() {
+  const y = body.parentElement?.scrollTop;
   clear(
     body,
-    el('div.clf-side', listCard(), newCard()),
+    el('div.clf-side', listCard(), newCard(), more.importCard()),
     el(
       'div.clf-main',
       detail
-        ? [headCard(), trainCard(), steerCard(), searchCard(), outputCard(), similarCard()]
-        : el('div.card.dim', all.length ? 'pick a classifier' : 'no classifiers yet: make one from two or more lists'),
+        ? [headCard(), tabBar(), ...[].concat(tabCards())]
+        : el('div.card.clf-none', el('span.big', icon('classifier')), el('p', all.length ? 'pick a classifier' : 'no classifiers yet'), el('p.dim.small', 'make one from two or more lists (each list a class), or bring one in from a .anendcls file')),
     ),
   );
+  if (y && body.parentElement) body.parentElement.scrollTop = y;
+}
+
+function tabBar() {
+  return el(
+    'nav.clf-tabs',
+    { role: 'tablist', 'aria-label': 'the classifier’s parts' },
+    TABS.map(([t, ic, label, about]) =>
+      tip(
+        el('button', { type: 'button', role: 'tab', className: tab === t ? 'on' : '', 'aria-selected': String(tab === t), onclick: () => setTab(t) }, icon(ic), el('span.lab', label)),
+        about,
+      ),
+    ),
+  );
+}
+
+function tabCards() {
+  if (tab === 'use') return [searchCard(), outputCard(), similarCard()];
+  if (tab === 'buckets') return more.bucketsCards();
+  if (tab === 'checks') return more.checksCards();
+  if (tab === 'share') return more.shareCards();
+  return [trainCard(), steerCard()];
 }
 
 function listCard() {
@@ -634,6 +685,25 @@ export default {
   barPlaceholder: 'search the open classifier’s class (Enter)',
   init(section, a) {
     app = a;
+    more.init({
+      app,
+      detail: () => detail,
+      all: () => all,
+      lists: () => lists,
+      draw: () => draw(),
+      open: (n) => (remember(n), load()),
+      visible: () => visible,
+      // the open classifier read again (its version after feedback)
+      reload: async () => {
+        if (!detail) return;
+        try {
+          detail = await app.api.call('classify.get', { name: detail.name });
+        } catch {
+          /* gone */
+        }
+      },
+      reloadAll: () => load(),
+    });
     count = el('span.count');
     this.barRight = count;
     body = el('div.clf-view');
@@ -650,6 +720,7 @@ export default {
   hide() {
     visible = false;
     clearTimeout(poll);
+    more.stop();
   },
   barKey(e) {
     if (e.key === 'Enter') {

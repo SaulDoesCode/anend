@@ -135,3 +135,39 @@ export function confirmClick(button, label, act) {
   button.addEventListener('blur', () => armed && (clearTimeout(t), disarm()));
   return button;
 }
+
+// a file to save, made in the page (bytes or text)
+export function saveFile(name, data, type = 'application/octet-stream') {
+  const url = URL.createObjectURL(new Blob([data], { type }));
+  const a = el('a', { href: url, download: name, hidden: true });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+export function fromBase64(b64) {
+  const s = atob(b64);
+  const out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out;
+}
+
+// a file the player picked, as base64
+export function fileBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ''));
+    r.onerror = () => reject(r.error || new Error("couldn't read that file"));
+    r.readAsDataURL(file);
+  });
+}
+
+// where a hit opens: a note in the editor, a memory in the memory view's bar
+export function openHit(app, h) {
+  if (h.note || String(h.key).startsWith('note:')) app.go(`editor/${encodeURIComponent(String(h.key).replace(/^note:/, ''))}`);
+  else {
+    app.barText.memory = h.text;
+    app.go('memory');
+  }
+}
