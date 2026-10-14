@@ -107,6 +107,10 @@ fn save_and_load_round_trip() {
     bad[40] ^= 1;
     assert!(Classifier::from_bytes(&bad).is_err());
     assert!(Classifier::from_bytes(&b[..10]).is_err());
+    // a file whose windows nearly all overlap would make reading long texts endless
+    let mut slow = tiny_clf(4);
+    slow.net.cfg.stride = 1;
+    assert!(Classifier::from_bytes(&slow.to_bytes()).unwrap_err().contains("window"));
 }
 
 #[test]

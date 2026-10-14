@@ -12,6 +12,12 @@ answer comes back as `{"id": 1, "ok": true, "data": ...}` or `{"id": 1, "ok": fa
 also work as `POST /app/api/{op}` with the args as the JSON body.
 
 The login cookie goes along with both (unless `--local`). The account must be active.
+Without one, a post's body isn't read and the socket isn't opened. A member's app runs at
+most 4 calls at once (more wait their turn) over at most 8 sockets. On a shared hub (not
+`--local`) a member's saves may fill the hub's `--quota` (1 GB by default) and number at
+most 200; past that, calls that would add something answer "your saves fill …" while
+reading and deleting still work. A `--local` hub answers only requests addressed to
+`localhost`, an IP address or its `--url` (see [security](security.md)).
 
 A **hit** is `{"key": "0,12", "text": "...", "note": false, "ordinal": 79, "reversed": 83}`.
 A key is a memory's bytes joined by commas, or `note:<key>` for a note.
@@ -87,7 +93,10 @@ a class name or its index. A text to judge is given as `key` (a memory or note) 
   meanwhile (feedback, another run) isn't written. It continues from the trained
   weights unless `fresh`. `rounds` above 1 trains that many rounds of `epochs`,
   deciding after each to widen, add attention heads, deepen or prune (growth events go
-  in the history). The presets: `tiny` (15 k weights, for tests), `compact` (89 k,
+  in the history). On a shared hub a member runs at most 2 trainings and indexings at
+  once, the hub at most as many as it has cores (4 at least), and a training stops (as
+  `failed`, writing nothing) after 2 hours. `threads` is at most the hub's cores, `batch`
+  at most 4096, `lr` above 0 and at most 1. The presets: `tiny` (15 k weights, for tests), `compact` (89 k,
   the default: seconds for a few lists of short memories), `small` (0.9 M), `base`
   (5 M).
 - **Steering** is the player's: a bias per class (added to the logits after the

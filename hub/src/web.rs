@@ -40,10 +40,72 @@ pub fn client_ip(req: &Request) -> IpAddr {
     req.remote_addr().ip().unwrap_or(IpAddr::from([0, 0, 0, 0]))
 }
 
+/// whether a request's `Host` may reach a `--local` hub, which answers anyone without a
+/// login. A page on another site can make the browser send requests to a name it
+/// controls that resolves to this machine (DNS rebinding); such a request carries that
+/// name as its Host. So a local hub answers only to loopback names (`localhost`,
+/// `*.localhost`), IP addresses (which no other site can rebind), and the host of its
+/// own `--url`.
+pub fn local_host_ok(host: &str, url: &str) -> bool {
+    fn name(h: &str) -> String {
+        let h = h.trim().to_ascii_lowercase();
+        if let Some(rest) = h.strip_prefix('[') {
+            // [v6]:port
+            return rest.split(']').next().unwrap_or("").to_string();
+        }
+        match h.rsplit_once(':') {
+            Some((n, port)) if port.bytes().all(|b| b.is_ascii_digit()) && !n.contains(':') => n.to_string(),
+            _ => h,
+        }
+    }
+    let host = name(host);
+    if host.is_empty() {
+        return false;
+    }
+    let own = url.split("://").nth(1).unwrap_or("").split('/').next().unwrap_or("");
+    host == "localhost"
+        || host.ends_with(".localhost")
+        || host.parse::<IpAddr>().is_ok()
+        || (!own.is_empty() && host == name(own))
+}
+
+/// headers every answer carries: no framing by other sites (the admin panel's buttons
+/// can't be clicked through a disguise), no sniffing a download into a page, and
+/// addresses kept to the hub when following a link out. The web app's page also gets a
+/// content security policy: scripts only from the hub, so a note that slipped some html
+/// past the markdown renderer still couldn't run anything.
+fn guard_headers(req: &Request, res: &mut Response) {
+    let h = res.headers_mut();
+    h.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    h.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    h.insert("referrer-policy", HeaderValue::from_static("same-origin"));
+    let csp = if req.uri().path().starts_with("/app") {
+        APP_CSP
+    } else {
+        "frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
+    };
+    h.insert("content-security-policy", HeaderValue::from_static(csp));
+}
+
+/// the web app's policy: its own scripts only; styles inline too (the editor's mirror and
+/// the views set them); pictures in notes from anywhere on the web; calls to the hub
+pub const APP_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' ws: wss:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
+
 /// loads the user behind the session cookie (or app token), turns away forms posted from
 /// other sites, and picks up the message left by the last redirect
 #[handler]
 pub async fn who_is_asking(req: &mut Request, depot: &mut Depot, res: &mut Response, ctrl: &mut FlowCtrl) {
+    guard_headers(req, res);
+    if *crate::app::LOCAL.get().unwrap_or(&false)
+        && !local_host_ok(&req.header::<String>("host").unwrap_or_default(), &hub().config.url)
+    {
+        res.status_code(StatusCode::FORBIDDEN);
+        res.render(Text::Plain(
+            "this hub runs with --local and only answers to localhost, an IP address or its --url",
+        ));
+        ctrl.skip_rest();
+        return;
+    }
     if req.method() == salvo::http::Method::POST && !req.uri().path().starts_with("/api/") {
         let cross = req
             .header::<String>("sec-fetch-site")
@@ -986,7 +1048,13 @@ pub async fn login(req: &mut Request, res: &mut Response) {
             log_in(res, &u.name);
             go(res, "/", &format!("welcome back, {}", u.name));
         }
-        _ => go(res, "/login", "!that name and password don't match"),
+        other => {
+            // as slow as a real check, so the answer's time doesn't say who has an account
+            if other.is_none_or(|u| u.password.is_empty()) {
+                auth::check_password(&password, auth::dummy_hash());
+            }
+            go(res, "/login", "!that name and password don't match")
+        }
     }
 }
 
@@ -1620,6 +1688,19 @@ pub async fn missing(depot: &mut Depot, res: &mut Response) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// a --local hub answers to loopback names, addresses and its own --url only
+    #[test]
+    fn local_hosts() {
+        let url = "http://notes.example:8080";
+        for ok in ["localhost:8231", "LOCALHOST", "app.localhost:1", "127.0.0.1:8231", "[::1]:8231", "192.168.1.4:80", "notes.example:8080", "notes.example"] {
+            assert!(local_host_ok(ok, url), "{ok}");
+        }
+        for bad in ["", "evil.example:8231", "localhost.evil.example", "127.0.0.1.nip.io:8231", "notes.example.evil:8080"] {
+            assert!(!local_host_ok(bad, url), "{bad}");
+        }
+        assert!(!local_host_ok("notes.example", "http://127.0.0.1:8080"));
+    }
 
     #[test]
     fn flash_round_trip() {

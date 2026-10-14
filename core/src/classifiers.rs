@@ -194,6 +194,30 @@ pub fn preset_opts(name: &str) -> TrainOpts {
     }
 }
 
+/// the largest batch a training run takes
+pub const MAX_BATCH: usize = 4096;
+
+/// steering a classifier of `k` classes may have: one head of `k` biases, all finite, a
+/// temperature above 0, a threshold from 0 to 1 and gains of 0 or more
+pub fn check_steer(steer: &crate::classify::Steer, k: usize) -> StoreResult<()> {
+    if steer.heads.len() != 1 || steer.heads[0].bias.len() != k {
+        return Err(format!("steering here has one head of {k} biases"));
+    }
+    let h = &steer.heads[0];
+    let finite = |x: f32| x.is_finite();
+    if !(h.temperature > 0.0 && h.temperature.is_finite())
+        || !h.bias.iter().all(|&b| finite(b))
+        || !(0.0..=1.0).contains(&h.threshold)
+    {
+        return Err("temperature above 0, biases finite, threshold from 0 to 1".into());
+    }
+    let g = &steer.gains;
+    if ![g.letter, g.word, g.side, g.extra].iter().all(|&x| finite(x) && x >= 0.0) {
+        return Err("gains are 0 or more".into());
+    }
+    Ok(())
+}
+
 pub fn clean_name(name: &str) -> StoreResult<String> {
     let n = name.trim();
     if n.is_empty() || n.chars().count() > 80 || n.chars().any(char::is_control) {
@@ -801,9 +825,13 @@ impl Store {
         let mut o = def.train.clone();
         o.epochs = a.epochs.unwrap_or(o.epochs).clamp(1, 1000);
         o.lr = a.lr.unwrap_or(o.lr);
-        o.batch = a.batch.unwrap_or(o.batch).max(1);
+        if !(o.lr > 0.0 && o.lr <= 1.0) {
+            return Err("a learning rate is above 0 and at most 1".into());
+        }
+        o.batch = a.batch.unwrap_or(o.batch).clamp(1, MAX_BATCH);
         o.max_steps = a.max_steps.unwrap_or(o.max_steps);
-        o.threads = a.threads.unwrap_or(o.threads);
+        // more threads than the machine has only slows it (and each is a real thread)
+        o.threads = a.threads.unwrap_or(o.threads).min(crate::classify::pool::available());
         o.seed = crate::classify::math::key(&[def.seed, def.version]);
         if stack.node > 0 {
             let pool = o.pool();
@@ -870,21 +898,7 @@ impl Store {
     pub fn steer_classifier(&self, name: &str, steer: Steer) -> StoreResult<Definition> {
         let mut def = self.classifier(name)?;
         let k = def.class_names().len();
-        if steer.heads.len() != 1 || steer.heads[0].bias.len() != k {
-            return Err(format!("steering for {name:?} has one head of {k} biases"));
-        }
-        let h = &steer.heads[0];
-        let finite = |x: f32| x.is_finite();
-        if !(h.temperature > 0.0 && h.temperature.is_finite())
-            || !h.bias.iter().all(|&b| finite(b))
-            || !(0.0..=1.0).contains(&h.threshold)
-        {
-            return Err("temperature above 0, biases finite, threshold from 0 to 1".into());
-        }
-        let g = &steer.gains;
-        if ![g.letter, g.word, g.side, g.extra].iter().all(|&x| finite(x) && x >= 0.0) {
-            return Err("gains are 0 or more".into());
-        }
+        check_steer(&steer, k)?;
         def.steer = steer;
         self.put_classifier(&mut def, None)?;
         Ok(def)
@@ -1309,6 +1323,37 @@ pub(crate) mod tests {
         for p in [path, pc] {
             let _ = std::fs::remove_file(p);
         }
+    }
+
+    /// training arguments from a caller are kept in bounds, and steering is checked
+    #[test]
+    fn hostile_arguments() {
+        let (s, path) = temp_store("hostile");
+        let (f, r) = lists(&s);
+        let def = s.create_classifier("kind", &[f, r], None, HeadKind::Single, "tiny", vec![]).unwrap();
+        for lr in [-1.0, 0.0, 5.0] {
+            let a = TrainArgs { lr: Some(lr), ..TrainArgs::default() };
+            assert!(s.prepare("kind", &a).is_err(), "lr {lr}");
+        }
+        let a = TrainArgs {
+            threads: Some(1 << 20),
+            batch: Some(usize::MAX),
+            epochs: Some(usize::MAX),
+            rounds: Some(usize::MAX),
+            ..TrainArgs::default()
+        };
+        let t = s.prepare("kind", &a).unwrap();
+        assert!(t.opts.threads <= crate::classify::pool::available());
+        assert_eq!((t.opts.batch, t.opts.epochs, t.rounds), (MAX_BATCH, 1000, 50));
+        let mut bad = def.steer.clone();
+        bad.heads[0].temperature = 0.0;
+        assert!(check_steer(&bad, 2).is_err() && s.steer_classifier("kind", bad).is_err());
+        let mut bad = def.steer.clone();
+        bad.heads[0].bias = vec![0.0; 3];
+        assert!(check_steer(&bad, 2).is_err());
+        assert!(check_steer(&def.steer, 2).is_ok());
+        drop(s);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

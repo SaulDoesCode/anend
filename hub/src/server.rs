@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use crate::web::{Layout, client_ip, go, layout, need_admin, render};
+use crate::web::{Layout, go, layout, need_admin, render};
 
 pub static DATA: OnceLock<PathBuf> = OnceLock::new();
 
@@ -54,8 +54,18 @@ struct Page {
     key: String,
 }
 
+/// a browser on the hub's own machine: the connection comes from loopback and no proxy
+/// passed it on (a reverse proxy on the same machine makes every request look local, so
+/// anything carrying a forwarding header isn't, whatever --behind-proxy says)
 fn local(req: &Request) -> bool {
-    client_ip(req).is_loopback()
+    is_local(req.remote_addr().ip(), req.headers())
+}
+
+fn is_local(from: Option<std::net::IpAddr>, headers: &salvo::http::HeaderMap) -> bool {
+    let forwarded = ["x-forwarded-for", "forwarded", "x-real-ip"]
+        .iter()
+        .any(|h| headers.contains_key(*h));
+    !forwarded && from.is_some_and(|ip| ip.is_loopback())
 }
 
 #[handler]
@@ -143,6 +153,13 @@ mod tests {
         assert_eq!(f.cert(), Some(PathBuf::from("/a.pem")));
         assert!(f.key().is_none());
         assert!(check("/nonexistent", "key", "PRIVATE KEY").is_err());
+        // only a browser on this machine, not one a proxy here passed on
+        let mut h = salvo::http::HeaderMap::new();
+        let lo = Some("127.0.0.1".parse().unwrap());
+        assert!(is_local(lo, &h) && is_local(Some("::1".parse().unwrap()), &h));
+        assert!(!is_local(Some("10.0.0.2".parse().unwrap()), &h) && !is_local(None, &h));
+        h.insert("x-forwarded-for", "127.0.0.1".parse().unwrap());
+        assert!(!is_local(lo, &h));
         std::fs::remove_dir_all(dir).ok();
     }
 }

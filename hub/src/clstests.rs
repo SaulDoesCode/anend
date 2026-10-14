@@ -15,7 +15,13 @@ use crate::web;
 
 const BASE: &str = "http://127.0.0.1:5800";
 
+/// the hub every router test shares (it's a global, set once)
 fn setup() -> std::path::PathBuf {
+    static DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(start).clone()
+}
+
+fn start() -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("anend-hubhttp-{}", rand::random::<u64>()));
     let hub = Hub {
         store: Store::open(&dir).unwrap(),
@@ -239,5 +245,64 @@ async fn classifier_site() {
     post_form(&format!("/classifiers/{id}/delete"), &saul, "").await;
     assert!(web::hub().store.classifier(&id).unwrap().is_none());
     assert!(!web::hub().store.classifier_path(&id).unwrap().exists());
-    std::fs::remove_dir_all(dir).ok();
+}
+
+/// the doors around the app and the API: who may post what, from where, and what every
+/// answer says about framing
+#[tokio::test]
+async fn doors() {
+    let dir = setup();
+    let bea = person("bea", Role::Member);
+
+    // sharing a save through the API takes a token: the login cookie alone, which another
+    // site's form would carry, is turned away
+    let save = dir.join("bea-share.redb");
+    crate::inspect::tests::make_save(&save, &["truth", "listen"]);
+    let bytes = std::fs::read(&save).unwrap();
+    let send = |auth: Option<String>| {
+        let (ct, b) = multipart(&[("name", "bea's save")], &bytes);
+        let mut q = TestClient::post(format!("{BASE}/api/saves"))
+            .add_header("cookie", bea.as_str(), true)
+            .add_header("content-type", ct.as_str(), true);
+        if let Some(t) = auth {
+            q = q.bearer_auth(t);
+        }
+        q.bytes(b)
+    };
+    let (code, text) = body(send(None).send(crate::router()).await).await;
+    assert_eq!(code, 401, "{text}");
+    assert!(!web::hub().store.saves().unwrap().iter().any(|s| s.author == "bea"));
+    let token = auth::new_token(&web::hub().store, "bea", "test").unwrap();
+    let (code, text) = body(send(Some(token)).send(crate::router()).await).await;
+    assert_eq!(code, 200, "{text}");
+    assert!(web::hub().store.saves().unwrap().iter().any(|s| s.author == "bea"));
+
+    // no one gets the app's calls or a socket
+    let (code, v) = post_json("/app/api/hello", "", json!({}), None).await;
+    assert_eq!(code, 400);
+    assert!(v["error"].as_str().unwrap().contains("log in"), "{v}");
+    let r = TestClient::get(format!("{BASE}/app/ws"))
+        .add_header("connection", "upgrade", true)
+        .add_header("upgrade", "websocket", true)
+        .add_header("sec-websocket-version", "13", true)
+        .add_header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==", true)
+        .send(crate::router())
+        .await;
+    assert_eq!(body(r).await.0, 401);
+    // bea does, from the hub's own page only
+    let (code, v) = post_json("/app/api/hello", &bea, json!({}), None).await;
+    assert_eq!(code, 200, "{v}");
+    let (code, _) = post_json("/app/api/hello", &bea, json!({}), Some("http://evil.example")).await;
+    assert_eq!(code, 403);
+
+    // nothing is framed by another site; the app's page runs only the hub's scripts
+    let r = TestClient::get(format!("{BASE}/")).send(crate::router()).await;
+    assert_eq!(r.headers().get("x-frame-options").unwrap(), "DENY");
+    assert!(r.headers().get("content-security-policy").unwrap().to_str().unwrap().contains("frame-ancestors 'none'"));
+    let r = TestClient::get(format!("{BASE}/app/")).send(crate::router()).await;
+    assert_eq!(r.headers().get("content-security-policy").unwrap(), web::APP_CSP);
+    assert_eq!(r.headers().get("x-content-type-options").unwrap(), "nosniff");
+    // the app's page has no inline script for that policy to stop
+    let (_, page) = body(r).await;
+    assert!(!page.contains("<script>"), "an inline script in index.html");
 }

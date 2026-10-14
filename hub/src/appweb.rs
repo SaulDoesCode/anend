@@ -8,6 +8,8 @@ use salvo::http::header::{CACHE_CONTROL, CONTENT_TYPE, HeaderValue};
 use salvo::prelude::*;
 use salvo::websocket::{Message, WebSocketUpgrade};
 use serde_json::{Value, json};
+use std::sync::Arc;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::app::{self, owner, workspaces};
 use crate::hub::Details;
@@ -80,6 +82,51 @@ fn envelope(id: &Value, r: app::Res) -> Value {
     }
 }
 
+/// how many calls one member's app may have running at once, and how many sockets it
+/// may hold open: one person's tabs can't take every thread the hub has
+const CALLS_AT_ONCE: usize = 4;
+const SOCKETS: usize = 8;
+
+/// each owner's turnstile for calls, and how many sockets they have open
+type Gates = std::sync::Mutex<std::collections::HashMap<String, (Arc<Semaphore>, usize)>>;
+
+fn gates() -> &'static Gates {
+    static G: std::sync::OnceLock<Gates> = std::sync::OnceLock::new();
+    G.get_or_init(Default::default)
+}
+
+fn gate(owner: &str) -> Arc<Semaphore> {
+    let local = *app::LOCAL.get().unwrap_or(&false);
+    let mut g = gates().lock().unwrap_or_else(|e| e.into_inner());
+    g.entry(owner.to_string())
+        .or_insert_with(|| (Arc::new(Semaphore::new(if local { 64 } else { CALLS_AT_ONCE })), 0))
+        .0
+        .clone()
+}
+
+/// waits for a turn to run one of `owner`'s calls
+async fn turn(owner: &str) -> Result<OwnedSemaphorePermit, String> {
+    gate(owner).acquire_owned().await.map_err(|e| e.to_string())
+}
+
+/// counts a socket in (false: too many open) or out
+fn socket_count(owner: &str, opened: bool) -> bool {
+    let local = *app::LOCAL.get().unwrap_or(&false);
+    let mut g = gates().lock().unwrap_or_else(|e| e.into_inner());
+    let e = g
+        .entry(owner.to_string())
+        .or_insert_with(|| (Arc::new(Semaphore::new(if local { 64 } else { CALLS_AT_ONCE })), 0));
+    if opened {
+        if !local && e.1 >= SOCKETS {
+            return false;
+        }
+        e.1 += 1;
+    } else {
+        e.1 = e.1.saturating_sub(1);
+    }
+    true
+}
+
 /// runs an operation for whoever's asking
 async fn run(owner: Result<String, String>, op: String, args: Value) -> app::Res {
     let owner = owner?;
@@ -95,9 +142,18 @@ async fn run(owner: Result<String, String>, op: String, args: Value) -> app::Res
 #[handler]
 pub async fn api(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     let op = req.param::<String>("op").unwrap_or_default();
-    let args: Value = req.parse_json_with_max_size(64 << 20).await.unwrap_or(Value::Null);
+    // who's asking before anything is read: a body from no one isn't parsed at all
     let who = owner(me(depot));
-    let r = run(who, op, args).await;
+    let r = match &who {
+        Ok(o) => match turn(o).await {
+            Ok(_permit) => {
+                let args: Value = req.parse_json_with_max_size(64 << 20).await.unwrap_or(Value::Null);
+                run(who, op, args).await
+            }
+            Err(e) => Err(e),
+        },
+        Err(e) => Err(e.clone()),
+    };
     if r.is_err() {
         res.status_code(StatusCode::BAD_REQUEST);
     }
@@ -119,8 +175,13 @@ pub async fn socket(req: &mut Request, depot: &mut Depot, res: &mut Response) ->
     if !same_origin(req) {
         return Err(StatusError::forbidden().brief("only the hub's own pages"));
     }
-    let who = owner(me(depot));
-    WebSocketUpgrade::new()
+    // no socket for no one (the app posts instead, and hears why)
+    let who = owner(me(depot)).map_err(|e| StatusError::unauthorized().brief(e))?;
+    if !socket_count(&who, true) {
+        return Err(StatusError::too_many_requests().brief("too many of your app's tabs are open"));
+    }
+    let counted = who.clone();
+    let r = WebSocketUpgrade::new()
         .max_message_size(64 << 20)
         .upgrade(req, res, move |ws| async move {
             let (mut tx, mut rx) = ws.split();
@@ -129,17 +190,23 @@ pub async fn socket(req: &mut Request, depot: &mut Depot, res: &mut Response) ->
                     break;
                 }
                 let Ok(text) = msg.as_str() else { continue };
+                let Ok(_permit) = turn(&who).await else { break };
                 let call: Value = serde_json::from_str(text).unwrap_or(Value::Null);
                 let id = call.get("id").cloned().unwrap_or(Value::Null);
                 let op = call.get("op").and_then(Value::as_str).unwrap_or("").to_string();
                 let args = call.get("args").cloned().unwrap_or(Value::Null);
-                let answer = envelope(&id, run(who.clone(), op, args).await);
+                let answer = envelope(&id, run(Ok(who.clone()), op, args).await);
                 if tx.send(Message::text(answer.to_string())).await.is_err() {
                     break;
                 }
             }
+            socket_count(&who, false);
         })
-        .await
+        .await;
+    if r.is_err() {
+        socket_count(&counted, false);
+    }
+    r
 }
 
 // ------------------------------------------------------------------ moving saves
@@ -333,4 +400,26 @@ pub async fn share_classifier(req: &mut Request, depot: &mut Depot, res: &mut Re
         res.status_code(StatusCode::BAD_REQUEST);
     }
     res.render(Json(envelope(&Value::Null, got)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// one member's tabs hold at most SOCKETS sockets and CALLS_AT_ONCE calls
+    #[test]
+    fn turnstiles() {
+        let who = format!("gate-test-{}", rand::random::<u32>());
+        for _ in 0..SOCKETS {
+            assert!(socket_count(&who, true));
+        }
+        assert!(!socket_count(&who, true), "one too many");
+        socket_count(&who, false);
+        assert!(socket_count(&who, true));
+        let g = gate(&who);
+        let held: Vec<_> = (0..CALLS_AT_ONCE).map(|_| g.clone().try_acquire_owned().unwrap()).collect();
+        assert!(g.clone().try_acquire_owned().is_err(), "a fifth call waits");
+        drop(held);
+        assert!(g.try_acquire_owned().is_ok());
+    }
 }

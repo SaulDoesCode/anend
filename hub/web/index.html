@@ -7,13 +7,7 @@
 <title>anend</title>
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
-<script>
-  // the colours before the first paint, so the page doesn't flash sand under night
-  try {
-    const s = JSON.parse(localStorage.getItem('anend.colours') || 'null');
-    if (s && s.preset === 'night') document.documentElement.dataset.dark = 'dark';
-  } catch {}
-</script>
+<script src="early.js"></script>
 </head>
 <body>
 <header id="top" class="bar">

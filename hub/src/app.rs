@@ -68,6 +68,34 @@ impl Workspaces {
     }
 }
 
+/// how much disk a member's saves may fill on a shared hub, in bytes (`--quota`; unset or
+/// 0: no limit, and a `--local` hub has none)
+pub static QUOTA: OnceLock<u64> = OnceLock::new();
+/// how many saves a member may keep on a shared hub
+pub const MAX_SAVES: usize = 200;
+
+/// calls that only read, or make room: they work whatever the quota says
+const MAKE_NO_ROOM: &[&str] = &[
+    "hello", "saves.list", "saves.open", "saves.delete", "saves.rename", "saves.export",
+    "notes.list", "notes.tags", "notes.get", "notes.delete",
+    "mem.measure", "mem.gsearch", "mem.search", "mem.forget", "mem.remember", "mem.all",
+    "lists.stats", "lists.delist", "lists.unlist", "space.spread", "forge.preview", "stats",
+    "classify.list", "classify.get", "classify.delete", "classify.job", "classify.cancel",
+    "classify.predict", "classify.search", "classify.contributions", "classify.represent",
+    "classify.similar", "classify.index_job", "classify.index_cancel", "classify.buckets",
+    "classify.bucket", "classify.near", "classify.tints", "classify.indexed",
+    "classify.disagreements", "classify.export", "classify.inspect",
+    "filters.list", "filters.delete", "filters.run",
+];
+
+/// calls that make a save
+const MAKE_A_SAVE: &[&str] = &["saves.new", "saves.copy", "saves.import", "forge.make"];
+
+/// a size for people
+fn mb(b: u64) -> String {
+    crate::hub::human_size(b)
+}
+
 /// a save's name made safe for a file name
 pub fn clean(name: &str) -> Result<String, String> {
     let n: String = name
@@ -99,6 +127,41 @@ impl Workspace {
 
     pub fn path(&self, name: &str) -> Result<PathBuf, String> {
         Ok(self.dir.join(format!("{}.redb", clean(name)?)))
+    }
+
+    /// whether the workspace may grow (and, with `new_save`, hold one more save): on a
+    /// shared hub its saves stay under the quota and [`MAX_SAVES`]
+    pub fn room(&self, new_save: bool) -> Result<(), String> {
+        if *LOCAL.get().unwrap_or(&false) {
+            return Ok(());
+        }
+        self.room_under(QUOTA.get().copied().unwrap_or(0), new_save)
+    }
+
+    fn room_under(&self, quota: u64, new_save: bool) -> Result<(), String> {
+        if quota == 0 {
+            return Ok(());
+        }
+        let files: Vec<u64> = std::fs::read_dir(&self.dir)
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .filter(|e| e.path().extension().is_some_and(|x| x == "redb"))
+                    .filter_map(|e| e.metadata().ok().map(|m| m.len()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let used: u64 = files.iter().sum();
+        if used >= quota {
+            return Err(format!(
+                "your saves fill {} of the {} this hub keeps for each member: delete or shrink some to make room",
+                mb(used),
+                mb(quota)
+            ));
+        }
+        if new_save && files.len() >= MAX_SAVES {
+            return Err(format!("that's {MAX_SAVES} saves, as many as the hub keeps for each member: delete one first"));
+        }
+        Ok(())
     }
 
     fn names(&self) -> Vec<String> {
@@ -434,6 +497,10 @@ fn saves_call(ws: &Workspace, open: &str, op: &str, args: &Value) -> Res {
 
 /// one operation on a workspace; runs off the async threads (redb blocks)
 pub fn call(ws: &Workspace, op: &str, args: &Value) -> Res {
+    if !MAKE_NO_ROOM.contains(&op) {
+        let merging = op == "saves.import" && args.get("merge").and_then(Value::as_bool) == Some(true);
+        ws.room(MAKE_A_SAVE.contains(&op) && !merging)?;
+    }
     if op.starts_with("saves.") {
         let open = ws.store()?.0;
         return saves_call(ws, &open, op, args);
@@ -652,6 +719,7 @@ fn tag_counts(notes: &[Note]) -> Vec<(String, usize)> {
 
 /// a hub save into the workspace (`merge`: into the open save instead of beside it)
 pub fn take_hub_save(ws: &Workspace, hub_file: &Path, name: &str, merge: bool) -> Res {
+    ws.room(!merge)?;
     if merge {
         let (_, store) = ws.store()?;
         let src = Store::open(hub_file)?;
@@ -779,6 +847,33 @@ mod tests {
         assert_eq!(call(&ws, "hello", &json!({})).unwrap()["save"], "renamed");
         assert!(call(&ws, "nonsense", &json!({})).is_err());
         assert!(clean("../x").is_ok_and(|n| !n.contains('/')));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// a member's saves stay under the quota: past it, only reading and deleting work
+    #[test]
+    fn quota() {
+        let dir = std::env::temp_dir().join(format!("anend-quota-{}", rand::random::<u64>()));
+        let ws = Workspace::new(dir.clone());
+        call(&ws, "mem.saturate", &json!({"text": "listen"})).unwrap();
+        let used: u64 = std::fs::metadata(ws.path("notes").unwrap()).unwrap().len();
+        assert!(ws.room_under(0, true).is_ok(), "0 is no limit");
+        assert!(ws.room_under(used + 1, true).is_ok());
+        let full = ws.room_under(used, false).unwrap_err();
+        assert!(full.contains("delete or shrink"), "{full}");
+        // the calls that need room are the ones not listed as making none
+        for op in ["notes.save", "mem.saturate", "saves.new", "saves.import", "classify.train", "filters.save"] {
+            assert!(!MAKE_NO_ROOM.contains(&op), "{op}");
+        }
+        for op in MAKE_NO_ROOM {
+            assert!(!MAKE_A_SAVE.contains(op), "{op}");
+        }
+        for i in 0..MAX_SAVES {
+            std::fs::write(dir.join(format!("s{i}.redb")), b"").unwrap();
+        }
+        assert!(ws.room_under(u64::MAX, false).is_ok());
+        assert!(ws.room_under(u64::MAX, true).unwrap_err().contains("delete one first"));
+        drop(ws);
         std::fs::remove_dir_all(dir).ok();
     }
 }

@@ -133,7 +133,61 @@ fn not_training(store: &Store, names: &[String]) -> Result<(), String> {
     }
 }
 
+/// a running hub (not `--local`) shares its machine: each workspace runs at most this
+/// many trainings and indexings at once, the hub at most [`hub_jobs`], and a training
+/// stops after [`TRAIN_LIMIT`]
+pub const WORKSPACE_JOBS: usize = 2;
+pub const TRAIN_LIMIT: std::time::Duration = std::time::Duration::from_secs(2 * 3600);
+
+fn hub_jobs() -> usize {
+    anend_core::classify::pool::available().max(4)
+}
+
+fn shared() -> bool {
+    !*crate::app::LOCAL.get().unwrap_or(&false)
+}
+
+/// the workspace folder a job key's save is in
+fn key_folder(key: &str) -> &str {
+    let path = key.split('\u{0}').next().unwrap_or("");
+    path.rsplit_once(['/', '\\']).map_or("", |(dir, _)| dir)
+}
+
+/// whether another job may start for `store`'s workspace (on a shared hub)
+fn room_for_a_job(store: &Store) -> Result<(), String> {
+    if !shared() {
+        return Ok(());
+    }
+    let mine = job_key(store, "");
+    let mine = key_folder(&mine);
+    let mut running: Vec<String> = jobs()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .filter(|(_, j)| j.running())
+        .map(|(k, _)| k.clone())
+        .collect();
+    running.extend(
+        index_jobs()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .filter(|(_, j)| index_snapshot(j)["state"] == "running")
+            .map(|(k, _)| k.clone()),
+    );
+    if running.iter().filter(|k| key_folder(k) == mine).count() >= WORKSPACE_JOBS {
+        return Err(format!(
+            "{WORKSPACE_JOBS} trainings or indexings are running in your saves already; wait for one to end"
+        ));
+    }
+    if running.len() >= hub_jobs() {
+        return Err("the hub is busy training for others; try again in a while".into());
+    }
+    Ok(())
+}
+
 fn start(store: Arc<Store>, name: &str, a: &TrainArgs, wait: bool) -> Res {
+    room_for_a_job(&store)?;
     let mut t = store.prepare(name, a)?;
     let job = Arc::new(Job {
         cancel: AtomicBool::new(false),
@@ -155,13 +209,21 @@ fn start(store: Arc<Store>, name: &str, a: &TrainArgs, wait: bool) -> Res {
         all.insert(key, job.clone());
     }
     let j = job.clone();
+    let limit = shared().then_some(TRAIN_LIMIT);
     let mut work = move || {
+        let mut too_long = false;
         let r = t.run(|tick| {
             j.tick(tick);
-            if j.cancel.load(Ordering::Relaxed) { Flow::Stop } else { Flow::Go }
+            too_long = limit.is_some_and(|l| j.started.elapsed() > l);
+            if too_long || j.cancel.load(Ordering::Relaxed) { Flow::Stop } else { Flow::Go }
         });
         let r = r.and_then(|s| {
-            if s.cancelled {
+            if too_long {
+                Err(format!(
+                    "the hub stops a training after {} hours; try fewer epochs or rounds, or a smaller preset",
+                    TRAIN_LIMIT.as_secs() / 3600
+                ))
+            } else if s.cancelled {
                 Ok((s, "cancelled"))
             } else {
                 store.commit(&t, &s).map(|_| (s, "done"))
@@ -182,11 +244,11 @@ fn start(store: Arc<Store>, name: &str, a: &TrainArgs, wait: bool) -> Res {
     };
     if wait {
         work();
-    } else {
-        std::thread::Builder::new()
-            .name(format!("train {name}"))
-            .spawn(work)
-            .map_err(|e| e.to_string())?;
+    } else if let Err(e) = std::thread::Builder::new().name("train".into()).spawn(work) {
+        // the job mustn't stay "running" with nothing behind it
+        let mut st = job.state.lock().unwrap_or_else(|e| e.into_inner());
+        st.state = "failed".into();
+        st.error = Some(format!("couldn't start the training: {e}"));
     }
     Ok(json!(job.snapshot()))
 }
@@ -605,6 +667,7 @@ pub fn call(store: Arc<Store>, op: &str, args: &Value) -> Res {
             let name = name_arg(args)?;
             let def = st.classifier(name)?;
             let steer = steer_from(&def, args.get("steer").unwrap_or(&Value::Null))?;
+            clfs::check_steer(&steer, def.class_names().len())?;
             let save = args.get("save").and_then(Value::as_bool).unwrap_or(true);
             let def = if save {
                 st.steer_classifier(name, steer)?
@@ -709,6 +772,7 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
                 Some(v) => Some(v.iter().map(|k| parse_ref(k.as_str().unwrap_or(""))).collect::<Result<_, _>>()?),
                 None => None,
             };
+            room_for_a_job(st)?;
             let key = job_key(st, &name);
             let job = Arc::new(IndexJob {
                 cancel: AtomicBool::new(false),
@@ -746,8 +810,7 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
             if wait {
                 work();
             } else {
-                // a thread's name can't hold the job key's \0
-                if let Err(e) = std::thread::Builder::new().name(format!("index {name}")).spawn(work) {
+                if let Err(e) = std::thread::Builder::new().name("index".into()).spawn(work) {
                     let mut s = job.state.lock().unwrap_or_else(|e| e.into_inner());
                     s["state"] = json!("failed");
                     s["error"] = json!(e.to_string());
@@ -965,6 +1028,13 @@ pub fn import_opts_and_take(st: &Store, m: &clsmodule::Module, args: &Value) -> 
 mod tests {
     use super::*;
     use crate::app::{Workspace, call as app_call};
+
+    #[test]
+    fn job_folders() {
+        assert_eq!(key_folder("/data/users/ann/saves/notes.redb\u{0}kind"), "/data/users/ann/saves");
+        assert_eq!(key_folder("/data/users/ann/saves/a/b.redb\u{0}x/y"), "/data/users/ann/saves/a");
+        assert_eq!(key_folder("plain"), "");
+    }
 
     #[test]
     fn classifier_calls() {

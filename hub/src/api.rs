@@ -110,9 +110,11 @@ pub async fn whoami(depot: &mut Depot, res: &mut Response) {
 }
 
 #[handler]
-pub async fn share(req: &mut Request, depot: &mut Depot, res: &mut Response) {
-    let Some(user) = me(depot).cloned() else {
-        return error(res, StatusCode::UNAUTHORIZED, "that token isn't known here");
+pub async fn share(req: &mut Request, res: &mut Response) {
+    // a bearer token only: the login cookie would ride along on a form another site posts
+    // here (the hub's own pages share through /upload, which checks where a form came from)
+    let Some(user) = token_user(req) else {
+        return error(res, StatusCode::UNAUTHORIZED, "send an app token (Authorization: Bearer …)");
     };
     if !Hub::active(&user) {
         return error(res, StatusCode::FORBIDDEN, "your account is waiting for an admin");

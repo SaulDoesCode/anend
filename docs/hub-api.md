@@ -36,7 +36,7 @@ website, on your profile page ("app tokens"), and pasted into the app's settings
 | `GET /api/saves?q=&sort=&page=` | approved saves. `q` matches names, descriptions, tags and authors; `sort` is `new` (default), `stars`, `downloads` or `featured`; `page` starts at 0, 24 a page. Returns `{"saves": [save...], "more": bool}` |
 | `GET /api/saves/{id}` | one approved save, plus `"sample": [{"text": "...", "ordinal": 1, "reversed": 2}]` (up to 24 of its memories) |
 | `GET /saves/{id}/download` | the save's `.redb` file, `Content-Disposition: attachment; filename="<name>.redb"`. Counts a download |
-| `POST /api/saves` | **token**. `multipart/form-data` with `name`, `description`, `tags` (comma separated) and `file` (the `.redb`). Returns `{"id": "...", "status": "pending"}` (waits for an admin) or `"approved"` (trusted uploaders) |
+| `POST /api/saves` | **token** (a bearer token only; a login cookie isn't enough here). `multipart/form-data` with `name`, `description`, `tags` (comma separated) and `file` (the `.redb`). Returns `{"id": "...", "status": "pending"}` (waits for an admin) or `"approved"` (trusted uploaders) |
 | `GET /api/me` | **token**. `{"username": "...", "points": 120, "level": 3, "title": "scribe"}` |
 | `GET /api/hub` | `{"name": "...", "description": "...", "saves": 12, "classifiers": 3, "users": 4}`: what the hub calls itself |
 

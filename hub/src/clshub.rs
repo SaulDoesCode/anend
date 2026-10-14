@@ -313,6 +313,7 @@ pub fn take_into(ws: &Workspace, file: &Path, max: u64, args: &Value) -> Result<
     let bytes = std::fs::read(file).map_err(|e| e.to_string())?;
     let m = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| clsmodule::read(&bytes, max as usize)))
         .map_err(|_| "that module can't be read".to_string())??;
+    ws.room(false)?;
     let (open, store) = ws.store()?;
     let mut done = crate::classify::import_opts_and_take(&store, &m, args)?;
     done["save"] = json!(open);

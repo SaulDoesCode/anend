@@ -37,6 +37,8 @@ usage: anend-hub [options]
   --about TEXT         a line about the hub for its front page
   --open               new accounts are active at once (default: an admin lets them in)
   --max-upload MB      largest save taken, in megabytes (default 64)
+  --quota MB           how much disk each member's saves in the web app may fill
+                       (default 1024; 0 for no limit; a --local hub has none)
   --behind-proxy       trust X-Forwarded-For for the client's address
   --admin NAME         make NAME an admin (creating them if needed), print a login link, carry on
   --no-ratelimit       don't limit login, join and upload tries
@@ -55,6 +57,7 @@ struct Args {
     about: String,
     open: bool,
     max_upload: u64,
+    quota: u64,
     behind_proxy: bool,
     admin: Option<String>,
     no_ratelimit: bool,
@@ -74,6 +77,7 @@ fn parse_args() -> Result<Args, String> {
                 .into(),
         open: false,
         max_upload: 64,
+        quota: 1024,
         behind_proxy: false,
         admin: None,
         no_ratelimit: false,
@@ -95,6 +99,11 @@ fn parse_args() -> Result<Args, String> {
                 a.max_upload = value("--max-upload")?
                     .parse()
                     .map_err(|_| "--max-upload is a number of megabytes")?
+            }
+            "--quota" => {
+                a.quota = value("--quota")?
+                    .parse()
+                    .map_err(|_| "--quota is a number of megabytes")?
             }
             "--behind-proxy" => a.behind_proxy = true,
             "--admin" => a.admin = Some(value("--admin")?),
@@ -220,6 +229,7 @@ async fn main() {
     };
     web::BEHIND_PROXY.set(args.behind_proxy).ok();
     app::LOCAL.set(args.local).ok();
+    app::QUOTA.set(args.quota.saturating_mul(1024 * 1024)).ok();
     app::WORKSPACES.set(app::Workspaces::new(args.data.join("users"))).ok();
     server::DATA.set(args.data.clone()).ok();
     if web::HUB.set(hub).is_err() {
@@ -246,6 +256,17 @@ async fn main() {
     );
     if args.local {
         println!("  --local: the web app needs no login; keep the hub on localhost");
+        let loopback = args
+            .addr
+            .rsplit_once(':')
+            .map(|(h, _)| h.trim_matches(['[', ']']))
+            .is_some_and(|h| h == "localhost" || h.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback()));
+        if !loopback {
+            println!(
+                "  WARNING: --local on {}: anyone who can reach this address can read and change every save, with no login",
+                args.addr
+            );
+        }
     }
     match tls {
         Some((cert, key)) => {

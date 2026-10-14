@@ -4,9 +4,12 @@
 
 import { esc } from './util.js';
 
-// links only go to the web, mail, or places on this site
-function safeUrl(u) {
-  const t = u.trim();
+// links only go to the web, mail, or places on this site. A browser drops control
+// characters and spaces at a url's start and tabs and newlines inside it before reading
+// its scheme, so they go first here too ("\x01javascript:" would otherwise pass as a
+// relative link); an entity is already escaped, so it can't spell a scheme either.
+export function safeUrl(u) {
+  const t = String(u).replace(/[\x00-\x20\x7f]/g, '');
   if (/^(https?:|mailto:)/i.test(t) || /^[/#.?]/.test(t) || !/^[a-z][a-z0-9+.-]*:/i.test(t)) return t;
   return '#';
 }

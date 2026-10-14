@@ -181,7 +181,9 @@ fn expected_weights(h: &Header) -> Result<usize, String> {
     if h.blocks.is_empty() || h.blocks.len() > MAX_LAYERS {
         return bad("depth");
     }
-    if c.max_len < 3 || c.max_len > MAX_LEN || c.stride == 0 || c.stride > MAX_LEN {
+    // windows overlap by at most three quarters: a stride of 1 on long windows would make
+    // every long text cost thousands of times its length to read
+    if c.max_len < 3 || c.max_len > MAX_LEN || c.stride == 0 || c.stride > MAX_LEN || c.stride * 4 < c.max_len - 2 {
         return bad("window");
     }
     if c.extra > MAX_EXTRA {

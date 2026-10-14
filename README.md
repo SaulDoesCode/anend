@@ -264,7 +264,7 @@ redb database (people, sessions, saves' details, stars) and the save files in
 
 **Options**: `--addr` where it listens, `--url` the address people reach it at (for login
 links, and https cookies when it starts with `https://`), `--data` its folder, `--name` and
-`--about` what it calls itself, `--open`, `--max-upload` in MB (64), `--behind-proxy` to
+`--about` what it calls itself, `--open`, `--max-upload` in MB (64), `--quota` in MB (1024: how much disk each member's saves in the web app may fill; 0 for no limit), `--behind-proxy` to
 trust `X-Forwarded-For`, `--no-ratelimit`, `--local` (below), and `--tls-cert` /
 `--tls-key` (PEM files) to speak https itself. Those two can also be set on
 **admin → server settings**, a page that only opens from the machine the hub runs on; they

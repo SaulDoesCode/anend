@@ -49,6 +49,13 @@ pub fn check_password(pw: &str, hash: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// a hash to check a password against when there's no account by that name, so a login
+/// for nobody takes as long as one for someone
+pub fn dummy_hash() -> &'static str {
+    static H: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    H.get_or_init(|| hash_password("no one has this password").unwrap_or_default())
+}
+
 /// starts a session; returns the cookie's value
 pub fn start_session(store: &Store, user: &str) -> Result<String, String> {
     let s = secret();
@@ -165,6 +172,7 @@ mod tests {
         assert!(check_password("correct horse", &h));
         assert!(!check_password("wrong horse", &h));
         assert!(!check_password("x", "not a hash"));
+        assert!(dummy_hash().starts_with("$argon2") && !check_password("", dummy_hash()));
         assert!(password_ok("short").is_err());
         assert!(password_ok("long enough").is_ok());
     }
