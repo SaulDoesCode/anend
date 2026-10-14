@@ -92,7 +92,7 @@ pub fn bar() -> impl Scene {
             Node {
                 display: Display::None,
                 flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::End,
+                justify_content: JustifyContent::Center,
                 padding: UiRect::axes(px(8), px(1)),
             }
             BarStrip
