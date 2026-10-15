@@ -19,12 +19,15 @@
 //! | `compose` | classifiers feeding classifiers, outputs as lists, feedback through a stack |
 //! | `generate` | sampling from a generative head, critics, constraints, guidance, reinforcement |
 //! | `io` | the versioned binary file format |
+//! | `spec` | the declarative model spec: inputs, trunk, heads, data queries, critics; build, train, run |
+//! | `bench` | a one-time machine benchmark suggesting model sizes for this hardware |
 //!
 //! Every numeric operation goes through `kernels` and `math`: they are the backend
 //! boundary a GPU implementation would replace.
 
 pub mod codec;
 pub mod compose;
+pub mod bench;
 pub mod generate;
 pub mod grow;
 pub mod io;
@@ -33,6 +36,7 @@ pub mod math;
 pub mod metrics;
 pub mod model;
 pub mod pool;
+pub mod spec;
 pub mod steer;
 pub mod text;
 pub mod train;
@@ -60,6 +64,10 @@ pub struct Meta {
     pub feedback: Vec<Example>,
     /// growth and pruning events, oldest first
     pub log: Vec<String>,
+    /// the declarative spec the model was built from, and anything it learned besides
+    /// weights (a picture codebook); see `spec::Model`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spec: Option<serde_json::Value>,
 }
 
 /// how many feedback examples a classifier keeps
