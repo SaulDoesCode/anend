@@ -35,6 +35,10 @@ pub struct Prefs {
     pub letters: bool,
     /// the space's background colour
     pub space_bg: String,
+    /// the space buckets by the reversed sum
+    pub space_reversed: bool,
+    /// the space adds new results to what's there
+    pub space_keep: bool,
     /// sections folded shut, by name (settings, lists…)
     pub collapsed: BTreeSet<String>,
     pub view: String,
@@ -59,6 +63,8 @@ impl Default for Prefs {
             saturate: true,
             letters: true,
             space_bg: "#e4d4be".into(),
+            space_reversed: false,
+            space_keep: false,
             collapsed: ["hub".to_string()].into_iter().collect(),
             view: "memory".into(),
             save: None,
