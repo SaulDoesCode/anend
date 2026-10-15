@@ -455,6 +455,12 @@ a just-made invite, a README section pointing at docs/deploy.md.
   on unless chosen. Spec-built models already work this way. When the store's classifiers
   move to the spec, turn it off in the Rust presets (`Config::tiny()` and the others) too,
   keeping existing model files loading with whatever they were trained with.
+- **Back burner (user, 15 Oct): generated pictures as block textures.** The patch-codebook
+  picture generator (`core/examples/pictures.rs`, 64×64 from 8×8 patches) and the space's
+  placed blocks can work together like Minecraft textures: a block's placement payload
+  points to a generated or imported texture entry, and the generator (steered by classifiers
+  as critics) makes texture sets in a chosen style. Do this after the editable space and
+  blocks exist.
 
 ## The queue (asked for on 13 Oct, in this order)
 
