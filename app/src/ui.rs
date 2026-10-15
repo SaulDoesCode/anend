@@ -145,7 +145,7 @@ pub struct Menu {
 
 /// a recent action that can be taken back
 #[derive(Debug, Clone, PartialEq)]
-pub enum Action {
+pub enum Did {
     Forgot { key: String, text: String },
     Remembered { key: String, text: String },
     Edited { key: String, old: String },
@@ -155,16 +155,16 @@ pub enum Action {
     Feedback { model: String },
 }
 
-impl Action {
+impl Did {
     pub fn describe(&self) -> String {
         match self {
-            Action::Forgot { text, .. } => format!("forgetting “{text}”"),
-            Action::Remembered { text, .. } => format!("remembering “{text}”"),
-            Action::Edited { old, .. } => format!("the edit of “{old}”"),
-            Action::Enlisted { .. } => "adding to a list".into(),
-            Action::Delisted { .. } => "taking out of a list".into(),
-            Action::Unlisted { .. } => "deleting a list".into(),
-            Action::Feedback { model } => format!("the verdict given to {model}"),
+            Did::Forgot { text, .. } => format!("forgetting “{text}”"),
+            Did::Remembered { text, .. } => format!("remembering “{text}”"),
+            Did::Edited { old, .. } => format!("the edit of “{old}”"),
+            Did::Enlisted { .. } => "adding to a list".into(),
+            Did::Delisted { .. } => "taking out of a list".into(),
+            Did::Unlisted { .. } => "deleting a list".into(),
+            Did::Feedback { model } => format!("the verdict given to {model}"),
         }
     }
 }
@@ -210,7 +210,7 @@ pub struct Ui {
     pub picks: Signal<Picks>,
     pub pending: Signal<Pending>,
     pub menu: Signal<Option<Menu>>,
-    pub actions: Signal<Vec<Action>>,
+    pub actions: Signal<Vec<Did>>,
     pub bar_history: Signal<BarHistory>,
     /// each view's key handler
     pub keys: Signal<Vec<(View, Callback<KeyPress, bool>)>>,
@@ -268,7 +268,7 @@ impl Ui {
     pub fn say(mut self, msg: impl Into<String>) {
         let n = self.next();
         self.status.set((msg.into(), false, n));
-        spawn(async move {
+        dioxus::dioxus_core::spawn_forever(async move {
             sleep_ms(4000).await;
             if self.status.peek().2 == n {
                 self.status.set((String::new(), false, n));
@@ -279,7 +279,7 @@ impl Ui {
     pub fn fail(mut self, msg: impl Into<String>) {
         let n = self.next();
         self.status.set((msg.into(), true, n));
-        spawn(async move {
+        dioxus::dioxus_core::spawn_forever(async move {
             sleep_ms(8000).await;
             if self.status.peek().2 == n {
                 self.status.set((String::new(), false, n));
@@ -291,7 +291,7 @@ impl Ui {
     pub fn toast(mut self, text: impl Into<String>) {
         let id = self.next();
         self.toasts.write().push(Toast { id, text: text.into() });
-        spawn(async move {
+        dioxus::dioxus_core::spawn_forever(async move {
             sleep_ms(15_000).await;
             self.toasts.write().retain(|t| t.id != id);
         });
@@ -361,7 +361,7 @@ impl Ui {
         }
     }
 
-    pub fn did(mut self, a: Action) {
+    pub fn did(mut self, a: Did) {
         let mut all = self.actions.write();
         all.push(a);
         if all.len() > 50 {
@@ -384,7 +384,7 @@ impl Ui {
 
     /// counts and the save's name again
     pub fn refresh(mut self, api: Api) {
-        spawn(async move {
+        dioxus::dioxus_core::spawn_forever(async move {
             match api.hello().await {
                 Ok(h) => self.hello.set(h),
                 Err(e) => self.fail(e),
@@ -400,21 +400,21 @@ pub fn undo_last(ui: Ui, api: Api) {
         ui.say("nothing to undo");
         return;
     };
-    spawn(async move {
+    dioxus::dioxus_core::spawn_forever(async move {
         let r = match &a {
-            Action::Forgot { key, text } => api.put_memory(key, text).await,
-            Action::Remembered { key, .. } => api.forget(key).await.map(|_| ()),
-            Action::Edited { key, old } => api.put_memory(key, old).await,
-            Action::Enlisted { list, member } => api.delist(list, member).await,
-            Action::Delisted { list, member } => api.enlist(list, member).await,
-            Action::Unlisted { list, members } => {
+            Did::Forgot { key, text } => api.put_memory(key, text).await,
+            Did::Remembered { key, .. } => api.forget(key).await.map(|_| ()),
+            Did::Edited { key, old } => api.put_memory(key, old).await,
+            Did::Enlisted { list, member } => api.delist(list, member).await,
+            Did::Delisted { list, member } => api.enlist(list, member).await,
+            Did::Unlisted { list, members } => {
                 let mut r = Ok(());
                 for m in members {
                     r = r.and(api.enlist(list, m).await);
                 }
                 r
             }
-            Action::Feedback { model } => api.undo_model_feedback(model).await,
+            Did::Feedback { model } => api.undo_model_feedback(model).await,
         };
         match r {
             Ok(()) => {

@@ -1,0 +1,413 @@
+//! The app's shell: the top bar (the mark, the views, the search line, the status, undo and
+//! settings), the views, the dock (the strip of toggles in the memory view and the space,
+//! the command bar), toasts, the right-click menu, and the keyboard.
+
+use dioxus::prelude::*;
+
+use crate::gem::Measure;
+use crate::prefs::Prefs;
+use crate::ui::*;
+use crate::views;
+
+const CSS: &str = include_str!("style.css");
+
+/// the one key listener: keys the shell or the open view takes, sent to Rust; the browser
+/// keeps the rest (typing, Tab, the browser's own)
+const KEYS_JS: &str = r#"
+const KEY = /^\d{1,3}(,\d{1,3}){0,5}$/;
+window.addEventListener('keydown', (e) => {
+  const t = e.target || {};
+  const bar = t.id === 'bar';
+  const typing = t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable;
+  const k = e.key, c = e.ctrlKey || e.metaKey;
+  let take = false, prevent = false;
+  if (c && (/^[1-9]$/.test(k) || [',', '=', '+', '-', '_', '0', 'PageUp', 'PageDown'].includes(k))) { take = true; prevent = true; }
+  else if (c && (k === 'z' || k === 'Z' || k === 'y') && (bar || !typing)) { take = true; prevent = true; }
+  else if (k === 'Escape') take = true;
+  else if (bar && (k === 'Enter' || k === 'ArrowUp' || k === 'ArrowDown')) { take = true; prevent = true; }
+  else if (bar && k === 'Delete' && KEY.test(t.value.trim()) && t.selectionStart === t.value.length) { take = true; prevent = true; }
+  else if (!typing && !e.altKey) { take = true; if (k.startsWith('Arrow') || k === ' ') prevent = true; }
+  if (!take) return;
+  if (prevent) e.preventDefault();
+  dioxus.send({ key: k, code: e.code, ctrl: c, shift: e.shiftKey, alt: e.altKey, bar, text: bar ? t.value : '' });
+});
+"#;
+
+fn measure_of(t: &str) -> Option<Measure> {
+    let t = t.trim();
+    let key_like = !t.is_empty() && t.split(',').all(|p| p.trim().parse::<u8>().is_ok());
+    (!t.is_empty() && !key_like && t.parse::<u64>().is_err()).then(|| Measure::of(t))
+}
+
+#[component]
+pub fn App() -> Element {
+    let api = use_context_provider(crate::make_api);
+    let prefs = use_signal(crate::prefs::load);
+    let ui = use_context_provider(|| Ui {
+        view: Signal::new(View::parse(&prefs.peek().view)),
+        prefs,
+        status: Signal::new((String::new(), false, 0)),
+        toasts: Signal::new(Vec::new()),
+        bar: Signal::new(String::new()),
+        measure: Signal::new(None),
+        settings: Signal::new(false),
+        hello: Signal::new(Default::default()),
+        topline: Signal::new(None),
+        picks: Signal::new(Default::default()),
+        pending: Signal::new(Pending::None),
+        menu: Signal::new(None),
+        actions: Signal::new(Vec::new()),
+        bar_history: Signal::new(Default::default()),
+        keys: Signal::new(Vec::new()),
+        changed: Signal::new(0),
+        seq: Signal::new(0),
+    });
+
+    // the save's name and counts, and again whenever something changed
+    {
+        let api = api.clone();
+        use_effect(move || {
+            let _ = (ui.changed)();
+            ui.refresh(api.clone());
+        });
+    }
+
+    // the bar's text measured a beat after typing stops, off the input path
+    use_effect(move || {
+        let t = ui.bar.read().clone();
+        spawn(async move {
+            sleep_ms(110).await;
+            if *ui.bar.peek() == t {
+                let mut m = ui.measure;
+                m.set(measure_of(&t));
+            }
+        });
+    });
+
+    // the keyboard
+    {
+        let api = api.clone();
+        use_hook(move || {
+            spawn(async move {
+                let mut ev = document::eval(KEYS_JS);
+                while let Ok(k) = ev.recv::<KeyPress>().await {
+                    on_key(ui, api.clone(), k);
+                }
+            });
+        });
+    }
+
+    let p = prefs.read();
+    let vars = crate::theme::css_vars(&p.palette, &p.colours);
+    let zoom = p.zoom;
+    let fs = p.font_size;
+    let view = (ui.view)();
+    let style = format!(
+        "{vars} --fs: {fs}px; --mfs: {}px; --mspace: {}px; zoom: {zoom}; height: calc(100vh / {zoom});",
+        p.memory_font, p.spacing
+    );
+    drop(p);
+    rsx! {
+        style { {CSS} }
+        div { class: "app v-{view.name()}", style: "{style}",
+            TopBar {}
+            div { class: "views",
+                for v in View::ALL {
+                    views::ViewHost { key: "{v.name()}", view: v }
+                }
+            }
+            Dock {}
+            Toasts {}
+            ContextMenu {}
+            if (ui.settings)() {
+                views::settings::Settings {}
+            }
+        }
+    }
+}
+
+fn set_zoom(mut ui: Ui, z: f32) {
+    ui.prefs.write().zoom = (z * 20.0).round().clamp(10.0, 60.0) / 20.0;
+    ui.save_prefs();
+    let z = ui.prefs.peek().zoom;
+    ui.say(format!("zoom {}%", (z * 100.0).round()));
+}
+
+fn on_key(mut ui: Ui, api: Api, k: KeyPress) {
+    let view = *ui.view.peek();
+    if k.ctrl {
+        let n: Option<usize> = k.key.parse().ok();
+        if let Some(n) = n.filter(|n| (1..=View::ALL.len()).contains(n)) {
+            go(ui, View::ALL[n - 1]);
+            return;
+        }
+        let z = ui.prefs.peek().zoom;
+        match k.key.as_str() {
+            "," => {
+                let open = *ui.settings.peek();
+                ui.settings.set(!open);
+            }
+            "=" | "+" | "PageUp" => set_zoom(ui, z + 0.05),
+            "-" | "_" | "PageDown" => set_zoom(ui, z - 0.05),
+            "0" => set_zoom(ui, 1.0),
+            "z" | "Z" | "y" if k.bar => ui.bar_undo(k.key != "z"),
+            "z" => undo_last(ui, api),
+            _ => {}
+        }
+        return;
+    }
+    if k.key == "Escape" {
+        if ui.menu.peek().is_some() {
+            ui.menu.set(None);
+        } else if *ui.settings.peek() {
+            ui.settings.set(false);
+        } else if *ui.pending.peek() != Pending::None {
+            ui.pending.set(Pending::None);
+            ui.say("never mind");
+        } else if k.bar {
+            document::eval("document.activeElement && document.activeElement.blur()");
+        } else {
+            let handler = ui.keys.peek().iter().find(|(v, _)| *v == view).map(|(_, h)| *h);
+            if let Some(h) = handler {
+                h.call(k);
+            }
+        }
+        return;
+    }
+    if *ui.settings.peek() || ui.menu.peek().is_some() {
+        return;
+    }
+    let handler = ui.keys.peek().iter().find(|(v, _)| *v == view).map(|(_, h)| *h);
+    let taken = handler.map(|h| h.call(k.clone())).unwrap_or(false);
+    if !taken && !k.bar && k.key == "Enter" {
+        ui.focus_bar();
+    }
+}
+
+pub fn go(mut ui: Ui, v: View) {
+    ui.view.set(v);
+    ui.prefs.write().view = v.name().to_string();
+    ui.save_prefs();
+    ui.menu.set(None);
+}
+
+#[component]
+fn TopBar() -> Element {
+    let mut ui = ui();
+    let api = api();
+    let view = (ui.view)();
+    let (status, bad, _) = (ui.status)();
+    let hello = (ui.hello)();
+    let line = (ui.topline)();
+    let show_line = matches!(view, View::Memory | View::Space);
+    let idle = format!(
+        "{} · {} texts · {} notes",
+        hello.save, hello.counts.memories, hello.counts.notes
+    );
+    let last = ui.actions.read().last().map(|a| a.describe());
+    rsx! {
+        header { class: "top", role: "banner",
+            span { class: "mark", title: "anend",
+                span { class: "logo", dangerous_inner_html: crate::icons::MARK }
+            }
+            nav { class: "tabs", "aria-label": "views",
+                for (i , v) in View::ALL.into_iter().enumerate() {
+                    button {
+                        key: "{v.name()}",
+                        class: if v == view { "tab on" } else { "tab" },
+                        class: if i == 0 { "tip-right" } else { "" },
+                        "data-tip": "{v.name()} · Ctrl+{i + 1}",
+                        "aria-label": "{v.name()}",
+                        "aria-current": if v == view { "page" } else { "false" },
+                        onclick: move |_| go(ui, v),
+                        Icon { name: v.icon() }
+                    }
+                }
+            }
+            if show_line {
+                if let Some(l) = line {
+                    div { class: "searchline", role: "status",
+                        b { "{l.title}" }
+                        if !l.detail.is_empty() {
+                            span { class: "detail", "{l.detail}" }
+                        }
+                        Triangle { s: l.s, r: l.r }
+                    }
+                }
+            }
+            span { class: "grow" }
+            span {
+                class: if bad { "status bad" } else { "status" },
+                role: "status",
+                "aria-live": "polite",
+                if status.is_empty() { "{idle}" } else { "{status}" }
+            }
+            button {
+                class: "side tip-left",
+                "data-tip": match &last { Some(d) => format!("undo {d} · Ctrl+Z"), None => "nothing to undo".to_string() },
+                "aria-label": "undo",
+                disabled: last.is_none(),
+                onclick: move |_| undo_last(ui, api.clone()),
+                Icon { name: "undo" }
+            }
+            button {
+                class: "side tip-left",
+                "data-tip": "settings · Ctrl+,",
+                "aria-label": "settings",
+                onclick: move |_| ui.settings.set(!(ui.settings)()),
+                Icon { name: "settings" }
+            }
+        }
+    }
+}
+
+#[component]
+fn Dock() -> Element {
+    let ui = ui();
+    let view = (ui.view)();
+    let pending = (ui.pending)();
+    let name = match &pending {
+        Pending::Edit(h) => format!("editing {}", h.key),
+        Pending::Tag(hs) => format!(
+            "tag {} with…",
+            if hs.len() == 1 {
+                hs[0].text.clone()
+            } else {
+                format!("{} texts", hs.len())
+            }
+        ),
+        Pending::None => view.name().to_string(),
+    };
+    rsx! {
+        footer { class: "dock",
+            if view.has_strip() {
+                div { class: "strip", role: "toolbar", "aria-label": "{view.name()} toggles",
+                    views::Strip { view }
+                }
+            }
+            div { class: "cmdbar",
+                label { class: if pending == Pending::None { "name" } else { "name pending" }, r#for: "bar", "{name}" }
+                input {
+                    id: "bar",
+                    r#type: "text",
+                    autocomplete: "off",
+                    spellcheck: "false",
+                    "aria-label": "command bar",
+                    placeholder: view.placeholder(),
+                    oninput: move |e| ui.typed(e.value()),
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn Toasts() -> Element {
+    let mut ui = ui();
+    let toasts = (ui.toasts)();
+    rsx! {
+        div { class: "toasts", "aria-live": "polite",
+            for t in toasts {
+                div {
+                    key: "{t.id}",
+                    class: "toast",
+                    title: "click: into the bar · double click: dismiss",
+                    onclick: {
+                        let text = t.text.clone();
+                        move |_| ui.set_bar(&text)
+                    },
+                    ondoubleclick: move |_| ui.toasts.write().retain(|x| x.id != t.id),
+                    "{t.text}"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ContextMenu() -> Element {
+    let mut ui = ui();
+    let api = api();
+    let Some(m) = (ui.menu)() else { return rsx! {} };
+    let hit = m.hit.clone();
+    let selected = ui.picks.read().selected.iter().any(|h| h.key == hit.key);
+    let (x, y) = (m.x.min(10_000.0), m.y.min(10_000.0));
+    let item = move |f: Box<dyn Fn()>| {
+        move |_| {
+            f();
+            let mut menu = ui.menu;
+            menu.set(None);
+        }
+    };
+    let h1 = hit.clone();
+    let h2 = hit.clone();
+    let h3 = hit.clone();
+    let h4 = hit.clone();
+    let h5 = hit.clone();
+    let h6 = hit.clone();
+    let h7 = hit.clone();
+    let api2 = api.clone();
+    rsx! {
+        div { class: "backdrop", onclick: move |_| ui.menu.set(None), oncontextmenu: move |e| { e.prevent_default(); ui.menu.set(None) } }
+        div {
+            class: "menu",
+            role: "menu",
+            style: "left: min({x}px, calc(100vw - 200px)); top: min({y}px, calc(100vh - 300px));",
+            onmounted: move |e| async move { let _ = e.set_focus(true).await; },
+            tabindex: "-1",
+            div { class: "title", "{hit.text}" }
+            button { role: "menuitem", onclick: item(Box::new(move || {
+                    ui.set_bar(&h1.text);
+                    let mut p = ui.pending; p.set(Pending::Edit(h1.clone()));
+                    ui.focus_bar();
+                    ui.say("edit it in the bar; Enter puts it back under the same key, Esc leaves it");
+                })), Icon { name: "edit" } "edit" kbd { "Enter keeps the key" } }
+            button { role: "menuitem", onclick: item(Box::new(move || {
+                    let sel = ui.picks.peek().selected.clone();
+                    let targets = if sel.iter().any(|h| h.key == h2.key) { sel } else { vec![h2.clone()] };
+                    let mut p = ui.pending; p.set(Pending::Tag(targets));
+                    ui.set_bar("");
+                    ui.focus_bar();
+                    ui.say("type a tag and press Enter");
+                })), Icon { name: "tag" } "tag…" }
+            button { role: "menuitem", onclick: item(Box::new(move || {
+                    let mut picks = ui.picks;
+                    let mut p = picks.write();
+                    if let Some(i) = p.selected.iter().position(|h| h.key == h3.key) { p.selected.remove(i); } else { p.selected.push(h3.clone()); }
+                })), Icon { name: "check" } if selected { "unselect" } else { "select" } kbd { "Alt+click" } }
+            button { role: "menuitem", onclick: item(Box::new(move || {
+                    let mut p = ui.picks; p.write().list = Some(h4.clone());
+                    ui.say(format!("list: {}", h4.text));
+                })), Icon { name: "list" } "make it the list" kbd { "Shift+click" } }
+            button { role: "menuitem", onclick: item(Box::new(move || {
+                    let mut p = ui.picks; p.write().candidate = Some(h5.clone());
+                    ui.say(format!("candidate: {}", h5.text));
+                })), Icon { name: "pick" } "make it the candidate" kbd { "Ctrl+click" } }
+            button { role: "menuitem", onclick: item(Box::new(move || {
+                    ui.set_bar(&h6.key);
+                })), Icon { name: "keys" } "its key into the bar" kbd { "double click" } }
+            if !hit.note {
+                button { role: "menuitem", onclick: item(Box::new(move || {
+                        let h = h7.clone();
+                        let api = api2.clone();
+                        dioxus::dioxus_core::spawn_forever(async move {
+                            match api.forget(&h.key).await {
+                                Ok(text) => {
+                                    ui.did(Did::Forgot { key: h.key.clone(), text: text.clone() });
+                                    ui.say(format!("forgot “{text}” ({}) · Ctrl+Z takes it back", h.key));
+                                    ui.touched();
+                                }
+                                Err(e) => ui.fail(e),
+                            }
+                        });
+                    })), Icon { name: "delete" } "forget" kbd { "Delete" } }
+            }
+        }
+    }
+}
+
+/// the prefs, changed and kept
+pub fn set_pref(mut ui: Ui, f: impl FnOnce(&mut Prefs)) {
+    f(&mut ui.prefs.write());
+    ui.save_prefs();
+}

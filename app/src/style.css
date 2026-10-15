@@ -110,12 +110,13 @@ button.tchip {
 button.tchip .icon { width: 14px; height: 14px; }
 button.tchip:hover { opacity: 1; filter: none; }
 button.tchip.on { color: var(--bar-text); opacity: 1; }
-.sidecar { color: var(--bar-text); font-family: var(--serif); font-size: 14px; display: flex; gap: 4px; align-items: baseline; }
+.sidecar { color: var(--bar-text); font-family: var(--serif); font-size: 14px; white-space: nowrap; }
+.sidecar .extra, .sidecar .letters { margin-left: 6px; }
 .sidecar .num { cursor: pointer; }
 .sidecar .num:hover { color: var(--accent); }
 .sidecar .num.on { text-decoration: underline; text-underline-offset: 3px; }
 .sidecar .extra { color: var(--bar-dim); font-size: 12.5px; }
-.sidecar .letters { font-size: 11px; color: var(--bar-dim); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidecar .letters { font-size: 11px; color: var(--bar-dim); display: inline-block; vertical-align: bottom; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cmdbar { position: relative; height: var(--barh); background: var(--bars); color: var(--bar-text); }
 .cmdbar:focus-within { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 70%, transparent); }
 .cmdbar .name, .cmdbar .count {
@@ -147,7 +148,8 @@ button.tchip.on { color: var(--bar-text); opacity: 1; }
 .pager { display: flex; gap: 6px; align-items: center; justify-content: center; padding: 4px; }
 
 /* ---------------------------------------------------------------- the memory view (weum's black field) */
-.app.v-memory { --bars: #000; --bar-text: #fff; --bar-dim: #b9a59a; --window: #000; }
+.app.v-memory { background: #000; }
+.app.v-memory .top, .app.v-memory .dock, .app.v-memory .toasts { --bars: #000; --bar-text: #fff; --bar-dim: #b9a59a; }
 .app.v-memory .top { --accent: #c9ab99; --on-button: #000; border-bottom: 1px solid #1d1b1b; }
 .app.v-memory .cmdbar { border-top: 1px solid #262323; }
 .app.v-memory .strip { border-bottom: 0; }
@@ -229,8 +231,8 @@ button.tchip.on { color: var(--bar-text); opacity: 1; }
 .dialog .close { position: absolute; right: 0; top: 4px; }
 .dialog hr { border: 0; border-top: 1px solid color-mix(in srgb, var(--dim) 35%, transparent); margin: 6px 0; }
 .section > .shead { display: flex; align-items: center; gap: 6px; width: 100%; background: none; color: var(--text); justify-content: flex-start; height: 28px; padding: 0 2px; font-weight: 600; font-size: 1.05em; }
-.section > .shead .icon { transition: transform .15s; }
-.section.folded > .shead .icon { transform: rotate(-90deg); }
+.section > .shead .icon { transition: transform .15s; transform: rotate(90deg); }
+.section.folded > .shead .icon { transform: none; }
 .section .body { display: grid; grid-template-columns: minmax(130px, 200px) 1fr; gap: 6px 12px; align-items: center; padding: 4px 4px 8px; }
 .section .body > .wide { grid-column: 1 / -1; }
 .section .body label { color: var(--dim); }
