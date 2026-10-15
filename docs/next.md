@@ -373,12 +373,16 @@ by the store redesign below, apart from the keyboard bits, which may be reused.
 - **Tests:** `hub/src/modetests.rs` (routes per mode, app sign-in incl. socket, invites,
   visibility leaks); `testkit.rs` shared helpers.
 
-Left: docs (`docs/deploy.md`: modes, flags, TLS, backups, invites, quotas, running it as a
-paid service; `docs/hub-api.md` visibility/`/api/mine`/`/health`/`api/me`; `docs/
-security.md` rows for invites, visibility, app sign-in; note unlisted content is never
-reviewed); `hub/Dockerfile` and updating `hub/anend-hub.service`; config examples
-`hub/config/terms.example.md`/`privacy.example.md` (the placeholder text names them);
-Playwright screenshots; the desktop build without the hub (`src/`, not started).
+- **Deploying:** `docs/deploy.md` (modes, flags, joining, visibility, TLS, backups,
+  running it as a paid service), `hub/Dockerfile` (+ `.dockerignore`, `HEALTHCHECK`),
+  `hub/anend-hub.service` updated, `hub/config/{terms,privacy}.example.md`;
+  `docs/hub-api.md` and `docs/security.md` cover modes, invites and visibility.
+  Screenshots of each mode's landing, the invite flow and the visibility controls were
+  taken (15 Oct, scratchpad `shots-modes/`).
+
+Left: the desktop build without the hub (`src/`, not started; a cargo feature there).
+Ideas not done: per-member quotas (today they're per server), a "copy link" button for
+a just-made invite, a README section pointing at docs/deploy.md.
 
 ### J. Docs
 - **README:** rewrite it, because it's very out of date (including the old blog import).
