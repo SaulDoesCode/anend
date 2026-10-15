@@ -269,6 +269,9 @@ impl Source for MemSource {
     }
 }
 
+/// one resolved data item: the value, its head, its class or values
+type Item = (Value, String, Option<String>, Option<Vec<f32>>);
+
 /// a head by name
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Slot {
@@ -399,7 +402,7 @@ impl ModelSpec {
                 return at(format!("critic {:?}: weight must be finite and not negative", c.model));
             }
         }
-        self.sampling.check().or_else(|e| at(e))?;
+        self.sampling.check().or_else(at)?;
         Ok(())
     }
 
@@ -747,7 +750,7 @@ impl Model {
     /// the spec's data queries as training examples
     pub fn examples(&mut self, src: &dyn Source) -> Result<Vec<Example>, String> {
         let spec = self.spec.clone();
-        let mut items: Vec<(Value, String, Option<String>, Option<Vec<f32>>)> = Vec::new();
+        let mut items: Vec<Item> = Vec::new();
         let mut pairs: Vec<(Value, Value, String)> = Vec::new();
         for q in &spec.data {
             match q {
@@ -978,7 +981,7 @@ mod tests {
             .contains("causal"));
         assert!(bad(r#"{"name":"x","input":{"type":"text"},"heads":[{"name":"a","kind":"regress","classes":["v"]}],
               "critics":[{"model":"m","head":"h","want":{"class":"c"}}]}"#)
-        .contains("no generate head") || true);
+        .contains("has none"));
         assert!(
             build(&ModelSpec::from_json(r#"{"name":"x","input":{"type":"text"},"trunk":{"preset":"huge"},"heads":[{"name":"a","kind":"generate"}]}"#).unwrap(), None)
                 .unwrap_err()
