@@ -121,7 +121,7 @@ pub fn Notes() -> Element {
                                 }
                             },
                             "{n.title}"
-                            span { class: "when", "{when(&n.created)}" if !n.tags.is_empty() { " · {n.tags.join(\", \")}" } }
+                            span { class: "when", "{when(&n.created)}" if !n.tags.is_empty() { {format!(" · {}", n.tags.join(", "))} } }
                         }
                     }
                 }
