@@ -450,6 +450,11 @@ a just-made invite, a README section pointing at docs/deploy.md.
     user's machine (model hubs are blocked here); test the loader with synthetic weights.
   - **Rule:** small sizes only where measured compute requires them, and never gematria
     by default.
+- **Gematria as a model input (user, 15 Oct): optional, off by default.** It is always
+  available as an opt-in input channel (letter, word-sum and side-vector features) and never
+  on unless chosen. Spec-built models already work this way. When the store's classifiers
+  move to the spec, turn it off in the Rust presets (`Config::tiny()` and the others) too,
+  keeping existing model files loading with whatever they were trained with.
 
 ## The queue (asked for on 13 Oct, in this order)
 
