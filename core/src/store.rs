@@ -23,6 +23,8 @@ const INDEX_VERSION: u64 = 1;
 pub struct Store {
     pub db: Database,
     path: std::path::PathBuf,
+    /// where the classifiers' texts and lists come from, when not these tables
+    pub(crate) texts: Option<std::sync::Arc<dyn crate::texts::Texts>>,
 }
 
 impl Store {
@@ -42,9 +44,17 @@ impl Store {
         let store = Store {
             db,
             path: path.to_path_buf(),
+            texts: None,
         };
         store.index_existing_notes()?;
         Ok(store)
+    }
+
+    /// a store whose classifiers read their texts and lists from `texts` (`texts.rs`)
+    pub fn open_over(path: &Path, texts: std::sync::Arc<dyn crate::texts::Texts>) -> StoreResult<Store> {
+        let mut s = Store::open(path)?;
+        s.texts = Some(texts);
+        Ok(s)
     }
 
     /// how many notes and memories a save holds, read without taking it over (it can't be

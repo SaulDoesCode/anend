@@ -733,6 +733,9 @@ impl Store {
 
     /// a list's members as stored
     pub fn list_members(&self, list: &Ref) -> StoreResult<Vec<Ref>> {
+        if let Some(t) = self.texts() {
+            return t.members(list);
+        }
         let txn = self.db.begin_read().map_err(err)?;
         let t = txn.open_multimap_table(LISTS).map_err(err)?;
         let mut out = Vec::new();
@@ -744,6 +747,9 @@ impl Store {
 
     /// what a classifier reads of a memory (its text) or a note (title and markdown)
     pub fn ref_text(&self, r: &Ref) -> StoreResult<Option<String>> {
+        if let Some(t) = self.texts() {
+            return t.text(r);
+        }
         let txn = self.db.begin_read().map_err(err)?;
         Ok(match r {
             Ref::Memory(k) => {
@@ -764,6 +770,9 @@ impl Store {
 
     /// every memory and note a classifier can rank: (ref, what it reads, what's shown)
     pub fn candidates(&self, limit: usize) -> StoreResult<Vec<(Ref, String, String)>> {
+        if let Some(t) = self.texts() {
+            return t.candidates(limit);
+        }
         let mut out: Vec<(Ref, String, String)> = self
             .all_memories()?
             .into_iter()

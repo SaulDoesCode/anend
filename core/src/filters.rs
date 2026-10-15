@@ -710,16 +710,26 @@ impl<'a> Universe<'a> {
                 (self.refs.iter().map(|r| found.contains(r)).collect(), vec![1.0; n])
             }
             Expr::Sum { bucket, from, to } => {
+                // over the entry graph the sums are its own (weum's), and atbash is gone
+                let graph = self.store.texts().is_some();
+                if graph && bucket == "atbash" {
+                    return Err("atbash was removed: sum filters are ordinal or reversed".into());
+                }
                 let m = self
                     .texts
                     .iter()
                     .map(|t| {
-                        let ms = crate::memory::measure(t);
-                        let v = match bucket.as_str() {
-                            "reversed" => ms.reversed,
-                            "atbash" => ms.atbash,
-                            _ => ms.ordinal,
-                        } as i64;
+                        let v = if graph {
+                            let ms = crate::graph::gematria::Measure::of(t);
+                            if bucket == "reversed" { ms.reversed } else { ms.ordinal }
+                        } else {
+                            let ms = crate::memory::measure(t);
+                            (match bucket.as_str() {
+                                "reversed" => ms.reversed,
+                                "atbash" => ms.atbash,
+                                _ => ms.ordinal,
+                            }) as i64
+                        };
                         from.is_none_or(|f| v >= f) && to.is_none_or(|t| v <= t)
                     })
                     .collect();
@@ -731,33 +741,36 @@ impl<'a> Universe<'a> {
                 (self.refs.iter().map(|r| members.contains(r)).collect(), vec![1.0; n])
             }
             Expr::Tags { tags, any } => {
-                if self.notes.is_none() {
-                    self.notes = Some(self.store.all()?.into_iter().map(|x| (x.key, x.tags)).collect());
-                }
-                let notes = self.notes.as_ref().expect("read");
                 let want: Vec<String> = tags.iter().filter_map(|t| crate::note::normalize_tag(t)).collect();
-                let m = self
-                    .refs
-                    .iter()
-                    .map(|r| match r {
-                        Ref::Note(k) => notes.get(k).is_some_and(|have| {
-                            let has =
-                                |t: &String| have.iter().any(|h| crate::note::normalize_tag(h).as_ref() == Some(t));
-                            if *any {
-                                want.iter().any(has)
-                            } else {
-                                want.iter().all(has)
-                            }
-                        }),
-                        Ref::Memory(_) => false,
-                    })
-                    .collect();
+                let matches = |have: &[String]| {
+                    let has = |t: &String| have.iter().any(|h| crate::note::normalize_tag(h).as_ref() == Some(t));
+                    if *any { want.iter().any(has) } else { want.iter().all(has) }
+                };
+                let m = if let Some(src) = self.store.texts() {
+                    let mut m = Vec::with_capacity(n);
+                    for r in &self.refs {
+                        m.push(matches(&src.tags(r)?));
+                    }
+                    m
+                } else {
+                    if self.notes.is_none() {
+                        self.notes = Some(self.store.all()?.into_iter().map(|x| (x.key, x.tags)).collect());
+                    }
+                    let notes = self.notes.as_ref().expect("read");
+                    self.refs
+                        .iter()
+                        .map(|r| match r {
+                            Ref::Note(k) => notes.get(k).is_some_and(|have| matches(have)),
+                            Ref::Memory(_) => false,
+                        })
+                        .collect()
+                };
                 (m, vec![1.0; n])
             }
             Expr::Kind { kind } => {
                 let notes = kind == "notes";
                 (
-                    self.refs.iter().map(|r| matches!(r, Ref::Note(_)) == notes).collect(),
+                    self.refs.iter().map(|r| self.store.is_note(r) == notes).collect(),
                     vec![1.0; n],
                 )
             }
@@ -813,7 +826,7 @@ impl Store {
                 .map(|i| Found {
                     key: u.refs[i].label(),
                     text: u.shown[i].clone(),
-                    note: matches!(u.refs[i], Ref::Note(_)),
+                    note: self.is_note(&u.refs[i]),
                     score: s[i],
                 })
                 .collect(),

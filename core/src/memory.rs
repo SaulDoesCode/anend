@@ -366,6 +366,10 @@ impl Store {
     /// saturates a text unless the very same text is already a memory; returns its key
     /// and whether it was new
     pub fn saturate(&self, text: &str) -> StoreResult<(Vec<u8>, bool)> {
+        if let Some(t) = self.texts() {
+            let (r, new) = t.saturate(text)?;
+            return Ok((r.bytes(), new));
+        }
         match self.find_exact(text)? {
             Some(k) => Ok((k, false)),
             None => Ok((self.saturate_new(text)?, true)),
@@ -373,6 +377,9 @@ impl Store {
     }
 
     pub fn remember(&self, r: &Ref) -> StoreResult<Hit> {
+        if let Some(t) = self.texts() {
+            return self.hit_from(t, r);
+        }
         let txn = self.db.begin_read().map_err(err)?;
         self.hit(&txn, r.clone())?.ok_or_else(|| "didn't find that".to_string())
     }
@@ -451,6 +458,9 @@ impl Store {
     /// the ordinary search of the memory view: every query weum's variation expansion
     /// produces, results merged in the order they turn up
     pub fn search_with_variations(&self, query: &str) -> StoreResult<Vec<Hit>> {
+        if let Some(t) = self.texts() {
+            return t.search(query)?.iter().map(|r| self.hit_from(t, r)).collect();
+        }
         let mut seen = HashSet::new();
         let mut out = Vec::new();
         for q in weum::search_variations(query.trim()) {
@@ -547,6 +557,9 @@ impl Store {
 
     /// adds many list members in one go
     pub fn enlist_many(&self, pairs: &[(Ref, Ref)]) -> StoreResult<()> {
+        if let Some(t) = self.texts() {
+            return t.enlist_many(pairs);
+        }
         let txn = self.db.begin_write().map_err(err)?;
         {
             let mut t = txn.open_multimap_table(LISTS).map_err(err)?;
@@ -594,6 +607,9 @@ impl Store {
 
     /// removes a whole list, returning how many members it had
     pub fn unlist(&self, list: &Ref) -> StoreResult<u64> {
+        if let Some(t) = self.texts() {
+            return t.unlist(list);
+        }
         let txn = self.db.begin_write().map_err(err)?;
         let n = txn
             .open_multimap_table(LISTS)

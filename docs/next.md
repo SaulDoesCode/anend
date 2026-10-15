@@ -124,6 +124,21 @@ New module beside the old store (apps not rewired yet; nothing old deleted). 37 
   stored as a slice); structured entries are indexed by their render at save time; no
   wasm check (the wasm32 target isn't installed here).
 
+## Step 3 status: the app API on the entry graph (`core/src/ops/`, `hub/`)
+
+In progress (15 Oct).
+- **Done:** `anend_core::ops`: the app ops over one graph (`ops::call`) and a folder of
+  saves (`ops::Saves`: `hello`, `saves.*`, `forge.*`; a process-wide cache of open
+  graphs so a busy save is shared, not opened twice); `ops::merge` (merging a save into
+  another and the forge, entries known by mime + rendered text, lists/tags/notes-on
+  carried); `ops::GraphTexts`, the graph as a classifier's texts: `core/src/texts.rs`'s
+  `Texts` trait, which a `Store` opened with `Store::open_over` reads list members,
+  texts, candidates and searches through (and writes its lists back through), so the
+  classifiers keep their own tables while reading the graph. Filters' tags/kind/sums go
+  through it too (atbash refused there).
+- **Left:** the desktop's `backend/local.rs` onto `ops::Saves`; the hub's app.rs,
+  classify.rs, appweb.rs, inspect.rs onto it; docs/app-api.md; the JS offline engine.
+
 ## The Dioxus app (`app/`, package `anend-app`): status
 
 Dioxus 0.7.10 (pinned); desktop through dioxus-desktop/wry (needs `libwebkit2gtk-4.1-dev
