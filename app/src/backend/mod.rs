@@ -16,6 +16,9 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub mod local;
 
+#[cfg(target_arch = "wasm32")]
+pub mod hub;
+
 use futures_util::future::LocalBoxFuture;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
