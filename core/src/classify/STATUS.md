@@ -123,21 +123,36 @@ Done (tested; `cargo test -p anend-core classify` ~12 s in debug):
 | critics (`Judge` for `Classifier`, `generate::Node` of a `Graph`, `classifiers::Stack`; `Want::{Class, Not, Near, Range}`), `Constraints` (gates must/must-not, sum ranges over `Measure::{Bytes, BytesReversed, Ordinal, Reversed, Length}`, length, contains/excludes), `draw` / `generate` (rank), `Guidance` (top-k next bytes reweighted by critics), `rewards` (score − mean), `reinforce` (reward-weighted likelihood + unlikelihood, replay), `Rewarded::{yes, no}` | generate.rs | `critics_rank_constrain_guide_and_reinforce` |
 | numbers as fixed-width text (`NumberCodec`), pictures as patch-codebook bytes (`Codebook::learn` integer k-means, `ROW` = 255, `encode/decode`), `png` writer (stored deflate), `toy` pictures | codec.rs | `codec::tests` |
 
-Left (in this order):
-- `classify/spec.rs`: the declarative `ModelSpec` (versioned serde: inputs text/bytes/image/numbers
-  with opt-in feature channels, trunk preset or sizes, heads classify/multi/regress/generate with
-  loss weights, data as queries over a `Source` (lists as classes, tags, pairs for
-  sequence-to-sequence, inline), critics by model name, sampling), `build / train / run`,
-  `Model::from_classifier`, validation with clear errors.
-- `classify/bench.rs`: one-time machine benchmark (`MachineProfile`), `suggest` sizes; the spec uses
-  it when sizes are left out.
-- `core/examples/generate.rs` (authors corpus: per-author generators, author classifier as critic,
-  before/after guidance, a reinforce round, timings, agreement) and `core/examples/pictures.rs`
-  (patch-codebook image generator, PNGs, measured cost vs sequence length).
-- `docs/models.md`: the spec format with examples (author classifier, steered text generator,
-  number regressor, image generator), every size limit labelled test-speed vs measured compute.
-- NUM tokens are in the engine but not yet fed from `Example` (numbers reach models as text or as
-  `extra` dense inputs for now).
+| declarative `ModelSpec` (versioned serde/JSON: input text with opt-in `letters`/`word_sums`/`side` features, bytes, image (patch codebook), numbers (fixed-width text + dense head inputs); trunk preset `test`/`compact`/`small`/`base`/`auto` or sizes, causal by default with a generate head; heads classify/multi/regress/generate with loss weights; data queries `list`/`tagged`/`pairs`/`inline` over a `Source` (`MemSource`); critics by model name; constraints; sampling), `build / train / Model::run / spec::generate`, `Model::{to_bytes, from_bytes, from_classifier}` (spec + codebook kept in `Meta::spec`), checks with clear errors | spec.rs, `docs/models.md` | `spec::tests` (classifier, steered generator, number regressor, picture generator, error messages) |
+| machine benchmark: `bench::{measure, load_or_measure, suggest}` (training throughput over a size ladder, forward cost by sequence length); the spec's `"auto"` preset uses it | bench.rs | `suggests_within_budget` |
+
+Examples (release, this machine: 4 vCPU, AVX2):
+
+- `cargo run --release -p anend-core --example generate [scale] [authors]`: author critic (359 k
+  weights, 71 % validation accuracy after 51 s) and one 670 k-weight generator per author (390
+  steps, ~55 s, ~14 k tokens/s, 2.1–2.65 held-out bits/byte). The critic agrees a 120-byte
+  passage is the right author's: plain sampling 61 %, the critic's top 3 of 12 89 %, guided
+  sampling 72 %, after one reinforce round 74 % (mean over 6 authors; per author 8–100 %,
+  Melville lowest). Drawing 12 candidates takes 0.1 s, guided 0.8–1.0 s, reinforce ~5 s.
+- `cargo run --release -p anend-core --example pictures [out-dir] [epochs]`: 192 toy 64×64
+  pictures → 8×8 patches, 128 codes, 72 tokens each; 870 k weights, 720 steps in 69 s, 0.87
+  bits per code held out; 16 samples in 0.25 s, written as PNG contact sheets. Forward cost of
+  one 64×64 picture by tokenisation (d 128, 4 blocks): 16×16 patches 20 tokens 1.5 ms, 8×8 72
+  tokens 4.9 ms, 4×4 272 tokens 28 ms, 2×2 1056 tokens 263 ms, a byte a pixel 4160 tokens
+  5.3 s (per-token cost ×16 from 72 to 4160 tokens: attention). Samples show the shapes and
+  backgrounds but are often blank or fragmentary; more data, steps and a critic would help.
+
+Left:
+- NUM tokens are in the engine but not fed from `Example` (numbers reach models as text and as
+  dense head inputs).
+- The entry store's `Source` implementation (lists, tags, pairs from the save), the UI and the
+  scripting language editing specs, hub ops for specs and generation.
+- A patch-embedding (continuous) input for picture classifiers; images now always go through
+  the codebook.
+- Guidance is per byte and judges partial text; it helped 4 authors of 6 here. Sentence-level
+  guidance (judge at word or sentence ends) is the obvious next try.
+- `git`: commit 79b25ff on the branch duplicates another agent's hub commit (an `--amend` on a
+  shared working tree); harmless (identical changes, merged cleanly), noted here.
 
 ## Next (not done)
 

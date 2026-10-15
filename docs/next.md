@@ -428,9 +428,12 @@ a just-made invite, a README section pointing at docs/deploy.md.
     numbers, pictures as patch-codebook bytes, PNG writer);
   - byte sums (bytes valued 1–256) are a separate measure (`core/src/measure.rs`), not a
     model feature; gematria channels are opt-in model inputs, off for new models;
-  - left: the declarative model spec (`classify/spec.rs`, `docs/models.md`) as the primary
-    interface, the machine benchmark for honest default sizes, the examples (authors
-    generator, picture generator with measured cost).
+  - the declarative model spec (`classify/spec.rs`, format in `docs/models.md`) is the
+    primary interface: inputs, trunk, heads, data queries, critics, sampling; the machine
+    benchmark (`classify/bench.rs`) sizes `"auto"` trunks; examples `generate` (authors:
+    critic agreement 61 % plain → 89 % reranked, 72 % guided, 74 % after reinforce) and
+    `pictures` (64×64 as 72 patch tokens; cost by tokenisation measured);
+  - left: the entry store as a spec `Source`, specs in the UI and the language, hub ops.
 - **A small scripting/templating language** (cf. the user's s-lang):
   - built around references, transformer outputs, data types, mutation and closures;
   - transpiled to concatenated Rust calls over a state machine, linked against a
