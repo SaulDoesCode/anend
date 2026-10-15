@@ -66,14 +66,6 @@ impl Measure {
         }
     }
 
-    pub fn sum(&self, mode: Mode) -> u64 {
-        match mode {
-            Mode::Ordinal => self.ordinal,
-            Mode::Reversed => self.reversed,
-            Mode::Frequency => self.ordinal,
-        }
-    }
-
     /// weum's ⌊√(ordinal · reversed)⌋, the triangle's third side and Ctrl+right click's
     /// gsearch
     pub fn triangle(&self) -> u64 {
@@ -214,16 +206,6 @@ pub fn underline(text: &str, mode: Mode) -> Option<String> {
     (key.len() >= 2).then(|| seed_clr(&key))
 }
 
-/// a number written as a text with that ordinal sum (z's and one letter), for measuring a
-/// number like a text
-pub fn text_of_ordinal(n: u64) -> String {
-    let mut s = "z".repeat((n / 26) as usize);
-    if !n.is_multiple_of(26) {
-        s.push((b'a' + (n % 26) as u8 - 1) as char);
-    }
-    s
-}
-
 /// the triangle with sides s, r and t = ⌊√(s·r)⌋ as an svg polygon fitted to a box:
 /// `(width, height, points, real)`. When the three can't close, the flat shape they come
 /// closest to (`real` false), drawn dashed.
@@ -289,8 +271,6 @@ mod tests {
         );
         assert_eq!(seed_clr("345"), "hsl(276, 70%, 45%)");
         assert_eq!(letters("e1i1l1n1s1t1"), "eilnst");
-        assert_eq!(text_of_ordinal(79), "zzza");
-        assert_eq!(sums(&text_of_ordinal(79)).0, 79);
         assert_eq!(byte_sum("ab"), 97 + 1 + 98 + 1);
     }
 

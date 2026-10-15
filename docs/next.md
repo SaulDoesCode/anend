@@ -144,14 +144,27 @@ libxdo-dev`), web through WebAssembly. Features: `desktop` (default), `web`, `hu
   decision): modes are ordinal, reversed and frequency; frequency underlines by ordinal.
 - **Found:** "every text in ordinal bucket 345 underlined purple" is weum's own behaviour:
   in reversed mode the grouping sum is the ordinal one, and seedCLR("345") is hue 276.
-- **Written, not yet wired:** `prefs.rs`, `theme.rs` (sand/night/paper/sea + custom),
-  `icons.rs` (assets/icons embedded), `ui.rs` (shared signals, status, toasts, the bar's own
-  undo, picks, pending edit/tag, right-click menu, undo of recent actions), `style.css`.
-- **Left, in order:** `backend/hub.rs` (WebSocket); the shell (top bar, centered command bar
-  with the strip in memory/space, settings dialog, font size, zoom, keyboard); the memory
-  view with weum parity and the additions; lists, reader, notes, tags, stats, models (a
-  general model builder over the coming spec), filters, settings with saves, import and
-  backup; the space through three.js interop; screenshots under Xvfb.
+- **Shell and views (15 Oct):** `backend/hub.rs` (WebSocket, queue, reconnect; the wasm32
+  build checks). `shell.rs`: top bar (mark, view icons with styled tips, the centered search
+  line with the triangle, status, undo, settings), the dock (the strip only in memory/space,
+  the centered bar not bound to a signal so typing never waits), one JS key listener (views,
+  zoom Ctrl+=/−/PageUp/PageDown/0, settings Ctrl+,, Ctrl+Z bar undo / action undo, Esc),
+  toasts, the right-click menu (edit keeps the key, tag…, select, list, candidate, key,
+  forget). `views/memory.rs`: weum parity (Enter/Ctrl/Shift/Delete, list commands, click /
+  Ctrl / Shift / double / Ctrl+right click, hover title and line, underlines, pfR, toasts,
+  r/o/f/g/s/l, ← →), the left-edge bucket circles, Alt+click multi-select → pick a list or
+  tag, the draggable centered field, spacing and size. `views/settings.rs`: dialog closed
+  by outside click/Esc, folding sections remembered, rules between them, palettes + own
+  colours, text size, zoom, memory sizes/spacing/field, space background, saves (open,
+  new, copy, two-click delete, backup, the step-by-step weum import), keys, hub (folded,
+  only with `hub`). `views/lists.rs` (tiles → a list's page: editable name and members,
+  pagination, figures, two-click delete) and `views/reader.rs` (pages, a tiny grid for
+  short texts, expand one with ← →). Driven under Xvfb: shots in the scratchpad's
+  `shots-dioxus/` (memory view, menu, hover line, buckets).
+- **Left:** notes editor, tags, stats, models (minimal until the model spec), filters
+  (over `entries.query`), the space (three.js interop), more screenshots.
+- **Checking while core is mid-edit:** `scratchpad/wtcheck.sh cargo clippy -p anend-app`
+  builds `app/` against the committed core in a worktree.
 
 ## Decisions (14 Oct): the redesign
 
