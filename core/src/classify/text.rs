@@ -16,11 +16,11 @@ use super::math::ln;
 use crate::simd;
 use crate::weum;
 
-pub const CLS: u16 = 256;
-pub const SEP: u16 = 257;
-pub const PAD: u16 = 258;
+pub const CLS: u32 = 256;
+pub const SEP: u32 = 257;
+pub const PAD: u32 = 258;
 /// a number: the token's embedding is its row plus value × a learned direction
-pub const NUM: u16 = 259;
+pub const NUM: u32 = 259;
 /// tokens without NUM (the table size of models without number inputs)
 pub const VOCAB: usize = 259;
 
@@ -36,7 +36,7 @@ pub const SIDE: usize = 46;
 /// one window of a text, ready for the embedder
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Window {
-    pub tokens: Vec<u16>,
+    pub tokens: Vec<u32>,
     pub letter: Vec<u8>,
     pub ordinal: Vec<u8>,
     pub reversed: Vec<u8>,
@@ -86,7 +86,7 @@ pub fn window_with(bytes: &[u8], causal: bool, end: bool) -> Window {
         values: Vec::new(),
     };
     w.tokens.push(CLS);
-    w.tokens.extend(bytes.iter().map(|&b| b as u16));
+    w.tokens.extend(bytes.iter().map(|&b| b as u32));
     if end {
         w.tokens.push(SEP);
     }

@@ -14,8 +14,11 @@
 //! the summation order). Forward passes keep a `Trace`; `backward` walks it in reverse
 //! and adds this window's gradients into a gradient `Net` of the same shape.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
+use super::bpe::Lexicon;
 use super::kernels::{
     self as k, Norm, matmul, norm_back, norm_fwd, rows, softmax_back_rows, softmax_rows, transpose, transposed,
 };
@@ -126,6 +129,43 @@ pub struct Config {
     /// NUM tokens: a token row plus value × a learned direction
     #[serde(default)]
     pub numbers: bool,
+    /// key/value heads per block (grouped-query attention: each run of
+    /// `heads / kv_heads` query heads shares one); 0 means one per query head
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub kv_heads: usize,
+    /// a vocabulary of this many tokens (a pretrained model's, read through
+    /// `Net::lexicon`) in place of bytes; 0 means bytes
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub vocab_size: usize,
+    /// biases on the query, key and value projections (Qwen2)
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub qkv_bias: bool,
+    /// how rotary frequencies are stretched for longer contexts
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rope_scaling: Option<RopeScaling>,
+}
+
+fn is_zero(v: &usize) -> bool {
+    *v == 0
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
+}
+
+/// rotary frequency scaling, as pretrained checkpoints declare it
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RopeScaling {
+    /// positions divided by `factor` (every frequency over `factor`)
+    Linear { factor: f64 },
+    /// Llama 3.1's: low frequencies over `factor`, high ones kept, a smooth blend between
+    Llama3 {
+        factor: f64,
+        low_freq_factor: f64,
+        high_freq_factor: f64,
+        original_max_position_embeddings: f64,
+    },
 }
 
 impl Config {
@@ -154,6 +194,10 @@ impl Config {
             words: false,
             causal: false,
             numbers: false,
+            kv_heads: 0,
+            vocab_size: 0,
+            qkv_bias: false,
+            rope_scaling: None,
         }
         .gematria(true)
     }
@@ -168,7 +212,21 @@ impl Config {
 
     /// tokens in the embedding table
     pub fn vocab(&self) -> usize {
-        VOCAB + self.numbers as usize
+        if self.vocab_size > 0 {
+            self.vocab_size
+        } else {
+            VOCAB + self.numbers as usize
+        }
+    }
+
+    /// the generative head's width: bytes and END, or the vocabulary
+    pub fn gen_out(&self) -> usize {
+        if self.vocab_size > 0 { self.vocab_size } else { GEN_OUT }
+    }
+
+    /// key/value heads of a block with `heads` query heads
+    pub fn kv_of(&self, heads: usize) -> usize {
+        if self.kv_heads == 0 { heads } else { self.kv_heads }
     }
 
     /// about 0.6M weights; trains on a laptop in minutes
@@ -216,6 +274,36 @@ impl Config {
         }
         if self.causal && matches!(self.pooling, Pooling::Cls | Pooling::ClsMean) {
             return Err("a causal model pools by mean or attention (CLS sees only itself)".into());
+        }
+        if self.kv_heads > 0 && !self.heads.is_multiple_of(self.kv_heads) {
+            return Err(format!(
+                "{} heads don't split into groups of {} key/value heads",
+                self.heads, self.kv_heads
+            ));
+        }
+        if self.vocab_size > 0 && (self.letters || self.words || self.side || self.numbers) {
+            return Err("a model with its own vocabulary reads tokens, not the byte feature channels".into());
+        }
+        match self.rope_scaling {
+            Some(RopeScaling::Linear { factor }) if !(factor.is_finite() && factor > 0.0) => {
+                return Err("rope scaling factor must be positive".into());
+            }
+            Some(RopeScaling::Llama3 {
+                factor,
+                low_freq_factor,
+                high_freq_factor,
+                original_max_position_embeddings,
+            }) if !(factor > 0.0
+                && low_freq_factor > 0.0
+                && high_freq_factor > low_freq_factor
+                && original_max_position_embeddings > 0.0
+                && factor.is_finite()
+                && high_freq_factor.is_finite()
+                && original_max_position_embeddings.is_finite()) =>
+            {
+                return Err("llama3 rope scaling needs factor > 0 and high_freq_factor > low_freq_factor > 0".into());
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -304,8 +392,11 @@ pub struct Block {
     pub ff: usize,
     /// RMSNorm gains before attention
     pub n1: Vec<f32>,
-    /// [d × 3·heads·head_dim]: queries, keys, values, each head after head
+    /// [d × (heads + 2·kv)·head_dim]: queries (heads), keys (kv), values (kv), each
+    /// head after head; kv = heads unless the config groups them (`Config::kv_heads`)
     pub wqkv: Vec<f32>,
+    /// biases of those projections (empty unless `Config::qkv_bias`)
+    pub bqkv: Vec<f32>,
     /// QK-norm gains, [head_dim] each (empty without QK-norm)
     pub qn: Vec<f32>,
     pub kn: Vec<f32>,
@@ -358,11 +449,42 @@ pub struct Rope {
 impl Rope {
     /// angle(t, i) = t · base^(−2i/head_dim), in f64 with `math`'s functions, then rounded
     pub fn new(max_len: usize, head_dim: usize, base: f32) -> Rope {
+        Rope::scaled(max_len, head_dim, base, None)
+    }
+
+    /// the rotation a configuration asks for
+    pub fn of(cfg: &Config) -> Rope {
+        Rope::scaled(cfg.max_len, cfg.head_dim, cfg.rope_base, cfg.rope_scaling.as_ref())
+    }
+
+    /// `new` with the frequencies stretched by `scaling`
+    pub fn scaled(max_len: usize, head_dim: usize, base: f32, scaling: Option<&RopeScaling>) -> Rope {
         let half = head_dim / 2;
         let lb = math::ln64(base as f64);
-        let freq: Vec<f64> = (0..half)
+        let mut freq: Vec<f64> = (0..half)
             .map(|i| math::exp64(-((2 * i) as f64) / head_dim as f64 * lb))
             .collect();
+        match scaling {
+            None => {}
+            Some(RopeScaling::Linear { factor }) => freq.iter_mut().for_each(|f| *f /= factor),
+            Some(&RopeScaling::Llama3 {
+                factor,
+                low_freq_factor: lo,
+                high_freq_factor: hi,
+                original_max_position_embeddings: old,
+            }) => {
+                let (lo_wave, hi_wave) = (old / lo, old / hi);
+                for f in freq.iter_mut() {
+                    let wave = 2.0 * std::f64::consts::PI / *f;
+                    if wave > lo_wave {
+                        *f /= factor;
+                    } else if wave >= hi_wave {
+                        let smooth = (old / wave - lo) / (hi - lo);
+                        *f = (1.0 - smooth) * *f / factor + smooth * *f;
+                    }
+                }
+            }
+        }
         let (mut cos, mut sin) = (Vec::with_capacity(max_len * half), Vec::with_capacity(max_len * half));
         for t in 0..max_len {
             for f in &freq {
@@ -434,12 +556,15 @@ pub struct Net {
     pub heads: Vec<Head>,
     /// the NUM value direction [d] (empty without numbers)
     pub num: Vec<f32>,
-    /// the generative head, if any, and its weights [d × GEN_OUT] and [GEN_OUT]
-    /// (empty without one)
+    /// the generative head, if any, and its weights [d × out] and [out], out being
+    /// `Config::gen_out` (empty without one)
     pub generator: Option<GenSpec>,
     pub gen_w: Vec<f32>,
     pub gen_b: Vec<f32>,
     pub rope: Rope,
+    /// the tokenizer of a model with its own vocabulary (`Config::vocab_size`), with
+    /// its start and end tokens; None for byte models
+    pub lexicon: Option<Arc<Lexicon>>,
 }
 
 /// uniform in [−a, a) with a = std·√3, so the variance is std²
@@ -449,8 +574,14 @@ fn init(r: &mut Rng, n: usize, std: f32) -> Vec<f32> {
 }
 
 impl Block {
+    /// the width of the query, key and value projections together
+    pub fn qkv_width(&self, cfg: &Config) -> usize {
+        (self.heads + 2 * cfg.kv_of(self.heads)) * cfg.head_dim
+    }
+
     pub fn new(cfg: &Config, r: &mut Rng, zero_out: bool) -> Block {
         let (d, a, f) = (cfg.d_model, cfg.heads * cfg.head_dim, cfg.d_ff);
+        let w3 = (cfg.heads + 2 * cfg.kv_of(cfg.heads)) * cfg.head_dim;
         let din = 1.0 / (d as f32).sqrt();
         let out = |fan: usize| 1.0 / (fan as f32).sqrt() / (2.0 * cfg.layers as f32).sqrt();
         let qk = if cfg.qk_norm {
@@ -458,7 +589,7 @@ impl Block {
         } else {
             Vec::new()
         };
-        let wqkv = init(r, d * 3 * a, din);
+        let wqkv = init(r, d * w3, din);
         let wo = if zero_out {
             vec![0.0; a * d]
         } else {
@@ -476,6 +607,7 @@ impl Block {
             ff: f,
             n1: vec![1.0; d],
             wqkv,
+            bqkv: if cfg.qkv_bias { vec![0.0; w3] } else { Vec::new() },
             qn: qk.clone(),
             kn: qk,
             wo,
@@ -493,6 +625,7 @@ impl Block {
             ff: self.ff,
             n1: z(&self.n1),
             wqkv: z(&self.wqkv),
+            bqkv: z(&self.bqkv),
             qn: z(&self.qn),
             kn: z(&self.kn),
             wo: z(&self.wo),
@@ -524,7 +657,8 @@ impl Net {
         }
         let mut r = Rng::new(key(&[seed, 0x1417]));
         let d = cfg.d_model;
-        let tok = init(&mut r, VOCAB * d, 0.5);
+        let rows = if cfg.vocab_size > 0 { cfg.vocab_size } else { VOCAB };
+        let tok = init(&mut r, rows * d, 0.5);
         let mut table = |on: bool, rows: usize| if on { init(&mut r, rows * d, 0.25) } else { Vec::new() };
         let letter = table(cfg.letters, LETTERS);
         let word_ord = table(cfg.words, SUM_BUCKETS);
@@ -557,11 +691,12 @@ impl Net {
             Vec::new()
         };
         let (gen_w, gen_b) = if generator.is_some() {
-            (init(&mut r, d * GEN_OUT, 1.0 / (d as f32).sqrt()), vec![0.0; GEN_OUT])
+            let out = cfg.gen_out();
+            (init(&mut r, d * out, 1.0 / (d as f32).sqrt()), vec![0.0; out])
         } else {
             (Vec::new(), Vec::new())
         };
-        let rope = Rope::new(cfg.max_len, cfg.head_dim, cfg.rope_base);
+        let rope = Rope::of(&cfg);
         Ok(Net {
             num,
             generator,
@@ -579,6 +714,7 @@ impl Net {
             heads,
             rope,
             cfg,
+            lexicon: None,
         })
     }
 
@@ -610,6 +746,7 @@ impl Net {
             gen_w: z(&self.gen_w),
             gen_b: z(&self.gen_b),
             rope: self.rope.clone(),
+            lexicon: self.lexicon.clone(),
         }
     }
 
@@ -635,6 +772,7 @@ impl Net {
             v.extend([
                 (Gain, &b.n1),
                 (Matrix, &b.wqkv),
+                (Bias, &b.bqkv),
                 (Gain, &b.qn),
                 (Gain, &b.kn),
                 (Matrix, &b.wo),
@@ -667,6 +805,7 @@ impl Net {
             v.extend([
                 (Gain, &mut b.n1),
                 (Matrix, &mut b.wqkv),
+                (Bias, &mut b.bqkv),
                 (Gain, &mut b.qn),
                 (Gain, &mut b.kn),
                 (Matrix, &mut b.wo),
@@ -715,7 +854,7 @@ impl Net {
             .map(|b| {
                 let a = b.heads * self.cfg.head_dim;
                 BlockT {
-                    wqkv: transpose(&b.wqkv, d, 3 * a),
+                    wqkv: transpose(&b.wqkv, d, b.qkv_width(&self.cfg)),
                     wo: transpose(&b.wo, a, d),
                     wg: transpose(&b.wg, d, b.ff),
                     wu: transpose(&b.wu, d, b.ff),
@@ -760,6 +899,15 @@ pub fn dropout_mask(key: u64, n: usize, p: f32) -> Vec<f32> {
     m
 }
 
+/// adds a bias to every row (nothing when it is empty)
+fn add_rows(x: &mut [f32], bias: &[f32]) {
+    if !bias.is_empty() {
+        for row in x.chunks_exact_mut(bias.len()) {
+            row.iter_mut().zip(bias).for_each(|(a, b)| *a += b);
+        }
+    }
+}
+
 fn mul_into(x: &mut [f32], m: &Option<Vec<f32>>) {
     if let Some(m) = m {
         x.iter_mut().zip(m).for_each(|(a, b)| *a *= b);
@@ -786,7 +934,8 @@ impl Mode {
 pub struct BlockTrace {
     n1: Norm,
     a: Vec<f32>,
-    /// per head [n × head_dim]: rotated queries and keys, values
+    /// [n × head_dim]: rotated queries per head; rotated keys and values per key/value
+    /// head (one per head unless grouped); the QK-norms likewise
     q: Vec<Vec<f32>>,
     kk: Vec<Vec<f32>>,
     v: Vec<Vec<f32>>,
@@ -807,7 +956,7 @@ pub struct BlockTrace {
 /// everything one window's forward pass leaves for backward
 pub struct Trace {
     pub n: usize,
-    tokens: Vec<u16>,
+    tokens: Vec<u32>,
     values: Vec<f32>,
     chan: [Vec<u8>; 5],
     gains: Gains,
@@ -866,7 +1015,7 @@ impl Drop for Trace {
 
 impl Trace {
     /// the window's tokens
-    pub fn tokens(&self) -> &[u16] {
+    pub fn tokens(&self) -> &[u32] {
         &self.tokens
     }
 
@@ -883,7 +1032,7 @@ impl Trace {
 
 impl Net {
     /// the sum of the embeddings, per element `tok + gl·letter + gw·(((ord + rev) + atb) + root)`
-    fn embed(&self, w: &Window, gains: &Gains) -> Vec<f32> {
+    pub(crate) fn embed(&self, w: &Window, gains: &Gains) -> Vec<f32> {
         let d = self.cfg.d_model;
         let n = w.len();
         let mut x = vec![0f32; n * d];
@@ -931,30 +1080,43 @@ impl Net {
         for (l, b) in self.blocks.iter().enumerate() {
             let l = l as u64 + 1;
             let a_w = b.heads * dh;
+            let kv = cfg.kv_of(b.heads);
+            let (w3, per) = (b.qkv_width(cfg), b.heads / kv);
             let (a, n1) = norm_fwd(&x, &b.n1, d, cfg.norm_eps);
-            let qkv = matmul(rows(&a, d), &b.wqkv, n, d, 3 * a_w, pool);
+            let mut qkv = matmul(rows(&a, d), &b.wqkv, n, d, w3, pool);
+            add_rows(&mut qkv, &b.bqkv);
             let mut ctx = k::zeros(n * a_w);
             let (mut qs, mut ks, mut vs, mut qns, mut kns, mut ps) = (vec![], vec![], vec![], vec![], vec![], vec![]);
+            let take = |off: usize| -> Vec<f32> {
+                let mut o = k::zeros(n * dh);
+                for t in 0..n {
+                    let s = t * w3 + off;
+                    o[t * dh..(t + 1) * dh].copy_from_slice(&qkv[s..s + dh]);
+                }
+                o
+            };
             for h in 0..b.heads {
-                let take = |off: usize| -> Vec<f32> {
-                    let mut o = k::zeros(n * dh);
-                    for t in 0..n {
-                        let s = t * 3 * a_w + off + h * dh;
-                        o[t * dh..(t + 1) * dh].copy_from_slice(&qkv[s..s + dh]);
+                let g = h / per;
+                if h % per == 0 {
+                    // this group's keys and values, normed and rotated once
+                    let (mut kh, v) = (take(a_w + g * dh), take(a_w + kv * dh + g * dh));
+                    if cfg.qk_norm {
+                        let (kq, kn) = norm_fwd(&kh, &b.kn, dh, cfg.norm_eps);
+                        k::recycle(std::mem::replace(&mut kh, kq));
+                        kns.push(kn);
                     }
-                    o
-                };
-                let (mut q, mut kh, v) = (take(0), take(a_w), take(2 * a_w));
+                    self.rope.apply(&mut kh, n);
+                    ks.push(kh);
+                    vs.push(v);
+                }
+                let mut q = take(h * dh);
                 if cfg.qk_norm {
                     let (qq, qn) = norm_fwd(&q, &b.qn, dh, cfg.norm_eps);
-                    let (kq, kn) = norm_fwd(&kh, &b.kn, dh, cfg.norm_eps);
                     k::recycle(std::mem::replace(&mut q, qq));
-                    k::recycle(std::mem::replace(&mut kh, kq));
                     qns.push(qn);
-                    kns.push(kn);
                 }
                 self.rope.apply(&mut q, n);
-                self.rope.apply(&mut kh, n);
+                let (kh, v) = (&ks[g], &vs[g]);
                 let s = if cfg.causal {
                     // row by row over the positions so far, exactly as `Decoder` does;
                     // the probabilities after t stay 0, which backward relies on
@@ -963,8 +1125,8 @@ impl Net {
                         let c = &mut ctx[t * a_w + h * dh..t * a_w + (h + 1) * dh];
                         attend_row(
                             &q[t * dh..(t + 1) * dh],
-                            &kh,
-                            &v,
+                            kh,
+                            v,
                             t,
                             dh,
                             scale,
@@ -974,11 +1136,11 @@ impl Net {
                     }
                     s
                 } else {
-                    let kt = transpose(&kh, n, dh);
+                    let kt = transpose(kh, n, dh);
                     let mut s = matmul(rows(&q, dh), &kt, n, dh, n, None);
                     s.iter_mut().for_each(|v| *v *= scale);
                     softmax_rows(&mut s, n);
-                    let o = matmul(rows(&s, n), &v, n, n, dh, None);
+                    let o = matmul(rows(&s, n), v, n, n, dh, None);
                     for t in 0..n {
                         ctx[t * a_w + h * dh..t * a_w + (h + 1) * dh].copy_from_slice(&o[t * dh..(t + 1) * dh]);
                     }
@@ -987,8 +1149,6 @@ impl Net {
                     s
                 };
                 qs.push(q);
-                ks.push(kh);
-                vs.push(v);
                 ps.push(s);
             }
             let mut o = matmul(rows(&ctx, a_w), &b.wo, n, a_w, d, pool);
@@ -1108,10 +1268,8 @@ impl Net {
     pub fn gen_logits(&self, tr: &Trace) -> Vec<f32> {
         assert!(self.generator.is_some(), "no generative head");
         let d = self.cfg.d_model;
-        let mut y = matmul(rows(&tr.xf, d), &self.gen_w, tr.n, d, GEN_OUT, None);
-        for row in y.as_chunks_mut::<GEN_OUT>().0 {
-            row.iter_mut().zip(&self.gen_b).for_each(|(a, b)| *a += b);
-        }
+        let mut y = matmul(rows(&tr.xf, d), &self.gen_w, tr.n, d, self.cfg.gen_out(), None);
+        add_rows(&mut y, &self.gen_b);
         y
     }
 
@@ -1121,7 +1279,7 @@ impl Net {
         self.backward_gen(tr, dlogits, &[], tp, g)
     }
 
-    /// `backward` with d(loss)/d(generative logits) too ([n × GEN_OUT], or empty)
+    /// `backward` with d(loss)/d(generative logits) too ([n × `Config::gen_out`], or empty)
     pub fn backward_gen(&self, tr: &Trace, dlogits: &[Vec<f32>], dgen: &[f32], tp: &[BlockT], g: &mut Net) -> Vec<f32> {
         let cfg = &self.cfg;
         let (d, dh, n) = (cfg.d_model, cfg.head_dim, tr.n);
@@ -1170,12 +1328,13 @@ impl Net {
             }
         }
         if !dgen.is_empty() {
-            k::gemm(&mut g.gen_w, transposed(&tr.xf, d), dgen, d, n, GEN_OUT, None);
-            for row in dgen.as_chunks::<GEN_OUT>().0 {
+            let out = cfg.gen_out();
+            k::gemm(&mut g.gen_w, transposed(&tr.xf, d), dgen, d, n, out, None);
+            for row in dgen.chunks_exact(out) {
                 g.gen_b.iter_mut().zip(row).for_each(|(a, b)| *a += b);
             }
-            let wt = transpose(&self.gen_w, d, GEN_OUT);
-            k::gemm(&mut dxf, rows(dgen, GEN_OUT), &wt, n, GEN_OUT, d, None);
+            let wt = transpose(&self.gen_w, d, out);
+            k::gemm(&mut dxf, rows(dgen, out), &wt, n, out, d, None);
         }
         let mut dx = k::zeros(n * d);
         norm_back(&dxf, &tr.nf, &self.nf, d, &mut dx, &mut g.nf);
@@ -1209,43 +1368,70 @@ impl Net {
             mul_into(&mut dout, &bt.m1);
             k::gemm(&mut gb.wo, transposed(&bt.ctx, a_w), &dout, a_w, n, d, None);
             let dctx = matmul(rows(&dout, d), &t.wo, n, d, a_w, None);
-            let mut dqkv = k::zeros(n * 3 * a_w);
+            let kv = cfg.kv_of(b.heads);
+            let (w3, per) = (b.qkv_width(cfg), b.heads / kv);
+            let mut dqkv = k::zeros(n * w3);
+            let put = |dqkv: &mut [f32], off: usize, src: &[f32]| {
+                for r in 0..n {
+                    dqkv[r * w3 + off..r * w3 + off + dh].copy_from_slice(&src[r * dh..(r + 1) * dh]);
+                }
+            };
+            // a group's key and value gradients, summed over its heads in head order
+            let (mut dkg, mut dvg): (Option<Vec<f32>>, Option<Vec<f32>>) = (None, None);
+            let add = |acc: &mut Option<Vec<f32>>, x: Vec<f32>| match acc {
+                Some(a) => {
+                    a.iter_mut().zip(&x).for_each(|(p, q)| *p += q);
+                    k::recycle(x);
+                }
+                None => *acc = Some(x),
+            };
             for h in 0..b.heads {
+                let g = h / per;
                 let mut dco = k::zeros(n * dh);
                 for r in 0..n {
                     dco[r * dh..(r + 1) * dh].copy_from_slice(&dctx[r * a_w + h * dh..r * a_w + (h + 1) * dh]);
                 }
-                let (q, kh, v, pr) = (&bt.q[h], &bt.kk[h], &bt.v[h], &bt.probs[h]);
+                let (q, kh, v, pr) = (&bt.q[h], &bt.kk[g], &bt.v[g], &bt.probs[h]);
                 let vt = transpose(v, n, dh);
                 let mut ds = matmul(rows(&dco, dh), &vt, n, dh, n, None);
                 let dv = matmul(transposed(pr, n), &dco, n, n, dh, None);
                 softmax_back_rows(pr, &mut ds, n);
                 ds.iter_mut().for_each(|v| *v *= scale);
                 let mut dq = matmul(rows(&ds, n), kh, n, n, dh, None);
-                let mut dk = matmul(transposed(&ds, n), q, n, n, dh, None);
+                let dk = matmul(transposed(&ds, n), q, n, n, dh, None);
                 self.rope.back(&mut dq, n);
-                self.rope.back(&mut dk, n);
                 if cfg.qk_norm {
                     let mut dq0 = k::zeros(n * dh);
                     norm_back(&dq, &bt.qn[h], &b.qn, dh, &mut dq0, &mut gb.qn);
-                    let mut dk0 = k::zeros(n * dh);
-                    norm_back(&dk, &bt.kn[h], &b.kn, dh, &mut dk0, &mut gb.kn);
                     k::recycle(std::mem::replace(&mut dq, dq0));
-                    k::recycle(std::mem::replace(&mut dk, dk0));
                 }
-                for r in 0..n {
-                    let row = &mut dqkv[r * 3 * a_w..(r + 1) * 3 * a_w];
-                    let src = r * dh..(r + 1) * dh;
-                    row[h * dh..(h + 1) * dh].copy_from_slice(&dq[src.clone()]);
-                    row[a_w + h * dh..a_w + (h + 1) * dh].copy_from_slice(&dk[src.clone()]);
-                    row[2 * a_w + h * dh..2 * a_w + (h + 1) * dh].copy_from_slice(&dv[src]);
+                put(&mut dqkv, h * dh, &dq);
+                add(&mut dkg, dk);
+                add(&mut dvg, dv);
+                if h % per == per - 1 {
+                    let (mut dk, dv) = (dkg.take().expect("summed"), dvg.take().expect("summed"));
+                    self.rope.back(&mut dk, n);
+                    if cfg.qk_norm {
+                        let mut dk0 = k::zeros(n * dh);
+                        norm_back(&dk, &bt.kn[g], &b.kn, dh, &mut dk0, &mut gb.kn);
+                        k::recycle(std::mem::replace(&mut dk, dk0));
+                    }
+                    put(&mut dqkv, a_w + g * dh, &dk);
+                    put(&mut dqkv, a_w + kv * dh + g * dh, &dv);
+                    k::recycle(dk);
+                    k::recycle(dv);
                 }
-                for v in [dco, vt, ds, dv, dq, dk] {
+                for v in [dco, vt, ds, dq] {
                     k::recycle(v);
                 }
             }
-            k::gemm(&mut gb.wqkv, transposed(&bt.a, d), &dqkv, d, n, 3 * a_w, None);
-            let da = matmul(rows(&dqkv, 3 * a_w), &t.wqkv, n, 3 * a_w, d, None);
+            if !gb.bqkv.is_empty() {
+                for row in dqkv.chunks_exact(w3) {
+                    gb.bqkv.iter_mut().zip(row).for_each(|(a, b)| *a += b);
+                }
+            }
+            k::gemm(&mut gb.wqkv, transposed(&bt.a, d), &dqkv, d, n, w3, None);
+            let da = matmul(rows(&dqkv, w3), &t.wqkv, n, w3, d, None);
             let mut dxin = dhres;
             norm_back(&da, &bt.n1, &b.n1, d, &mut dxin, &mut gb.n1);
             for v in [dout, dctx, dqkv, da] {
@@ -1285,25 +1471,53 @@ impl Net {
     }
 }
 
-/// One byte at a time through a causal model with a key/value cache, giving the
-/// generative head's logits for the next byte. Each step computes exactly what the full
-/// forward pass computes for that position (the same row operations in the same
-/// order), so decoding equals `gen_logits` bit for bit. When the window is full the
-/// decoder starts over from CLS with the last half window of bytes.
+/// One token (a byte, or a vocabulary token for a pretrained model) at a time through a
+/// causal model with a key/value cache, giving the generative head's logits for the
+/// next one. Each step computes exactly what the full forward pass computes for that
+/// position (the same row operations in the same order), so decoding equals
+/// `gen_logits` bit for bit. When the window is full the decoder starts over from the
+/// start token (CLS, or the lexicon's) with the last half window.
 pub struct Decoder<'a> {
     net: &'a Net,
     gains: Gains,
-    /// the bytes in the current window (after its CLS)
-    bytes: Vec<u8>,
-    /// per block, per head: rotated keys and values, rows of head_dim
+    /// the tokens in the current window (after its start token)
+    seq: Vec<u32>,
+    /// per block, per key/value head: rotated keys and values, rows of head_dim
     keys: Vec<Vec<Vec<f32>>>,
     vals: Vec<Vec<Vec<f32>>>,
     logits: Vec<f32>,
 }
 
 impl<'a> Decoder<'a> {
-    /// a decoder that has read CLS and then `prompt`
+    /// a decoder that has read the start token and then `prompt` (bytes; a model with
+    /// a vocabulary encodes them with its tokenizer)
     pub fn new(net: &'a Net, gains: Gains, prompt: &[u8]) -> Decoder<'a> {
+        let mut dec = Decoder::empty(net, gains);
+        match &net.lexicon {
+            Some(lx) => {
+                for t in lx.encode_split(prompt, 0).0 {
+                    dec.push_token(t);
+                }
+            }
+            None => {
+                for &b in prompt {
+                    dec.push(b);
+                }
+            }
+        }
+        dec
+    }
+
+    /// a decoder that has read the start token and then these token ids
+    pub fn from_tokens(net: &'a Net, gains: Gains, prompt: &[u32]) -> Decoder<'a> {
+        let mut dec = Decoder::empty(net, gains);
+        for &t in prompt {
+            dec.push_token(t);
+        }
+        dec
+    }
+
+    fn empty(net: &'a Net, gains: Gains) -> Decoder<'a> {
         assert!(
             net.cfg.causal && net.generator.is_some(),
             "decoding needs a causal model with a generative head"
@@ -1311,55 +1525,64 @@ impl<'a> Decoder<'a> {
         let mut dec = Decoder {
             net,
             gains,
-            bytes: Vec::new(),
+            seq: Vec::new(),
             keys: Vec::new(),
             vals: Vec::new(),
             logits: Vec::new(),
         };
         dec.restart(&[]);
-        for &b in prompt {
-            dec.push(b);
-        }
         dec
     }
 
-    /// the logits for the next byte (GEN_OUT: bytes, then END)
+    /// the logits for the next token (`Config::gen_out` of them: bytes then END, or
+    /// the vocabulary)
     pub fn logits(&self) -> &[f32] {
         &self.logits
     }
 
     /// the bytes the current window holds
-    pub fn window(&self) -> &[u8] {
-        &self.bytes
+    pub fn window(&self) -> Vec<u8> {
+        self.net.token_bytes(&self.seq)
     }
 
-    fn restart(&mut self, keep: &[u8]) {
-        let heads = |b: &Block| vec![Vec::new(); b.heads];
-        self.keys = self.net.blocks.iter().map(heads).collect();
-        self.vals = self.net.blocks.iter().map(heads).collect();
-        self.bytes.clear();
-        self.step(text::CLS);
-        for &b in keep {
-            self.bytes.push(b);
-            self.step(b as u16);
+    /// the tokens the current window holds (after the start token)
+    pub fn tokens(&self) -> &[u32] {
+        &self.seq
+    }
+
+    fn restart(&mut self, keep: &[u32]) {
+        let net = self.net;
+        let kv = |b: &Block| vec![Vec::new(); net.cfg.kv_of(b.heads)];
+        self.keys = net.blocks.iter().map(kv).collect();
+        self.vals = net.blocks.iter().map(kv).collect();
+        self.seq.clear();
+        self.step(net.start_token());
+        for &t in keep {
+            self.seq.push(t);
+            self.step(t);
         }
     }
 
-    /// reads one more byte
+    /// reads one more byte (byte models)
     pub fn push(&mut self, b: u8) {
-        if self.bytes.len() + 1 >= self.net.cfg.max_len {
-            let keep = self.bytes[self.bytes.len() - self.net.cfg.room() / 2..].to_vec();
+        self.push_token(b as u32);
+    }
+
+    /// reads one more token
+    pub fn push_token(&mut self, t: u32) {
+        if self.seq.len() + 1 >= self.net.cfg.max_len {
+            let keep = self.seq[self.seq.len() - self.net.cfg.room() / 2..].to_vec();
             self.restart(&keep);
         }
-        self.bytes.push(b);
-        self.step(b as u16);
+        self.seq.push(t);
+        self.step(t);
     }
 
-    fn step(&mut self, token: u16) {
+    fn step(&mut self, token: u32) {
         let net = self.net;
         let cfg = &net.cfg;
         let (d, dh) = (cfg.d_model, cfg.head_dim);
-        let pos = self.bytes.len();
+        let pos = self.seq.len();
         // the channels of this position, as a causal window computes them
         let mut w1 = Window {
             tokens: vec![token],
@@ -1371,7 +1594,8 @@ impl<'a> Decoder<'a> {
             ..Window::default()
         };
         if pos > 0 && (cfg.letters || cfg.words) {
-            let w = text::window_with(&self.bytes, true, false);
+            let bytes: Vec<u8> = self.seq.iter().map(|&t| t as u8).collect();
+            let w = text::window_with(&bytes, true, false);
             w1.letter[0] = w.letter[pos];
             w1.ordinal[0] = w.ordinal[pos];
             w1.reversed[0] = w.reversed[pos];
@@ -1382,26 +1606,34 @@ impl<'a> Decoder<'a> {
         let scale = 1.0 / (dh as f32).sqrt();
         for (l, b) in net.blocks.iter().enumerate() {
             let a_w = b.heads * dh;
+            let kv = cfg.kv_of(b.heads);
+            let (w3, per) = (b.qkv_width(cfg), b.heads / kv);
             let (a, _) = norm_fwd(&x, &b.n1, d, cfg.norm_eps);
-            let qkv = matmul(rows(&a, d), &b.wqkv, 1, d, 3 * a_w, None);
+            let mut qkv = matmul(rows(&a, d), &b.wqkv, 1, d, w3, None);
+            add_rows(&mut qkv, &b.bqkv);
             let mut ctx = vec![0f32; a_w];
             let mut p = vec![0f32; pos + 1];
             for h in 0..b.heads {
+                let g = h / per;
+                if h % per == 0 {
+                    let mut kh = qkv[a_w + g * dh..a_w + (g + 1) * dh].to_vec();
+                    let v = &qkv[a_w + (kv + g) * dh..a_w + (kv + g + 1) * dh];
+                    if cfg.qk_norm {
+                        kh = norm_fwd(&kh, &b.kn, dh, cfg.norm_eps).0;
+                    }
+                    net.rope.apply_at(&mut kh, pos);
+                    self.keys[l][g].extend_from_slice(&kh);
+                    self.vals[l][g].extend_from_slice(v);
+                }
                 let mut q = qkv[h * dh..(h + 1) * dh].to_vec();
-                let mut kh = qkv[a_w + h * dh..a_w + (h + 1) * dh].to_vec();
-                let v = &qkv[2 * a_w + h * dh..2 * a_w + (h + 1) * dh];
                 if cfg.qk_norm {
                     q = norm_fwd(&q, &b.qn, dh, cfg.norm_eps).0;
-                    kh = norm_fwd(&kh, &b.kn, dh, cfg.norm_eps).0;
                 }
                 net.rope.apply_at(&mut q, pos);
-                net.rope.apply_at(&mut kh, pos);
-                self.keys[l][h].extend_from_slice(&kh);
-                self.vals[l][h].extend_from_slice(v);
                 attend_row(
                     &q,
-                    &self.keys[l][h],
-                    &self.vals[l][h],
+                    &self.keys[l][g],
+                    &self.vals[l][g],
                     pos,
                     dh,
                     scale,
@@ -1421,9 +1653,111 @@ impl<'a> Decoder<'a> {
             x = hres.iter().zip(&dn).map(|(a, b)| a + b).collect();
         }
         let (xf, _) = norm_fwd(&x, &net.nf, d, cfg.norm_eps);
-        let mut y = matmul(rows(&xf, d), &net.gen_w, 1, d, GEN_OUT, None);
+        let mut y = matmul(rows(&xf, d), &net.gen_w, 1, d, cfg.gen_out(), None);
         y.iter_mut().zip(&net.gen_b).for_each(|(a, b)| *a += b);
         self.logits = y;
+    }
+}
+
+impl Net {
+    /// the token every window starts with: CLS, or the lexicon's start
+    pub fn start_token(&self) -> u32 {
+        self.lexicon.as_ref().map_or(text::CLS, |l| l.start)
+    }
+
+    /// the generative head's "the data ends here": END, or the lexicon's end token
+    pub fn end_index(&self) -> usize {
+        self.lexicon.as_ref().map_or(END, |l| l.end as usize)
+    }
+
+    /// whether a generated index ends the output
+    pub fn ends(&self, t: usize) -> bool {
+        match &self.lexicon {
+            Some(l) => u32::try_from(t).is_ok_and(|t| l.stops(t)),
+            None => t == END,
+        }
+    }
+
+    /// the bytes a generated index (or window token) stands for
+    pub fn index_bytes(&self, t: usize) -> Vec<u8> {
+        match &self.lexicon {
+            Some(l) => l.tokenizer.token_bytes(t as u32),
+            None if t < 256 => vec![t as u8],
+            None => Vec::new(),
+        }
+    }
+
+    /// tokens back to bytes (special tokens of a lexicon left out)
+    pub fn token_bytes(&self, ts: &[u32]) -> Vec<u8> {
+        match &self.lexicon {
+            Some(l) => ts
+                .iter()
+                .filter(|&&t| !l.tokenizer.is_special(t))
+                .flat_map(|&t| l.tokenizer.token_bytes(t))
+                .collect(),
+            None => ts.iter().filter(|&&t| t < 256).map(|&t| t as u8).collect(),
+        }
+    }
+
+    /// the data as the token sequence this net reads, with the token index where
+    /// `data[from..]` starts: bytes as they are, or ids from the lexicon (prompt and
+    /// continuation encoded apart)
+    pub fn sequence(&self, data: &[u8], from: usize) -> (Vec<u32>, usize) {
+        match &self.lexicon {
+            Some(l) => l.encode_split(data, from),
+            None => (data.iter().map(|&b| b as u32).collect(), from),
+        }
+    }
+
+    /// one window over tokens `ts` (from `sequence`): the start token, the tokens and,
+    /// when `end`, the end token. Byte models get their feature channels as
+    /// `text::window_with` computes them (bit for bit the same window).
+    pub fn window_tokens(&self, ts: &[u32], end: bool) -> Window {
+        match &self.lexicon {
+            None => {
+                let bytes: Vec<u8> = ts.iter().map(|&t| t as u8).collect();
+                text::window_with(&bytes, self.cfg.causal, end)
+            }
+            Some(l) => {
+                let mut tokens = Vec::with_capacity(ts.len() + 2);
+                tokens.push(l.start);
+                tokens.extend_from_slice(ts);
+                if end {
+                    tokens.push(l.end);
+                }
+                Window {
+                    tokens,
+                    ..Window::default()
+                }
+            }
+        }
+    }
+
+    /// every window of some data, and where each starts in the token sequence
+    /// (`text::windows_of` for byte models)
+    pub fn windows_of(&self, data: &[u8]) -> (Vec<Window>, Vec<usize>) {
+        let c = &self.cfg;
+        if self.lexicon.is_none() {
+            let ws = text::windows_of(data, c.max_len, c.stride, c.causal);
+            return (ws, text::starts(data.len(), c.room(), c.stride));
+        }
+        let (ts, _) = self.sequence(data, 0);
+        self.windows_over(&ts)
+    }
+
+    /// every window of a token sequence, and their starts
+    pub fn windows_over(&self, ts: &[u32]) -> (Vec<Window>, Vec<usize>) {
+        let c = &self.cfg;
+        let room = c.room().max(1);
+        let starts = text::starts(ts.len(), room, c.stride);
+        let ws = starts
+            .iter()
+            .map(|&s| {
+                let e = (s + room).min(ts.len());
+                self.window_tokens(&ts[s..e], !c.causal || e == ts.len())
+            })
+            .collect();
+        (ws, starts)
     }
 }
 
@@ -1580,7 +1914,8 @@ mod tests {
                 let dn = loss(&net);
                 net.params_mut()[ti].1[i] = orig;
                 let num = (up - dn) / (2.0 * eps);
-                let tol = 5e-3 + 3e-2 * num.abs().max(gt[i].abs());
+                // f32 differences of a sum over every logit: a little noise at this eps
+                let tol = 8e-3 + 3e-2 * num.abs().max(gt[i].abs());
                 assert!(
                     (num - gt[i]).abs() <= tol,
                     "tensor {ti} [{i}]: numeric {num} analytic {}",

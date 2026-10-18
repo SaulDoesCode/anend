@@ -779,6 +779,41 @@ impl Tokenizer {
     }
 }
 
+/// a tokenizer with the tokens a model starts sequences with and ends them with
+#[derive(Clone, Debug, PartialEq)]
+pub struct Lexicon {
+    pub tokenizer: Tokenizer,
+    /// put before every window (BOS, or the end token for models without one)
+    pub start: u32,
+    /// the end of a text: what training windows end in and the generative head's END
+    pub end: u32,
+    /// tokens that also end generation (chat models have several)
+    pub stops: Vec<u32>,
+}
+
+impl Lexicon {
+    /// bytes to ids, `data[..from]` and `data[from..]` encoded apart (a prompt and its
+    /// continuation), with the id index where the second part starts
+    pub fn encode_split(&self, data: &[u8], from: usize) -> (Vec<u32>, usize) {
+        let from = from.min(data.len());
+        let mut ids = if from > 0 {
+            self.tokenizer.encode(&String::from_utf8_lossy(&data[..from]))
+        } else {
+            Vec::new()
+        };
+        let at = ids.len();
+        if from < data.len() {
+            ids.extend(self.tokenizer.encode(&String::from_utf8_lossy(&data[from..])));
+        }
+        (ids, at)
+    }
+
+    /// whether a token ends generation
+    pub fn stops(&self, id: u32) -> bool {
+        id == self.end || self.stops.contains(&id)
+    }
+}
+
 enum Seg<'a> {
     Text(&'a str),
     Token(u32),

@@ -40,6 +40,7 @@ pub mod metrics;
 pub mod model;
 pub mod pattern;
 pub mod pool;
+pub mod pretrained;
 pub mod safetensors;
 pub mod spec;
 pub mod steer;
@@ -143,8 +144,7 @@ impl Classifier {
 
     /// the windows of any bytes (causal windows for a causal model)
     pub fn windows_of(&self, data: &[u8]) -> Vec<Window> {
-        let c = &self.net.cfg;
-        text::windows_of(data, c.max_len, c.stride, c.causal)
+        self.net.windows_of(data).0
     }
 
     /// every window of a text through the net with the given gains, averaged in window

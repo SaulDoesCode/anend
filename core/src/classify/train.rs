@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use super::kernels::{self as k, softmax_rows};
 use super::math::{self, Rng, key, mix};
 use super::metrics::{self, Metrics};
-use super::model::{BlockT, END, GEN_OUT, Gains, HeadKind, Mode, Net, Trace};
+use super::model::{BlockT, END, Gains, HeadKind, Mode, Net, Trace};
 use super::pool::{self, Pool};
 use super::text::{self, Window};
 use super::{Classifier, FEEDBACK_KEPT};
@@ -221,9 +221,10 @@ pub fn head_loss(kind: HeadKind, logits: &[f32], t: &Target, smoothing: f32) -> 
 /// (`Next`) or −ln(1 − p) (`Avoid`), averaged over those positions. `offset` is the
 /// data index of the window's first byte. Returns (loss, d(loss)/d(logits) [n ×
 /// GEN_OUT], positions counted).
-pub fn gen_loss(logits: &[f32], tokens: &[u16], offset: usize, t: &Target) -> (f32, Vec<f32>, usize) {
+pub fn gen_loss(net: &Net, logits: &[f32], tokens: &[u32], offset: usize, t: &Target) -> (f32, Vec<f32>, usize) {
     let n = tokens.len();
-    let mut g = vec![0f32; n * GEN_OUT];
+    let out = net.cfg.gen_out();
+    let mut g = vec![0f32; n * out];
     let (from, avoid) = match t {
         Target::Next { from } => (*from, false),
         Target::Avoid { from } => (*from, true),
@@ -234,17 +235,22 @@ pub fn gen_loss(logits: &[f32], tokens: &[u16], offset: usize, t: &Target) -> (f
         let next = tokens[p + 1];
         let class = match next {
             b if b < 256 => b as usize,
+            // a vocabulary: every token is a class (the end token included)
+            t if net.lexicon.is_some() => t as usize,
             text::SEP => END,
             _ => continue,
         };
         if offset + p >= from {
+            if class >= out {
+                continue;
+            }
             rows.push((p, class));
         }
     }
     let count = rows.len();
     let mut loss = 0f32;
     for &(p, class) in &rows {
-        let row = &logits[p * GEN_OUT..(p + 1) * GEN_OUT];
+        let row = &logits[p * out..(p + 1) * out];
         let tg = if avoid {
             Target::Not(class)
         } else {
@@ -253,7 +259,7 @@ pub fn gen_loss(logits: &[f32], tokens: &[u16], offset: usize, t: &Target) -> (f
         let (l, d) = head_loss(HeadKind::Single, row, &tg, 0.0).expect("fits");
         loss += l;
         let inv = 1.0 / count as f32;
-        g[p * GEN_OUT..(p + 1) * GEN_OUT]
+        g[p * out..(p + 1) * out]
             .iter_mut()
             .zip(&d)
             .for_each(|(a, b)| *a = b * inv);
@@ -409,6 +415,9 @@ pub fn crop(net: &Net, text: &str, key: u64) -> Window {
 /// where the data ends
 pub fn crop_bytes(net: &Net, b: &[u8], key: u64) -> (Window, usize) {
     let room = net.cfg.room();
+    if net.lexicon.is_some() {
+        return crop_seq(net, &net.sequence(b, 0).0, key);
+    }
     let causal = net.cfg.causal;
     if b.len() <= room {
         return (text::window_with(b, causal, true), 0);
@@ -422,8 +431,51 @@ pub fn crop_bytes(net: &Net, b: &[u8], key: u64) -> (Window, usize) {
 }
 
 /// every window of a text forward, and the mean of their logits (in window order)
+/// `crop` over a token sequence (`Net::sequence`), the same windows as `crop_bytes`
+pub fn crop_seq(net: &Net, ts: &[u32], key: u64) -> (Window, usize) {
+    let room = net.cfg.room();
+    let causal = net.cfg.causal;
+    if ts.len() <= room {
+        return (net.window_tokens(ts, true), 0);
+    }
+    let start = (mix(key) % (ts.len() - room + 1) as u64) as usize;
+    let end = start + room == ts.len();
+    (net.window_tokens(&ts[start..start + room], !causal || end), start)
+}
+
+/// an example's data as the token sequence the net reads, and its targets with each
+/// generative target's `from` (a byte index) as a token index
+pub fn sequence_of(net: &Net, ex: &Example) -> (Vec<u32>, Vec<(usize, Target)>) {
+    let first = from_of(ex);
+    let (ts, at) = net.sequence(ex.data(), first.unwrap_or(0));
+    let moved = |f: usize| if Some(f) == first { at } else { f };
+    let targets = ex
+        .targets()
+        .map(|(h, t)| {
+            let t = match t {
+                Target::Next { from } => Target::Next { from: moved(*from) },
+                Target::Avoid { from } => Target::Avoid { from: moved(*from) },
+                t => t.clone(),
+            };
+            (h, t)
+        })
+        .collect();
+    (ts, targets)
+}
+
+fn from_of(ex: &Example) -> Option<usize> {
+    ex.targets().find_map(|(_, t)| match t {
+        Target::Next { from } | Target::Avoid { from } => Some(*from),
+        _ => None,
+    })
+}
+
 pub fn forward_text(net: &Net, text: &[u8], extra: &[f32], gains: &Gains) -> (Vec<Trace>, Vec<Vec<f32>>) {
-    let ws = text::windows_of(text, net.cfg.max_len, net.cfg.stride, net.cfg.causal);
+    forward_windows(net, &net.windows_of(text).0, extra, gains)
+}
+
+/// windows forward, and the mean of their logits (in window order)
+pub fn forward_windows(net: &Net, ws: &[Window], extra: &[f32], gains: &Gains) -> (Vec<Trace>, Vec<Vec<f32>>) {
     let trs: Vec<Trace> = ws
         .iter()
         .map(|w| net.forward(w, extra, gains, Mode::EVAL, None))
@@ -514,17 +566,18 @@ fn example_grad(net: &Net, tp: &[BlockT], ex: &Example, it: &Item, smoothing: f3
     let mut loss = 0f32;
     match it.how {
         How::Crop(kk) => {
-            let (w, start) = crop_bytes(net, ex.data(), kk);
+            let (ts, targets) = sequence_of(net, ex);
+            let (w, start) = crop_seq(net, &ts, kk);
             let mode = Mode {
                 dropout: net.cfg.dropout,
                 key: kk,
             };
             let tr = net.forward(&w, &extra, &net.cfg.gains, mode, None);
             let mut dgen = Vec::new();
-            for (h, t) in ex.targets() {
+            for (h, t) in targets.iter().map(|(h, t)| (*h, t)) {
                 let hw = head_weight(net, h, t);
                 if t.generative() {
-                    let (l, d, _) = gen_loss(&net.gen_logits(&tr), &w.tokens, start, t);
+                    let (l, d, _) = gen_loss(net, &net.gen_logits(&tr), &w.tokens, start, t);
                     loss += hw * l;
                     add_scaled(&mut dgen, &d, hw * it.coef);
                 } else {
@@ -538,17 +591,17 @@ fn example_grad(net: &Net, tp: &[BlockT], ex: &Example, it: &Item, smoothing: f3
             (loss, w.len())
         }
         How::Whole => {
-            let data = ex.data();
-            let (trs, avg) = forward_text(net, data, &extra, &net.cfg.gains);
-            let starts = text::starts(data.len(), net.cfg.room(), net.cfg.stride);
+            let (ts, targets) = sequence_of(net, ex);
+            let (ws, starts) = net.windows_over(&ts);
+            let (trs, avg) = forward_windows(net, &ws, &extra, &net.cfg.gains);
             let nw = trs.len() as f32;
             let mut dgen: Vec<Vec<f32>> = Vec::new();
-            for (h, t) in ex.targets() {
+            for (h, t) in targets.iter().map(|(h, t)| (*h, t)) {
                 let hw = head_weight(net, h, t);
                 if t.generative() {
                     dgen.resize(trs.len(), Vec::new());
                     for (i, tr) in trs.iter().enumerate() {
-                        let (l, d, _) = gen_loss(&net.gen_logits(tr), tr_tokens(tr), starts[i], t);
+                        let (l, d, _) = gen_loss(net, &net.gen_logits(tr), tr.tokens(), starts[i], t);
                         loss += hw * l / nw;
                         add_scaled(&mut dgen[i], &d, hw * it.coef / nw);
                     }
@@ -564,10 +617,6 @@ fn example_grad(net: &Net, tp: &[BlockT], ex: &Example, it: &Item, smoothing: f3
             (loss, tokens)
         }
     }
-}
-
-fn tr_tokens(tr: &Trace) -> &[u16] {
-    tr.tokens()
 }
 
 /// the summed gradient of a batch into `total`; returns (Σ coef·loss, tokens)
@@ -647,17 +696,17 @@ pub fn evaluate(clf: &Classifier, data: &[Example], idx: &[usize], pool: &Pool) 
     pool.run(idx.len(), &|i| {
         let ex = &data[idx[i]];
         let extra = zeros_for(net, &ex.extra);
-        let bytes = ex.data();
         let mut total = 0f32;
         let mut main = Vec::new();
-        let (trs, avg) = forward_text(net, bytes, &extra, &net.cfg.gains);
-        let starts = text::starts(bytes.len(), net.cfg.room(), net.cfg.stride);
-        for (j, (h, t)) in ex.targets().enumerate() {
+        let (ts, targets) = sequence_of(net, ex);
+        let (ws, starts) = net.windows_over(&ts);
+        let (trs, avg) = forward_windows(net, &ws, &extra, &net.cfg.gains);
+        for (j, (h, t)) in targets.iter().map(|(h, t)| (*h, t)).enumerate() {
             let hw = head_weight(net, h, t);
             if t.generative() {
                 let (mut nats, mut count) = (0f64, 0usize);
                 for (w, tr) in trs.iter().enumerate() {
-                    let (l, _, c) = gen_loss(&net.gen_logits(tr), tr.tokens(), starts[w], t);
+                    let (l, _, c) = gen_loss(net, &net.gen_logits(tr), tr.tokens(), starts[w], t);
                     nats += l as f64 * c as f64;
                     count += c;
                 }
@@ -1341,8 +1390,8 @@ pub fn tune(clf: &mut Classifier, data: &[Example], fresh: usize, o: &FeedbackOp
 /// before it (in nats, summed), and how many predictions that is (the end included)
 pub fn nll(clf: &Classifier, data: &[u8], from: usize) -> (f64, usize) {
     let net = &clf.net;
-    let ws = clf.windows_of(data);
-    let starts = text::starts(data.len(), net.cfg.room(), net.cfg.stride);
+    let (ts, from) = net.sequence(data, from);
+    let (ws, starts) = net.windows_over(&ts);
     let extra = vec![0.0; net.cfg.extra];
     let (mut nats, mut count) = (0f64, 0usize);
     let mut seen = 0usize;
@@ -1350,7 +1399,7 @@ pub fn nll(clf: &Classifier, data: &[u8], from: usize) -> (f64, usize) {
         let tr = net.forward(w, &extra, &clf.gains(), Mode::EVAL, None);
         // windows overlap: count each predicted byte once, in the first window holding it
         let t = Target::Next { from: from.max(seen) };
-        let (l, _, c) = gen_loss(&net.gen_logits(&tr), &w.tokens, st, &t);
+        let (l, _, c) = gen_loss(net, &net.gen_logits(&tr), &w.tokens, st, &t);
         nats += l as f64 * c as f64;
         count += c;
         seen = st + w.len() - 1;

@@ -20,7 +20,7 @@ use super::Classifier;
 use super::compose::Graph;
 use super::kernels::softmax_rows;
 use super::math::{self, Rng, key};
-use super::model::{Decoder, END, GEN_OUT};
+use super::model::Decoder;
 use super::pool::{self, Pool};
 use super::steer::Output;
 use super::train::{self, Example, FeedbackOpts, Target};
@@ -77,7 +77,7 @@ impl Sampling {
     }
 }
 
-/// picks a next token (0..GEN_OUT) from logits; `adjust` (if any) is added to the
+/// picks a next token (an index into the logits) from them; `adjust` (if any) is added to the
 /// scaled logits of the candidates it names. Ties go to the lower token.
 pub fn pick(logits: &[f32], s: &Sampling, r: &mut Rng) -> usize {
     if s.temperature == 0.0 {
@@ -152,7 +152,8 @@ fn sample_guided(
     guide: Option<Guide>,
 ) -> (Vec<u8>, f32) {
     let mut r = Rng::new(key(&[s.seed, index, 0x5a3e]));
-    let mut dec = Decoder::new(&generator.net, generator.gains(), prompt);
+    let net = &generator.net;
+    let mut dec = Decoder::new(net, generator.gains(), prompt);
     let mut out = Vec::new();
     let mut logp = 0f32;
     while out.len() < s.max_len {
@@ -163,16 +164,19 @@ fn sample_guided(
         }
         let t = pick(&l, s, &mut r);
         logp += log_prob(&base, t);
-        if t == END {
+        if net.ends(t) {
             break;
         }
-        let b = t as u8;
-        out.push(b);
-        if s.stop == Some(b) {
+        let piece = net.index_bytes(t);
+        if let Some(i) = s.stop.and_then(|stop| piece.iter().position(|&b| b == stop)) {
+            out.extend_from_slice(&piece[..=i]);
             break;
         }
-        dec.push(b);
+        out.extend(piece);
+        dec.push_token(t as u32);
     }
+    // a vocabulary token can end past the limit
+    out.truncate(s.max_len);
     (out, logp)
 }
 
@@ -502,15 +506,16 @@ pub fn draw(
             if critics.is_empty() || !out.len().is_multiple_of(g.every.max(1)) {
                 return;
             }
-            let mut order: Vec<usize> = (0..GEN_OUT).collect();
+            let net = &generator.net;
+            let mut order: Vec<usize> = (0..l.len()).collect();
             order.sort_by(|&a, &b| l[b].total_cmp(&l[a]).then(a.cmp(&b)));
             order.truncate(g.top_k.max(1));
-            let mut adj = vec![f32::NEG_INFINITY; GEN_OUT];
+            let mut adj = vec![f32::NEG_INFINITY; l.len()];
             for &t in &order {
-                let ext = if t == END {
+                let ext = if net.ends(t) {
                     out.to_vec()
                 } else {
-                    [out, &[t as u8]].concat()
+                    [out, &net.index_bytes(t)[..]].concat()
                 };
                 let (_, sc) = judge_all(critics, &shown(&ext));
                 // the scaled logit is raised by strength·score, so temperature still applies
