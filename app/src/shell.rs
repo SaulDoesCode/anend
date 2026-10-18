@@ -16,6 +16,8 @@ const CSS: &str = include_str!("style.css");
 const KEYS_JS: &str = r#"
 const KEY = /^\d{1,3}(,\d{1,3}){0,5}$/;
 window.addEventListener('keydown', (e) => {
+  // an input method composing (IME): its keys are its own, Enter included
+  if (e.isComposing || e.keyCode === 229) return;
   const t = e.target || {};
   const bar = t.id === 'bar';
   const typing = t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable;

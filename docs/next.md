@@ -5,6 +5,23 @@ Where the work stands, for picking it up in a new session. Branch:
 
 ## Resuming (read first)
 
+**As of 18 Oct 2026, evening UTC** (the newest entry; the older ones below are history):
+- **The app is the Dioxus app** (`app/`): the desktop app (`anend-app`, on the entry graph
+  in process) and the web app from the same code, which the hub serves at `/app/`
+  (`app/web/build.sh` before building the hub; docs/deploy.md). Both checked end to end on
+  18 Oct (every view; the web build against `anend-hub --mode app --local`).
+- **Retired 18 Oct:** the Bevy app (`src/`, the root package; cf08139) and the old JS web
+  app (`hub/web`; its files went in 49e3930, the rest in the commit after cf08139). The
+  workspace is core, hub and app. Release and Docker build `anend-app` and the web build.
+  The guide (docs/guide) still describes the old apps in places: touch it up.
+- **The GPU and pretrained tracks stopped** mid-way: their state is in docs/next.md under
+  their sections and in `docs/wip/`.
+- **CI:** GitHub Actions hasn't run a job since 14 Oct (billing or settings). Run locally:
+  `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+  `cargo test --workspace`, and the wasm32 web build.
+- **Next:** daily-use rough edges in the app (see "The Dioxus app" status), the guide, the
+  README last.
+
 **As of 18 Oct 2026, 03:35 UTC** (the newest entry; the older ones below are history):
 - **Done and pushed:** step 1 (the entry graph store), step 3 (one app API in
   `core/src/ops`, used by the hub and the desktop), and the Dioxus app with every view.
@@ -253,9 +270,13 @@ libxdo-dev`), web through WebAssembly. Features: `desktop` (default), `web`, `hu
   filter's words and a list member; zen (fade after a delay) and the top bar's autohide
   (from the window's top edge, kept while the pointer stays on it) in settings, as the old
   app's. Small screenshots with data for the README: `app/docs/shots/`.
-- **Needs a hub change:** serve `app/web/dist` at `/app/` (instead of hub/web) so the web
-  build shares the hub's origin.
-- **Left:** IME untested; models wait for the spec.
+- **Round 3 (18 Oct):** the hub serves the Dioxus web build at `/app/` (rust-embed of
+  `app/web/dist`; a page saying how to build it when missing; its CSP allows wasm, the
+  interop's eval and blob scripts; test `modetests::app_serves_the_dioxus_page`); Bevy and
+  the old JS app retired; keys typed into an input method (IME) while it composes are left
+  to it (Enter doesn't search mid-composition; not tested with a real IME here).
+- **Left:** rough edges found in daily use; the desktop window has no icon yet; models
+  wait for the spec.
 - **Checking while core is mid-edit:** `scratchpad/wtcheck.sh cargo clippy -p anend-app`
   builds `app/` against the committed core in a worktree.
 
@@ -568,6 +589,10 @@ a just-made invite, a README section pointing at docs/deploy.md.
   on unless chosen. Spec-built models already work this way. When the store's classifiers
   move to the spec, turn it off in the Rust presets (`Config::tiny()` and the others) too,
   keeping existing model files loading with whatever they were trained with.
+  Done 18 Oct: the Rust presets and new store classifiers have it off (`gematria: true` on
+  `classify.create` opts in); old files and definitions keep theirs (fixture
+  `testdata/v2_gematria.anendcls`, bit-exact). Stopped there; the NFC / `\p{M}` tokenizer gaps
+  are not started.
 - **Back burner (user, 15 Oct): generated pictures as block textures.** The patch-codebook
   picture generator (`core/examples/pictures.rs`, 64×64 from 8×8 patches) and the space's
   placed blocks can work together like Minecraft textures: a block's placement payload
