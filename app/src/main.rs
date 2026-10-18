@@ -35,6 +35,15 @@ pub fn make_api() -> Api {
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
     use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
+    // WebKitGTK's DMA-BUF renderer needs GBM buffers the driver may refuse ("Failed to
+    // create GBM buffer ... Invalid argument", NVIDIA's driver and some Wayland setups),
+    // which leaves the window white. Turn it off unless the person chose otherwise
+    // (`WEBKIT_DISABLE_DMABUF_RENDERER=0` keeps it).
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        // SAFETY: first thing in main, before any thread is started.
+        unsafe { std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1") };
+    }
     // `anend-app [--save path.redb]`; else the last save, else main.redb in the saves folder
     let args: Vec<String> = std::env::args().collect();
     let arg_save = args

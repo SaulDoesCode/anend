@@ -84,6 +84,11 @@ app/web/build.sh            # writes app/web/dist
 cargo run --release -p anend-hub -- --local
 ```
 
+On Linux the app turns off WebKitGTK's DMA-BUF renderer, which leaves a white window
+("Failed to create GBM buffer") on some drivers. If the window is still blank, try
+`WEBKIT_DISABLE_COMPOSITING_MODE=1 anend-app`. To keep DMA-BUF on, set
+`WEBKIT_DISABLE_DMABUF_RENDERER=0`.
+
 Build the web app before the hub, so the hub can serve it at `/app/`. Without it,
 `/app/` shows a page saying to run `app/web/build.sh`.
 
