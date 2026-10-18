@@ -41,6 +41,7 @@ let bytes = model.to_bytes();                          // weights + spec + codeb
 | `sampling` | for a generate head: `{temperature, top_k, top_p, max_len, stop, seed}` |
 | `train` | `{epochs, batch, lr, val_fraction, patience, max_steps, threads, budget_seconds}` |
 | `seed` | weights' and data split's seed |
+| `from` | optional starting point: `{"pretrained": "<model folder>"}` (see Pretrained models) |
 | `device` | where training and generation run: `"cpu"` (default), `"gpu"`, `"gpu_fast"`; see below |
 
 **Inputs** (`input.type`):
@@ -160,6 +161,56 @@ head on one trunk), `Example::and` (several targets in one pass), `HeadSpec::wei
 full pass bit for bit). Everything is deterministic: the same data, spec and seeds give
 the same weights and the same samples on any thread count and CPU.
 
+## Pretrained models
+
+A spec can start from a pretrained open model instead of fresh weights:
+
+```json
+{
+  "name": "smol writer",
+  "from": {"pretrained": "models/SmolLM2-135M"},
+  "input": {"type": "text"},
+  "trunk": {"max_len": 512},
+  "heads": [{"name": "next", "kind": "generate"},
+            {"name": "tone", "kind": "classify", "classes": ["calm", "loud"]}],
+  "critics": [{"model": "author", "head": "author", "want": {"class": "austen"}}],
+  "sampling": {"temperature": 0.9, "top_p": 0.95, "max_len": 160},
+  "train": {"lr": 0.00002, "epochs": 1}
+}
+```
+
+- `from.pretrained` is a HuggingFace model folder: `config.json`, `tokenizer.json`, the
+  weights as `model.safetensors` or shards with `model.safetensors.index.json` (F32, F16 or
+  BF16), and optionally `generation_config.json` (its end tokens stop generation too).
+- Supported architectures: `model_type` `llama` (Llama 1–3.x, TinyLlama, SmolLM/SmolLM2,
+  OpenLLaMA), `mistral`, `qwen2` (Qwen1.5/2/2.5, with q/k/v biases) and `qwen3` (QK-norm).
+  The engine maps grouped key/value heads, an explicit `head_dim`, tied or separate output
+  embeddings, `rope_theta`, `rope_scaling` (`linear`, `llama3`) and `rms_norm_eps`; a
+  sliding window shortens the window to it. Anything that changes the computation and isn't
+  supported is refused naming the field: `model_type "gemma" is not supported`, `hidden_act
+  "gelu"`, `rope_scaling type "yarn"`, `attention_bias true`, a missing or misshapen tensor
+  (`tensor "model.layers.3.mlp.up_proj.weight" has shape [..], the config implies [..]`).
+- The model reads the checkpoint's own vocabulary (`classify::bpe` reads `tokenizer.json`:
+  byte-level BPE as in Llama 3, Qwen and SmolLM, or SentencePiece-style BPE with byte
+  fallback as in Llama 2, TinyLlama and Mistral). Every window starts with the model's BOS
+  (or its end token when it has none, as Qwen) and ends with its end token. The engine's
+  own models keep reading bytes.
+- The spec's generate head is the model's language-model head (declare one); classify,
+  multi and regress heads are new and sit on the pretrained trunk (mean pooled), so a
+  pretrained model can be a classifier too. Trunk sizes come from the checkpoint: only
+  `trunk.max_len` (default the model's context) and `trunk.dropout` apply; `input` must be
+  plain `text` or `bytes`.
+- Training fine-tunes everything (use a small `lr`, around 1e-5 to 1e-4); critics,
+  constraints, guidance and reinforcement work as for any generator, judging the decoded
+  bytes. The saved model carries the weights (as f32) and the tokenizer, so it no longer
+  needs the folder.
+- In Rust: `pretrained::load(dir, &Options)` gives a `Classifier`; `pretrained::Folder`
+  exposes the parsed `Arch`, tokenizer and checkpoint.
+- Numbers match the transformers reference to rounding (f32 throughout), not bit for bit;
+  the engine's results are still deterministic across threads and CPUs.
+- Try it: `core/examples/pretrained.rs` (downloads SmolLM2-135M with one command, then
+  steers it with an author classifier trained on the corpus).
+
 ## On the GPU (opt-in per run)
 
 Every model runs on the CPU unless a run asks for the GPU: `"device": "gpu"` in a spec
@@ -205,5 +256,6 @@ wgpu in.
 | pictures as patches rather than pixels | **measured compute**: a 64×64 picture is 72 tokens with 8×8 patches, 4160 at a byte a pixel; the pictures example prints the cost of each |
 | codes per codebook ≤ 255 | format: a code is one byte, 255 ends a row |
 | file limits in `io` (width 2048, 64 blocks, 8192 tokens…) | safety: a damaged or hostile file can't make the reader allocate without bound |
+| file limits for models with their own vocabulary (width 65 536, 4096 blocks, 2 M tokens, 16 M vocabulary) | the same safety, set past any open checkpoint; the weights themselves are bounded by the file's size |
 
 The main lever to lift the compute limits is the GPU backend (above; `"device": "gpu"`).

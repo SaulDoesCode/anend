@@ -235,16 +235,16 @@ pub fn gen_loss(net: &Net, logits: &[f32], tokens: &[u32], offset: usize, t: &Ta
     for p in 0..n.saturating_sub(1) {
         let next = tokens[p + 1];
         let class = match next {
-            b if b < 256 => b as usize,
             // a vocabulary: every token is a class (the end token included)
             t if net.lexicon.is_some() => t as usize,
+            b if b < 256 => b as usize,
             text::SEP => END,
             _ => continue,
         };
+        if class >= out {
+            continue;
+        }
         if offset + p >= from {
-            if class >= out {
-                continue;
-            }
             rows.push((p, class));
         }
     }
@@ -415,10 +415,10 @@ pub fn crop(net: &Net, text: &str, key: u64) -> Window {
 /// `crop` over bytes, with the crop's start; a causal model's crop ends in SEP only
 /// where the data ends
 pub fn crop_bytes(net: &Net, b: &[u8], key: u64) -> (Window, usize) {
-    let room = net.cfg.room();
     if net.lexicon.is_some() {
         return crop_seq(net, &net.sequence(b, 0).0, key);
     }
+    let room = net.cfg.room();
     let causal = net.cfg.causal;
     if b.len() <= room {
         return (text::window_with(b, causal, true), 0);
@@ -431,7 +431,6 @@ pub fn crop_bytes(net: &Net, b: &[u8], key: u64) -> (Window, usize) {
     )
 }
 
-/// every window of a text forward, and the mean of their logits (in window order)
 /// `crop` over a token sequence (`Net::sequence`), the same windows as `crop_bytes`
 pub fn crop_seq(net: &Net, ts: &[u32], key: u64) -> (Window, usize) {
     let room = net.cfg.room();
@@ -471,6 +470,7 @@ fn from_of(ex: &Example) -> Option<usize> {
     })
 }
 
+/// every window of a text forward, and the mean of their logits (in window order)
 pub fn forward_text(net: &Net, text: &[u8], extra: &[f32], gains: &Gains) -> (Vec<Trace>, Vec<Vec<f32>>) {
     forward_windows(net, &net.windows_of(text).0, extra, gains)
 }

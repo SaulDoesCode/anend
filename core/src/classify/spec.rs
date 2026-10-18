@@ -243,6 +243,9 @@ pub struct ModelSpec {
     pub train: TrainSpec,
     #[serde(default)]
     pub seed: u64,
+    /// where the trunk comes from: a pretrained model folder instead of new weights
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<Origin>,
     /// where training and generation run: "cpu" (the default and the reference),
     /// "gpu" (exact precision) or "gpu_fast"; a GPU needs the `gpu` build feature
     #[serde(default, skip_serializing_if = "is_cpu")]
@@ -251,6 +254,16 @@ pub struct ModelSpec {
 
 fn is_cpu(d: &Device) -> bool {
     *d == Device::Cpu
+}
+
+/// a model's starting point other than fresh weights
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Origin {
+    /// a HuggingFace model folder (config.json, tokenizer.json, safetensors), see
+    /// `pretrained`: its trunk, vocabulary and language-model head (the spec's generate
+    /// head); the spec's classify/multi/regress heads go on its trunk, new
+    Pretrained(String),
 }
 
 /// the data behind queries: the save (the entry store implements this), or memory
@@ -446,6 +459,32 @@ impl ModelSpec {
             }
         }
         self.sampling.check().or_else(at)?;
+        if let Some(Origin::Pretrained(dir)) = &self.from {
+            if !matches!(self.input, InputSpec::Text { ref features } if features.is_empty())
+                && self.input != InputSpec::Bytes
+            {
+                return at(format!(
+                    "a pretrained model ({dir}) reads plain text, without feature channels"
+                ));
+            }
+            if !self.generates() {
+                return at("a pretrained model's language-model head is its generate head; declare one".into());
+            }
+            let t = &self.trunk;
+            if t.preset.is_some()
+                || t.d_model.is_some()
+                || t.layers.is_some()
+                || t.heads.is_some()
+                || t.head_dim.is_some()
+                || t.d_ff.is_some()
+                || t.causal == Some(false)
+                || t.pooling.is_some()
+            {
+                return at(
+                    "a pretrained trunk's sizes come from its checkpoint (only max_len and dropout apply)".into(),
+                );
+            }
+        }
         Ok(())
     }
 
@@ -592,7 +631,6 @@ pub fn build(spec: &ModelSpec, profile: Option<&MachineProfile>) -> Result<Model
 
 fn build_for(spec: &ModelSpec, profile: Option<&MachineProfile>, examples: usize) -> Result<Model, String> {
     spec.check()?;
-    let cfg = spec.config(profile, examples)?;
     let heads: Vec<HeadSpec> = spec
         .heads
         .iter()
@@ -615,8 +653,20 @@ fn build_for(spec: &ModelSpec, profile: Option<&MachineProfile>, examples: usize
             name: h.name.clone(),
             weight: h.weight,
         });
-    let mut clf = Classifier::with_gen(cfg, &heads, generator, spec.seed)
-        .map_err(|e| format!("model spec {:?}: {e}", spec.name))?;
+    let mut clf = match &spec.from {
+        Some(Origin::Pretrained(dir)) => {
+            let o = super::pretrained::Options {
+                max_len: spec.trunk.max_len,
+                heads,
+                generator: generator.map_or("next".into(), |g| g.name),
+                dropout: spec.trunk.dropout.unwrap_or(0.0),
+                seed: spec.seed,
+            };
+            super::pretrained::load(std::path::Path::new(dir), &o)
+        }
+        None => Classifier::with_gen(spec.config(profile, examples)?, &heads, generator, spec.seed),
+    }
+    .map_err(|e| format!("model spec {:?}: {e}", spec.name))?;
     clf.meta.name = spec.name.clone();
     Ok(Model {
         spec: spec.clone(),
@@ -690,6 +740,7 @@ impl Model {
             sampling: Sampling::default(),
             train: TrainSpec::default(),
             seed: clf.meta.seed,
+            from: None,
             device: Device::Cpu,
         };
         Model {

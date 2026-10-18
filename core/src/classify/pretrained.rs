@@ -870,4 +870,61 @@ mod tests {
         let (s1, _) = generate::sample(&g, b"hello", &Sampling::greedy(8), 0);
         assert_eq!(generate::sample(&back, b"hello", &Sampling::greedy(8), 0).0, s1);
     }
+
+    /// the declarative spec: `"from": {"pretrained": dir}`, trained, run, generating
+    /// with a critic model; checks name what a pretrained spec can't set
+    #[test]
+    fn a_pretrained_model_from_a_spec() {
+        use crate::classify::spec::{self, MemSource, Model, ModelSpec, Value};
+        let dd = dir("spec");
+        synth(&dd, &Shape::llama(), 4);
+        let json = r#"{
+          "name": "writer",
+          "from": {"pretrained": "DIR"},
+          "input": {"type": "text"},
+          "trunk": {"max_len": 32},
+          "heads": [{"name": "next", "kind": "generate"},
+                    {"name": "tone", "kind": "classify", "classes": ["calm", "loud"]}],
+          "data": [{"from": "list", "list": "texts", "head": "next"},
+                   {"from": "list", "list": "loud", "head": "tone", "class": "loud"},
+                   {"from": "list", "list": "calm", "head": "tone", "class": "calm"}],
+          "critics": [{"model": "judge", "head": "kind", "want": {"class": "yes"}}],
+          "sampling": {"temperature": 1.0, "max_len": 12, "seed": 2},
+          "train": {"epochs": 2, "batch": 2, "lr": 0.002, "val_fraction": 0.0, "threads": 2}
+        }"#
+        .replace("DIR", &dd.display().to_string().replace('\\', "/"));
+        let sp = ModelSpec::from_json(&json).unwrap();
+        let src = MemSource::default()
+            .with_texts("texts", &["hello the world", "the world, hello"])
+            .with_texts("loud", &["HELLO!", "WORLD!"])
+            .with_texts("calm", &["hello", "world"]);
+        let (m, rep) = spec::train(None, &sp, &src, None, |_| Flow::Go).unwrap();
+        assert!(rep.steps > 0);
+        let a = m.run(&Value::Text("hello".into())).unwrap();
+        assert!(a.contains_key("tone") && a.contains_key("next"), "{a:?}");
+        let judge = ModelSpec::from_json(
+            r#"{"name": "judge", "input": {"type": "text"}, "trunk": {"preset": "test"},
+                "heads": [{"name": "kind", "kind": "classify", "classes": ["no", "yes"]}]}"#,
+        )
+        .unwrap();
+        let jm = spec::build(&judge, None).unwrap();
+        let models: BTreeMap<String, &Model> = [("judge".to_string(), &jm)].into();
+        let c = spec::generate(&m, &models, &Value::Text("the".into()), 3, None).unwrap();
+        assert!(!c.is_empty() && c.iter().all(|c| c.bytes.len() <= 12));
+        // saved and read back: the weights travel in the file, not the folder
+        let back = Model::from_bytes(&m.to_bytes()).unwrap();
+        assert_eq!(back.run(&Value::Text("hello".into())).unwrap(), a);
+        for (field, says) in [
+            (r#""trunk": {"preset": "small"}"#, "sizes come from its checkpoint"),
+            (r#""input": {"type": "text", "features": ["letters"]}"#, "plain text"),
+        ] {
+            let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
+            let f: serde_json::Value = serde_json::from_str(&format!("{{{field}}}")).unwrap();
+            for (k, x) in f.as_object().unwrap() {
+                v[k] = x.clone();
+            }
+            let e = ModelSpec::from_json(&v.to_string()).unwrap_err();
+            assert!(e.contains(says), "{e}");
+        }
+    }
 }
