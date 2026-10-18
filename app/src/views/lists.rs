@@ -124,7 +124,7 @@ fn ListPage(list: ListInfo, back: EventHandler<()>) -> Element {
                     class: "name",
                     r#type: "text",
                     "aria-label": "the list's name",
-                    value: "{name}",
+                    initial_value: "{name}",
                     style: "flex: 1; height: auto; background: none;",
                     oninput: move |e| name.set(e.value()),
                     onchange: move |_| {
@@ -191,7 +191,7 @@ fn Member(list: String, hit: Hit, n: usize) -> Element {
             input {
                 r#type: "text",
                 "aria-label": "member {n}",
-                value: "{text}",
+                initial_value: "{text}",
                 readonly: hit.note,
                 oninput: move |e| text.set(e.value()),
                 onchange: move |_| {

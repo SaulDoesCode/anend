@@ -216,6 +216,8 @@ pub struct Ui {
     pub keys: Signal<Vec<(View, Callback<KeyPress, bool>)>>,
     /// bumped when the save's data changed (views reload)
     pub changed: Signal<u64>,
+    /// what the bar held in each view, put back when you return to it
+    pub bar_texts: Signal<std::collections::HashMap<View, String>>,
     pub seq: Signal<u64>,
 }
 

@@ -240,10 +240,19 @@ libxdo-dev`), web through WebAssembly. Features: `desktop` (default), `web`, `hu
   a hop and the card, lists, reader, notes typing, stats, models, filters, settings, night);
   the web build in Playwright's chromium renders the same (no hub there, so calls fail).
   Shots: scratchpad `shots-dioxus/`.
-- **Left:** the hub's app API on the graph (so the web build has data; another agent's);
-  controlled inputs other than the bar and the notes pad (list members, filters, settings)
-  could drop letters typed very fast, the same fix applies; a zen fade; IME untested;
-  models wait for the spec.
+- **Round 2 (18 Oct), in progress:** the web build verified end to end against
+  `anend-hub --mode app --local` over `/app/ws` (memory search, menu tag, a new list,
+  multi-select into it, lists, reader, notes typed fast, tags, stats, models, filters,
+  space, settings; shots in scratchpad `shots-web/`). The page has to come from the hub's
+  origin (the socket answers 403 to another Origin); `?hub=host:port` points the page at a
+  hub, and a small proxy in the scratchpad serves `app/web/dist` as if from the hub. App
+  side: backup and weum import now use `saves.backup` / `saves.import_texts` on both
+  backends; each view keeps its own bar text; the list picker offers the picked list even
+  while empty; typed inputs (list name and members, filters, notes' tags, save names, the
+  hub address) are unbound (`initial_value`, remade by key when filled from outside).
+  **Needs a hub change:** none found so far. **Left this round:** check fast typing in
+  those inputs, the zen fade and the top-bar autohide (as the old app's settings), fresh
+  small screenshots for the README (desktop and web, with data).
 - **Checking while core is mid-edit:** `scratchpad/wtcheck.sh cargo clippy -p anend-app`
   builds `app/` against the committed core in a worktree.
 

@@ -36,10 +36,23 @@ impl Hub {
     /// the hub that served this page
     pub fn here() -> Hub {
         let loc = web_sys::window().map(|w| w.location());
-        let (proto, host) = loc
-            .map(|l| (l.protocol().unwrap_or_default(), l.host().unwrap_or_default()))
+        let (proto, host, search) = loc
+            .map(|l| {
+                (
+                    l.protocol().unwrap_or_default(),
+                    l.host().unwrap_or_default(),
+                    l.search().unwrap_or_default(),
+                )
+            })
             .unwrap_or_default();
         let ws = if proto == "https:" { "wss" } else { "ws" };
+        // `?hub=host:port` talks to a hub elsewhere (the page served apart from it)
+        let host = search
+            .trim_start_matches('?')
+            .split('&')
+            .find_map(|kv| kv.strip_prefix("hub="))
+            .map(str::to_string)
+            .unwrap_or(host);
         Hub {
             url: format!("{ws}://{host}/app/ws"),
             st: Default::default(),

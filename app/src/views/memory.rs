@@ -448,6 +448,23 @@ pub fn Memory() -> Element {
     }
 }
 
+/// the lists, and the picked list (Shift+click, or a new one) even while it's empty
+fn with_picked(mut lists: Vec<crate::backend::ListInfo>, picked: Option<Hit>) -> Vec<crate::backend::ListInfo> {
+    if let Some(h) = picked
+        && !lists.iter().any(|l| l.list == h.key)
+    {
+        lists.insert(
+            0,
+            crate::backend::ListInfo {
+                list: h.key,
+                name: h.text,
+                ..Default::default()
+            },
+        );
+    }
+    lists
+}
+
 #[component]
 fn SelBar(n: usize) -> Element {
     let mut ui = ui();
@@ -479,8 +496,8 @@ fn SelBar(n: usize) -> Element {
         if picking() {
             div { class: "listpick",
                 match &*lists.read() {
-                    Some(Some(l)) if !l.lists.is_empty() => rsx! {
-                        for li in l.lists.clone() {
+                    Some(Some(l)) if !l.lists.is_empty() || ui.picks.read().list.is_some() => rsx! {
+                        for li in with_picked(l.lists.clone(), ui.picks.read().list.clone()) {
                             button {
                                 key: "{li.list}",
                                 title: "{li.count} members · {li.list}",

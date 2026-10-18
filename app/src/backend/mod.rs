@@ -368,30 +368,15 @@ pub trait Backend {
         ))
     }
     /// weum's `await memory.backup`: the texts in one JSON, everything else in another;
-    /// on disk the backend writes the two files (their paths come back), elsewhere the
-    /// two documents come back to be downloaded
+    /// on disk the backend writes the two files (their paths come back), a hub hands the
+    /// two documents back to be downloaded
     fn backup(&self, name: &str) -> Fut<Backup> {
-        if self.on_disk() {
-            return typed(self.call("saves.backup", json!({ "name": name })));
-        }
-        let f = self.call("saves.export", json!({ "name": name }));
-        Box::pin(async move {
-            let b = f.await?;
-            Ok(Backup::from_bundle(&b))
-        })
+        typed(self.call("saves.backup", json!({ "name": name })))
     }
     /// weum's `all-of-it.json` (or a backup's texts.json) into the open save, or a new one
     /// named `new_save`
     fn import_texts(&self, json_text: &str, new_save: &str) -> Fut<Imported> {
-        if self.on_disk() {
-            return typed(self.call("saves.import_texts", json!({ "data": json_text, "name": new_save })));
-        }
-        let parsed: Result<Value, String> = serde_json::from_str(json_text).map_err(|e| e.to_string());
-        let bundle = parsed.and_then(|v| weum_bundle(new_save, &v).map(|b| b.0));
-        match bundle {
-            Ok(b) => self.import_bundle(b, new_save, new_save.is_empty()),
-            Err(e) => Box::pin(async move { Err(e) }),
-        }
+        typed(self.call("saves.import_texts", json!({ "data": json_text, "name": new_save })))
     }
 
     // ---- texts (memories) and sums
@@ -628,67 +613,5 @@ pub trait Backend {
     }
     fn set_setting(&self, name: &str, value: &str) -> Fut<()> {
         unit(self.call("settings.set", json!({ "name": name, "value": value })))
-    }
-}
-
-impl Backup {
-    /// splits a bundle (core/src/bundle.rs) into the texts and everything else
-    pub fn from_bundle(b: &Value) -> Backup {
-        let mut other = b.clone();
-        let texts = other.get_mut("memories").map(Value::take).unwrap_or(json!([]));
-        if let Some(o) = other.as_object_mut() {
-            o.remove("memories");
-        }
-        Backup {
-            paths: Vec::new(),
-            texts,
-            other,
-        }
-    }
-}
-
-/// weum's `all-of-it.json` (`[[text, [key bytes]], ...]`) as a bundle to import
-pub fn weum_bundle(name: &str, all_of_it: &Value) -> Result<(Value, usize), String> {
-    let arr = all_of_it
-        .as_array()
-        .ok_or("that isn't weum's all-of-it.json: it should be a list of [text, [key bytes]]")?;
-    let mut memories = Vec::with_capacity(arr.len());
-    for e in arr {
-        let text = e.get(0).and_then(Value::as_str);
-        let key = e.get(1).and_then(Value::as_array);
-        if let (Some(t), Some(k)) = (text, key) {
-            let bytes: Option<Vec<u8>> = k
-                .iter()
-                .map(|b| b.as_u64().and_then(|b| u8::try_from(b).ok()))
-                .collect();
-            if let Some(bytes) = bytes.filter(|b| !b.is_empty() && b.len() <= 4) {
-                memories.push(json!([t, bytes]));
-            }
-        }
-    }
-    if memories.is_empty() && !arr.is_empty() {
-        return Err("none of those entries reads as [text, [key bytes]]".into());
-    }
-    let n = memories.len();
-    Ok((json!({ "anend": 1, "name": name, "memories": memories }), n))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn weum_import_reads() {
-        let (b, n) = weum_bundle("w", &json!([["listen", [0]], ["silent", [1, 2]], ["bad", "x"]])).unwrap();
-        assert_eq!(n, 2);
-        assert_eq!(b["memories"][1], json!(["silent", [1, 2]]));
-        assert!(weum_bundle("w", &json!({})).is_err());
-    }
-
-    #[test]
-    fn backup_splits() {
-        let b = Backup::from_bundle(&json!({ "anend": 1, "memories": [["a", [0]]], "notes": [] }));
-        assert_eq!(b.texts, json!([["a", [0]]]));
-        assert!(b.other.get("memories").is_none() && b.other.get("notes").is_some());
     }
 }

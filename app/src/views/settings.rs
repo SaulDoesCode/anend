@@ -160,6 +160,7 @@ fn Saves() -> Element {
         async move { api.saves().await }
     });
     let mut name = use_signal(String::new);
+    let mut made = use_signal(|| 0u64);
     let mut step = use_signal(|| Step::Closed);
     let mut armed = use_signal(|| None::<String>);
     let list: Vec<SaveInfo> = match &*saves.read() {
@@ -202,8 +203,9 @@ fn Saves() -> Element {
                                                 match api.backup(&n).await {
                                                     Ok(b) if !b.paths.is_empty() => ui.say(format!("backed up: {}", b.paths.join(" and "))),
                                                     Ok(b) => {
-                                                        download(&format!("{n} texts.json"), &b.texts.to_string());
-                                                        download(&format!("{n} other.json"), &b.other.to_string());
+                                                        let text = |v: &serde_json::Value| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string());
+                                                        download(&format!("{n} texts.json"), &text(&b.texts));
+                                                        download(&format!("{n} other.json"), &text(&b.other));
                                                         ui.say("backed up: two downloads");
                                                     }
                                                     Err(e) => ui.fail(e),
@@ -242,8 +244,10 @@ fn Saves() -> Element {
             }
             label { r#for: "newsave", "a new save" }
             div { class: "row",
-                input { id: "newsave", r#type: "text", placeholder: "its name", value: "{name}", oninput: move |e| name.set(e.value()) }
-                button { onclick: { let api = api.clone(); move |_| { let n = name(); act(api.new_save(&n), format!("made and opened {n}")); name.set(String::new()); } },
+                for g in [made()] {
+                    input { key: "{g}", id: "newsave", r#type: "text", placeholder: "its name", initial_value: "{name}", oninput: move |e| name.set(e.value()) }
+                }
+                button { onclick: { let api = api.clone(); move |_| { let n = name(); act(api.new_save(&n), format!("made and opened {n}")); name.set(String::new()); made += 1; } },
                     Icon { name: "new" } "make it" }
                 button { class: "plain", onclick: move |_| step.set(Step::Read { target: String::new(), data: String::new(), rows: 0, sample: vec![] }),
                     Icon { name: "upload" } "a new save from all-of-it.json" }
@@ -312,7 +316,7 @@ fn ImportSteps(step: Signal<Step>) -> Element {
                 div { class: "row",
                     if target.is_empty() {
                         "into a new save named"
-                        input { r#type: "text", value: "{new_name}", oninput: move |e| new_name.set(e.value()) }
+                        input { r#type: "text", initial_value: "{new_name}", oninput: move |e| new_name.set(e.value()) }
                     } else {
                         "into “{target}”: keys already there are replaced (the old text kept as a version)"
                     }
@@ -418,7 +422,7 @@ fn Hub() -> Element {
     rsx! {
         Fold { name: "hub", title: "the hub",
             label { r#for: "hub", "its address" }
-            input { id: "hub", r#type: "text", placeholder: "http://localhost:8080", value: "{p.hub_url}",
+            input { id: "hub", r#type: "text", placeholder: "http://localhost:8080", initial_value: "{p.hub_url}",
                 oninput: move |e| set_pref(ui, |p| p.hub_url = e.value()) }
             div { class: "wide dim small", "Sharing saves and models on the hub comes back here when the hub moves to the entry graph." }
         }

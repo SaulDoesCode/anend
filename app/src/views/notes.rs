@@ -77,123 +77,125 @@ pub fn Notes() -> Element {
     let shown_title = anend_core::note::split(&text()).0;
     let api_d = api.clone();
     rsx! {
-        div { class: "notes", style: "position: absolute; inset: 0;",
-            div { class: "card notelist",
-                button {
-                    class: "primary",
-                    onclick: move |_| {
-                        open.set(Some(Note::default()));
-                        text.set("# \n\n".into());
-                        seq += 1;
-                        tags.set(String::new());
-                        dirty.set(false);
-                    },
-                    Icon { name: "new" }
-                    "a new note"
-                }
-                ul { role: "listbox", "aria-label": "notes, newest first",
-                    if notes.is_empty() {
-                        li { class: "dim", "no notes" if !q().is_empty() { " with “{q}”" } }
+            div { class: "notes", style: "position: absolute; inset: 0;",
+                div { class: "card notelist",
+                    button {
+                        class: "primary",
+                        onclick: move |_| {
+                            open.set(Some(Note::default()));
+                            text.set("# \n\n".into());
+                            seq += 1;
+                            tags.set(String::new());
+                            dirty.set(false);
+                        },
+                        Icon { name: "new" }
+                        "a new note"
                     }
-                    for n in notes {
-                        li {
-                            key: "{n.key}",
-                            class: if n.key == cur_key { "on" } else { "" },
-                            title: "{n.title}",
-                            role: "option",
-                            tabindex: "0",
-                            onclick: {
-                                let api = api.clone();
-                                let key = n.key.clone();
-                                move |_| {
+                    ul { role: "listbox", "aria-label": "notes, newest first",
+                        if notes.is_empty() {
+                            li { class: "dim", "no notes" if !q().is_empty() { " with “{q}”" } }
+                        }
+                        for n in notes {
+                            li {
+                                key: "{n.key}",
+                                class: if n.key == cur_key { "on" } else { "" },
+                                title: "{n.title}",
+                                role: "option",
+                                tabindex: "0",
+                                onclick: {
                                     let api = api.clone();
-                                    let key = key.clone();
-                                    dioxus::dioxus_core::spawn_forever(async move {
-                                        match api.note(&key).await {
-                                            Ok(note) => {
-                                                text.set(anend_core::note::compose(&note.title, &note.markdown));
-                                                tags.set(note.tags.join(", "));
-                                                open.set(Some(note));
-                                                seq += 1;
-                                                dirty.set(false);
-                                                armed.set(false);
+                                    let key = n.key.clone();
+                                    move |_| {
+                                        let api = api.clone();
+                                        let key = key.clone();
+                                        dioxus::dioxus_core::spawn_forever(async move {
+                                            match api.note(&key).await {
+                                                Ok(note) => {
+                                                    text.set(anend_core::note::compose(&note.title, &note.markdown));
+                                                    tags.set(note.tags.join(", "));
+                                                    open.set(Some(note));
+                                                    seq += 1;
+                                                    dirty.set(false);
+                                                    armed.set(false);
+                                                }
+                                                Err(e) => ui.fail(e),
                                             }
-                                            Err(e) => ui.fail(e),
-                                        }
-                                    });
-                                }
-                            },
-                            "{n.title}"
-                            span { class: "when", "{when(&n.created)}" if !n.tags.is_empty() { {format!(" · {}", n.tags.join(", "))} } }
-                        }
-                    }
-                }
-            }
-            div { class: "card editor",
-                if let Some(note) = open() {
-                    div { class: "head",
-                        span { class: "title", title: "{shown_title}", "{shown_title}" }
-                        label { class: "row", Icon { name: "tag" }
-                            input { r#type: "text", placeholder: "tags, comma separated", value: "{tags}", "aria-label": "tags",
-                                oninput: move |e| { tags.set(e.value()); dirty.set(true); } }
-                        }
-                        button { class: if dirty() { "primary" } else { "" }, "data-tip": "save · Ctrl+S", "aria-label": "save",
-                            onclick: { let s = save_k.clone(); move |_| s() }, Icon { name: "save" } }
-                        if !note.key.is_empty() {
-                            button {
-                                class: if armed() { "armed" } else { "plain" },
-                                "data-tip": "delete (click twice)",
-                                "aria-label": "delete",
-                                onclick: move |_| {
-                                    if !armed() { armed.set(true); return; }
-                                    let api = api_d.clone();
-                                    let key = note.key.clone();
-                                    dioxus::dioxus_core::spawn_forever(async move {
-                                        match api.delete_note(&key).await {
-                                            Ok(()) => { open.set(None); ui.say("deleted"); ui.touched(); }
-                                            Err(e) => ui.fail(e),
-                                        }
-                                    });
+                                        });
+                                    }
                                 },
-                                Icon { name: "delete" }
-                                if armed() { "delete?" }
+                                "{n.title}"
+                                span { class: "when", "{when(&n.created)}" if !n.tags.is_empty() { {format!(" · {}", n.tags.join(", "))} } }
                             }
                         }
                     }
-                    if !note.created.is_empty() {
-                        span { class: "dim small", "written {when(&note.created)}" if !note.edits.is_empty() { " · {note.edits.len()} edits" } }
-                    }
-                    // not bound to the signal while typing (a round trip per key would drop
-                    // letters typed fast); its text is put in when a note opens
-                    for pad in [format!("{}-{}", cur_key, seq())] {
-                        textarea {
-                            key: "{pad}",
-                            id: "note-pad",
-                            "aria-label": "the note: # title, then markdown",
-                            spellcheck: "true",
-                            onmounted: move |_| {
-                                let js = format!(
-                                    "const p = document.getElementById('note-pad'); if (p) {{ p.value = {}; }}",
-                                    serde_json::to_string(&*text.peek()).unwrap_or_default()
-                                );
-                                document::eval(&js);
-                            },
-                            oninput: move |e| { text.set(e.value()); dirty.set(true); },
-                            onkeydown: {
-                                let s = save.clone();
-                                move |e: KeyboardEvent| {
-                                    if e.modifiers().ctrl() && e.key() == Key::Character("s".into()) {
-                                        e.prevent_default();
-                                        s();
-                                    }
+                }
+                div { class: "card editor",
+                    if let Some(note) = open() {
+                        div { class: "head",
+                            span { class: "title", title: "{shown_title}", "{shown_title}" }
+                            label { class: "row", Icon { name: "tag" }
+    for g in [format!("{}-{}", cur_key, seq())] {
+                                input { key: "{g}", r#type: "text", placeholder: "tags, comma separated", initial_value: "{tags}", "aria-label": "tags",
+                                    oninput: move |e| { tags.set(e.value()); dirty.set(true); } }
+    }
+                            }
+                            button { class: if dirty() { "primary" } else { "" }, "data-tip": "save · Ctrl+S", "aria-label": "save",
+                                onclick: { let s = save_k.clone(); move |_| s() }, Icon { name: "save" } }
+                            if !note.key.is_empty() {
+                                button {
+                                    class: if armed() { "armed" } else { "plain" },
+                                    "data-tip": "delete (click twice)",
+                                    "aria-label": "delete",
+                                    onclick: move |_| {
+                                        if !armed() { armed.set(true); return; }
+                                        let api = api_d.clone();
+                                        let key = note.key.clone();
+                                        dioxus::dioxus_core::spawn_forever(async move {
+                                            match api.delete_note(&key).await {
+                                                Ok(()) => { open.set(None); ui.say("deleted"); ui.touched(); }
+                                                Err(e) => ui.fail(e),
+                                            }
+                                        });
+                                    },
+                                    Icon { name: "delete" }
+                                    if armed() { "delete?" }
                                 }
-                            },
+                            }
                         }
+                        if !note.created.is_empty() {
+                            span { class: "dim small", "written {when(&note.created)}" if !note.edits.is_empty() { " · {note.edits.len()} edits" } }
+                        }
+                        // not bound to the signal while typing (a round trip per key would drop
+                        // letters typed fast); its text is put in when a note opens
+                        for pad in [format!("{}-{}", cur_key, seq())] {
+                            textarea {
+                                key: "{pad}",
+                                id: "note-pad",
+                                "aria-label": "the note: # title, then markdown",
+                                spellcheck: "true",
+                                onmounted: move |_| {
+                                    let js = format!(
+                                        "const p = document.getElementById('note-pad'); if (p) {{ p.value = {}; }}",
+                                        serde_json::to_string(&*text.peek()).unwrap_or_default()
+                                    );
+                                    document::eval(&js);
+                                },
+                                oninput: move |e| { text.set(e.value()); dirty.set(true); },
+                                onkeydown: {
+                                    let s = save.clone();
+                                    move |e: KeyboardEvent| {
+                                        if e.modifiers().ctrl() && e.key() == Key::Character("s".into()) {
+                                            e.prevent_default();
+                                            s();
+                                        }
+                                    }
+                                },
+                            }
+                        }
+                    } else {
+                        div { class: "empty", "Pick a note, or make a new one. A note is a text whose first line is its # title." }
                     }
-                } else {
-                    div { class: "empty", "Pick a note, or make a new one. A note is a text whose first line is its # title." }
                 }
             }
         }
-    }
 }

@@ -150,6 +150,7 @@ pub fn Filters() -> Element {
     let mut since = use_signal(String::new);
     let mut until = use_signal(String::new);
     let mut name = use_signal(String::new);
+    let mut form = use_signal(|| 0u64);
     let mut found: Signal<Option<(u64, Vec<Hit>)>> = use_signal(|| None);
     let api_s = api.clone();
     let saved = use_resource(move || {
@@ -205,6 +206,7 @@ pub fn Filters() -> Element {
                 None => w.words = t,
             }
             drop(w);
+            form += 1;
             run();
             true
         });
@@ -216,27 +218,29 @@ pub fn Filters() -> Element {
     rsx! {
         div { class: "page",
             div { class: "row", h2 { "filters" } span { class: "dim small", "every condition must hold" } }
-            div { class: "card",
+            // remade when a kept filter or the bar fills it (its inputs aren't bound while typing)
+            for g in [form()] {
+            div { key: "{g}", class: "card",
                 div { class: "cond", Icon { name: "search" } "words"
-                    input { r#type: "text", value: "{cur.words}", placeholder: "any", oninput: move |e| q.write().words = e.value() } }
+                    input { r#type: "text", initial_value: "{cur.words}", placeholder: "any", oninput: move |e| q.write().words = e.value() } }
                 div { class: "cond", Icon { name: "hash" } "sum"
                     select { value: "{cur.bucket}", onchange: move |e| q.write().bucket = e.value(),
                         option { value: "", "any" } option { value: "ordinal", "ordinal" } option { value: "reversed", "reversed" } }
-                    "from" input { r#type: "number", value: cur.from.map(|v| v.to_string()).unwrap_or_default(), oninput: move |e| q.write().from = e.value().parse().ok() }
-                    "to" input { r#type: "number", value: cur.to.map(|v| v.to_string()).unwrap_or_default(), oninput: move |e| q.write().to = e.value().parse().ok() } }
+                    "from" input { r#type: "number", initial_value: cur.from.map(|v| v.to_string()).unwrap_or_default(), oninput: move |e| q.write().from = e.value().parse().ok() }
+                    "to" input { r#type: "number", initial_value: cur.to.map(|v| v.to_string()).unwrap_or_default(), oninput: move |e| q.write().to = e.value().parse().ok() } }
                 div { class: "cond", Icon { name: "sort" } "written between"
-                    input { r#type: "date", value: "{since}", oninput: move |e| since.set(e.value()) } "and"
-                    input { r#type: "date", value: "{until}", oninput: move |e| until.set(e.value()) } }
+                    input { r#type: "date", initial_value: "{since}", oninput: move |e| since.set(e.value()) } "and"
+                    input { r#type: "date", initial_value: "{until}", oninput: move |e| until.set(e.value()) } }
                 div { class: "cond", Icon { name: "tag" } "tag"
-                    input { r#type: "text", value: cur.tag.clone().unwrap_or_default(), placeholder: "any", oninput: move |e| { let v = e.value(); q.write().tag = (!v.is_empty()).then_some(v); } } }
+                    input { r#type: "text", initial_value: cur.tag.clone().unwrap_or_default(), placeholder: "any", oninput: move |e| { let v = e.value(); q.write().tag = (!v.is_empty()).then_some(v); } } }
                 div { class: "cond", Icon { name: "filter" } "kind"
                     for (k , label) in [("", "everything"), ("memories", "texts"), ("notes", "notes")] {
                         button { key: "{k}", class: if cur.kind == k { "chip on" } else { "chip" }, onclick: move |_| q.write().kind = k.to_string(), "{label}" }
                     } }
                 div { class: "row",
-                    button { class: "primary", onclick: move |_| run2(), Icon { name: "play" } "run" }
-                    input { r#type: "text", placeholder: "a name to keep it", value: "{name}", oninput: move |e| name.set(e.value()) }
-                    button { disabled: name().trim().is_empty(), onclick: move |_| {
+                    button { class: "primary", onclick: { let run2 = run2.clone(); move |_| run2() }, Icon { name: "play" } "run" }
+                    input { r#type: "text", placeholder: "a name to keep it", initial_value: "{name}", oninput: move |e| name.set(e.value()) }
+                    button { disabled: name().trim().is_empty(), onclick: { let api_save = api_save.clone(); move |_| {
                             let api = api_save.clone();
                             let mut all = saved.peek().clone().unwrap_or_default();
                             let n = name.peek().trim().to_string();
@@ -248,8 +252,9 @@ pub fn Filters() -> Element {
                                     Err(e) => ui.fail(e),
                                 }
                             });
-                        }, Icon { name: "save" } "keep" }
+                        } }, Icon { name: "save" } "keep" }
                 }
+            }
             }
             if !saved_list.is_empty() {
                 div { class: "row",
@@ -259,6 +264,7 @@ pub fn Filters() -> Element {
                                 let run = run.clone();
                                 move |_| {
                                     if let Ok(query) = serde_json::from_value::<EntryQuery>(v["q"].clone()) { q.set(query); }
+                                    form += 1;
                                     since.set(v["since"].as_str().unwrap_or("").to_string());
                                     until.set(v["until"].as_str().unwrap_or("").to_string());
                                     name.set(n.clone());

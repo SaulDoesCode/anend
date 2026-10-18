@@ -60,6 +60,7 @@ pub fn App() -> Element {
         bar_history: Signal::new(Default::default()),
         keys: Signal::new(Vec::new()),
         changed: Signal::new(0),
+        bar_texts: Signal::new(Default::default()),
         seq: Signal::new(0),
     });
 
@@ -191,6 +192,15 @@ fn on_key(mut ui: Ui, api: Api, k: KeyPress) {
 }
 
 pub fn go(mut ui: Ui, v: View) {
+    let from = *ui.view.peek();
+    if from == v {
+        return;
+    }
+    // each view keeps its own bar text
+    let now = ui.bar.peek().clone();
+    ui.bar_texts.write().insert(from, now);
+    let back = ui.bar_texts.peek().get(&v).cloned().unwrap_or_default();
+    ui.set_bar(&back);
     ui.view.set(v);
     ui.prefs.write().view = v.name().to_string();
     ui.save_prefs();
