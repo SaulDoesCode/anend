@@ -148,8 +148,8 @@ async fn app_needs_sign_in() {
         assert!(code == 403 && page.contains("waiting"), "{page}");
         let (code, _, page) = fetch(m, "/app/", Some(&ok)).await;
         assert!(code == 200 && page.contains("<html"), "{code}");
-        assert_eq!(fetch(m, "/app/app.js", None).await.0, 401);
-        assert_eq!(fetch(m, "/app/app.js", Some(&ok)).await.0, 200);
+        assert_eq!(fetch(m, "/app/anend-app.js", None).await.0, 401);
+        assert_eq!(fetch(m, "/app/index.html", Some(&ok)).await.0, 200);
         assert_eq!(app_call(m, None).await, 401);
         assert_eq!(app_call(m, Some(&waiting)).await, 403);
         assert_eq!(app_call(m, Some(&ok)).await, 200);
@@ -447,4 +447,24 @@ async fn visibility() {
     assert!(h.shared_bytes("vz-owner").unwrap() >= 3 * std::fs::metadata(&file).unwrap().len());
     // a bad visibility is refused
     assert!(Details::new("x", "", "").unwrap().seen_by("secret").is_err());
+}
+
+/// `/app/` serves the Dioxus app's page (app/web/dist), or says how to build it when this
+/// binary was built without it; its script and wasm come with the right types
+#[cfg(feature = "app")]
+#[tokio::test]
+async fn app_serves_the_dioxus_page() {
+    setup();
+    let (code, _, page) = fetch(Mode::LOCAL, "/app/", None).await;
+    assert_eq!(code, 200);
+    if page.contains("app/web/build.sh") {
+        // built without the web app: the page says so
+        return;
+    }
+    assert!(page.contains("id=\"main\"") && page.contains("boot.js"), "{page}");
+    let r = TestClient::get(format!("{BASE}/app/anend-app_bg.wasm"))
+        .add_header("host", "127.0.0.1:5800", true)
+        .send(&service(Mode::LOCAL))
+        .await;
+    assert_eq!(r.headers().get("content-type").unwrap(), "application/wasm");
 }

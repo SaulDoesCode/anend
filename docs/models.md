@@ -41,6 +41,7 @@ let bytes = model.to_bytes();                          // weights + spec + codeb
 | `sampling` | for a generate head: `{temperature, top_k, top_p, max_len, stop, seed}` |
 | `train` | `{epochs, batch, lr, val_fraction, patience, max_steps, threads, budget_seconds}` |
 | `seed` | weights' and data split's seed |
+| `device` | where training and generation run: `"cpu"` (default), `"gpu"`, `"gpu_fast"`; see below |
 
 **Inputs** (`input.type`):
 
@@ -159,6 +160,40 @@ head on one trunk), `Example::and` (several targets in one pass), `HeadSpec::wei
 full pass bit for bit). Everything is deterministic: the same data, spec and seeds give
 the same weights and the same samples on any thread count and CPU.
 
+## On the GPU (opt-in per run)
+
+Every model runs on the CPU unless a run asks for the GPU: `"device": "gpu"` in a spec
+(training and generation), `TrainOpts::device` and `GenOpts::device` in Rust
+(`classify::device::Device::{Cpu, Gpu, GpuFast}`). The backend is `classify::gpu`
+(wgpu compute shaders in WGSL — Vulkan, Metal, DX12, GL; the same WGSL is valid WebGPU),
+built only with the cargo feature `gpu`; a default build refuses `"gpu"` with "this build
+has no GPU backend (build with the cargo feature `gpu`)", and wasm builds never pull
+wgpu in.
+
+- What runs on the device: the trunk (every block's norms, projections, attention with
+  its KV cache when decoding, SwiGLU, the final norm) and the generative head, forward
+  and backward. The embedding lookup, pooling, the classification heads, the losses and
+  the optimizer stay on the CPU (a sliver of the work); weights are uploaded after each
+  optimizer step. Critics judge on the CPU.
+- `"gpu"` (exact precision) follows the CPU's operation order kernel by kernel and guards
+  against what GPUs usually do differently (fused multiply-adds, approximate ÷ and √). On
+  a device that rounds each operation once it gives the CPU's bits; whether a device does
+  is measured, not assumed: `gpu::probe::probe(gpu, precision)` runs every kernel on both
+  and reports per kernel how many values differ and by how many ulps. On llvmpipe
+  (lavapipe Vulkan) every kernel, whole forward passes, decoding and training steps match
+  the CPU bit for bit (`cargo test -p anend-core --features gpu gpu::`).
+- `"gpu_fast"` uses the plain operators: faster on real GPUs, within about 1e-4 relative
+  of the CPU per kernel, so results are close but not the CPU's bits.
+- Saved models answer on the CPU (the reference) unless a run asks for the GPU; a model
+  trained on a device the probe did not find exact is a different (equally valid) set of
+  weights from the CPU's.
+- `ANEND_GPU=off` turns the GPU off; `WGPU_BACKEND` (vulkan, metal, dx12, gl) and
+  `WGPU_ADAPTER_NAME` choose among several. Sizes are bounded by the device: the largest
+  buffer the adapter allows (all its limits are requested).
+- `cargo run --release -p anend-core --features gpu --example gpu_bench` prints the
+  device, the probe, and tokens/s on the CPU and GPU (forward, decoding) for the presets,
+  the machine's "auto" size and a ladder of larger trunks up to what the device holds.
+
 ## Sizes, and why each limit is what it is
 
 | limit | reason |
@@ -171,5 +206,4 @@ the same weights and the same samples on any thread count and CPU.
 | codes per codebook ≤ 255 | format: a code is one byte, 255 ends a row |
 | file limits in `io` (width 2048, 64 blocks, 8192 tokens…) | safety: a damaged or hostile file can't make the reader allocate without bound |
 
-The main lever to lift the compute limits is the GPU backend (backlog: `kernels` is the
-boundary it would replace; see `core/src/classify/STATUS.md`).
+The main lever to lift the compute limits is the GPU backend (above; `"device": "gpu"`).

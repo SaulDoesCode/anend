@@ -9,5 +9,6 @@ cargo build -p anend-app --target wasm32-unknown-unknown --no-default-features -
 mkdir -p "$here/dist"
 wasm-bindgen --target web --no-typescript --out-dir "$here/dist" "$target/wasm32-unknown-unknown/release/anend-app.wasm"
 cp "$here/index.html" "$here/dist/index.html"
+cp "$here/boot.js" "$here/dist/boot.js"
 cp "$root/assets/icon.svg" "$here/dist/icon.svg"
 echo "built $here/dist"

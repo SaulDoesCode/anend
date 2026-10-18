@@ -186,7 +186,7 @@ var<workgroup> tb: array<f32, 1024>;
 // y[z][r][c] (+)= Σ_p A[z][r][p]·B[z][p][c], each element one chain in ascending p.
 // u0 (n, k, m, flags: 1 accumulate, 2 causal: p ≤ t0 + r only)
 // u1 (a_off, a_rs, a_ps, a_zs)  u2 (b_off, b_ps, b_cs, b_zs)  u3 (y_off, y_rs, y_zs, ·)
-// u4 (t0, ·, ·, ·); b1 A, b2 B, b3 y. Tiles of 64×64 outputs, 4×4 per thread, p in
+// u4 (t0, batch, per, ·): B's batch index is z / per (grouped keys and values); b1 A, b2 B, b3 y. Tiles of 64×64 outputs, 4×4 per thread, p in
 // steps of 16 through workgroup memory (which keeps every chain in order).
 @compute @workgroup_size(16, 16)
 fn gemm(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>, @builtin(local_invocation_index) li: u32) {
@@ -198,7 +198,7 @@ fn gemm(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
     let t0 = p.u4.x;
     let z = wid.z;
     let ab = p.u1.x + z * p.u1.w;
-    let bb = p.u2.x + z * p.u2.w;
+    let bb = p.u2.x + (z / max(p.u4.z, 1u)) * p.u2.w;
     let yb = p.u3.x + z * p.u3.z;
     let r0 = wid.y * 64u;
     let c0 = wid.x * 64u;
@@ -276,7 +276,7 @@ fn gemm_small(@builtin(workgroup_id) wid: vec3<u32>, @builtin(num_workgroups) nw
     let r = (i / m) % n;
     let c = i % m;
     let ab = p.u1.x + z * p.u1.w + r * p.u1.y;
-    let bb = p.u2.x + z * p.u2.w + c * p.u2.z;
+    let bb = p.u2.x + (z / max(p.u4.z, 1u)) * p.u2.w + c * p.u2.z;
     let yi = p.u3.x + z * p.u3.z + r * p.u3.y + c;
     var v = 0.0;
     if ((p.u0.w & 1u) == 1u) {
@@ -293,7 +293,8 @@ fn gemm_small(@builtin(workgroup_id) wid: vec3<u32>, @builtin(num_workgroups) nw
 }
 
 // causal attention scores: S[h][t][s] = dot8(q[h][t], k[h][s])·scale for s ≤ t0 + t,
-// else 0. u0 (n_q, width, dh, heads) u1 (q_off, q_hs, k_off, k_hs) u2 (s_off, t0, ·, ·)
+// else 0; head h reads key head h / per. u0 (n_q, width, dh, heads) u1 (q_off, q_hs, k_off, k_hs)
+// u2 (s_off, t0, per, ·)
 // f0.x scale; b1 q, b2 k, b3 S
 @compute @workgroup_size(64)
 fn scores(@builtin(workgroup_id) wid: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>, @builtin(local_invocation_index) li: u32) {
@@ -310,7 +311,7 @@ fn scores(@builtin(workgroup_id) wid: vec3<u32>, @builtin(num_workgroups) nw: ve
     var v = 0.0;
     if (s <= p.u2.y + t) {
         let qb = p.u1.x + h * p.u1.y + t * dh;
-        let kb = p.u1.z + h * p.u1.w + s * dh;
+        let kb = p.u1.z + (h / max(p.u2.z, 1u)) * p.u1.w + s * dh;
         var l: array<f32, 8>;
         for (var j = 0u; j < 8u; j = j + 1u) {
             l[j] = 0.0;

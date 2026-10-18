@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use super::bench::{self, MachineProfile, Task};
 use super::codec::{Codebook, Image, NumberCodec};
+use super::device::Device;
 use super::generate::{self, Candidate, Constraints, Critic, GenOpts, Judge, Sampling, Want};
 use super::model::{Config, GenSpec, HeadKind, HeadSpec, Pooling};
 use super::steer::Output;
@@ -242,6 +243,14 @@ pub struct ModelSpec {
     pub train: TrainSpec,
     #[serde(default)]
     pub seed: u64,
+    /// where training and generation run: "cpu" (the default and the reference),
+    /// "gpu" (exact precision) or "gpu_fast"; a GPU needs the `gpu` build feature
+    #[serde(default, skip_serializing_if = "is_cpu")]
+    pub device: Device,
+}
+
+fn is_cpu(d: &Device) -> bool {
+    *d == Device::Cpu
 }
 
 /// the data behind queries: the save (the entry store implements this), or memory
@@ -540,6 +549,7 @@ impl ModelSpec {
             max_steps: t.max_steps.unwrap_or(0),
             threads: t.threads.unwrap_or(0),
             seed: self.seed,
+            device: self.device,
             ..d
         }
     }
@@ -680,6 +690,7 @@ impl Model {
             sampling: Sampling::default(),
             train: TrainSpec::default(),
             seed: clf.meta.seed,
+            device: Device::Cpu,
         };
         Model {
             spec,
@@ -1001,6 +1012,7 @@ pub fn generate(
         sampling: model.spec.sampling.clone(),
         candidates,
         guidance,
+        device: model.spec.device,
         ..GenOpts::default()
     };
     generate::generate(&model.clf, &critics, &model.spec.constraints, &opts)

@@ -1,4 +1,5 @@
-//! The web app's side of the hub: its files (hub/web, built into the binary), the
+//! The web app's side of the hub: its files (the Dioxus app's web build, app/web/dist,
+//! built into the binary; `app/web/build.sh` makes it before `cargo build -p anend-hub`), the
 //! WebSocket and the plain posts that reach app.rs, and moving saves between a
 //! workspace, the hub and your computer.
 
@@ -34,8 +35,11 @@ fn refusal(depot: &Depot) -> StatusCode {
 }
 
 #[derive(RustEmbed)]
-#[folder = "web/"]
+#[folder = "../app/web/dist/"]
 struct Files;
+
+/// the page when the web app wasn't built into this binary
+const NOT_BUILT: &str = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>anend</title></head><body style=\"font: 16px system-ui; padding: 24px\"><p>The web app isn't built into this hub. Run <code>app/web/build.sh</code>, then build the hub again (docs/deploy.md).</p></body></html>";
 
 fn kind(path: &str) -> &'static str {
     match path.rsplit('.').next() {
@@ -46,6 +50,7 @@ fn kind(path: &str) -> &'static str {
         Some("json") => "application/json",
         Some("png") => "image/png",
         Some("woff2") => "font/woff2",
+        Some("wasm") => "application/wasm",
         _ => "application/octet-stream",
     }
 }
@@ -86,20 +91,26 @@ fn page(depot: &Depot, res: &mut Response) {
 }
 
 fn serve(res: &mut Response, path: &str, m: crate::mode::Mode) {
+    // which server this is: "hub" when the hub is here too; "local" for a --local server
+    // (no accounts, nothing to share on); "app" for the app alone
+    let what = match (m.local, m.hub) {
+        (true, _) => "local",
+        (_, true) => "hub",
+        _ => "app",
+    };
+    if path == "index.html" && Files::get(path).is_none() {
+        res.headers_mut()
+            .insert(CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"));
+        res.headers_mut().insert("x-anend", HeaderValue::from_static(what));
+        res.write_body(NOT_BUILT).ok();
+        return;
+    }
     match Files::get(path) {
         Some(f) => {
             res.headers_mut()
                 .insert(CONTENT_TYPE, HeaderValue::from_static(kind(path)));
             res.headers_mut()
                 .insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-            // how the page knows a server served it (api.js), and not a static server:
-            // "hub" when the hub is here too; "local" for a --local server (no accounts,
-            // nothing to share on); "app" for the app alone (no hub to share on)
-            let what = match (m.local, m.hub) {
-                (true, _) => "local",
-                (_, true) => "hub",
-                _ => "app",
-            };
             res.headers_mut().insert("x-anend", HeaderValue::from_static(what));
             res.write_body(f.data.into_owned()).ok();
         }

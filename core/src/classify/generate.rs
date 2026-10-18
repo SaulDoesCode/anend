@@ -18,9 +18,9 @@ use serde::{Deserialize, Serialize};
 
 use super::Classifier;
 use super::compose::Graph;
+use super::device::{self, Device, Runner};
 use super::kernels::softmax_rows;
 use super::math::{self, Rng, key};
-use super::model::Decoder;
 use super::pool::{self, Pool};
 use super::steer::Output;
 use super::train::{self, Example, FeedbackOpts, Target};
@@ -138,7 +138,7 @@ fn log_prob(logits: &[f32], i: usize) -> f32 {
 /// one sample: the written bytes (prompt excluded) and their log-probability under the
 /// generator (unguided, temperature 1). `index` keys the random stream.
 pub fn sample(generator: &Classifier, prompt: &[u8], s: &Sampling, index: u64) -> (Vec<u8>, f32) {
-    sample_guided(generator, prompt, s, index, None)
+    sample_guided(generator, prompt, s, index, None, None)
 }
 
 /// reweights scaled next-byte logits in place, given the bytes written so far
@@ -150,10 +150,11 @@ fn sample_guided(
     s: &Sampling,
     index: u64,
     guide: Option<Guide>,
+    runner: Option<&Runner>,
 ) -> (Vec<u8>, f32) {
     let mut r = Rng::new(key(&[s.seed, index, 0x5a3e]));
     let net = &generator.net;
-    let mut dec = Decoder::new(net, generator.gains(), prompt);
+    let mut dec = device::decoder(runner, net, generator.gains(), prompt);
     let mut out = Vec::new();
     let mut logp = 0f32;
     while out.len() < s.max_len {
@@ -409,6 +410,8 @@ pub struct GenOpts {
     pub judge_prompt: bool,
     /// 0 for every core
     pub threads: usize,
+    /// where the generator decodes (the CPU unless asked; critics stay on the CPU)
+    pub device: Device,
 }
 
 impl Default for GenOpts {
@@ -421,6 +424,7 @@ impl Default for GenOpts {
             guidance: None,
             judge_prompt: false,
             threads: 0,
+            device: Device::Cpu,
         }
     }
 }
@@ -493,6 +497,8 @@ pub fn draw(
     } else {
         opts.threads
     });
+    // the generator on the device, when asked (one upload shared by every candidate)
+    let runner = Runner::open(opts.device, &generator.net)?;
     let one = |i: u64| -> Candidate {
         let shown = |out: &[u8]| -> Vec<u8> {
             if opts.judge_prompt {
@@ -529,6 +535,7 @@ pub fn draw(
             &opts.sampling,
             i,
             if opts.guidance.is_some() { Some(&guide) } else { None },
+            runner.as_ref(),
         );
         let seen = shown(&bytes);
         let (outs, scores) = judge_all(critics, &seen);

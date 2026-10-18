@@ -107,9 +107,10 @@ fn guard_headers(req: &Request, res: &mut Response) {
     h.insert("content-security-policy", HeaderValue::from_static(csp));
 }
 
-/// the web app's policy: its own scripts only; styles inline too (the editor's mirror and
-/// the views set them); pictures in notes from anywhere on the web; calls to the hub
-pub const APP_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' ws: wss:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
+/// the web app's policy: its own scripts, its WebAssembly, and what it builds in the page
+/// (Dioxus's interop evaluates JavaScript it sends; the space loads three.js from a blob);
+/// styles inline too (the views set them); pictures from anywhere on the web; calls to the hub
+pub const APP_CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' ws: wss:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
 
 /// loads the user behind the session cookie (or app token), turns away forms posted from
 /// other sites, and picks up the message left by the last redirect

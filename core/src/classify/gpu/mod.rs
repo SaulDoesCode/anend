@@ -20,6 +20,7 @@ pub mod net;
 pub mod probe;
 #[cfg(test)]
 mod tests;
+pub mod train;
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -252,7 +253,10 @@ impl Gpu {
 
     /// the largest buffer the device takes, in f32s
     pub fn max_floats(&self) -> usize {
-        self.limits.max_storage_buffer_binding_size.min(self.limits.max_buffer_size) as usize / 4
+        self.limits
+            .max_storage_buffer_binding_size
+            .min(self.limits.max_buffer_size) as usize
+            / 4
     }
 
     fn module(&self, prec: Precision) -> &wgpu::ShaderModule {
@@ -570,6 +574,7 @@ impl<'g> Run<'g> {
             0,
             causal.unwrap_or(0) as u32,
             z as u32,
+            b.per as u32,
         ];
         let p = Params::new(&u);
         if n < 16 {
@@ -684,6 +689,7 @@ impl<'g> Run<'g> {
         heads: usize,
         t0: usize,
         scale: f32,
+        per: usize,
     ) {
         let p = Params::new(&[
             nq as u32,
@@ -696,6 +702,7 @@ impl<'g> Run<'g> {
             k.2 as u32,
             s.1 as u32,
             t0 as u32,
+            per as u32,
         ])
         .f(&[scale]);
         self.op("scores", &[q.0, k.0, s.0], p, grid(heads * nq * width, 64));
@@ -825,6 +832,8 @@ pub struct View<'a> {
     pub s0: usize,
     pub s1: usize,
     pub zs: usize,
+    /// batched products: product z reads this operand's slice z / per (B only)
+    pub per: usize,
 }
 
 impl<'a> View<'a> {
@@ -836,6 +845,7 @@ impl<'a> View<'a> {
             s0: cols,
             s1: 1,
             zs: 0,
+            per: 1,
         }
     }
 
@@ -847,6 +857,7 @@ impl<'a> View<'a> {
             s0: 1,
             s1: cols,
             zs: 0,
+            per: 1,
         }
     }
 
@@ -858,5 +869,22 @@ impl<'a> View<'a> {
     pub fn batch(mut self, zs: usize) -> View<'a> {
         self.zs = zs;
         self
+    }
+
+    pub fn per(mut self, per: usize) -> View<'a> {
+        self.per = per;
+        self
+    }
+
+    /// a strided view: offset, two strides, batch stride
+    pub fn of(buf: &'a Buf, off: usize, s0: usize, s1: usize, zs: usize) -> View<'a> {
+        View {
+            buf,
+            off,
+            s0,
+            s1,
+            zs,
+            per: 1,
+        }
     }
 }

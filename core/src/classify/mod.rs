@@ -29,6 +29,7 @@ pub mod bench;
 pub mod bpe;
 pub mod codec;
 pub mod compose;
+pub mod device;
 pub mod generate;
 #[cfg(feature = "gpu")]
 pub mod gpu;

@@ -308,6 +308,7 @@ pub fn probe(g: &Gpu, prec: Precision) -> Report {
         2,
         0,
         scale,
+        1,
     );
     r.submit();
     let mut cv = vec![0f32; 2 * nq * nq];

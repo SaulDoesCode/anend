@@ -19,6 +19,23 @@ Every mode has the accounts (`/join`, `/login`, `/u/{name}`, app tokens), the ad
 mode doesn't exist (a 404), and the pages only offer what's there. One data folder works
 in any mode: switching modes keeps every account, save and setting.
 
+### The web app inside
+
+The web app at `/app/` is the Dioxus app's web build (`app/`), built into the hub's
+binary from `app/web/dist`. Build it first (it needs the `wasm32-unknown-unknown` target
+and `wasm-bindgen` at the version in Cargo.lock), then the hub:
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.129   # the version Cargo.lock pins
+app/web/build.sh                                   # writes app/web/dist
+cargo build --release -p anend-hub
+```
+
+A hub built without it still runs; its `/app/` page says to run `app/web/build.sh` and
+build again. (A debug build reads `app/web/dist` from disk, so rebuilding the web app is
+enough there.)
+
 ### Builds without a half
 
 Cargo features `hub` and `app` (both by default):

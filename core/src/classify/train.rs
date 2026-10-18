@@ -14,6 +14,7 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
+use super::device::{Device, Trainer};
 use super::kernels::{self as k, softmax_rows};
 use super::math::{self, Rng, key, mix};
 use super::metrics::{self, Metrics};
@@ -824,6 +825,9 @@ pub struct TrainOpts {
     /// keep an exponential moving average of the weights with this decay (0: off);
     /// evaluation, early stopping and the result use the average
     pub ema: f32,
+    /// where the forward and backward passes run (the CPU unless asked; see `device`)
+    #[serde(default)]
+    pub device: Device,
 }
 
 impl Default for TrainOpts {
@@ -849,6 +853,7 @@ impl Default for TrainOpts {
             freeze_trunk: false,
             max_steps: 0,
             ema: 0.0,
+            device: Device::Cpu,
         }
     }
 }
@@ -1010,6 +1015,7 @@ pub fn fit(
     let train_mask = trainable(&clf.net, o.freeze_trunk);
     let mut adam = Adam::new(&clf.net);
     let bufs = buffers(&clf.net, pool.threads());
+    let mut dev = Trainer::open(o.device, &clf.net)?;
     let mut grad = clf.net.zeros_like();
     let mut report = TrainReport {
         train_examples: train.len(),
@@ -1066,7 +1072,19 @@ pub fn fit(
                     how: How::Crop(key(&[o.seed, base_steps + step as u64, i as u64])),
                 })
                 .collect();
-            let (loss, tk) = batch_grad(&clf.net, data, &items, o.label_smoothing, &pool, &bufs, &mut grad);
+            let (loss, tk) = match dev.as_mut() {
+                Some(dv) => {
+                    let crops: Vec<(usize, f32, u64)> = items
+                        .iter()
+                        .map(|it| match it.how {
+                            How::Crop(kk) => (it.ex, it.coef, kk),
+                            How::Whole => unreachable!("training crops"),
+                        })
+                        .collect();
+                    dv.batch(&clf.net, data, &crops, o.label_smoothing, &mut grad)
+                }
+                None => batch_grad(&clf.net, data, &items, o.label_smoothing, &pool, &bufs, &mut grad),
+            };
             tokens += tk as u64;
             let (scale, norm) = clip_scale(&grad, o.clip, &train_mask);
             let lr = lr_at(step, total, warmup, o.lr, o.min_lr);
