@@ -1,6 +1,7 @@
 //! The views. Every view stays mounted (the space keeps its scene, each view its page and
 //! scroll) and loads when first shown; only the open one is visible.
 
+pub mod classifiers;
 pub mod lists;
 pub mod memory;
 pub mod models;
@@ -40,7 +41,7 @@ pub fn ViewHost(view: View) -> Element {
                 View::Notes => rsx! { notes::Notes {} },
                 View::Tags => rsx! { tags::Tags {} },
                 View::Stats => rsx! { stats::Stats {} },
-                View::Models => rsx! { models::Models {} },
+                View::Models => rsx! { classifiers::Models {} },
                 View::Filters => rsx! { models::Filters {} },
             }
         }

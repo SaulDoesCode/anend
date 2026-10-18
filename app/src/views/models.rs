@@ -1,10 +1,4 @@
-//! Models and filters.
-//!
-//! **Models** are general tools built from a declarative spec (inputs, heads, data, critics;
-//! docs/models.md, being written in core/src/classify). Until it lands this view is the
-//! builder's frame: the spec's parts as cards, and train / run / feedback panels over the
-//! classifier calls the backend has (the hub's; the desktop's graph backend says "not
-//! yet"). Every verdict given can be taken back (Ctrl+Z).
+//! Filters (the models view is `classifiers.rs`).
 //!
 //! **Filters** run the query model (`entries.query`): words, a sum range, a time range, a
 //! tag and a kind, intersected. Filters are kept in the save's settings by name.
@@ -12,135 +6,9 @@
 use dioxus::prelude::*;
 use serde_json::{Value, json};
 
-use crate::backend::{EntryQuery, Hit, ModelSummary};
+use crate::backend::{EntryQuery, Hit};
 use crate::ui::*;
 use crate::views::use_keys;
-
-#[component]
-pub fn Models() -> Element {
-    let ui = ui();
-    let api = api();
-    let mut chosen: Signal<Option<String>> = use_signal(|| None);
-    let mut out: Signal<Option<Value>> = use_signal(|| None);
-    let api_r = api.clone();
-    let models = use_resource(move || {
-        let api = api_r.clone();
-        let _ = (ui.changed)();
-        async move { api.models().await }
-    });
-    {
-        let api = api.clone();
-        use_keys(View::Models, move |k: KeyPress| {
-            if !(k.bar && k.key == "Enter") {
-                return false;
-            }
-            let Some(name) = chosen.peek().clone() else {
-                ui.fail("pick a model first");
-                return true;
-            };
-            let (api, text) = (api.clone(), k.text.trim().to_string());
-            dioxus::dioxus_core::spawn_forever(async move {
-                match api.run_model(&name, &text).await {
-                    Ok(v) => out.set(Some(v)),
-                    Err(e) => ui.fail(e),
-                }
-            });
-            true
-        });
-    }
-    let (list, note): (Vec<ModelSummary>, Option<String>) = match &*models.read() {
-        Some(Ok(v)) => (v.clone(), None),
-        Some(Err(e)) => (vec![], Some(e.clone())),
-        None => (vec![], None),
-    };
-    rsx! {
-        div { class: "page",
-            div { class: "row", h2 { "models" } span { class: "dim small", "general tools from a declarative spec: inputs, heads, data, critics" } }
-            if let Some(n) = note {
-                div { class: "card dim", "{n}" }
-            }
-            div { class: "builder",
-                div { class: "card", h3 { Icon { name: "text" } "inputs" } p { class: "dim small", "texts or bytes, numbers, small images; optional feature channels (the sums among them, off by default)" } }
-                div { class: "card", h3 { Icon { name: "classifier" } "heads" } p { class: "dim small", "classify, multi-label, regress, generate" } }
-                div { class: "card", h3 { Icon { name: "list" } "data" } p { class: "dim small", "queries over lists, tags and entries" } }
-                div { class: "card", h3 { Icon { name: "shield" } "critics" } p { class: "dim small", "models that judge another's outputs, for guided generation" } }
-            }
-            if !list.is_empty() {
-                div { class: "card",
-                    h3 { "in this save" }
-                    div { class: "results",
-                        for m in list {
-                            div { key: "{m.name}", class: "result",
-                                button { class: if chosen() == Some(m.name.clone()) { "chip on" } else { "chip" },
-                                    onclick: { let n = m.name.clone(); move |_| chosen.set(Some(n.clone())) }, "{m.name}" }
-                                span { class: "t dim", {format!("{} · {}{}", m.classes.join(", "), if m.trained { "trained" } else { "not trained" }, m.accuracy.map(|a| format!(" · accuracy {:.0}%", a * 100.0)).unwrap_or_default())} }
-                                button { class: "plain", "data-tip": "train", "aria-label": "train",
-                                    onclick: { let (api, n) = (api.clone(), m.name.clone()); move |_| {
-                                        let (api, n) = (api.clone(), n.clone());
-                                        dioxus::dioxus_core::spawn_forever(async move {
-                                            match api.train_model(&n, 4).await { Ok(j) => ui.say(format!("{n}: {}", j.state)), Err(e) => ui.fail(e) }
-                                        });
-                                    } },
-                                    Icon { name: "play" } }
-                            }
-                        }
-                    }
-                }
-            }
-            if let (Some(name), Some(v)) = (chosen(), out()) {
-                RunPanel { name, v }
-            }
-        }
-    }
-}
-
-/// a run's outputs, with yes / no on each class (taken back by Ctrl+Z)
-#[component]
-fn RunPanel(name: String, v: Value) -> Element {
-    let ui = ui();
-    let api = api();
-    let classes: Vec<String> = v["classes"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|c| c.as_str().map(str::to_string))
-        .collect();
-    let r = v["results"][0].clone();
-    let text = r["text"].as_str().unwrap_or("").to_string();
-    let probs: Vec<f64> = r["probs"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_f64)
-        .collect();
-    rsx! {
-        div { class: "card",
-            h3 { "“{text}”" }
-            div { class: "results",
-                for (i , c) in classes.into_iter().enumerate() {
-                    div { key: "{c}", class: "result",
-                        span { class: "t", "{c}" }
-                        span { class: "probbar", span { style: "width: {probs.get(i).copied().unwrap_or(0.0) * 100.0:.1}%;" } }
-                        span { class: "p", {format!("{:.0}%", probs.get(i).copied().unwrap_or(0.0) * 100.0)} }
-                        for yes in [true, false] {
-                            button { class: "plain", "aria-label": if yes { "yes" } else { "no" }, "data-tip": if yes { "yes, it is" } else { "no, it isn't" },
-                                onclick: { let (api, n, t, c) = (api.clone(), name.clone(), text.clone(), c.clone()); move |_| {
-                                    let (api, n, t, c) = (api.clone(), n.clone(), t.clone(), c.clone());
-                                    dioxus::dioxus_core::spawn_forever(async move {
-                                        match api.model_feedback(&n, None, &t, &c, yes).await {
-                                            Ok(_) => { ui.did(Did::Feedback { model: n }); ui.say("told it; Ctrl+Z takes it back"); }
-                                            Err(e) => ui.fail(e),
-                                        }
-                                    });
-                                } },
-                                Icon { name: if yes { "check" } else { "close" } } }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
 
 #[component]
 pub fn Filters() -> Element {

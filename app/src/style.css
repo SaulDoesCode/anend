@@ -367,3 +367,39 @@ kbd { font: 12px var(--mono); border: 1px solid color-mix(in srgb, var(--dim) 50
 .md img { max-width: 100%; }
 .md a { color: var(--link); }
 .import input[type=text] { background: var(--cards); }
+
+/* ---------------------------------------------------------------- classifiers */
+.page.wide { max-width: 1180px; }
+.cls-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: var(--gap); align-items: start; }
+.cls-list { display: flex; flex-direction: column; gap: 2px; padding: 6px; position: sticky; top: 0; max-height: calc(100vh - var(--top) - var(--barh) - 60px); overflow: auto; }
+button.cls-item { display: flex; flex-direction: column; align-items: flex-start; height: auto; padding: 4px 8px; gap: 0; background: none; color: var(--text); text-align: left; white-space: normal; }
+button.cls-item:hover { background: color-mix(in srgb, var(--buttons) 35%, transparent); filter: none; }
+button.cls-item.on { background: var(--accent); color: var(--on-button); }
+button.cls-item .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; opacity: .85; }
+button.cls-item .state { font-size: 11px; opacity: .7; }
+.cls-main, .cls-page { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
+.cls-head h2 { margin: 0 6px 0 0; overflow-wrap: anywhere; }
+.chip.cls-class { background: hsl(var(--hue) 40% 52%); color: #fff; }
+.form { display: grid; grid-template-columns: minmax(110px, 170px) minmax(0, 1fr); gap: 6px 12px; align-items: center; padding: 4px 0 8px; }
+.form > label { color: var(--dim); }
+.form .col { display: flex; flex-direction: column; gap: 4px; }
+.card h3 { display: flex; align-items: center; gap: 6px; }
+.progress { height: 10px; background: var(--pad); border-radius: 5px; overflow: hidden; margin: 6px 0 4px; }
+.progress span { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+svg.spark { display: block; margin-top: 4px; overflow: visible; }
+svg.spark polyline { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; }
+table.confusion { border-collapse: collapse; font-size: 12.5px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+table.confusion th, table.confusion td { padding: 2px 8px; text-align: right; border-bottom: 1px solid color-mix(in srgb, var(--dim) 20%, transparent); }
+table.confusion th:first-child { text-align: left; }
+table.confusion thead th { font-weight: 400; color: var(--dim); }
+table.confusion td.hit { font-weight: 700; }
+table.confusion td.miss { color: var(--bad); }
+.result.best .t { font-weight: 700; }
+.cls-new .chip.on, .cls-page .chip.on { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--text) 60%, transparent); font-weight: 600; }
+.result .t .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: hsl(var(--hue) 45% 55%); margin-right: 6px; }
+.probbar.wide { width: min(260px, 34%); height: 8px; }
+.num { font: 12px var(--mono); color: var(--dim); width: 44px; text-align: right; flex: none; }
+.t.dim.small { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+@media (max-width: 700px) { .cls-layout { grid-template-columns: 1fr; } .cls-list { position: static; max-height: 30vh; } }
+/* the page's controls sit at the right: their tips open leftwards, inside the window */
+.page.wide [data-tip]::after { left: auto; right: 0; transform: none; }
