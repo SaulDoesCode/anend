@@ -26,6 +26,7 @@
 //! boundary a GPU implementation would replace.
 
 pub mod bench;
+pub mod bpe;
 pub mod codec;
 pub mod compose;
 pub mod generate;
@@ -35,7 +36,9 @@ pub mod kernels;
 pub mod math;
 pub mod metrics;
 pub mod model;
+pub mod pattern;
 pub mod pool;
+pub mod safetensors;
 pub mod spec;
 pub mod steer;
 pub mod text;
