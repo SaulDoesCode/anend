@@ -320,6 +320,7 @@ fn summary(store: &Store, d: &clfs::Definition) -> Value {
         "not": d.not,
         "head": head_name(d.head),
         "preset": d.preset,
+        "gematria": d.gematria,
         "inputs": d.inputs,
         "trained": d.trained(),
         "version": d.version,
@@ -507,7 +508,16 @@ pub fn call(store: Arc<Store>, op: &str, args: &Value) -> Res {
                 "" => clfs::DEFAULT_PRESET,
                 p => p,
             };
-            let def = st.create_classifier(name_arg(args)?, &classes, not.as_ref(), head, preset, inputs_arg(args)?)?;
+            let gematria = args.get("gematria").and_then(Value::as_bool).unwrap_or(false);
+            let def = st.create_classifier_with(
+                name_arg(args)?,
+                &classes,
+                not.as_ref(),
+                head,
+                preset,
+                inputs_arg(args)?,
+                gematria,
+            )?;
             details(st, &def)
         }
         "classify.get" => details(st, &st.classifier(name_arg(args)?)?),

@@ -143,7 +143,13 @@ fn long_texts_average_their_windows() {
 #[test]
 fn steering_and_its_bias_metric() {
     let data = synthetic(60, 6);
-    let mut clf = tiny_clf(6);
+    // with the gematria channels, so the side vector's gain has something to change
+    let mut clf = Classifier::new(
+        Config::tiny().gematria(true),
+        &[HeadSpec::single("kind", &["fruit", "rock"])],
+        6,
+    )
+    .unwrap();
     train::train(&mut clf, &data, &quick_opts(2), |_| Flow::Go).unwrap();
     let texts: Vec<&str> = data.iter().map(|e| e.text.as_str()).collect();
     let pool = Pool::new(2);
@@ -257,4 +263,28 @@ fn multi_output_models_train_heads_jointly() {
     assert_eq!(back.net.generator, m.net.generator);
     assert_eq!(back.net.heads[0].spec.weight, 2.0);
     assert_eq!(back.predict("granite slate", &[]), m.predict("granite slate", &[]));
+}
+
+/// a version 2 file saved while the presets still had the gematria channels on (18 Oct):
+/// it keeps them, and answers with exactly the bits it gave then
+#[test]
+fn gematria_files_keep_their_channels_bit_exact() {
+    let clf = Classifier::from_bytes(include_bytes!("testdata/v2_gematria.anendcls")).unwrap();
+    assert!(clf.net.cfg.letters && clf.net.cfg.words && clf.net.cfg.side);
+    assert!(!Config::tiny().letters && !Config::small().words && !Config::base().side);
+    let l = clf.logits("granite and peach, 1234!", &[]);
+    let bits: Vec<Vec<u32>> = l.iter().map(|h| h.iter().map(|v| v.to_bits()).collect()).collect();
+    assert_eq!(bits, vec![vec![3199179086, 1054726511]]);
+    let p: Vec<u32> = clf.predict("slate and plum", &[])[0]
+        .probs
+        .iter()
+        .map(|v| v.to_bits())
+        .collect();
+    assert_eq!(p, [1057944601, 1055004622]);
+    assert_eq!(
+        Classifier::from_bytes(&clf.to_bytes())
+            .unwrap()
+            .logits("granite and peach, 1234!", &[]),
+        l
+    );
 }

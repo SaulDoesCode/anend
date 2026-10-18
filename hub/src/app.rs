@@ -125,14 +125,28 @@ fn open_models() -> &'static Mutex<HashMap<PathBuf, Weak<Store>>> {
 
 /// a save's classifiers, reading its graph's texts
 pub fn models_at(path: &Path, graph: Arc<Graph>) -> Result<Arc<Store>, String> {
-    let mut all = open_models().lock().unwrap_or_else(|e| e.into_inner());
-    all.retain(|_, w| w.strong_count() > 0);
-    if let Some(s) = all.get(path).and_then(Weak::upgrade) {
-        return Ok(s);
+    // the last holder (a training thread, say) may still be closing the file: its handle
+    // is gone from the map but redb hasn't let go of the lock yet, so wait a moment
+    for _ in 0..200 {
+        let mut all = open_models().lock().unwrap_or_else(|e| e.into_inner());
+        all.retain(|_, w| w.strong_count() > 0);
+        if let Some(s) = all.get(path).and_then(Weak::upgrade) {
+            return Ok(s);
+        }
+        match Store::open_over(path, Arc::new(GraphTexts(graph.clone()))) {
+            Ok(s) => {
+                let s = Arc::new(s);
+                all.insert(path.to_path_buf(), Arc::downgrade(&s));
+                return Ok(s);
+            }
+            Err(e) if e.contains("already open") => {
+                drop(all);
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            Err(e) => return Err(e),
+        }
     }
-    let s = Arc::new(Store::open_over(path, Arc::new(GraphTexts(graph)))?);
-    all.insert(path.to_path_buf(), Arc::downgrade(&s));
-    Ok(s)
+    Err("the classifiers are busy closing; try again".into())
 }
 
 impl Workspace {

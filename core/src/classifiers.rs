@@ -108,6 +108,10 @@ pub struct Definition {
     pub head: HeadKind,
     /// "tiny", "compact", "small" or "base" (see `preset`)
     pub preset: String,
+    /// the gematria input channels (letter values, word sums, the side vector): opt-in,
+    /// off for new classifiers; definitions saved before it was optional had them on
+    #[serde(default = "yes")]
+    pub gematria: bool,
     pub steer: Steer,
     #[serde(default)]
     pub inputs: Vec<Input>,
@@ -143,6 +147,10 @@ pub struct FeedbackEntry {
     /// the class's unsteered probability before and after
     pub before: f32,
     pub after: f32,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// the sizes on offer, smallest first
@@ -252,6 +260,7 @@ impl Definition {
             not,
             head,
             preset: preset_name.into(),
+            gematria: false,
             steer: Steer {
                 gains: Default::default(),
                 heads: vec![],
@@ -317,7 +326,7 @@ impl Definition {
     /// a fresh, untrained classifier for this definition; `extra` is the width of its
     /// upstream inputs
     pub fn build(&self, extra: usize) -> StoreResult<Classifier> {
-        let mut cfg = preset(&self.preset).ok_or("unknown preset")?;
+        let mut cfg = preset(&self.preset).ok_or("unknown preset")?.gematria(self.gematria);
         cfg.extra = extra;
         let names = self.class_names();
         let names: Vec<&str> = names.iter().map(String::as_str).collect();
@@ -602,7 +611,8 @@ impl Store {
     }
 
     /// a new classifier over lists (by label): `classes` the lists, `not` an optional
-    /// list of texts that are none of them, `inputs` classifiers it builds on
+    /// list of texts that are none of them, `inputs` classifiers it builds on; no
+    /// gematria channels (see `create_classifier_with`)
     pub fn create_classifier(
         &self,
         name: &str,
@@ -611,6 +621,22 @@ impl Store {
         head: HeadKind,
         preset_name: &str,
         inputs: Vec<Input>,
+    ) -> StoreResult<Definition> {
+        self.create_classifier_with(name, classes, not, head, preset_name, inputs, false)
+    }
+
+    /// `create_classifier`, with the gematria input channels (letter values, word sums,
+    /// the side vector) on when `gematria`
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_classifier_with(
+        &self,
+        name: &str,
+        classes: &[Ref],
+        not: Option<&Ref>,
+        head: HeadKind,
+        preset_name: &str,
+        inputs: Vec<Input>,
+        gematria: bool,
     ) -> StoreResult<Definition> {
         let name = clean_name(name)?;
         if self.classifier(&name).is_ok() {
@@ -626,6 +652,7 @@ impl Store {
         let classes = classes.iter().map(class).collect::<StoreResult<Vec<_>>>()?;
         let not = not.map(class).transpose()?;
         let mut def = Definition::new(&name, classes, not, head, preset_name)?;
+        def.gematria = gematria;
         for i in &inputs {
             if i.from == name {
                 return Err("a classifier can't build on itself".into());
@@ -1270,6 +1297,32 @@ pub fn unbase64(s: &str) -> Option<Vec<u8>> {
 pub(crate) mod tests {
     use super::*;
 
+    /// new definitions build without gematria; ones saved before the field existed
+    /// keep the channels they were made with
+    #[test]
+    fn gematria_is_opt_in_and_old_definitions_keep_it() {
+        let classes = vec![
+            ClassDef {
+                name: "a".into(),
+                list: "a".into(),
+            },
+            ClassDef {
+                name: "b".into(),
+                list: "b".into(),
+            },
+        ];
+        let d = Definition::new("x", classes, None, HeadKind::Single, DEFAULT_PRESET).unwrap();
+        assert!(!d.gematria);
+        let c = d.build(0).unwrap();
+        assert!(!c.net.cfg.letters && !c.net.cfg.words && !c.net.cfg.side);
+        let mut v = serde_json::to_value(&d).unwrap();
+        v.as_object_mut().unwrap().remove("gematria");
+        let old: Definition = serde_json::from_value(v).unwrap();
+        assert!(old.gematria);
+        let c = old.build(0).unwrap();
+        assert!(c.net.cfg.letters && c.net.cfg.words && c.net.cfg.side);
+    }
+
     pub fn temp_store(name: &str) -> (Store, std::path::PathBuf) {
         let path = std::env::temp_dir().join(format!("anend-clf-{}-{name}.redb", std::process::id()));
         let _ = std::fs::remove_file(&path);
@@ -1371,7 +1424,9 @@ pub(crate) mod tests {
             key: None,
             text: "apple granite".into(),
         };
-        let e = s.feedback_classifier("kind", &j, "rocks", true, 1.0).unwrap();
+        // a firm yes: the replayed list members outweigh one feedback of weight 1 on this
+        // byte-only (no gematria) tiny model
+        let e = s.feedback_classifier("kind", &j, "rocks", true, 2.0).unwrap();
         assert!(e.after > e.before, "{e:?}");
         s.feedback_classifier("kind", &j, "rocks", false, 1.0).unwrap();
         let log = s.classifier_feedback("kind").unwrap();

@@ -5,7 +5,11 @@ language and the UI will write the same structure) saying what goes in, how big 
 trunk is, what comes out, what it learns from, and — for generators — which other models
 judge what it writes. The engine underneath (`core/src/classify/`) is a general-purpose,
 bit-deterministic transformer; nothing in it assumes gematria. Gematria channels are
-optional input features you list, off unless you do.
+optional input features you list, off unless you do. The same holds below the spec: the
+Rust presets (`Config::tiny()`, `small()`, `base()`, the store's tiny/compact/small/base)
+have them off, `Config::gematria(true)` turns them on, and the store's classifiers take
+`gematria: true` at creation (`classify.create`). Files and stored classifiers made while
+they defaulted on keep them, and answer bit for bit as before.
 
 ```rust
 use anend_core::classify::spec::{self, ModelSpec, MemSource, Value};

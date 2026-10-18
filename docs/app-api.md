@@ -89,8 +89,8 @@ a class name or its index. A text to judge is given as `key` (a memory or note) 
 
 | op | args | data |
 |---|---|---|
-| `classify.list` | | `[summary]`: `{name, classes, lists, not, head, preset, inputs, trained, version, accuracy, macro_f1, examples, outputs, modified, training}` |
-| `classify.create` | `{name, classes: [list keys], not?: list key, preset?: tiny\|compact\|small\|base (compact), head?: single\|multi, inputs?: [name or {from, coupling}]}` | details (below) |
+| `classify.list` | | `[summary]`: `{name, classes, lists, not, head, preset, gematria, inputs, trained, version, accuracy, macro_f1, examples, outputs, modified, training}` |
+| `classify.create` | `{name, classes: [list keys], not?: list key, preset?: tiny\|compact\|small\|base (compact), head?: single\|multi, inputs?: [name or {from, coupling}], gematria?: false}` (`gematria: true` adds the letter-value, word-sum and side-vector input channels; off by default, and classifiers made before it was optional keep theirs on) | details (below) |
 | `classify.get` | `{name}` | details: the summary and `{steer, history, train, created, feedback_count, feedback: [latest 50], size: {weights, d_model, layers, blocks, max_len, steps, growth}, job}` |
 | `classify.delete` | `{name}` (not while it trains, nor while another builds on it) | `null` |
 | `classify.couple` | `{name, from, coupling}` (0 to 10; 0 keeps end-to-end feedback out of `from`) | summary |
@@ -205,6 +205,6 @@ any. Importing it restores the save keys and all; merging it leaves the classifi
 A bundle of weum rows alone (`{"memories": [[text, [key bytes]], ...]}`) imports as weum's
 `all-of-it.json` does. Old bundles (`anend: 1` with notes as records) aren't read.
 
-The web app's offline engine (`hub/web/local`, IndexedDB) is **frozen**: it still
-answers the old op set over old bundles, but it no longer matches the hub, and its parity
-test is retired. The Rust core compiled to WebAssembly replaces it ([next](next.md)).
+The old JavaScript web app and its offline engine are retired: the web app is the Dioxus
+app's web build (`app/`), served at `/app/`. Running without a hub comes with the Rust
+core compiled to WebAssembly ([next](next.md)).

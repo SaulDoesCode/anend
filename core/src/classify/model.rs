@@ -171,7 +171,8 @@ pub enum RopeScaling {
 impl Config {
     /// for tests and CI only: a few thousand weights, so the suite runs in seconds in a
     /// debug build. Not a size to offer anyone; it is chosen for test speed, not for
-    /// what the hardware can do (see `bench::suggest` for that)
+    /// what the hardware can do (see `bench::suggest` for that). Like every preset it
+    /// has no gematria channels; `gematria(true)` opts in.
     pub fn tiny() -> Config {
         Config {
             d_model: 16,
@@ -199,7 +200,7 @@ impl Config {
             qkv_bias: false,
             rope_scaling: None,
         }
-        .gematria(true)
+        .gematria(false)
     }
 
     /// the gematria features (letter channel, word sum channels, side vector) on or off
@@ -1858,10 +1859,22 @@ mod tests {
                     pooling,
                     qk_norm,
                     extra: 2,
-                    ..Config::tiny()
+                    ..Config::tiny().gematria(true)
                 });
             }
         }
+        // no gematria; grouped key/value heads with q/k/v biases (pretrained shapes)
+        check(Config {
+            extra: 2,
+            ..Config::tiny()
+        });
+        check(Config {
+            heads: 4,
+            kv_heads: 2,
+            qkv_bias: true,
+            extra: 2,
+            ..Config::tiny()
+        });
     }
 
     /// a causal model with a generative head, numbers and no gematria: finite
