@@ -105,6 +105,8 @@ pub struct Tokenizer {
     /// decoding: the metaspace character read as a space, and leading spaces stripped
     space_char: Option<char>,
     strip_start: usize,
+    /// id → the bytes it decodes to (computed once)
+    bytes: Vec<Vec<u8>>,
 }
 
 /// GPT-2's byte ↔ printable character table: bytes that print map to themselves,
@@ -122,6 +124,19 @@ pub fn byte_chars() -> [char; 256] {
         };
     }
     out
+}
+
+/// the inverse of `byte_chars`
+pub fn byte_of(c: char) -> Option<u8> {
+    let u = c as u32;
+    let kept = (33..=126).contains(&u) || (161..=172).contains(&u) || (174..=255).contains(&u);
+    match u {
+        _ if kept => Some(u as u8),
+        256..=288 => Some((u - 256) as u8),
+        289..=322 => Some((u - 289 + 127) as u8),
+        323 => Some(173),
+        _ => None,
+    }
 }
 
 fn str_of(v: &Json, what: &str) -> Result<String, String> {
@@ -452,7 +467,7 @@ impl Tokenizer {
             _ => decoder(d)?,
         }
         byte_level |= pre.iter().any(|p| matches!(p, Pre::ByteLevel { .. }));
-        Ok(Tokenizer {
+        let mut t = Tokenizer {
             source: text.to_string(),
             pieces,
             ids,
@@ -468,7 +483,10 @@ impl Tokenizer {
             ignore_merges: m["ignore_merges"].as_bool().unwrap_or(false),
             space_char,
             strip_start,
-        })
+            bytes: Vec::new(),
+        };
+        t.bytes = (0..t.pieces.len() as u32).map(|id| t.piece_bytes(id)).collect();
+        Ok(t)
     }
 
     /// the `tokenizer.json` text this was read from
@@ -727,6 +745,10 @@ impl Tokenizer {
 
     /// the bytes one token stands for (no leading-space stripping)
     pub fn token_bytes(&self, id: u32) -> Vec<u8> {
+        self.bytes.get(id as usize).cloned().unwrap_or_default()
+    }
+
+    fn piece_bytes(&self, id: u32) -> Vec<u8> {
         if let Some(&i) = self.added_of.get(&id) {
             return self.added[i].content.as_bytes().to_vec();
         }
@@ -734,12 +756,11 @@ impl Tokenizer {
             return Vec::new();
         };
         if self.byte_level {
-            let map = byte_chars();
             let mut out = Vec::with_capacity(p.len());
             let mut buf = [0u8; 4];
             for c in p.chars() {
-                match map.iter().position(|&m| m == c) {
-                    Some(b) => out.push(b as u8),
+                match byte_of(c) {
+                    Some(b) => out.push(b),
                     None => out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes()),
                 }
             }
@@ -917,6 +938,15 @@ pub(crate) mod tests {
 
     fn pieces(t: &Tokenizer, ids: &[u32]) -> Vec<String> {
         ids.iter().map(|&i| t.piece(i).unwrap().to_string()).collect()
+    }
+
+    #[test]
+    fn byte_table_inverts() {
+        for (b, c) in byte_chars().iter().enumerate() {
+            assert_eq!(byte_of(*c), Some(b as u8));
+        }
+        assert_eq!(byte_of('Ā'), Some(0));
+        assert_eq!(byte_of('中'), None);
     }
 
     #[test]
