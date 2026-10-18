@@ -25,6 +25,7 @@ pub fn Notes() -> Element {
     let mut tags = use_signal(String::new);
     let mut dirty = use_signal(|| false);
     let mut armed = use_signal(|| false);
+    let mut seq = use_signal(|| 0u64);
     let api_r = api.clone();
     let list = use_resource(move || {
         let api = api_r.clone();
@@ -83,6 +84,7 @@ pub fn Notes() -> Element {
                     onclick: move |_| {
                         open.set(Some(Note::default()));
                         text.set("# \n\n".into());
+                        seq += 1;
                         tags.set(String::new());
                         dirty.set(false);
                     },
@@ -112,6 +114,7 @@ pub fn Notes() -> Element {
                                                 text.set(anend_core::note::compose(&note.title, &note.markdown));
                                                 tags.set(note.tags.join(", "));
                                                 open.set(Some(note));
+                                                seq += 1;
                                                 dirty.set(false);
                                                 armed.set(false);
                                             }
@@ -160,10 +163,20 @@ pub fn Notes() -> Element {
                     if !note.created.is_empty() {
                         span { class: "dim small", "written {when(&note.created)}" if !note.edits.is_empty() { " · {note.edits.len()} edits" } }
                     }
+                    // not bound to the signal while typing (a round trip per key would drop
+                    // letters typed fast); its text is put in when a note opens
                     textarea {
+                        key: "{note.key}-{seq}",
+                        id: "note-pad",
                         "aria-label": "the note: # title, then markdown",
                         spellcheck: "true",
-                        value: "{text}",
+                        onmounted: move |_| {
+                            let js = format!(
+                                "const p = document.getElementById('note-pad'); if (p) {{ p.value = {}; }}",
+                                serde_json::to_string(&*text.peek()).unwrap_or_default()
+                            );
+                            document::eval(&js);
+                        },
                         oninput: move |e| { text.set(e.value()); dirty.set(true); },
                         onkeydown: {
                             let s = save.clone();
