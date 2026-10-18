@@ -90,7 +90,7 @@ To pick up:
 Checks to run before every push:
 - `cargo clippy -p anend -p anend-core -p anend-hub`
 - `cargo test -p anend -p anend-core -p anend-hub`
-- `node hub/web/test/parity.mjs`, which must print "all the same"
+- (`node hub/web/test/parity.mjs` is retired: the JS offline engine is frozen, see step 3)
 
 ## Step 1 status: the entry graph store (`core/src/graph/`)
 
@@ -126,18 +126,36 @@ New module beside the old store (apps not rewired yet; nothing old deleted). 37 
 
 ## Step 3 status: the app API on the entry graph (`core/src/ops/`, `hub/`)
 
-In progress (15 Oct).
-- **Done:** `anend_core::ops`: the app ops over one graph (`ops::call`) and a folder of
-  saves (`ops::Saves`: `hello`, `saves.*`, `forge.*`; a process-wide cache of open
-  graphs so a busy save is shared, not opened twice); `ops::merge` (merging a save into
-  another and the forge, entries known by mime + rendered text, lists/tags/notes-on
-  carried); `ops::GraphTexts`, the graph as a classifier's texts: `core/src/texts.rs`'s
-  `Texts` trait, which a `Store` opened with `Store::open_over` reads list members,
-  texts, candidates and searches through (and writes its lists back through), so the
-  classifiers keep their own tables while reading the graph. Filters' tags/kind/sums go
-  through it too (atbash refused there).
-- **Left:** the desktop's `backend/local.rs` onto `ops::Saves`; the hub's app.rs,
-  classify.rs, appweb.rs, inspect.rs onto it; docs/app-api.md; the JS offline engine.
+**Done (18 Oct).** One implementation of the app ops, `anend_core::ops`, answers for both
+the desktop (`app/src/backend/local.rs`, now a thin wrapper over `ops::Saves`) and the hub
+(`hub/src/app.rs`). Tests: `cargo test -p anend-core ops::`, `cargo test -p anend-hub`
+(every op, quotas, modes, sign-in, classifiers, hub take/share), `cargo test -p anend-app`.
+Clippy clean for the hub's three feature builds and core.
+- **`ops::call` / `ops::Saves`:** the ops on one graph, and a folder of saves (`hello`,
+  `saves.*`, `forge.*`). Open graphs are cached process-wide by file (weak refs), so a
+  save still held by a training thread is shared instead of failing to open twice.
+  Bundles are `{anend: 2, name, memories: texts.json rows, other: other.json}`;
+  `saves.copy` goes through backup/restore; `saves.rename` works on the open save.
+- **Notes** are markdown entries; `notes.save` takes `on` (a NOTE edge), `notes.on` lists
+  them. **Atbash is removed** (an error where asked). Hits carry graph sums.
+- **Merge and forge** (`ops::merge`): an entry is (mime, rendered text); merging and the
+  forge dedup on that, keep times, and carry lists (in order), tags and other relations
+  whose ends came along. Structured entries arrive as rendered text (left: remap refs).
+- **Classifiers:** still `core/src/classifiers.rs`'s own tables, in `<save>.models` beside
+  each save (a `Store::open_over` with `ops::GraphTexts`), renamed/copied/deleted with
+  it and exported in bundles as `classifiers`. `core/src/texts.rs`'s `Texts` trait is the
+  boundary: list members, texts, candidates, searches, and the lists classifiers write
+  go through the graph. Filters' kind/tags/sums read the graph too. Every entry is
+  `Ref::Memory(key bytes)`; whether it's a note comes from its mime.
+- **Hub saves:** uploads, shares and takes are graph files (`inspect.rs` reads graphs,
+  `Graph::is_save` checks a file first); old saves are refused. A merge-take uses
+  `ops::merge`.
+- **The JS offline engine** (`hub/web/local`) is frozen: it answers the old op set and no
+  longer matches the hub. `parity.mjs` is out of CI; core-in-WASM replaces it.
+- **Left:** `GET /app/saves/{name}` downloads the graph file only (no `.models`); bundles
+  carry classifiers. Old `anend: 1` bundles with notes aren't converted. The desktop
+  answers models with "not yet" (the model spec). Per-save counts in `saves.list` only
+  for the open save.
 
 ## The Dioxus app (`app/`, package `anend-app`): status
 
