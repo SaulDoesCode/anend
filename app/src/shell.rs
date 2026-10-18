@@ -102,8 +102,14 @@ pub fn App() -> Element {
     let zoom = p.zoom;
     let fs = p.font_size;
     let view = (ui.view)();
+    // zoom only when it isn't 1 (WebKit's css zoom upsets the space's 3d transforms)
+    let zoomed = if (zoom - 1.0).abs() > 0.001 {
+        format!("zoom: {zoom}; height: calc(100vh / {zoom});")
+    } else {
+        String::new()
+    };
     let style = format!(
-        "{vars} --fs: {fs}px; --mfs: {}px; --mspace: {}px; zoom: {zoom}; height: calc(100vh / {zoom});",
+        "{vars} --fs: {fs}px; --mfs: {}px; --mspace: {}px; {zoomed}",
         p.memory_font, p.spacing
     );
     drop(p);

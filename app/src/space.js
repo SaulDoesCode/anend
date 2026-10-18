@@ -1,5 +1,6 @@
-// the space: memory texts float as camera-facing labels (css 3d sprites over a webgl room,
-// so the text stays crisp) and you fly through it. Adapted from hub/web/space.js for the
+// the space: memory texts float as camera-facing labels (html laid over a webgl room at
+// each text's projected place, its font sized by distance, so the text stays crisp and
+// no css 3d is needed) and you fly through it. Adapted from hub/web/space.js for the
 // Dioxus app: it talks to Rust through `send` (events) and the commands Rust sends in.
 //
 // right mouse drag looks, W A S D move, Space / C up and down, Q / E roll, Shift fast,
@@ -7,7 +8,6 @@
 // camera onto the nearest text in that direction. Texts shrink as the camera nears them.
 
 import * as THREE from '__THREE__';
-import { CSS3DRenderer, CSS3DSprite } from '__CSS3D__';
 
 const FONT = 40;
 const PX = 0.014;
@@ -44,9 +44,10 @@ export class Space {
     } catch {
       this.gl = null;
     }
-    this.css = new CSS3DRenderer();
-    this.css.domElement.className = 'space-css';
-    host.append(this.css.domElement);
+    this.overlay = document.createElement('div');
+    this.overlay.className = 'space-css';
+    host.append(this.overlay);
+    this.size = { w: 1, h: 1 };
     this.grid = new THREE.GridHelper(600, 120, 0x000000, 0x000000);
     this.grid.position.y = -9;
     for (const m of [].concat(this.grid.material)) {
@@ -82,7 +83,7 @@ export class Space {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.gl?.setSize(w, h);
-    this.css.setSize(w, h);
+    this.size = { w, h };
     this.render();
   }
 
@@ -116,13 +117,11 @@ export class Space {
         const el = document.createElement('div');
         el.className = 'slabel';
         el.textContent = t.note ? `✎ ${t.text}` : t.text;
-        el.style.fontSize = `${FONT}px`;
         el.tabIndex = -1;
-        const obj = new CSS3DSprite(el);
-        obj.scale.setScalar(PX);
+        const obj = new THREE.Object3D();
         it = { obj, el, hit: t };
         this.wire(it);
-        this.scene.add(obj);
+        this.overlay.append(el);
         this.items.set(String(t.key), it);
       }
       it.node = n;
@@ -144,7 +143,6 @@ export class Space {
   }
 
   drop(id, it) {
-    this.scene.remove(it.obj);
     it.el.remove();
     this.items.delete(id);
   }
@@ -312,18 +310,40 @@ export class Space {
       if (e.t >= 1) this.ease = null;
       this.info();
     }
-    // texts shrink as the camera nears them, so they stay readable
-    for (const it of this.items.values()) {
-      const d = c.position.distanceTo(it.obj.position);
-      it.obj.scale.setScalar(PX * Math.max(0.22, Math.min(1, d / 14)));
-    }
     this.render();
     requestAnimationFrame(this.loop);
   }
 
   render() {
     this.gl?.render(this.scene, this.camera);
-    this.css.render(this.scene, this.camera);
+    // each label at its projected place, sized by distance; texts shrink as the camera
+    // nears them (up to a fifth), so a close one stays readable rather than filling the room
+    const c = this.camera;
+    c.updateMatrixWorld();
+    const { w, h } = this.size;
+    const focal = h / 2 / Math.tan((c.fov * Math.PI) / 360);
+    const v = new THREE.Vector3();
+    for (const it of this.items.values()) {
+      v.copy(it.obj.position).applyMatrix4(c.matrixWorldInverse);
+      const dist = -v.z;
+      if (dist < 0.3) {
+        it.el.style.display = 'none';
+        continue;
+      }
+      const shrink = Math.max(0.22, Math.min(1, dist / 14));
+      const px = (FONT * PX * focal * shrink) / dist;
+      const x = w / 2 + (v.x / dist) * focal;
+      const y = h / 2 - (v.y / dist) * focal;
+      if (px < 2 || x < -w || x > 2 * w || y < -h || y > 2 * h) {
+        it.el.style.display = 'none';
+        continue;
+      }
+      it.el.style.display = '';
+      it.el.style.fontSize = `${Math.min(px, 160).toFixed(1)}px`;
+      it.el.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px) translate(-50%, -50%)`;
+      it.el.style.zIndex = String(100000 - Math.round(dist * 10));
+      it.el.style.opacity = String(Math.max(0.15, Math.min(1, 1.4 - dist / 220)));
+    }
   }
 
   info() {

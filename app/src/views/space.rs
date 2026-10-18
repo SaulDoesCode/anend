@@ -18,7 +18,6 @@ use crate::ui::*;
 use crate::views::{TChip, use_keys};
 
 const THREE: &str = include_str!("../../../hub/web/vendor/three.module.min.js");
-const CSS3D: &str = include_str!("../../../hub/web/vendor/CSS3DRenderer.js");
 const ENGINE: &str = include_str!("../space.js");
 
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
@@ -40,12 +39,10 @@ fn boot_js() -> String {
     format!(
         r#"
 const THREE_SRC = {three};
-const CSS3D_SRC = {css3d};
 const ENGINE_SRC = {engine};
 const url = (src) => URL.createObjectURL(new Blob([src], {{ type: 'text/javascript' }}));
 const tu = url(THREE_SRC);
-const cu = url(CSS3D_SRC.split("'./three.module.min.js'").join(JSON.stringify(tu)));
-const eu = url(ENGINE_SRC.split("'__THREE__'").join(JSON.stringify(tu)).split("'__CSS3D__'").join(JSON.stringify(cu)));
+const eu = url(ENGINE_SRC.split("'__THREE__'").join(JSON.stringify(tu)));
 let host = null;
 for (let i = 0; i < 100 && !host; i++) {{ host = document.getElementById('space-host'); if (!host) await new Promise((r) => setTimeout(r, 20)); }}
 try {{
@@ -68,7 +65,6 @@ try {{
 }}
 "#,
         three = serde_json::to_string(THREE).unwrap_or_default(),
-        css3d = serde_json::to_string(CSS3D).unwrap_or_default(),
         engine = serde_json::to_string(ENGINE).unwrap_or_default(),
     )
 }

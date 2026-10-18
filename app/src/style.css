@@ -141,7 +141,10 @@ button.tchip.on { color: var(--bar-text); opacity: 1; }
 .views { position: relative; min-height: 0; min-width: 0; }
 .view { position: absolute; inset: 0; overflow: auto; }
 .card { background: var(--cards); border-radius: var(--radius); padding: 10px 12px; }
-.page { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--gap); padding-bottom: 6px; }
+.page { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--gap); padding: 0 0 6px; }
+.page > .row:first-child { background: var(--cards); border-radius: 0 0 var(--radius) var(--radius); padding: 4px 10px; }
+.page > .row:first-child h2 { margin: 0; }
+.metrics svg.triangle polygon { stroke: var(--text); }
 .chip { display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 7px; font-size: 13px; background: var(--buttons); color: var(--on-button); border-radius: var(--radius); border: 0; cursor: pointer; }
 .chip.on { background: var(--accent); }
 .empty { color: var(--dim); text-align: center; padding: 24px; }
@@ -319,10 +322,11 @@ kbd { font: 12px var(--mono); border: 1px solid color-mix(in srgb, var(--dim) 50
 .space-host { position: absolute; inset: 0; overflow: hidden; outline: 0; }
 .space-host.looking { cursor: none; }
 .space-gl, .space-css { position: absolute !important; inset: 0; }
-.space-css { pointer-events: none; }
+.space-css { pointer-events: none; overflow: hidden; }
+.space-css .slabel { position: absolute; left: 0; top: 0; will-change: transform; }
 .slabel {
   pointer-events: auto; cursor: pointer; white-space: nowrap; line-height: 1.15; padding: 0 3px;
-  color: var(--room-ink); font-family: var(--font); border-bottom: 4px solid transparent; user-select: none;
+  color: var(--room-ink); font-family: var(--font); border-bottom: .09em solid transparent; user-select: none;
   text-shadow: 0 0 2px var(--room-bg);
 }
 .slabel:hover { color: var(--link); }
