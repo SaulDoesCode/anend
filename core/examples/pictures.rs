@@ -35,7 +35,11 @@ fn sheet(ims: &[Image], cols: usize, scale: usize) -> Image {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let out = std::path::PathBuf::from(args.get(1).cloned().unwrap_or_else(|| std::env::temp_dir().display().to_string()));
+    let out = std::path::PathBuf::from(
+        args.get(1)
+            .cloned()
+            .unwrap_or_else(|| std::env::temp_dir().display().to_string()),
+    );
     let epochs: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(60);
     std::fs::create_dir_all(&out).expect("out dir");
     println!("{} threads, {} kernels", pool::available(), kernels::simd_name());
@@ -54,7 +58,15 @@ fn main() {
         ("2×2 patches", 32 * 33),
         ("1 byte a pixel (palette)", 64 * 65),
     ] {
-        let net = Net::new(Config { max_len: len + 2, ..base.clone() }, &[HeadSpec::single("k", &["a"])], 1).unwrap();
+        let net = Net::new(
+            Config {
+                max_len: len + 2,
+                ..base.clone()
+            },
+            &[HeadSpec::single("k", &["a"])],
+            1,
+        )
+        .unwrap();
         let w = text::window(&vec![7u8; len]);
         let t = Instant::now();
         let mut n = 0;
@@ -63,7 +75,10 @@ fn main() {
             n += 1;
         }
         let ms = t.elapsed().as_secs_f64() * 1e3 / n as f64;
-        println!("  {what:>26}: {len:>5} tokens, {ms:>9.2} ms per pass, {:>7.1} µs per token", ms * 1e3 / len as f64);
+        println!(
+            "  {what:>26}: {len:>5} tokens, {ms:>9.2} ms per pass, {:>7.1} µs per token",
+            ms * 1e3 / len as f64
+        );
     }
 
     let train_ims: Vec<Value> = (0..192).map(|i| Value::Image(toy(64, i % 4, i as u64))).collect();
@@ -111,7 +126,11 @@ fn main() {
     if let Ok(a) = m.run(&Value::Image(toy(64, 0, 999))) {
         assert!(a.values().any(|x| matches!(x, Answer::Generated(_))));
     }
-    for (name, ims) in [("pictures-training.png", &originals), ("pictures-codebook.png", &through), ("pictures-sampled.png", &samples)] {
+    for (name, ims) in [
+        ("pictures-training.png", &originals),
+        ("pictures-codebook.png", &through),
+        ("pictures-sampled.png", &samples),
+    ] {
         let p = out.join(name);
         std::fs::write(&p, png(&sheet(ims, 4, 2))).unwrap();
         println!("wrote {}", p.display());

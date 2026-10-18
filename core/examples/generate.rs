@@ -15,7 +15,9 @@
 use std::time::Instant;
 
 use anend_core::classify::generate::{self, Constraints, Critic, GenOpts, Guidance, ReinforceOpts, Sampling, Want};
-use anend_core::classify::{Classifier, Config, Example, Flow, GenSpec, HeadSpec, Pool, Pooling, TrainOpts, kernels, pool, train};
+use anend_core::classify::{
+    Classifier, Config, Example, Flow, GenSpec, HeadSpec, Pool, Pooling, TrainOpts, kernels, pool, train,
+};
 
 const AUTHORS: [&str; 6] = ["austen", "chesterton", "melville", "milton", "shakespeare", "whitman"];
 
@@ -33,7 +35,10 @@ fn passages(text: &str, len: usize, step: usize) -> Vec<String> {
 }
 
 fn agreement(critic: &Classifier, c: usize, cands: &[generate::Candidate]) -> f64 {
-    let hits = cands.iter().filter(|k| critic.predict(&k.text(), &[])[0].top == c).count();
+    let hits = cands
+        .iter()
+        .filter(|k| critic.predict(&k.text(), &[])[0].top == c)
+        .count();
     hits as f64 / cands.len().max(1) as f64
 }
 
@@ -46,7 +51,11 @@ fn main() {
         .iter()
         .map(|a| std::fs::read_to_string(format!("{dir}/{a}.txt")).expect("corpus"))
         .collect();
-    println!("{} threads, {} kernels, scale {scale}", pool::available(), kernels::simd_name());
+    println!(
+        "{} threads, {} kernels, scale {scale}",
+        pool::available(),
+        kernels::simd_name()
+    );
 
     // the critic: an author classifier (no gematria features: a general transformer)
     let t0 = Instant::now();
@@ -169,7 +178,19 @@ fn main() {
             },
         )
         .unwrap();
-        let after = generate::draw(&g, &critics, &none, &GenOpts { sampling: Sampling { seed: 6, ..opts.sampling.clone() }, ..opts.clone() }).unwrap();
+        let after = generate::draw(
+            &g,
+            &critics,
+            &none,
+            &GenOpts {
+                sampling: Sampling {
+                    seed: 6,
+                    ..opts.sampling.clone()
+                },
+                ..opts.clone()
+            },
+        )
+        .unwrap();
         let tr = t4.elapsed().as_secs_f64();
         let a = [
             agreement(&critic, c, &plain),

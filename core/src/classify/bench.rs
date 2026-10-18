@@ -72,7 +72,12 @@ pub fn measure(per_rung: Duration) -> MachineProfile {
     let data: Vec<Example> = (0..64).map(|i| Example::class(&text[i..i + 300], i % 2)).collect();
     let mut ladder = Vec::new();
     for &(d, layers, heads, ff) in &LADDER {
-        let mut clf = Classifier::new(config(d, layers, heads, ff, 128), &[HeadSpec::single("k", &["a", "b"])], 1).unwrap();
+        let mut clf = Classifier::new(
+            config(d, layers, heads, ff, 128),
+            &[HeadSpec::single("k", &["a", "b"])],
+            1,
+        )
+        .unwrap();
         let started = Instant::now();
         let mut tokens = 0u64;
         let mut steps = 0;
@@ -155,7 +160,13 @@ pub fn suggest(p: &MachineProfile, t: &Task) -> Config {
     let tokens = (t.examples * t.epochs.max(1) * t.max_len) as f64;
     // longer windows cost more per token (attention); scale from the 128-token rate
     let per_token = |len: usize| -> f64 {
-        let at = |l: usize| p.forward_ms.iter().find(|x| x.0 >= l).or(p.forward_ms.last()).map_or(1.0, |x| x.1 / x.0 as f64);
+        let at = |l: usize| {
+            p.forward_ms
+                .iter()
+                .find(|x| x.0 >= l)
+                .or(p.forward_ms.last())
+                .map_or(1.0, |x| x.1 / x.0 as f64)
+        };
         at(len) / at(128).max(1e-12)
     };
     let slow = per_token(t.max_len).max(1.0);
