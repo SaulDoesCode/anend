@@ -165,28 +165,30 @@ pub fn Notes() -> Element {
                     }
                     // not bound to the signal while typing (a round trip per key would drop
                     // letters typed fast); its text is put in when a note opens
-                    textarea {
-                        key: "{note.key}-{seq}",
-                        id: "note-pad",
-                        "aria-label": "the note: # title, then markdown",
-                        spellcheck: "true",
-                        onmounted: move |_| {
-                            let js = format!(
-                                "const p = document.getElementById('note-pad'); if (p) {{ p.value = {}; }}",
-                                serde_json::to_string(&*text.peek()).unwrap_or_default()
-                            );
-                            document::eval(&js);
-                        },
-                        oninput: move |e| { text.set(e.value()); dirty.set(true); },
-                        onkeydown: {
-                            let s = save.clone();
-                            move |e: KeyboardEvent| {
-                                if e.modifiers().ctrl() && e.key() == Key::Character("s".into()) {
-                                    e.prevent_default();
-                                    s();
+                    for pad in [format!("{}-{}", cur_key, seq())] {
+                        textarea {
+                            key: "{pad}",
+                            id: "note-pad",
+                            "aria-label": "the note: # title, then markdown",
+                            spellcheck: "true",
+                            onmounted: move |_| {
+                                let js = format!(
+                                    "const p = document.getElementById('note-pad'); if (p) {{ p.value = {}; }}",
+                                    serde_json::to_string(&*text.peek()).unwrap_or_default()
+                                );
+                                document::eval(&js);
+                            },
+                            oninput: move |e| { text.set(e.value()); dirty.set(true); },
+                            onkeydown: {
+                                let s = save.clone();
+                                move |e: KeyboardEvent| {
+                                    if e.modifiers().ctrl() && e.key() == Key::Character("s".into()) {
+                                        e.prevent_default();
+                                        s();
+                                    }
                                 }
-                            }
-                        },
+                            },
+                        }
                     }
                 } else {
                     div { class: "empty", "Pick a note, or make a new one. A note is a text whose first line is its # title." }
