@@ -86,6 +86,15 @@ fn Looks() -> Element {
                     oninput: move |e| set_pref(ui, |p| p.font_size = e.value().parse().unwrap_or(14.0)) }
                 span { "{p.font_size}px" }
             }
+            label { "zen" }
+            div { class: "row",
+                label { class: "row", input { r#type: "checkbox", checked: p.zen, onchange: move |e| set_pref(ui, |p| p.zen = e.checked()) } "fade the bars while you rest" }
+                input { r#type: "range", min: "0.5", max: "10", step: "0.5", value: "{p.zen_delay}", "aria-label": "seconds before zen fades",
+                    oninput: move |e| set_pref(ui, |p| p.zen_delay = e.value().parse().unwrap_or(2.5)) }
+                span { "after {p.zen_delay}s" }
+            }
+            label { "the top bar" }
+            label { class: "row", input { r#type: "checkbox", checked: p.hide_bar, onchange: move |e| set_pref(ui, |p| p.hide_bar = e.checked()) } "slide it away until the pointer comes near the top" }
             label { r#for: "zoom", "zoom" }
             div { class: "row",
                 input { id: "zoom", r#type: "range", min: "0.5", max: "3", step: "0.05", value: "{p.zoom}",

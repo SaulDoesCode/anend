@@ -39,6 +39,12 @@ pub struct Prefs {
     pub space_reversed: bool,
     /// the space adds new results to what's there
     pub space_keep: bool,
+    /// fade the bars away while the mouse and keys rest
+    pub zen: bool,
+    /// seconds of stillness before zen fades
+    pub zen_delay: f32,
+    /// slide the top bar away until the pointer comes near it
+    pub hide_bar: bool,
     /// sections folded shut, by name (settings, lists…)
     pub collapsed: BTreeSet<String>,
     pub view: String,
@@ -65,6 +71,9 @@ impl Default for Prefs {
             space_bg: "#e4d4be".into(),
             space_reversed: false,
             space_keep: false,
+            zen: false,
+            zen_delay: 2.5,
+            hide_bar: false,
             collapsed: ["hub".to_string()].into_iter().collect(),
             view: "memory".into(),
             save: None,

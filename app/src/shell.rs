@@ -31,6 +31,22 @@ window.addEventListener('keydown', (e) => {
   if (prevent) e.preventDefault();
   dioxus.send({ key: k, code: e.code, ctrl: c, shift: e.shiftKey, alt: e.altKey, bar, text: bar ? t.value : '' });
 });
+// zen: the bars fade while the mouse and keys rest; the top bar slides in near the top
+let zenTimer = 0;
+const stir = (y) => {
+  const app = document.querySelector('.app');
+  if (!app) return;
+  app.classList.remove('idle');
+  clearTimeout(zenTimer);
+  if (app.dataset.zen === '1') zenTimer = setTimeout(() => {
+    if (!app.querySelector('.dock:focus-within, .overlay, .menu')) app.classList.add('idle');
+  }, (parseFloat(app.dataset.zenDelay) || 2.5) * 1000);
+  // shown from the window's top edge, kept while the pointer stays on the bar
+  if (y !== undefined) app.classList.toggle('peek', y < (app.classList.contains('peek') ? 36 : 8));
+};
+window.addEventListener('mousemove', (e) => stir(e.clientY), { passive: true });
+window.addEventListener('keydown', () => stir(), { passive: true });
+window.addEventListener('mousedown', (e) => stir(e.clientY), { passive: true });
 "#;
 
 fn measure_of(t: &str) -> Option<Measure> {
@@ -102,6 +118,7 @@ pub fn App() -> Element {
     let vars = crate::theme::css_vars(&p.palette, &p.colours);
     let zoom = p.zoom;
     let fs = p.font_size;
+    let (zen, zen_delay, hide_bar) = (p.zen, p.zen_delay, p.hide_bar);
     let view = (ui.view)();
     // zoom only when it isn't 1 (WebKit's css zoom upsets the space's 3d transforms)
     let zoomed = if (zoom - 1.0).abs() > 0.001 {
@@ -116,7 +133,13 @@ pub fn App() -> Element {
     drop(p);
     rsx! {
         style { {CSS} }
-        div { class: "app v-{view.name()}", style: "{style}",
+        div {
+            class: "app v-{view.name()}",
+            class: if zen { "zen" } else { "" },
+            class: if hide_bar { "hide-bar" } else { "" },
+            "data-zen": if zen { "1" } else { "0" },
+            "data-zen-delay": "{zen_delay}",
+            style: "{style}",
             TopBar {}
             div { class: "views",
                 for v in View::ALL {
