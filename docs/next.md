@@ -14,7 +14,27 @@ Where the work stands, for picking it up in a new session. Branch:
   `models.*` ops (create from spec JSON, train, run, generate, `from` pretrained,
   `device`) and a spec panel in the models view.
 
-**As of 18 Oct 2026, evening UTC** (the newest entry; the older ones below are history):
+**As of 18 Oct 2026, late evening UTC** (the newest entry; the older ones below are history):
+- **Classifiers work in the Dioxus app, desktop and web alike.** `classify.*` and
+  `filters.*` have one implementation in core (`core/src/ops/classify.rs`, switched on by
+  `ops::Saves::with_models(Limits)`: each save's classifiers in `<save>.models`, training
+  and indexing as background jobs); the hub keeps only its quotas, job limits
+  (`Limits::shared()`), sharing and routes. `classify.unfeedback` takes a yes/no back
+  exactly (an undo table in the models file, the last 20, dropped by the next training).
+- **The models view** (`app/src/views/classifiers.rs`, Ctrl+8) is the classifiers view: the
+  list; new (lists as classes, a none-of-them list, size, several-at-once, gematria off);
+  training with progress, loss line, cancel and metrics (confusion, F1); try it as you type
+  in the bar, yes/no per class (Ctrl+Z, after Esc leaves the bar); steering (bias,
+  temperature, threshold, the bias report); search by class with yes/no; a class as a list;
+  texts like this; verdicts given; export/import `.anendcls`; two-click delete.
+- **The memory view**: a picker in the strip colours the texts by a classifier
+  (`classify.tints`, with a legend), and C turns on its search mode (a class's name finds
+  its texts, any other text the texts it reads most like).
+- **Verified** by tests (`ops::classify::tests`, `backend::local::tests::classifiers`) and by
+  driving the desktop under Xvfb and the web build against `anend-hub --mode app --local`.
+- **Next:** spec models (`models.*` ops and a spec panel), then the guide.
+
+**As of 18 Oct 2026, evening UTC** (history now):
 - **The app is the Dioxus app** (`app/`): the desktop app (`anend-app`, on the entry graph
   in process) and the web app from the same code, which the hub serves at `/app/`
   (`app/web/build.sh` before building the hub; docs/deploy.md). Both checked end to end on
@@ -209,9 +229,9 @@ Clippy clean for the hub's three feature builds and core.
 - **The JS offline engine** (`hub/web/local`) is frozen: it answers the old op set and no
   longer matches the hub. `parity.mjs` is out of CI; core-in-WASM replaces it.
 - **Left:** `GET /app/saves/{name}` downloads the graph file only (no `.models`); bundles
-  carry classifiers. Old `anend: 1` bundles with notes aren't converted. The desktop
-  answers models with "not yet" (the model spec). Per-save counts in `saves.list` only
-  for the open save.
+  carry classifiers. Old `anend: 1` bundles with notes aren't converted. Per-save counts
+  in `saves.list` only for the open save. (Classifiers: one implementation since 18 Oct
+  evening, `core/src/ops/classify.rs`, answered on the desktop too.)
 
 ## The Dioxus app (`app/`, package `anend-app`): status
 

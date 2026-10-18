@@ -206,7 +206,10 @@ needs an async device request and a wasm feature set.
 
 ## Next (not done)
 
-- ~~the desktop app's classifiers view~~: done (src/classify_ui.rs, filters_ui.rs, index_panel.rs, tint.rs; see docs/next.md item 4).
+- ~~the desktop app's classifiers view~~: done for the Bevy app (retired), and again for
+  the Dioxus app on 18 Oct (`app/src/views/classifiers.rs`, the memory view's colouring
+  and classifier search) over one implementation of the ops (`core/src/ops/classify.rs`)
+  for the desktop and the hub. `classify.unfeedback` undoes a yes/no bit for bit.
 - JS port of inference for offline use; search filter panel; default classifiers for
   new saves; filter presets as lists.
 - GPU backend: done (above); what is left is listed there.
