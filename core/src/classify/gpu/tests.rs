@@ -219,3 +219,35 @@ fn training_matches_the_cpu() {
         assert_ne!(flat(&cpu), flat(&fresh), "{name}: training moved the weights");
     }
 }
+
+#[test]
+fn classification_and_model_run_match_the_cpu() {
+    use crate::classify::Classifier;
+    use crate::classify::device::{Device, Runner};
+    use crate::classify::spec::{Model, Value};
+    let Some(g) = device() else { return };
+    let exact = exact_device(g, Precision::Exact);
+    let long: String = (0..12).map(|i| format!("sentence {i} of a longer text, ")).collect();
+    for (name, cfg) in configs() {
+        let generator = cfg.causal.then(|| GenSpec::new("next"));
+        let heads = [HeadSpec::single("c", &["a", "b", "c"])];
+        let clf = Classifier::with_gen(cfg.clone(), &heads, generator, 4).unwrap();
+        let runner = Runner::open(Device::Gpu, &clf.net).unwrap();
+        for text in ["short", long.as_str()] {
+            let extra = vec![0.0; cfg.extra];
+            let cpu = clf.predict_bytes(text.as_bytes(), &extra, None);
+            let gpu = clf.predict_bytes_with(text.as_bytes(), &extra, runner.as_ref());
+            for (c, d) in cpu.iter().zip(&gpu) {
+                close(&format!("{name} predict {}", text.len()), &d.probs, &c.probs, exact);
+                assert_eq!(c.top, d.top);
+            }
+        }
+        let model = Model::from_classifier(clf);
+        let input = Value::Text("abc def".into());
+        let cpu = model.run_on(&input, None).unwrap();
+        let gpu = model.run_on(&input, runner.as_ref()).unwrap();
+        if exact {
+            assert_eq!(cpu, gpu, "{name}: run");
+        }
+    }
+}

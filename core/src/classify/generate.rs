@@ -141,6 +141,17 @@ pub fn sample(generator: &Classifier, prompt: &[u8], s: &Sampling, index: u64) -
     sample_guided(generator, prompt, s, index, None, None)
 }
 
+/// `sample` decoding on the runner's device (the CPU without one)
+pub fn sample_on(
+    generator: &Classifier,
+    prompt: &[u8],
+    s: &Sampling,
+    index: u64,
+    runner: Option<&Runner>,
+) -> (Vec<u8>, f32) {
+    sample_guided(generator, prompt, s, index, None, runner)
+}
+
 /// reweights scaled next-byte logits in place, given the bytes written so far
 type Guide<'a> = &'a dyn Fn(&[u8], &mut [f32]);
 

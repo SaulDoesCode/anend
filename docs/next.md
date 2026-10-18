@@ -535,6 +535,10 @@ a just-made invite, a README section pointing at docs/deploy.md.
     nothing about a GPU). Left (STATUS.md "The GPU backend"): batched decoding of several
     candidates per submission, AdamW on the device, a faster GEMM for big models,
     classification inference on the device, the WebGPU (browser) build.
+    Round 2 stopped (18 Oct, to save usage) after item 1: classification inference on the
+    device (`Classifier::predict_bytes_with`, `Model::run_on`/`runner`, bit-exact on
+    llvmpipe); batched decoding, AdamW on the device, the faster GEMM and the bench table
+    are not started.
   - **Importing pretrained open models (done in core, 18 Oct; tested on synthetic
     checkpoints only).** `classify::safetensors` (F32/F16/BF16/F64, sharded indexes, read
     on demand), `classify::bpe` (HuggingFace `tokenizer.json`: byte-level BPE as in Llama 3,

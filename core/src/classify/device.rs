@@ -201,6 +201,20 @@ impl Runner {
         }
     }
 
+    /// every head's logits averaged over the windows of `data` (`train::forward_text`'s
+    /// mean), the trunk on the device
+    pub fn text_logits(&self, net: &Net, data: &[u8], extra: &[f32], gains: &super::model::Gains) -> Vec<Vec<f32>> {
+        #[cfg(feature = "gpu")]
+        {
+            self.gn.text_logits(net, data, extra, gains)
+        }
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = (net, data, extra, gains);
+            match *self {}
+        }
+    }
+
     /// a decoder on the device that has read the start token and `prompt`
     pub fn decoder<'a>(&'a self, net: &'a Net, gains: super::model::Gains, prompt: &[u8]) -> Box<dyn Decode + 'a> {
         #[cfg(feature = "gpu")]

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use super::bench::{self, MachineProfile, Task};
 use super::codec::{Codebook, Image, NumberCodec};
-use super::device::Device;
+use super::device::{Device, Runner};
 use super::generate::{self, Candidate, Constraints, Critic, GenOpts, Judge, Sampling, Want};
 use super::model::{Config, GenSpec, HeadKind, HeadSpec, Pooling};
 use super::steer::Output;
@@ -832,6 +832,17 @@ impl Model {
 
     /// every head's answer on an input, by head name
     pub fn run(&self, input: &Value) -> Result<BTreeMap<String, Answer>, String> {
+        self.run_on(input, self.runner()?.as_ref())
+    }
+
+    /// the model uploaded to the spec's `device` (None for the CPU); open it once and
+    /// pass it to `run_on` when running many inputs
+    pub fn runner(&self) -> Result<Option<Runner>, String> {
+        Runner::open(self.spec.device, &self.clf.net)
+    }
+
+    /// `run` with the trunk (and decoding) on the runner's device, the CPU without one
+    pub fn run_on(&self, input: &Value, runner: Option<&Runner>) -> Result<BTreeMap<String, Answer>, String> {
         let (bytes, extra) = self.encode(input)?;
         let extra = if extra.is_empty() {
             vec![0.0; self.clf.net.cfg.extra]
@@ -841,7 +852,7 @@ impl Model {
         let outs = if self.clf.net.heads.is_empty() {
             Vec::new()
         } else {
-            self.clf.predict_bytes(&bytes, &extra, None)
+            self.clf.predict_bytes_with(&bytes, &extra, runner)
         };
         let mut m = BTreeMap::new();
         for (h, o) in self.clf.net.heads.iter().zip(&outs) {
@@ -858,7 +869,7 @@ impl Model {
         }
         if let Some(g) = &self.clf.net.generator {
             let prompt = self.prompt(&bytes);
-            let (out, _) = generate::sample(&self.clf, &prompt, &self.spec.sampling, 0);
+            let (out, _) = generate::sample_on(&self.clf, &prompt, &self.spec.sampling, 0, runner);
             m.insert(g.name.clone(), Answer::Generated(self.decode(&out)));
         }
         Ok(m)

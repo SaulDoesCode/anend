@@ -209,6 +209,15 @@ impl Classifier {
         self.read(&r.logits)
     }
 
+    /// `predict_bytes` with the trunk on the runner's device (the CPU without one); the
+    /// same outputs, bit for bit on a device the probe finds exact
+    pub fn predict_bytes_with(&self, data: &[u8], extra: &[f32], runner: Option<&device::Runner>) -> Vec<Output> {
+        match runner {
+            Some(r) => self.read(&r.text_logits(&self.net, data, extra, &self.gains())),
+            None => self.predict_bytes(data, extra, None),
+        }
+    }
+
     /// steered outputs from window-averaged logits
     pub fn read(&self, logits: &[Vec<f32>]) -> Vec<Output> {
         logits
