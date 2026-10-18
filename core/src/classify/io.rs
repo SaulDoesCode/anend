@@ -227,7 +227,12 @@ fn expected_weights(h: &Header) -> Result<usize, String> {
     }
     let d = c.d_model;
     let mut n: usize = (VOCAB + c.numbers as usize) * d;
-    n += if c.letters { LETTERS * d } else { 0 } + if c.words { (3 * SUM_BUCKETS + ROOT_BUCKETS) * d } else { 0 };
+    n += if c.letters { LETTERS * d } else { 0 }
+        + if c.words {
+            (3 * SUM_BUCKETS + ROOT_BUCKETS) * d
+        } else {
+            0
+        };
     if c.numbers {
         n += d;
     }

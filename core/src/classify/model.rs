@@ -956,7 +956,16 @@ impl Net {
                     let mut s = k::zeros(n * n);
                     for t in 0..n {
                         let c = &mut ctx[t * a_w + h * dh..t * a_w + (h + 1) * dh];
-                        attend_row(&q[t * dh..(t + 1) * dh], &kh, &v, t, dh, scale, &mut s[t * n..t * n + t + 1], c);
+                        attend_row(
+                            &q[t * dh..(t + 1) * dh],
+                            &kh,
+                            &v,
+                            t,
+                            dh,
+                            scale,
+                            &mut s[t * n..t * n + t + 1],
+                            c,
+                        );
                     }
                     s
                 } else {
@@ -1290,7 +1299,10 @@ pub struct Decoder<'a> {
 impl<'a> Decoder<'a> {
     /// a decoder that has read CLS and then `prompt`
     pub fn new(net: &'a Net, gains: Gains, prompt: &[u8]) -> Decoder<'a> {
-        assert!(net.cfg.causal && net.generator.is_some(), "decoding needs a causal model with a generative head");
+        assert!(
+            net.cfg.causal && net.generator.is_some(),
+            "decoding needs a causal model with a generative head"
+        );
         let mut dec = Decoder {
             net,
             gains,
@@ -1381,7 +1393,16 @@ impl<'a> Decoder<'a> {
                 net.rope.apply_at(&mut kh, pos);
                 self.keys[l][h].extend_from_slice(&kh);
                 self.vals[l][h].extend_from_slice(v);
-                attend_row(&q, &self.keys[l][h], &self.vals[l][h], pos, dh, scale, &mut p, &mut ctx[h * dh..(h + 1) * dh]);
+                attend_row(
+                    &q,
+                    &self.keys[l][h],
+                    &self.vals[l][h],
+                    pos,
+                    dh,
+                    scale,
+                    &mut p,
+                    &mut ctx[h * dh..(h + 1) * dh],
+                );
             }
             let o = matmul(rows(&ctx, a_w), &b.wo, 1, a_w, d, None);
             let hres: Vec<f32> = x.iter().zip(&o).map(|(a, b)| a + b).collect();
@@ -1555,7 +1576,11 @@ mod tests {
                 net.params_mut()[ti].1[i] = orig;
                 let num = (up - dn) / (2.0 * eps);
                 let tol = 5e-3 + 3e-2 * num.abs().max(gt[i].abs());
-                assert!((num - gt[i]).abs() <= tol, "tensor {ti} [{i}]: numeric {num} analytic {}", gt[i]);
+                assert!(
+                    (num - gt[i]).abs() <= tol,
+                    "tensor {ti} [{i}]: numeric {num} analytic {}",
+                    gt[i]
+                );
                 checked += 1;
             }
         }
@@ -1583,7 +1608,12 @@ mod tests {
             assert_eq!(dec.logits(), &full[..GEN_OUT]);
             for (i, &b) in text.iter().enumerate() {
                 dec.push(b);
-                assert_eq!(dec.logits(), &full[(i + 1) * GEN_OUT..(i + 2) * GEN_OUT], "position {}", i + 1);
+                assert_eq!(
+                    dec.logits(),
+                    &full[(i + 1) * GEN_OUT..(i + 2) * GEN_OUT],
+                    "position {}",
+                    i + 1
+                );
             }
             // past max_len the decoder keeps the last half window
             dec.push(b'!');

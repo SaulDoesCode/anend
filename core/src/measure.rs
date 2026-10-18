@@ -27,12 +27,20 @@ pub struct ByteSums {
 impl ByteSums {
     /// the digit roots of `bytes`, `reversed` and `digits` (0 for 0, else 1 + (n − 1) mod 9)
     pub fn roots(&self) -> [u64; 3] {
-        [digit_root(self.bytes), digit_root(self.reversed), digit_root(self.digits)]
+        [
+            digit_root(self.bytes),
+            digit_root(self.reversed),
+            digit_root(self.digits),
+        ]
     }
 
     /// the mean byte value, 1 ..= 256 (0 for no bytes)
     pub fn mean(&self) -> f64 {
-        if self.len == 0 { 0.0 } else { self.bytes as f64 / self.len as f64 }
+        if self.len == 0 {
+            0.0
+        } else {
+            self.bytes as f64 / self.len as f64
+        }
     }
 }
 
@@ -130,7 +138,10 @@ mod tests {
         assert_eq!(byte_sum(b"ab"), 197);
         assert_eq!(byte_sums(&[0, 255]).bytes, 1 + 256);
         assert_eq!(byte_sums(&[]), ByteSums::default());
-        assert_eq!(byte_sums(&[0, 255]).roots(), [digit_root(257), digit_root(257), digit_root(1 + 13)]);
+        assert_eq!(
+            byte_sums(&[0, 255]).roots(),
+            [digit_root(257), digit_root(257), digit_root(1 + 13)]
+        );
         assert_eq!(digit_sum(256), 13);
         assert!((byte_sums(b"aa").mean() - 98.0).abs() < 1e-12);
     }

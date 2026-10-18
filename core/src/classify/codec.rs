@@ -147,7 +147,10 @@ pub struct Codebook {
 }
 
 fn dist(a: &[u8], b: &[u8]) -> u64 {
-    a.iter().zip(b).map(|(&x, &y)| (x as i64 - y as i64).pow(2) as u64).sum()
+    a.iter()
+        .zip(b)
+        .map(|(&x, &y)| (x as i64 - y as i64).pow(2) as u64)
+        .sum()
 }
 
 impl Codebook {
@@ -157,12 +160,17 @@ impl Codebook {
     /// means (rounded half up); an entry left without patches keeps its value
     pub fn learn(images: &[Image], patch: usize, codes: usize, iters: usize, seed: u64) -> Result<Codebook, String> {
         if patch == 0 || codes == 0 || codes > MAX_CODES {
-            return Err(format!("a codebook has 1 to {MAX_CODES} codes of patches at least 1 pixel wide"));
+            return Err(format!(
+                "a codebook has 1 to {MAX_CODES} codes of patches at least 1 pixel wide"
+            ));
         }
         let mut all: Vec<Vec<u8>> = Vec::new();
         for im in images {
             if im.width % patch != 0 || im.height % patch != 0 {
-                return Err(format!("{}×{} is not a multiple of the {patch} pixel patch", im.width, im.height));
+                return Err(format!(
+                    "{}×{} is not a multiple of the {patch} pixel patch",
+                    im.width, im.height
+                ));
             }
             for py in 0..im.height / patch {
                 for px in 0..im.width / patch {
@@ -193,7 +201,9 @@ impl Codebook {
             }
             for ((e, s), &n) in cb.entries.iter_mut().zip(&sums).zip(&counts) {
                 if n > 0 {
-                    e.iter_mut().zip(s).for_each(|(v, &t)| *v = ((2 * t + n) / (2 * n)) as u8);
+                    e.iter_mut()
+                        .zip(s)
+                        .for_each(|(v, &t)| *v = ((2 * t + n) / (2 * n)) as u8);
                 }
             }
         }
@@ -324,7 +334,13 @@ pub fn png(im: &Image) -> Vec<u8> {
 /// 3 stripes) in a colour on a background, placed and sized by the seed
 pub fn toy(size: usize, shape: usize, seed: u64) -> Image {
     let mut r = Rng::new(key(&[seed, 0x70e]));
-    let palette = [[230, 60, 50], [40, 160, 80], [50, 90, 220], [240, 200, 40], [150, 60, 200]];
+    let palette = [
+        [230, 60, 50],
+        [40, 160, 80],
+        [50, 90, 220],
+        [240, 200, 40],
+        [150, 60, 200],
+    ];
     let bgs = [[250, 248, 240], [30, 30, 40], [200, 220, 235]];
     let fg = palette[r.below(palette.len())];
     let bg = bgs[r.below(bgs.len())];

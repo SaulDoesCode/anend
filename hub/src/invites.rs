@@ -246,16 +246,24 @@ pub async fn follow(req: &mut Request, depot: &mut Depot, res: &mut Response) {
 /// `POST /admin/settings`: `join` (open, apply, invite) and `trusted_invite` (on or not)
 #[handler]
 pub async fn settings(req: &mut Request, depot: &mut Depot, res: &mut Response) {
-    let Some(admin) = need_admin(res, depot).cloned() else { return };
+    let Some(admin) = need_admin(res, depot).cloned() else {
+        return;
+    };
     let join = req.form::<String>("join").await.unwrap_or_default();
-    let trusted = req.form::<String>("trusted_invite").await.is_some_and(|v| v == "on" || v == "1");
+    let trusted = req
+        .form::<String>("trusted_invite")
+        .await
+        .is_some_and(|v| v == "on" || v == "1");
     let Some(j) = Join::parse(&join) else {
         return go(res, "/admin#invites", "!joining is open, apply or invite");
     };
     let r = hub().set_join_policy(j).and_then(|_| hub().set_trusted_invite(trusted));
     match r {
         Ok(()) => {
-            hub().store.log(&admin.name, format!("set joining to {}", j.name()), "").ok();
+            hub()
+                .store
+                .log(&admin.name, format!("set joining to {}", j.name()), "")
+                .ok();
             go(res, "/admin#invites", &format!("joining: {}", j.about()))
         }
         Err(e) => go(res, "/admin#invites", &format!("!{e}")),

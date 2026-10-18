@@ -38,7 +38,10 @@ impl SetMode {
 
 /// what the server runs, for this request
 pub fn mode(depot: &Depot) -> Mode {
-    depot.get::<Mode>("mode").copied().unwrap_or_else(|_| crate::mode::get())
+    depot
+        .get::<Mode>("mode")
+        .copied()
+        .unwrap_or_else(|_| crate::mode::get())
 }
 
 // ------------------------------------------------------------------ who's asking
@@ -113,9 +116,7 @@ pub const APP_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'sel
 #[handler]
 pub async fn who_is_asking(req: &mut Request, depot: &mut Depot, res: &mut Response, ctrl: &mut FlowCtrl) {
     guard_headers(req, res);
-    if mode(depot).local
-        && !local_host_ok(&req.header::<String>("host").unwrap_or_default(), &hub().config.url)
-    {
+    if mode(depot).local && !local_host_ok(&req.header::<String>("host").unwrap_or_default(), &hub().config.url) {
         res.status_code(StatusCode::FORBIDDEN);
         res.render(Text::Plain(
             "this hub runs with --local and only answers to localhost, an IP address or its --url",
@@ -336,7 +337,11 @@ pub fn layout(depot: &Depot, tab: &'static str) -> Layout {
 
 /// where "back" goes from a message: the front page, named for what's on it
 fn home_label(depot: &Depot) -> &'static str {
-    if mode(depot).hub { "to the saves" } else { "to the start" }
+    if mode(depot).hub {
+        "to the saves"
+    } else {
+        "to the start"
+    }
 }
 
 #[derive(Template)]
@@ -638,7 +643,9 @@ pub fn join_form(depot: &Depot, res: &mut Response, code: &str) {
     let policy = hub().join_policy();
     let m = mode(depot);
     let what = match (m.hub, m.app) {
-        (true, true) => "to keep your saves here and use the app in the browser, share saves, star the ones you like and climb the levels",
+        (true, true) => {
+            "to keep your saves here and use the app in the browser, share saves, star the ones you like and climb the levels"
+        }
         (true, false) => "to share saves, star the ones you like and climb the levels",
         _ => "to keep your saves here and use the app in the browser",
     };
@@ -654,9 +661,9 @@ pub fn join_form(depot: &Depot, res: &mut Response, code: &str) {
         (Join::Apply, _) => format!(
             "Apply for an account {what}: an admin lets people in. Say a little about why you'd like to join. (With an invite code you're in at once.)"
         ),
-        (Join::Invite, _) => format!(
-            "This server is invite-only: you need an invite code from a member. Make an account {what}."
-        ),
+        (Join::Invite, _) => {
+            format!("This server is invite-only: you need an invite code from a member. Make an account {what}.")
+        }
     };
     let mut f = vec![
         Field {
@@ -711,7 +718,12 @@ pub async fn join(req: &mut Request, res: &mut Response) {
     let name = req.form::<String>("name").await.unwrap_or_default().trim().to_string();
     let email = req.form::<String>("email").await.unwrap_or_default().trim().to_string();
     let password = req.form::<String>("password").await.unwrap_or_default();
-    let code = req.form::<String>("invite").await.unwrap_or_default().trim().to_string();
+    let code = req
+        .form::<String>("invite")
+        .await
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let why: String = req
         .form::<String>("why")
         .await
@@ -875,7 +887,11 @@ pub async fn login(req: &mut Request, res: &mut Response) {
             if other.is_none_or(|u| u.password.is_empty()) {
                 auth::check_password(&password, auth::dummy_hash());
             }
-            let back = if next == "/" { "/login".to_string() } else { format!("/login?next={}", url(&next)) };
+            let back = if next == "/" {
+                "/login".to_string()
+            } else {
+                format!("/login?next={}", url(&next))
+            };
             go(res, &back, "!that name and password don't match")
         }
     }
@@ -984,11 +1000,7 @@ fn show_profile(name: &str, depot: &Depot, res: &mut Response) {
     }
     let all = hub().store.saves().unwrap_or_default();
     let theirs: Vec<&Save> = all.iter().filter(|s| s.author.eq_ignore_ascii_case(&u.name)).collect();
-    let mut approved: Vec<&Save> = theirs
-        .iter()
-        .copied()
-        .filter(|s| s.listed())
-        .collect();
+    let mut approved: Vec<&Save> = theirs.iter().copied().filter(|s| s.listed()).collect();
     approved.sort_by(|a, b| b.stars.cmp(&a.stars).then(b.updated.cmp(&a.updated)));
     let given = hub().store.stars_given(&u.name).unwrap_or(0);
     let all_cls = hub().store.classifiers().unwrap_or_default();
@@ -996,11 +1008,7 @@ fn show_profile(name: &str, depot: &Depot, res: &mut Response) {
         .iter()
         .filter(|c| c.author.eq_ignore_ascii_case(&u.name))
         .collect();
-    let mut cls_approved: Vec<&ClassifierRec> = their_cls
-        .iter()
-        .copied()
-        .filter(|c| c.listed())
-        .collect();
+    let mut cls_approved: Vec<&ClassifierRec> = their_cls.iter().copied().filter(|c| c.listed()).collect();
     cls_approved.sort_by(|a, b| b.stars.cmp(&a.stars).then(b.updated.cmp(&a.updated)));
     let level = game::level(u.points);
     let new_token = depot.get::<String>("new_token").cloned().unwrap_or_default();
@@ -1221,7 +1229,9 @@ pub async fn whoami(depot: &mut Depot, res: &mut Response) {
         }
         None => {
             res.status_code(StatusCode::UNAUTHORIZED);
-            res.render(salvo::writing::Json(serde_json::json!({ "error": "that token isn't known here" })));
+            res.render(salvo::writing::Json(
+                serde_json::json!({ "error": "that token isn't known here" }),
+            ));
         }
     }
 }
@@ -1327,11 +1337,7 @@ pub fn show_admin(depot: &Depot, res: &mut Response) {
         res,
         Admin {
             l: layout(depot, "admin"),
-            waiting_saves: saves
-                .iter()
-                .filter(|s| s.waiting())
-                .map(admin_save)
-                .collect(),
+            waiting_saves: saves.iter().filter(|s| s.waiting()).map(admin_save).collect(),
             applied: users
                 .iter()
                 .filter(|u| u.standing == Standing::Applied)
@@ -1343,11 +1349,7 @@ pub fn show_admin(depot: &Depot, res: &mut Response) {
                 .map(admin_user)
                 .collect(),
             all_saves: saves.iter().map(admin_save).collect(),
-            waiting_cls: cls
-                .iter()
-                .filter(|c| c.waiting())
-                .map(admin_cls)
-                .collect(),
+            waiting_cls: cls.iter().filter(|c| c.waiting()).map(admin_cls).collect(),
             all_cls: cls.iter().map(admin_cls).collect(),
             join: hub().join_policy().name(),
             join_about: hub().join_policy().about(),

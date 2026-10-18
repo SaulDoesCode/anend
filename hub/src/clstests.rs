@@ -32,7 +32,14 @@ async fn classifier_site() {
     )
     .await;
     assert_eq!(code, 403);
-    assert!(!web::hub().store.classifiers().unwrap().iter().any(|c| c.author == "saul"));
+    assert!(
+        !web::hub()
+            .store
+            .classifiers()
+            .unwrap()
+            .iter()
+            .any(|c| c.author == "saul")
+    );
     // nor can nobody
     let (code, v) = post_json("/app/classifiers/share", "", json!({ "name": "kind" }), None).await;
     assert_eq!(code, 400, "{v}");
@@ -251,7 +258,9 @@ async fn doors() {
             .unwrap()
             .contains("frame-ancestors 'none'")
     );
-    let r = TestClient::get(format!("{BASE}/app/")).send(&crate::testkit::both()).await;
+    let r = TestClient::get(format!("{BASE}/app/"))
+        .send(&crate::testkit::both())
+        .await;
     assert_eq!(r.headers().get("content-security-policy").unwrap(), web::APP_CSP);
     assert_eq!(r.headers().get("x-content-type-options").unwrap(), "nosniff");
     // the app's page has no inline script for that policy to stop

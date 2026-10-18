@@ -51,7 +51,11 @@ pub async fn log_requests(req: &mut Request, depot: &mut Depot, res: &mut Respon
 #[handler]
 pub async fn health(depot: &mut Depot, res: &mut Response) {
     let db = hub().store.meta("join").is_ok();
-    res.status_code(if db { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE });
+    res.status_code(if db {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    });
     res.render(Json(json!({
         "status": if db { "ok" } else { "database unavailable" },
         "mode": mode(depot).name(),

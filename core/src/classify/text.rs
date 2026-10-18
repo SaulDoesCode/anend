@@ -135,7 +135,13 @@ impl Window {
         }
         for &v in values {
             self.tokens.push(NUM);
-            for c in [&mut self.letter, &mut self.ordinal, &mut self.reversed, &mut self.atbash, &mut self.root] {
+            for c in [
+                &mut self.letter,
+                &mut self.ordinal,
+                &mut self.reversed,
+                &mut self.atbash,
+                &mut self.root,
+            ] {
                 c.push(0);
             }
             self.values.push(v);

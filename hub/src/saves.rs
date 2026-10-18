@@ -111,7 +111,6 @@ pub async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     );
 }
 
-
 // ------------------------------------------------------------------ a save
 
 pub struct SaveView {
@@ -255,7 +254,6 @@ pub async fn star(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     }
 }
 
-
 fn upload_form(depot: &Depot, action: String, heading: String, s: Option<&Save>, intro: String) -> Form {
     let max = human_size(hub().config.max_upload);
     Form {
@@ -378,19 +376,24 @@ pub async fn upload(req: &mut Request, depot: &mut Depot, res: &mut Response) {
         Ok(s) => s,
         Err(e) => return go(res, "/upload", &format!("!{e}")),
     };
-    let details = match Details::new(&sent.name, &sent.description, &sent.tags).and_then(|d| d.seen_by(&sent.visibility)) {
-        Ok(d) => d,
-        Err(e) => return go(res, "/upload", &format!("!{e}")),
-    };
+    let details =
+        match Details::new(&sent.name, &sent.description, &sent.tags).and_then(|d| d.seen_by(&sent.visibility)) {
+            Ok(d) => d,
+            Err(e) => return go(res, "/upload", &format!("!{e}")),
+        };
     let Some((path, _)) = sent.file else {
         return go(res, "/upload", "!pick a save to share");
     };
     match hub().accept(&user, details, &path, None).await {
         Ok(s) if s.listed() => go(res, &format!("/saves/{}", s.id), "shared: it's in the grid"),
-        Ok(s) if s.visibility == Visibility::Private => go(res, &format!("/saves/{}", s.id), "kept: only you can see it"),
-        Ok(s) if s.visibility == Visibility::Unlisted => {
-            go(res, &format!("/saves/{}", s.id), "kept: anyone with this page's link can see it")
+        Ok(s) if s.visibility == Visibility::Private => {
+            go(res, &format!("/saves/{}", s.id), "kept: only you can see it")
         }
+        Ok(s) if s.visibility == Visibility::Unlisted => go(
+            res,
+            &format!("/saves/{}", s.id),
+            "kept: anyone with this page's link can see it",
+        ),
         Ok(s) => go(
             res,
             &format!("/saves/{}", s.id),
@@ -436,10 +439,11 @@ pub async fn edit(req: &mut Request, depot: &mut Depot, res: &mut Response) {
         Ok(x) => x,
         Err(e) => return go(res, &back, &format!("!{e}")),
     };
-    let details = match Details::new(&sent.name, &sent.description, &sent.tags).and_then(|d| d.seen_by(&sent.visibility)) {
-        Ok(d) => d,
-        Err(e) => return go(res, &back, &format!("!{e}")),
-    };
+    let details =
+        match Details::new(&sent.name, &sent.description, &sent.tags).and_then(|d| d.seen_by(&sent.visibility)) {
+            Ok(d) => d,
+            Err(e) => return go(res, &back, &format!("!{e}")),
+        };
     let page = format!("/saves/{}", s.id);
     match sent.file {
         Some((path, _)) => {
@@ -486,14 +490,21 @@ pub async fn delete(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     }
 }
 
-
 /// `POST /saves/{id}/visibility` with `visibility`: private, unlisted or public (its
 /// owner; an admin can only remove, not reveal)
 #[handler]
 pub async fn visibility(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     let id = req.param::<String>("id").unwrap_or_default();
-    let Some(user) = need_active(res, depot).cloned() else { return };
-    let Some(s) = hub().store.save(&id).ok().flatten().filter(|s| s.author.eq_ignore_ascii_case(&user.name)) else {
+    let Some(user) = need_active(res, depot).cloned() else {
+        return;
+    };
+    let Some(s) = hub()
+        .store
+        .save(&id)
+        .ok()
+        .flatten()
+        .filter(|s| s.author.eq_ignore_ascii_case(&user.name))
+    else {
         return not_found(res, depot);
     };
     let back = format!("/saves/{}", s.id);
@@ -587,7 +598,6 @@ pub async fn leaderboard(depot: &mut Depot, res: &mut Response) {
     );
 }
 
-
 #[handler]
 pub async fn admin_save_action(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     let Some(admin) = need_admin(res, depot).cloned() else {
@@ -613,4 +623,3 @@ pub async fn admin_save_action(req: &mut Request, depot: &mut Depot, res: &mut R
         Err(e) => go(res, &back, &format!("!{e}")),
     }
 }
-

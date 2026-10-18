@@ -115,7 +115,11 @@ impl Example {
 
     /// the data: `raw` if set, else the text's bytes
     pub fn data(&self) -> &[u8] {
-        if self.raw.is_empty() { self.text.as_bytes() } else { &self.raw }
+        if self.raw.is_empty() {
+            self.text.as_bytes()
+        } else {
+            &self.raw
+        }
     }
 
     /// every (head, target) of the example, the main one first
@@ -241,7 +245,11 @@ pub fn gen_loss(logits: &[f32], tokens: &[u16], offset: usize, t: &Target) -> (f
     let mut loss = 0f32;
     for &(p, class) in &rows {
         let row = &logits[p * GEN_OUT..(p + 1) * GEN_OUT];
-        let tg = if avoid { Target::Not(class) } else { Target::Class(class) };
+        let tg = if avoid {
+            Target::Not(class)
+        } else {
+            Target::Class(class)
+        };
         let (l, d) = head_loss(HeadKind::Single, row, &tg, 0.0).expect("fits");
         loss += l;
         let inv = 1.0 / count as f32;
@@ -407,7 +415,10 @@ pub fn crop_bytes(net: &Net, b: &[u8], key: u64) -> (Window, usize) {
     }
     let start = (mix(key) % (b.len() - room + 1) as u64) as usize;
     let end = start + room == b.len();
-    (text::window_with(&b[start..start + room], causal, !causal || end), start)
+    (
+        text::window_with(&b[start..start + room], causal, !causal || end),
+        start,
+    )
 }
 
 /// every window of a text forward, and the mean of their logits (in window order)
@@ -871,11 +882,7 @@ pub fn check(clf: &Classifier, data: &[Example]) -> Result<(), String> {
                 }
                 continue;
             }
-            let h = clf
-                .net
-                .heads
-                .get(head)
-                .ok_or(format!("example {i}: no head {head}"))?;
+            let h = clf.net.heads.get(head).ok_or(format!("example {i}: no head {head}"))?;
             head_loss(h.spec.kind, &vec![0.0; h.width()], t, 0.0).map_err(|e| format!("example {i}: {e}"))?;
         }
         if !ex.extra.is_empty() && ex.extra.len() != clf.net.cfg.extra {

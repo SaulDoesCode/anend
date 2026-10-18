@@ -106,7 +106,11 @@ pub async fn one(req: &mut Request, depot: &mut Depot, res: &mut Response) {
 #[handler]
 pub async fn mine(depot: &mut Depot, res: &mut Response) {
     let Some(u) = me(depot) else {
-        return error(res, StatusCode::UNAUTHORIZED, "send an app token (Authorization: Bearer …)");
+        return error(
+            res,
+            StatusCode::UNAUTHORIZED,
+            "send an app token (Authorization: Bearer …)",
+        );
     };
     let mut saves: Vec<Save> = hub()
         .store
@@ -344,7 +348,13 @@ pub async fn share_classifier(req: &mut Request, res: &mut Response) {
         "" => None,
         v => match Visibility::parse(v) {
             Some(v) => Some(v),
-            None => return error(res, StatusCode::BAD_REQUEST, "visibility is private, unlisted or public"),
+            None => {
+                return error(
+                    res,
+                    StatusCode::BAD_REQUEST,
+                    "visibility is private, unlisted or public",
+                );
+            }
         },
     };
     let Some(path) = form

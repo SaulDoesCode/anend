@@ -144,7 +144,13 @@ pub fn sample(generator: &Classifier, prompt: &[u8], s: &Sampling, index: u64) -
 /// reweights scaled next-byte logits in place, given the bytes written so far
 type Guide<'a> = &'a dyn Fn(&[u8], &mut [f32]);
 
-fn sample_guided(generator: &Classifier, prompt: &[u8], s: &Sampling, index: u64, guide: Option<Guide>) -> (Vec<u8>, f32) {
+fn sample_guided(
+    generator: &Classifier,
+    prompt: &[u8],
+    s: &Sampling,
+    index: u64,
+    guide: Option<Guide>,
+) -> (Vec<u8>, f32) {
     let mut r = Rng::new(key(&[s.seed, index, 0x5a3e]));
     let mut dec = Decoder::new(&generator.net, generator.gains(), prompt);
     let mut out = Vec::new();
@@ -223,7 +229,13 @@ impl Want {
             Want::Near { index, value, scale } => math::exp(-(get(index) - value).abs() / scale.max(1e-6)),
             Want::Range { index, lo, hi, scale } => {
                 let v = get(index);
-                let d = if v < lo { lo - v } else if v > hi { v - hi } else { 0.0 };
+                let d = if v < lo {
+                    lo - v
+                } else if v > hi {
+                    v - hi
+                } else {
+                    0.0
+                };
                 math::exp(-d / scale.max(1e-6))
             }
         }
@@ -462,12 +474,21 @@ fn judge_all(critics: &[Critic], data: &[u8]) -> (Vec<Vec<Output>>, Vec<f32>) {
 /// draws `opts.candidates` candidates in parallel and judges them all; each candidate
 /// is a function of (generator, critics, opts, its index) only, so the thread count
 /// changes nothing
-pub fn draw(generator: &Classifier, critics: &[Critic], c: &Constraints, opts: &GenOpts) -> Result<Vec<Candidate>, String> {
+pub fn draw(
+    generator: &Classifier,
+    critics: &[Critic],
+    c: &Constraints,
+    opts: &GenOpts,
+) -> Result<Vec<Candidate>, String> {
     opts.sampling.check()?;
     if generator.net.generator.is_none() {
         return Err("the model has no generative head".into());
     }
-    let pool = Pool::new(if opts.threads == 0 { pool::available() } else { opts.threads });
+    let pool = Pool::new(if opts.threads == 0 {
+        pool::available()
+    } else {
+        opts.threads
+    });
     let one = |i: u64| -> Candidate {
         let shown = |out: &[u8]| -> Vec<u8> {
             if opts.judge_prompt {
@@ -486,7 +507,11 @@ pub fn draw(generator: &Classifier, critics: &[Critic], c: &Constraints, opts: &
             order.truncate(g.top_k.max(1));
             let mut adj = vec![f32::NEG_INFINITY; GEN_OUT];
             for &t in &order {
-                let ext = if t == END { out.to_vec() } else { [out, &[t as u8]].concat() };
+                let ext = if t == END {
+                    out.to_vec()
+                } else {
+                    [out, &[t as u8]].concat()
+                };
                 let (_, sc) = judge_all(critics, &shown(&ext));
                 // the scaled logit is raised by strength·score, so temperature still applies
                 adj[t] = l[t] + g.strength * combine(critics, &sc) * opts.sampling.temperature.max(1e-3);
@@ -517,8 +542,16 @@ pub fn draw(generator: &Classifier, critics: &[Critic], c: &Constraints, opts: &
 }
 
 /// the candidates that pass the constraints, best score first (ties: lower index)
-pub fn generate(generator: &Classifier, critics: &[Critic], c: &Constraints, opts: &GenOpts) -> Result<Vec<Candidate>, String> {
-    let mut v: Vec<Candidate> = draw(generator, critics, c, opts)?.into_iter().filter(|c| c.passed()).collect();
+pub fn generate(
+    generator: &Classifier,
+    critics: &[Critic],
+    c: &Constraints,
+    opts: &GenOpts,
+) -> Result<Vec<Candidate>, String> {
+    let mut v: Vec<Candidate> = draw(generator, critics, c, opts)?
+        .into_iter()
+        .filter(|c| c.passed())
+        .collect();
     v.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.index.cmp(&b.index)));
     if opts.keep > 0 {
         v.truncate(opts.keep);
@@ -647,7 +680,11 @@ pub fn reinforce(
         .iter()
         .map(|s| {
             let from = s.prompt.len();
-            let t = if s.reward > 0.0 { Target::Next { from } } else { Target::Avoid { from } };
+            let t = if s.reward > 0.0 {
+                Target::Next { from }
+            } else {
+                Target::Avoid { from }
+            };
             Example::bytes(&[&s.prompt[..], &s.bytes[..]].concat(), 0, t).weighted(s.reward.abs())
         })
         .collect();
@@ -697,7 +734,9 @@ mod tests {
 
     fn corpus() -> Vec<Example> {
         let words = ["ab", "abc", "abcd"];
-        (0..24).map(|i| Example::generate(&format!("{}.", words[i % 3]))).collect()
+        (0..24)
+            .map(|i| Example::generate(&format!("{}.", words[i % 3])))
+            .collect()
     }
 
     fn trained(threads: usize) -> Classifier {
@@ -736,7 +775,9 @@ mod tests {
         assert!(a.iter().all(|(o, _)| o.len() <= 12));
         assert!(a.iter().filter(|(o, _)| o.starts_with(b"ab")).count() >= 4, "{a:?}");
         // the sampling seed matters
-        let other: Vec<_> = (0..6).map(|i| sample(&g, b"", &Sampling { seed: 10, ..s.clone() }, i)).collect();
+        let other: Vec<_> = (0..6)
+            .map(|i| sample(&g, b"", &Sampling { seed: 10, ..s.clone() }, i))
+            .collect();
         assert!(a.iter().zip(&other).all(|(x, y)| x.0.len() <= 12 && y.0.len() <= 12));
         let p = train::evaluate(&g, &corpus(), &(0..24).collect::<Vec<_>>(), &Pool::new(1));
         assert!(p.bits_per_byte.unwrap() < 1.5, "{:?}", p.bits_per_byte);
@@ -746,7 +787,12 @@ mod tests {
     fn critics_rank_constrain_guide_and_reinforce() {
         let mut g = trained(1);
         // a "critic" that likes texts containing 'd': a classifier trained on it
-        let mut critic = Classifier::new(Config::tiny().gematria(false), &[HeadSpec::single("d", &["no", "yes"])], 2).unwrap();
+        let mut critic = Classifier::new(
+            Config::tiny().gematria(false),
+            &[HeadSpec::single("d", &["no", "yes"])],
+            2,
+        )
+        .unwrap();
         let data: Vec<Example> = (0..32)
             .map(|i| {
                 let t = ["ab.", "abc.", "abcd.", "abd.", "cd.", "ba."][i % 6];
@@ -777,7 +823,19 @@ mod tests {
             ..GenOpts::default()
         };
         let all = draw(&g, &critics, &Constraints::default(), &opts).unwrap();
-        assert_eq!(all, draw(&g, &critics, &Constraints::default(), &GenOpts { threads: 1, ..opts.clone() }).unwrap());
+        assert_eq!(
+            all,
+            draw(
+                &g,
+                &critics,
+                &Constraints::default(),
+                &GenOpts {
+                    threads: 1,
+                    ..opts.clone()
+                }
+            )
+            .unwrap()
+        );
         let ranked = generate(&g, &critics, &Constraints::default(), &opts).unwrap();
         assert!(ranked.windows(2).all(|w| w[0].score >= w[1].score));
         // constraints: must contain 'd' and be at most 6 bytes
@@ -797,7 +855,12 @@ mod tests {
             }],
             ..Constraints::default()
         };
-        assert!(generate(&g, &critics, &sums, &opts).unwrap().iter().all(|k| (3..=4).contains(&k.bytes.len())));
+        assert!(
+            generate(&g, &critics, &sums, &opts)
+                .unwrap()
+                .iter()
+                .all(|k| (3..=4).contains(&k.bytes.len()))
+        );
         // guidance raises the mean critic score
         let mean = |v: &[Candidate]| v.iter().map(|c| c.scores[0]).sum::<f32>() / v.len() as f32;
         let guided = draw(
@@ -814,7 +877,12 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(mean(&guided) > mean(&all), "guided {} plain {}", mean(&guided), mean(&all));
+        assert!(
+            mean(&guided) > mean(&all),
+            "guided {} plain {}",
+            mean(&guided),
+            mean(&all)
+        );
         // reinforcement: the rewarded samples get likelier, the penalised less likely
         let rw = rewards(&all, b"", 1.0);
         let rep = reinforce(

@@ -105,7 +105,6 @@ pub fn multipart(fields: &[(&str, &str)], file: &[u8]) -> (String, Vec<u8>) {
     (format!("multipart/form-data; boundary={boundary}"), b)
 }
 
-
 /// the server as main builds it, for a mode
 pub fn service(mode: Mode) -> Service {
     crate::service(mode)

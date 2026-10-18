@@ -158,7 +158,11 @@ pub enum DataQuery {
     },
     /// pairs (input from list `input`, output from list `output`) for a generate head:
     /// it learns to write the output after the input
-    Pairs { input: String, output: String, head: String },
+    Pairs {
+        input: String,
+        output: String,
+        head: String,
+    },
     /// examples written into the spec
     Inline { items: Vec<InlineItem> },
 }
@@ -179,8 +183,17 @@ pub struct InlineItem {
 pub enum WantDecl {
     Class(String),
     Not(String),
-    Near { value: String, target: f32, scale: f32 },
-    Range { value: String, lo: f32, hi: f32, scale: f32 },
+    Near {
+        value: String,
+        target: f32,
+        scale: f32,
+    },
+    Range {
+        value: String,
+        lo: f32,
+        hi: f32,
+        scale: f32,
+    },
 }
 
 /// another model judging what a generator writes
@@ -295,7 +308,11 @@ impl ModelSpec {
         let mut pooled = 0;
         for h in &self.heads {
             if h.name == head {
-                return Ok(if h.kind == OutKind::Generate { Slot::Gen } else { Slot::Pooled(pooled) });
+                return Ok(if h.kind == OutKind::Generate {
+                    Slot::Gen
+                } else {
+                    Slot::Pooled(pooled)
+                });
             }
             if h.kind != OutKind::Generate {
                 pooled += 1;
@@ -305,7 +322,10 @@ impl ModelSpec {
     }
 
     fn decl(&self, head: &str) -> Result<&HeadDecl, String> {
-        self.heads.iter().find(|h| h.name == head).ok_or(format!("{}: no head {head:?}", self.name))
+        self.heads
+            .iter()
+            .find(|h| h.name == head)
+            .ok_or(format!("{}: no head {head:?}", self.name))
     }
 
     fn generates(&self) -> bool {
@@ -316,7 +336,10 @@ impl ModelSpec {
     pub fn check(&self) -> Result<(), String> {
         let at = |m: String| Err(format!("model spec {:?}: {m}", self.name));
         if self.version == 0 || self.version > SPEC_VERSION {
-            return at(format!("version {} (this build reads 1 to {SPEC_VERSION})", self.version));
+            return at(format!(
+                "version {} (this build reads 1 to {SPEC_VERSION})",
+                self.version
+            ));
         }
         if self.name.trim().is_empty() {
             return at("a model needs a name".into());
@@ -351,12 +374,23 @@ impl ModelSpec {
         if self.generates() && self.trunk.causal == Some(false) {
             return at("a generate head needs a causal trunk".into());
         }
-        if let InputSpec::Image { width, height, patch, codes } = self.input {
+        if let InputSpec::Image {
+            width,
+            height,
+            patch,
+            codes,
+        } = self.input
+        {
             if patch == 0 || width == 0 || height == 0 || width % patch != 0 || height % patch != 0 {
-                return at(format!("image {width}×{height} must be a positive multiple of the {patch} pixel patch"));
+                return at(format!(
+                    "image {width}×{height} must be a positive multiple of the {patch} pixel patch"
+                ));
             }
             if codes == 0 || codes > super::codec::MAX_CODES {
-                return at(format!("an image codebook holds 1 to {} codes", super::codec::MAX_CODES));
+                return at(format!(
+                    "an image codebook holds 1 to {} codes",
+                    super::codec::MAX_CODES
+                ));
             }
         }
         if let InputSpec::Numbers { names, .. } = &self.input
@@ -436,7 +470,11 @@ impl ModelSpec {
                 ),
                 None => Config::small(),
             },
-            other => return Err(format!("unknown trunk preset {other:?} (test, compact, small, base, auto)")),
+            other => {
+                return Err(format!(
+                    "unknown trunk preset {other:?} (test, compact, small, base, auto)"
+                ));
+            }
         };
         cfg = cfg.gematria(false);
         if let InputSpec::Text { features } = &self.input {
@@ -465,7 +503,9 @@ impl ModelSpec {
         });
         cfg.stride = (cfg.max_len.saturating_sub(2) / 2).max(1);
         cfg.causal = t.causal.unwrap_or(self.generates());
-        cfg.pooling = t.pooling.unwrap_or(if cfg.causal { Pooling::Mean } else { cfg.pooling });
+        cfg.pooling = t
+            .pooling
+            .unwrap_or(if cfg.causal { Pooling::Mean } else { cfg.pooling });
         if let Some(v) = t.dropout {
             cfg.dropout = v;
         }
@@ -480,7 +520,9 @@ impl ModelSpec {
     /// the window an input needs whole (pictures and number vectors), else 128
     fn natural_len(&self) -> usize {
         match &self.input {
-            InputSpec::Image { width, height, patch, .. } => (width / patch + 1) * (height / patch) + 2,
+            InputSpec::Image {
+                width, height, patch, ..
+            } => (width / patch + 1) * (height / patch) + 2,
             InputSpec::Numbers { names, codec } => names.len() * (codec.width() + 1) + 2,
             _ => 128,
         }
@@ -517,7 +559,11 @@ pub struct Model {
 #[serde(rename_all = "snake_case")]
 pub enum Answer {
     /// class (or label) probabilities by name, the top one, the members (steered)
-    Classes { probs: BTreeMap<String, f32>, top: String, members: Vec<String> },
+    Classes {
+        probs: BTreeMap<String, f32>,
+        top: String,
+        members: Vec<String>,
+    },
     Values(BTreeMap<String, f32>),
     /// what the generate head wrote after the input, with the spec's sampling
     Generated(Value),
@@ -551,11 +597,16 @@ fn build_for(spec: &ModelSpec, profile: Option<&MachineProfile>, examples: usize
             HeadSpec::new(&h.name, kind, &c).weighted(h.weight)
         })
         .collect();
-    let generator = spec.heads.iter().find(|h| h.kind == OutKind::Generate).map(|h| GenSpec {
-        name: h.name.clone(),
-        weight: h.weight,
-    });
-    let mut clf = Classifier::with_gen(cfg, &heads, generator, spec.seed).map_err(|e| format!("model spec {:?}: {e}", spec.name))?;
+    let generator = spec
+        .heads
+        .iter()
+        .find(|h| h.kind == OutKind::Generate)
+        .map(|h| GenSpec {
+            name: h.name.clone(),
+            weight: h.weight,
+        });
+    let mut clf = Classifier::with_gen(cfg, &heads, generator, spec.seed)
+        .map_err(|e| format!("model spec {:?}: {e}", spec.name))?;
     clf.meta.name = spec.name.clone();
     Ok(Model {
         spec: spec.clone(),
@@ -604,7 +655,11 @@ impl Model {
         }
         let spec = ModelSpec {
             version: SPEC_VERSION,
-            name: if clf.meta.name.is_empty() { "classifier".into() } else { clf.meta.name.clone() },
+            name: if clf.meta.name.is_empty() {
+                "classifier".into()
+            } else {
+                clf.meta.name.clone()
+            },
             input: InputSpec::Text { features },
             trunk: TrunkSpec {
                 preset: Some("small".into()),
@@ -668,9 +723,15 @@ impl Model {
             (InputSpec::Bytes | InputSpec::Text { .. }, Value::Bytes(b)) => Ok((b.clone(), vec![])),
             (InputSpec::Image { width, height, .. }, Value::Image(im)) => {
                 if im.width != *width || im.height != *height {
-                    return Err(format!("a {}×{} picture for a {width}×{height} model", im.width, im.height));
+                    return Err(format!(
+                        "a {}×{} picture for a {width}×{height} model",
+                        im.width, im.height
+                    ));
                 }
-                let cb = self.codebook.as_ref().ok_or("the picture codebook is learned by training first")?;
+                let cb = self
+                    .codebook
+                    .as_ref()
+                    .ok_or("the picture codebook is learned by training first")?;
                 Ok((cb.encode(im), vec![]))
             }
             (InputSpec::Numbers { names, codec }, Value::Numbers(x)) => {
@@ -710,7 +771,11 @@ impl Model {
     /// every head's answer on an input, by head name
     pub fn run(&self, input: &Value) -> Result<BTreeMap<String, Answer>, String> {
         let (bytes, extra) = self.encode(input)?;
-        let extra = if extra.is_empty() { vec![0.0; self.clf.net.cfg.extra] } else { extra };
+        let extra = if extra.is_empty() {
+            vec![0.0; self.clf.net.cfg.extra]
+        } else {
+            extra
+        };
         let outs = if self.clf.net.heads.is_empty() {
             Vec::new()
         } else {
@@ -754,12 +819,26 @@ impl Model {
         let mut pairs: Vec<(Value, Value, String)> = Vec::new();
         for q in &spec.data {
             match q {
-                DataQuery::List { list, head, class, value } => {
-                    items.extend(src.list(list)?.into_iter().map(|v| (v, head.clone(), class.clone(), value.clone())))
-                }
-                DataQuery::Tagged { tag, head, class, value } => {
-                    items.extend(src.tagged(tag)?.into_iter().map(|v| (v, head.clone(), class.clone(), value.clone())))
-                }
+                DataQuery::List {
+                    list,
+                    head,
+                    class,
+                    value,
+                } => items.extend(
+                    src.list(list)?
+                        .into_iter()
+                        .map(|v| (v, head.clone(), class.clone(), value.clone())),
+                ),
+                DataQuery::Tagged {
+                    tag,
+                    head,
+                    class,
+                    value,
+                } => items.extend(
+                    src.tagged(tag)?
+                        .into_iter()
+                        .map(|v| (v, head.clone(), class.clone(), value.clone())),
+                ),
                 DataQuery::Pairs { input, output, head } => {
                     pairs.extend(src.pairs(input, output)?.into_iter().map(|(a, b)| (a, b, head.clone())))
                 }
@@ -803,7 +882,11 @@ impl Model {
             let (ia, _) = self.encode(&a)?;
             let (ib, _) = self.encode(&b)?;
             let prompt = self.prompt(&ia);
-            out.push(Example::bytes(&[&prompt[..], &ib[..]].concat(), 0, Target::Next { from: prompt.len() }));
+            out.push(Example::bytes(
+                &[&prompt[..], &ib[..]].concat(),
+                0,
+                Target::Next { from: prompt.len() },
+            ));
         }
         Ok(out)
     }
@@ -811,7 +894,10 @@ impl Model {
 
 fn index(d: &HeadDecl, class: Option<&str>) -> Result<usize, String> {
     let c = class.ok_or(format!("data for head {:?} names a class", d.name))?;
-    d.classes.iter().position(|x| x == c).ok_or(format!("head {:?} has no class {c:?}", d.name))
+    d.classes
+        .iter()
+        .position(|x| x == c)
+        .ok_or(format!("head {:?} has no class {c:?}", d.name))
 }
 
 fn kind_of(v: &Value) -> &'static str {
@@ -875,13 +961,20 @@ pub fn generate(
 ) -> Result<Vec<Candidate>, String> {
     let mut critics = Vec::new();
     for c in &model.spec.critics {
-        let m = models.get(&c.model).ok_or(format!("critic {:?} is not loaded", c.model))?;
+        let m = models
+            .get(&c.model)
+            .ok_or(format!("critic {:?} is not loaded", c.model))?;
         let slot = m.spec.slot(&c.head)?;
         let Slot::Pooled(h) = slot else {
             return Err(format!("critic {:?}: {:?} is a generate head", c.model, c.head));
         };
         let d = m.spec.decl(&c.head)?;
-        let pos = |n: &str| d.classes.iter().position(|x| x == n).ok_or(format!("critic {:?}: no class {n:?}", c.model));
+        let pos = |n: &str| {
+            d.classes
+                .iter()
+                .position(|x| x == n)
+                .ok_or(format!("critic {:?}: no class {n:?}", c.model))
+        };
         let want = match &c.want {
             WantDecl::Class(n) => Want::Class(pos(n)?),
             WantDecl::Not(n) => Want::Not(pos(n)?),
@@ -936,8 +1029,28 @@ mod tests {
 
     fn source() -> MemSource {
         MemSource::default()
-            .with_texts("fruits", &["apple plum", "peach melon", "grape apple", "mango plum", "cherry peach", "melon grape"])
-            .with_texts("rocks", &["granite slate", "flint shale", "quartz basalt", "stone rock", "slate flint", "basalt stone"])
+            .with_texts(
+                "fruits",
+                &[
+                    "apple plum",
+                    "peach melon",
+                    "grape apple",
+                    "mango plum",
+                    "cherry peach",
+                    "melon grape",
+                ],
+            )
+            .with_texts(
+                "rocks",
+                &[
+                    "granite slate",
+                    "flint shale",
+                    "quartz basalt",
+                    "stone rock",
+                    "slate flint",
+                    "basalt stone",
+                ],
+            )
     }
 
     #[test]
@@ -952,7 +1065,10 @@ mod tests {
         }
         let back = Model::from_bytes(&m.to_bytes()).unwrap();
         assert_eq!(back.spec, m.spec);
-        assert_eq!(back.run(&Value::Text("apple".into())).unwrap(), m.run(&Value::Text("apple".into())).unwrap());
+        assert_eq!(
+            back.run(&Value::Text("apple".into())).unwrap(),
+            m.run(&Value::Text("apple".into())).unwrap()
+        );
         // an old-style classifier converts
         let c = Model::from_classifier(m.clf.clone());
         assert_eq!(c.spec.heads, m.spec.heads);
@@ -964,8 +1080,10 @@ mod tests {
     fn specs_are_checked_with_clear_errors() {
         let bad = |j: &str| ModelSpec::from_json(j).unwrap_err();
         assert!(bad(r#"{"name":"x","input":{"type":"text"},"heads":[]}"#).contains("at least one head"));
-        assert!(bad(r#"{"name":"x","version":9,"input":{"type":"text"},"heads":[{"name":"a","kind":"generate"}]}"#)
-            .contains("version 9"));
+        assert!(
+            bad(r#"{"name":"x","version":9,"input":{"type":"text"},"heads":[{"name":"a","kind":"generate"}]}"#)
+                .contains("version 9")
+        );
         assert!(
             bad(r#"{"name":"x","input":{"type":"text"},"heads":[{"name":"a","kind":"classify","classes":["p"]}]}"#)
                 .contains("two classes")
@@ -974,21 +1092,31 @@ mod tests {
             r#"{"name":"x","input":{"type":"image","width":30,"height":32},"heads":[{"name":"a","kind":"generate"}]}"#
         )
         .contains("multiple"));
-        assert!(bad(r#"{"name":"x","input":{"type":"text"},"heads":[{"name":"a","kind":"classify","classes":["p","q"]}],
-              "data":[{"from":"list","list":"l","head":"a","class":"z"}]}"#)
-        .contains("no class \"z\""));
+        assert!(
+            bad(
+                r#"{"name":"x","input":{"type":"text"},"heads":[{"name":"a","kind":"classify","classes":["p","q"]}],
+              "data":[{"from":"list","list":"l","head":"a","class":"z"}]}"#
+            )
+            .contains("no class \"z\"")
+        );
         assert!(bad(r#"{"name":"x","input":{"type":"text"},"heads":[{"name":"a","kind":"generate"}],"trunk":{"causal":false}}"#)
             .contains("causal"));
-        assert!(bad(r#"{"name":"x","input":{"type":"text"},"heads":[{"name":"a","kind":"regress","classes":["v"]}],
-              "critics":[{"model":"m","head":"h","want":{"class":"c"}}]}"#)
-        .contains("has none"));
+        assert!(
+            bad(
+                r#"{"name":"x","input":{"type":"text"},"heads":[{"name":"a","kind":"regress","classes":["v"]}],
+              "critics":[{"model":"m","head":"h","want":{"class":"c"}}]}"#
+            )
+            .contains("has none")
+        );
         assert!(
             build(&ModelSpec::from_json(r#"{"name":"x","input":{"type":"text"},"trunk":{"preset":"huge"},"heads":[{"name":"a","kind":"generate"}]}"#).unwrap(), None)
                 .unwrap_err()
                 .contains("unknown trunk preset")
         );
         // sizes left out: not the test preset
-        let s = ModelSpec::from_json(r#"{"name":"x","input":{"type":"text"},"heads":[{"name":"a","kind":"generate"}]}"#).unwrap();
+        let s =
+            ModelSpec::from_json(r#"{"name":"x","input":{"type":"text"},"heads":[{"name":"a","kind":"generate"}]}"#)
+                .unwrap();
         let c = s.config(None, 0).unwrap();
         assert!(c.causal && c.d_model >= Config::small().d_model && !c.letters);
     }
@@ -1017,8 +1145,15 @@ mod tests {
         let c = generate(&g, &models, &Value::Bytes(vec![]), 6, None).unwrap();
         assert_eq!(c, generate(&g, &models, &Value::Bytes(vec![]), 6, None).unwrap());
         assert!(c.windows(2).all(|w| w[0].score >= w[1].score));
-        assert!(matches!(g.run(&Value::Text("gra".into())).unwrap()["next"], Answer::Generated(Value::Text(_))));
-        assert!(generate(&g, &BTreeMap::new(), &Value::Bytes(vec![]), 2, None).unwrap_err().contains("not loaded"));
+        assert!(matches!(
+            g.run(&Value::Text("gra".into())).unwrap()["next"],
+            Answer::Generated(Value::Text(_))
+        ));
+        assert!(
+            generate(&g, &BTreeMap::new(), &Value::Bytes(vec![]), 2, None)
+                .unwrap_err()
+                .contains("not loaded")
+        );
 
         // numbers: y = a + b, read as fixed-width text plus the numbers themselves
         let nspec = ModelSpec::from_json(
@@ -1045,13 +1180,17 @@ mod tests {
         let mut nspec = nspec;
         nspec.data.push(DataQuery::Inline { items });
         let (n, _) = train(None, &nspec, &MemSource::default(), None, |_| Flow::Go).unwrap();
-        let Answer::Values(v) = &n.run(&Value::Numbers(vec![1.0, 0.6])).unwrap()["y"] else { panic!() };
+        let Answer::Values(v) = &n.run(&Value::Numbers(vec![1.0, 0.6])).unwrap()["y"] else {
+            panic!()
+        };
         assert!((v["sum"] - 1.6).abs() < 0.4, "{v:?}");
     }
 
     #[test]
     fn a_picture_generator_from_a_spec() {
-        let ims: Vec<Value> = (0..8).map(|i| Value::Image(super::super::codec::toy(16, i % 4, i as u64))).collect();
+        let ims: Vec<Value> = (0..8)
+            .map(|i| Value::Image(super::super::codec::toy(16, i % 4, i as u64)))
+            .collect();
         let spec = ModelSpec::from_json(
             r#"{
               "name": "pictures",
@@ -1065,8 +1204,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(spec.config(None, 0).unwrap().max_len, 5 * 4 + 2);
-        let (m, _) = train(None, &spec, &MemSource::default().with_list("toys", ims), None, |_| Flow::Go).unwrap();
-        let Answer::Generated(Value::Image(im)) = &m.run(&Value::Image(super::super::codec::toy(16, 0, 99))).unwrap()["draw"]
+        let (m, _) = train(None, &spec, &MemSource::default().with_list("toys", ims), None, |_| {
+            Flow::Go
+        })
+        .unwrap();
+        let Answer::Generated(Value::Image(im)) =
+            &m.run(&Value::Image(super::super::codec::toy(16, 0, 99))).unwrap()["draw"]
         else {
             panic!()
         };

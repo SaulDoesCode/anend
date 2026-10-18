@@ -13,9 +13,9 @@ use crate::auth::{self, Limiter};
 use crate::game;
 #[cfg(feature = "hub")]
 use crate::inspect;
+use crate::store::{Role, Standing, Store, User};
 #[cfg(feature = "hub")]
 use crate::store::{Save, Status, Visibility};
-use crate::store::{Role, Standing, Store, User};
 
 pub struct Config {
     pub name: String,
@@ -164,8 +164,7 @@ impl Details {
     /// unlisted or public
     pub fn seen_by(mut self, vis: &str) -> Result<Details, String> {
         if !vis.trim().is_empty() {
-            self.visibility =
-                Some(Visibility::parse(vis).ok_or("visibility is private, unlisted or public")?);
+            self.visibility = Some(Visibility::parse(vis).ok_or("visibility is private, unlisted or public")?);
         }
         Ok(self)
     }
@@ -266,7 +265,6 @@ impl Hub {
 
 #[cfg(feature = "hub")]
 impl Hub {
-
     /// takes an uploaded file in: checks it's a save, files it, and queues it for review
     /// (or lets it straight in for trusted users). `replace` uploads a new version.
     pub async fn accept(
@@ -382,7 +380,8 @@ impl Hub {
             self.store.update_save(id, |s| s.rewarded = true)?;
             self.store.add_points(&s.author, game::APPROVED)?;
         }
-        self.store.log(&user.name, format!("made a save {}", vis.name()), &s.id)?;
+        self.store
+            .log(&user.name, format!("made a save {}", vis.name()), &s.id)?;
         Ok(s)
     }
 

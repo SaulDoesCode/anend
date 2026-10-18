@@ -113,9 +113,15 @@ async fn routes_per_mode() {
     }
     // the nav and the front page follow the mode
     let (_, page) = get_in(Mode::APP, "/", None).await;
-    assert!(page.contains("/login?next=/app/") && !page.contains("href=\"/classifiers\""), "{page}");
+    assert!(
+        page.contains("/login?next=/app/") && !page.contains("href=\"/classifiers\""),
+        "{page}"
+    );
     let (_, page) = get_in(Mode::HUB, "/", None).await;
-    assert!(page.contains("href=\"/classifiers\"") && !page.contains("href=\"/app/\""), "{page}");
+    assert!(
+        page.contains("href=\"/classifiers\"") && !page.contains("href=\"/app/\""),
+        "{page}"
+    );
     let (_, page) = get_in(Mode::BOTH, "/", None).await;
     assert!(page.contains("href=\"/classifiers\"") && page.contains("href=\"/app/\""));
     let (code, to, _) = fetch(Mode::LOCAL, "/", None).await;
@@ -163,9 +169,15 @@ async fn app_needs_sign_in() {
     // logging in goes back where it was asked from, and only to this server
     web::hub()
         .store
-        .update_user("si-member", |u| u.password = auth::hash_password("long enough pw").unwrap())
+        .update_user("si-member", |u| {
+            u.password = auth::hash_password("long enough pw").unwrap()
+        })
         .unwrap();
-    for (next, want) in [("/app/", "/app/"), ("//evil.example", "/"), ("https://evil.example", "/")] {
+    for (next, want) in [
+        ("/app/", "/app/"),
+        ("//evil.example", "/"),
+        ("https://evil.example", "/"),
+    ] {
         let r = TestClient::post(format!("{BASE}/login?next={}", web::url(next)))
             .raw_form("name=si-member&password=long+enough+pw".to_string())
             .send(&service(Mode::APP))
@@ -183,9 +195,7 @@ async fn invites() {
     let admin = person("iv-admin", Role::Admin);
     let trusted = person("iv-trusted", Role::Trusted);
     h.set_join_policy(crate::hub::Join::Invite).unwrap();
-    let join = |name: &str, code: &str| {
-        format!("name={name}&password=long+enough+pw&invite={}", web::url(code))
-    };
+    let join = |name: &str, code: &str| format!("name={name}&password=long+enough+pw&invite={}", web::url(code));
     // no code, no account
     let (code, _) = post_form_in(Mode::BOTH, "/join", "", &join("iv-nocode", "")).await;
     assert_eq!(code, 303);
@@ -223,7 +233,10 @@ async fn invites() {
     post_form_in(Mode::BOTH, "/join", "", &join("iv-two", &code_text)).await;
     post_form_in(Mode::BOTH, "/join", "", &join("iv-three", &code_text)).await;
     let one = h.store.user("iv-one").unwrap().unwrap();
-    assert_eq!((one.standing, one.invited_by.as_str()), (Standing::Active, "iv-trusted"));
+    assert_eq!(
+        (one.standing, one.invited_by.as_str()),
+        (Standing::Active, "iv-trusted")
+    );
     assert!(h.store.user("iv-two").unwrap().is_some());
     assert!(h.store.user("iv-three").unwrap().is_none());
     // the admin panel lists every invite, and takes one back
@@ -250,8 +263,14 @@ async fn invites() {
     post_form_in(Mode::BOTH, "/join", "", &join("iv-expired", &old)).await;
     assert!(h.store.user("iv-expired").unwrap().is_none());
     // bad numbers are refused
-    assert!(h.make_invite(&h.store.user("iv-admin").unwrap().unwrap(), 0, 1, "").is_err());
-    assert!(h.make_invite(&h.store.user("iv-admin").unwrap().unwrap(), 1, 9999, "").is_err());
+    assert!(
+        h.make_invite(&h.store.user("iv-admin").unwrap().unwrap(), 0, 1, "")
+            .is_err()
+    );
+    assert!(
+        h.make_invite(&h.store.user("iv-admin").unwrap().unwrap(), 1, 9999, "")
+            .is_err()
+    );
     // under apply, a code skips the wait; without one you apply
     h.set_join_policy(crate::hub::Join::Apply).unwrap();
     let (skip, _) = h
@@ -296,7 +315,11 @@ async fn visibility() {
             name: format!("{name}cls"),
             author: "vz-owner".into(),
             // the public one waits, so the classifier tests' grid stays theirs
-            status: if vis == Visibility::Public { Status::Pending } else { Status::Approved },
+            status: if vis == Visibility::Public {
+                Status::Pending
+            } else {
+                Status::Approved
+            },
             visibility: vis,
             size: 10,
             ..Default::default()
@@ -346,11 +369,22 @@ async fn visibility() {
         (format!("/api/saves/{unlid}"), 200, 200),
         ("/classifiers/vzcunl".to_string(), 200, 200),
     ] {
-        assert_eq!(get_in(Mode::BOTH, &path, Some(&other)).await.0, code_other, "{path} for another");
+        assert_eq!(
+            get_in(Mode::BOTH, &path, Some(&other)).await.0,
+            code_other,
+            "{path} for another"
+        );
         assert_eq!(get_in(Mode::BOTH, &path, None).await.0, code_other, "{path} for no one");
-        assert_eq!(get_in(Mode::BOTH, &path, Some(&owner)).await.0, code_owner, "{path} for its owner");
+        assert_eq!(
+            get_in(Mode::BOTH, &path, Some(&owner)).await.0,
+            code_owner,
+            "{path} for its owner"
+        );
     }
-    assert_eq!(get_in(Mode::BOTH, &format!("/saves/{privid}"), Some(&admin)).await.0, 404);
+    assert_eq!(
+        get_in(Mode::BOTH, &format!("/saves/{privid}"), Some(&admin)).await.0,
+        404
+    );
     let r = TestClient::get(format!("{BASE}/api/saves/{privid}"))
         .bearer_auth(&token)
         .send(&service(Mode::BOTH))
@@ -366,21 +400,45 @@ async fn visibility() {
     get_in(Mode::BOTH, &format!("/saves/{unlid}/download"), Some(&other)).await;
     assert_eq!(h.store.save(&unlid).unwrap().unwrap().downloads, 0);
     // only the owner changes it; going public from a member's account waits for review
-    let (code, _) = post_form_in(Mode::BOTH, &format!("/saves/{privid}/visibility"), &other, "visibility=public").await;
+    let (code, _) = post_form_in(
+        Mode::BOTH,
+        &format!("/saves/{privid}/visibility"),
+        &other,
+        "visibility=public",
+    )
+    .await;
     assert_eq!(code, 404);
     let member = person("vz-member", Role::Member);
     let m = h.store.user("vz-member").unwrap().unwrap();
     let s = h
-        .accept(&m, Details::new("vzmemberpriv", "", "").unwrap().seen_by("private").unwrap(), &file, None)
+        .accept(
+            &m,
+            Details::new("vzmemberpriv", "", "")
+                .unwrap()
+                .seen_by("private")
+                .unwrap(),
+            &file,
+            None,
+        )
         .await
         .unwrap();
-    assert_eq!((s.status, s.waiting()), (Status::Pending, false), "private skips the queue");
+    assert_eq!(
+        (s.status, s.waiting()),
+        (Status::Pending, false),
+        "private skips the queue"
+    );
     let (_, page) = get_in(Mode::BOTH, "/admin", Some(&admin)).await;
     assert!(
         page.contains("vzmemberpriv") && !page.contains(&format!("<a href=\"/saves/{}\">", s.id)),
         "a private one is listed in admin, unlinked"
     );
-    post_form_in(Mode::BOTH, &format!("/saves/{}/visibility", s.id), &member, "visibility=public").await;
+    post_form_in(
+        Mode::BOTH,
+        &format!("/saves/{}/visibility", s.id),
+        &member,
+        "visibility=public",
+    )
+    .await;
     let s = h.store.save(&s.id).unwrap().unwrap();
     assert!(s.waiting() && !s.listed(), "public now, waiting for an admin");
     let (_, page) = get_in(Mode::BOTH, "/", None).await;

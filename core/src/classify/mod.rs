@@ -25,9 +25,9 @@
 //! Every numeric operation goes through `kernels` and `math`: they are the backend
 //! boundary a GPU implementation would replace.
 
+pub mod bench;
 pub mod codec;
 pub mod compose;
-pub mod bench;
 pub mod generate;
 pub mod grow;
 pub mod io;
@@ -98,7 +98,12 @@ impl Classifier {
     }
 
     /// a model with pooled heads and optionally a generative head (causal configs only)
-    pub fn with_gen(cfg: Config, heads: &[HeadSpec], generator: Option<GenSpec>, seed: u64) -> Result<Classifier, String> {
+    pub fn with_gen(
+        cfg: Config,
+        heads: &[HeadSpec],
+        generator: Option<GenSpec>,
+        seed: u64,
+    ) -> Result<Classifier, String> {
         let net = Net::with_gen(cfg, heads, generator, seed)?;
         let steer = Steer::neutral(&net.heads);
         Ok(Classifier {

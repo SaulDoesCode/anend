@@ -204,7 +204,11 @@ pub fn router(mode: Mode) -> Router {
     // every mode: the front page, files, the pages about the server, accounts, admin
     #[cfg(feature = "hub")]
     {
-        r = if mode.hub { r.get(saves::index) } else { r.get(pages::landing) };
+        r = if mode.hub {
+            r.get(saves::index)
+        } else {
+            r.get(pages::landing)
+        };
     }
     #[cfg(not(feature = "hub"))]
     {
@@ -244,7 +248,11 @@ pub fn router(mode: Mode) -> Router {
             .push(Router::with_path("saves/{id}/download").get(saves::download))
             .push(Router::with_path("saves/{id}/star").post(saves::star))
             .push(Router::with_path("saves/{id}/visibility").post(saves::visibility))
-            .push(Router::with_path("saves/{id}/edit").get(saves::edit_page).post(saves::edit))
+            .push(
+                Router::with_path("saves/{id}/edit")
+                    .get(saves::edit_page)
+                    .post(saves::edit),
+            )
             .push(Router::with_path("saves/{id}/delete").post(saves::delete))
             .push(Router::with_path("upload").get(saves::upload_page).post(saves::upload))
             .push(Router::with_path("leaderboard").get(saves::leaderboard))
@@ -348,7 +356,8 @@ async fn main() {
     let mode = args.mode;
     let about = args.about.clone().unwrap_or_else(|| {
         if mode.hub {
-            "Saves from the anend notes app: memories, notes and their gematria, shared by the people who made them.".into()
+            "Saves from the anend notes app: memories, notes and their gematria, shared by the people who made them."
+                .into()
         } else {
             String::new()
         }

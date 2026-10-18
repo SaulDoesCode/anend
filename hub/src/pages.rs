@@ -54,7 +54,11 @@ struct About {
 
 /// what a quota allows, for people
 fn limit(bytes: u64) -> String {
-    if bytes == 0 { "no limit".into() } else { human_size(bytes) }
+    if bytes == 0 {
+        "no limit".into()
+    } else {
+        human_size(bytes)
+    }
 }
 
 /// `GET /about`

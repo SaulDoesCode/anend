@@ -9,11 +9,11 @@ use salvo::prelude::*;
 use crate::auth;
 use crate::clshub::may_edit;
 use crate::hub::{Hub, Sort, human_size};
-use crate::store::{ClassifierRec, Role, Visibility, may_see};
 use crate::saves::read_upload;
+use crate::store::{ClassifierRec, Role, Visibility, may_see};
 use crate::web::{
-    ClsCard, Field, Form, Layout, ago, client_ip, cls_card, count, field, go, hub, hue, layout, me, mode,
-    need_active, need_admin, not_found, percent, render, status_name, url,
+    ClsCard, Field, Form, Layout, ago, client_ip, cls_card, count, field, go, hub, hue, layout, me, mode, need_active,
+    need_admin, not_found, percent, render, status_name, url,
 };
 
 #[derive(Template)]
@@ -410,7 +410,9 @@ fn vis_of(s: &str) -> Result<Option<Visibility>, ()> {
 #[handler]
 pub async fn visibility(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     let id = req.param::<String>("id").unwrap_or_default();
-    let Some(user) = need_active(res, depot).cloned() else { return };
+    let Some(user) = need_active(res, depot).cloned() else {
+        return;
+    };
     let Some(c) = hub()
         .store
         .classifier(&id)
@@ -425,7 +427,11 @@ pub async fn visibility(req: &mut Request, depot: &mut Depot, res: &mut Response
         return go(res, &back, "!visibility is private, unlisted or public");
     };
     match hub().set_classifier_visibility(&user, &c.id, v) {
-        Ok(n) => go(res, &back, &crate::saves::visibility_said(n.visibility, n.listed(), n.waiting())),
+        Ok(n) => go(
+            res,
+            &back,
+            &crate::saves::visibility_said(n.visibility, n.listed(), n.waiting()),
+        ),
         Err(e) => go(res, &back, &format!("!{e}")),
     }
 }
