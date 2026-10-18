@@ -54,7 +54,7 @@ pub fn Stats() -> Element {
     let tmax = tags.iter().map(|e| e.1).max().unwrap_or(1).max(1);
     rsx! {
         div { class: "page",
-            h2 { "stats" }
+            div { class: "row", h2 { "stats" } span { class: "dim small", "the whole save" } }
             div { class: "card stats-grid",
                 div { class: "stat", b { {n("entries").to_string()} } span { "entries" } }
                 div { class: "stat", b { {n("memories").to_string()} } span { "texts" } }
