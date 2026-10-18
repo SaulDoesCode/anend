@@ -275,8 +275,15 @@ libxdo-dev`), web through WebAssembly. Features: `desktop` (default), `web`, `hu
   interop's eval and blob scripts; test `modetests::app_serves_the_dioxus_page`); Bevy and
   the old JS app retired; keys typed into an input method (IME) while it composes are left
   to it (Enter doesn't search mid-composition; not tested with a real IME here).
-- **Left:** rough edges found in daily use; the desktop window has no icon yet; models
-  wait for the spec.
+- **Daily use (18 Oct):** both apps checked again after the retirement (desktop under Xvfb,
+  the hub's `/app/` in Chromium, every view). Fixed: notes read as markdown (notes view's
+  read mode and the reader; raw HTML shown as text, only http(s)/mailto/relative links),
+  the window's icon, the desktop's weum import from a typed path (WebKitGTK's file dialog
+  didn't open under Xvfb; on a desktop it should), the reader's total, the space's labels
+  under its overlays. Tried a 50 000-text save: import ~2 s, gsearch, the reader, stats
+  and a 209-text spread all quick.
+- **Left:** a real IME session (keys are left to it while composing, untested here); models
+  wait for the spec; the guide (docs/guide) still describes the old apps.
 - **Checking while core is mid-edit:** `scratchpad/wtcheck.sh cargo clippy -p anend-app`
   builds `app/` against the committed core in a worktree.
 
