@@ -277,6 +277,12 @@ fn ImportSteps(step: Signal<Step>) -> Element {
     let api = api();
     let mut new_name = use_signal(|| "weum".to_string());
     let cur = step();
+    let on_disk = api.on_disk();
+    let mut path = use_signal(String::new);
+    let target_p = match &cur {
+        Step::Read { target, .. } => target.clone(),
+        _ => String::new(),
+    };
     let n = match &cur {
         Step::Read { rows: 0, .. } => 1,
         Step::Read { .. } => 2,
@@ -292,34 +298,37 @@ fn ImportSteps(step: Signal<Step>) -> Element {
             button { class: "plain ibtn", "aria-label": "close the import", onclick: move |_| step.set(Step::Closed), Icon { name: "close" } }
         }
         match cur {
-            Step::Read { target, rows: 0, .. } => rsx! {
-                div { class: "row",
-                    "weum's all-of-it.json (or a backup's texts.json):"
-                    input {
-                        r#type: "file",
-                        accept: ".json,application/json",
-                        onchange: move |e: FormEvent| {
-                            let target = target.clone();
-                            async move {
-                                let Some(f) = e.files().into_iter().next() else { return };
-                                match f.read_string().await {
-                                    Ok(data) => {
-                                        let parsed: Result<serde_json::Value, _> = serde_json::from_str(&data);
-                                        match parsed {
-                                            Ok(serde_json::Value::Array(rows)) => {
-                                                let sample = rows.iter().take(8).filter_map(|r| r.get(0).and_then(|t| t.as_str()).map(str::to_string)).collect();
-                                                step.set(Step::Read { target, data, rows: rows.len(), sample });
-                                            }
-                                            _ => ui.fail("that isn't a list of [text, [key bytes]] rows"),
-                                        }
+            Step::Read { target, rows: 0, .. } => {
+                let t2 = target.clone();
+                rsx! {
+                    div { class: "row",
+                        "weum's all-of-it.json (or a backup's texts.json):"
+                        input {
+                            r#type: "file",
+                            accept: ".json,application/json",
+                            onchange: move |e: FormEvent| {
+                                let target = target.clone();
+                                async move {
+                                    let Some(f) = e.files().into_iter().next() else { return };
+                                    match f.read_string().await {
+                                        Ok(data) => read_rows(ui, step, target, data),
+                                        Err(e) => ui.fail(format!("couldn't read it: {e}")),
                                     }
-                                    Err(e) => ui.fail(format!("couldn't read it: {e}")),
                                 }
-                            }
-                        },
+                            },
+                        }
+                    }
+                    if on_disk {
+                        div { class: "row",
+                            "or its path:"
+                            input { r#type: "text", placeholder: "/home/you/all-of-it.json", style: "flex: 1;",
+                                oninput: move |e| path.set(e.value()),
+                                onkeydown: move |e: KeyboardEvent| if e.key() == Key::Enter { read_path(ui, step, t2.clone(), path()) } }
+                            button { onclick: move |_| read_path(ui, step, target_p.clone(), path()), "read it" }
+                        }
                     }
                 }
-            },
+            }
             Step::Read { target, data, rows, sample } => rsx! {
                 div { "{rows} rows. The first: " span { class: "dim", {sample.join(" · ")} } }
                 div { class: "row",
@@ -369,6 +378,40 @@ fn ImportSteps(step: Signal<Step>) -> Element {
             },
             Step::Closed => rsx! {},
         }
+    }
+}
+
+/// a weum file's rows read: on to the step that shows what's in it
+fn read_rows(ui: Ui, mut step: Signal<Step>, target: String, data: String) {
+    match serde_json::from_str::<serde_json::Value>(&data) {
+        Ok(serde_json::Value::Array(rows)) => {
+            let sample = rows
+                .iter()
+                .take(8)
+                .filter_map(|r| r.get(0).and_then(|t| t.as_str()).map(str::to_string))
+                .collect();
+            step.set(Step::Read {
+                target,
+                data,
+                rows: rows.len(),
+                sample,
+            });
+        }
+        _ => ui.fail("that isn't a list of [text, [key bytes]] rows"),
+    }
+}
+
+/// the desktop reads the file at a path typed in (when a file dialog isn't at hand)
+fn read_path(ui: Ui, step: Signal<Step>, target: String, path: String) {
+    #[cfg(not(target_arch = "wasm32"))]
+    match std::fs::read_to_string(path.trim()) {
+        Ok(data) => read_rows(ui, step, target, data),
+        Err(e) => ui.fail(format!("couldn't read {}: {e}", path.trim())),
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (step, target, path);
+        ui.fail("pick the file instead");
     }
 }
 

@@ -26,6 +26,7 @@ pub fn Notes() -> Element {
     let mut dirty = use_signal(|| false);
     let mut armed = use_signal(|| false);
     let mut seq = use_signal(|| 0u64);
+    let mut reading = use_signal(|| false);
     let api_r = api.clone();
     let list = use_resource(move || {
         let api = api_r.clone();
@@ -139,7 +140,14 @@ pub fn Notes() -> Element {
                                     oninput: move |e| { tags.set(e.value()); dirty.set(true); } }
     }
                             }
-                            button { class: if dirty() { "primary" } else { "" }, "data-tip": "save · Ctrl+S", "aria-label": "save",
+                            button {
+                            class: "plain",
+                            "data-tip": if reading() { "edit it" } else { "read it" },
+                            "aria-label": if reading() { "edit" } else { "read" },
+                            onclick: move |_| { reading.set(!reading()); seq += 1; },
+                            Icon { name: if reading() { "edit" } else { "view" } }
+                        }
+                        button { class: if dirty() { "primary" } else { "" }, "data-tip": "save · Ctrl+S", "aria-label": "save",
                                 onclick: { let s = save_k.clone(); move |_| s() }, Icon { name: "save" } }
                             if !note.key.is_empty() {
                                 button {
@@ -167,7 +175,10 @@ pub fn Notes() -> Element {
                         }
                         // not bound to the signal while typing (a round trip per key would drop
                         // letters typed fast); its text is put in when a note opens
-                        for pad in [format!("{}-{}", cur_key, seq())] {
+                        if reading() {
+                        div { class: "md rendered", dangerous_inner_html: crate::md::to_html(&text()) }
+                    }
+                    for pad in [format!("{}-{}", cur_key, seq())].into_iter().filter(|_| !reading()) {
                             textarea {
                                 key: "{pad}",
                                 id: "note-pad",

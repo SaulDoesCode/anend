@@ -4,6 +4,7 @@
 mod backend;
 mod gem;
 mod icons;
+mod md;
 mod prefs;
 mod shell;
 mod theme;
@@ -71,12 +72,34 @@ fn main() {
     let window = WindowBuilder::new()
         .with_title("anend")
         .with_inner_size(LogicalSize::new(1200.0, 820.0));
-    let cfg = Config::new()
+    let mut cfg = Config::new();
+    if let Some(icon) = window_icon() {
+        cfg = cfg.with_icon(icon);
+    }
+    let cfg = cfg
         .with_window(window)
         .with_menu(None)
         .with_disable_context_menu(true)
         .with_background_color((0x40, 0x40, 0x40, 0xff));
     dioxus::LaunchBuilder::desktop().with_cfg(cfg).launch(shell::App);
+}
+
+/// the window's icon, from assets/icon.png
+#[cfg(not(target_arch = "wasm32"))]
+fn window_icon() -> Option<dioxus::desktop::tao::window::Icon> {
+    let dec = png::Decoder::new(std::io::Cursor::new(include_bytes!("../../assets/icon.png")));
+    let mut reader = dec.read_info().ok()?;
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).ok()?;
+    let rgba: Vec<u8> = match info.color_type {
+        png::ColorType::Rgba => buf[..info.buffer_size()].to_vec(),
+        png::ColorType::Rgb => buf[..info.buffer_size()]
+            .chunks(3)
+            .flat_map(|p| [p[0], p[1], p[2], 255])
+            .collect(),
+        _ => return None,
+    };
+    dioxus::desktop::tao::window::Icon::from_rgba(rgba, info.width, info.height).ok()
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -356,3 +356,14 @@ kbd { font: 12px var(--mono); border: 1px solid color-mix(in srgb, var(--dim) 50
 .app.hide-bar { grid-template-rows: minmax(0, 1fr) auto; }
 .app.hide-bar .top { position: fixed; left: 0; right: 0; top: 0; height: var(--top); z-index: 30; transform: translateY(-100%); box-shadow: 0 2px 10px rgb(0 0 0 / .3); }
 .app.hide-bar.peek .top, .app.hide-bar .top:focus-within { transform: none; }
+
+/* markdown read: the reader's expanded note and the notes view's reading mode */
+.md.rendered { flex: 1; overflow: auto; padding: 4px 10px; min-height: 0; }
+.md { line-height: 1.55; overflow-wrap: anywhere; }
+.md ul, .md ol { padding-left: 1.6em; }
+.md li::marker { color: var(--accent); }
+.md table { border-collapse: collapse; }
+.md th, .md td { padding: 3px 8px; border-bottom: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+.md img { max-width: 100%; }
+.md a { color: var(--link); }
+.import input[type=text] { background: var(--cards); }

@@ -153,7 +153,7 @@ fn Expanded(hit: Hit, i: usize, n: usize, on_close: EventHandler<()>, on_step: E
             }
             if hit.note {
                 h2 { "{hit.text}" }
-                div { class: "text", {body.read().clone().flatten().unwrap_or_default()} }
+                div { class: "md", dangerous_inner_html: crate::md::to_html(&body.read().clone().flatten().unwrap_or_default()) }
             } else {
                 div { class: "text", style: "font-size: 1.6em;", "{hit.text}" }
             }
