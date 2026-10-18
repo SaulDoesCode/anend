@@ -1459,7 +1459,7 @@ pub fn submit_icon(submit: &str) -> &'static str {
     }
 }
 
-/// the shared icon set (assets/icons) as a sprite, made by hub/web/tools/icons.mjs
+/// the shared icon set (assets/icons) as a sprite, made by scripts/icons.mjs
 #[handler]
 pub async fn icons(req: &mut Request, res: &mut Response) {
     res.headers_mut()
@@ -1524,7 +1524,7 @@ mod tests {
         assert_eq!(decode("%zz"), "%zz");
     }
 
-    /// every icon a page asks for is in the sprite (hub/web/tools/icons.mjs makes it from
+    /// every icon a page asks for is in the sprite (scripts/icons.mjs makes it from
     /// assets/icons), and the sprite is only shapes
     #[test]
     fn icons_in_the_sprite() {
@@ -1548,14 +1548,14 @@ mod tests {
                 "no icon {name} in the sprite"
             );
         }
-        // the sprite has the whole set: run hub/web/tools/icons.mjs when it changes
+        // the sprite has the whole set: run scripts/icons.mjs when it changes
         let set = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/icons");
         for e in std::fs::read_dir(set).unwrap() {
             let f = e.unwrap().file_name().into_string().unwrap();
             if let Some(name) = f.strip_suffix(".svg") {
                 assert!(
                     sprite.contains(&format!("<symbol id=\"i-{name}\"")),
-                    "{name} isn't in the sprite: run node hub/web/tools/icons.mjs"
+                    "{name} isn't in the sprite: run node scripts/icons.mjs"
                 );
             }
         }

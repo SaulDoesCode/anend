@@ -30,8 +30,8 @@ what's enforced where, and the limits that are still open. Written during the re
 | logs | `ops::log_requests` | method, path, status, time; no addresses, names or queries; `/login/{secret}` and `/invite/{code}` logged without the secret |
 | `--local` and DNS rebinding | `web::local_host_ok` | a local hub answers only when Host is `localhost`/`*.localhost`, an IP address, or its `--url`'s host; it warns at start when `--addr` isn't loopback |
 | framing, sniffing | `web::guard_headers` | `X-Frame-Options: DENY`, `frame-ancestors 'none'`, `nosniff`, `Referrer-Policy: same-origin` on every answer |
-| scripts in the web app | `web::APP_CSP` | `script-src 'self'` (no inline scripts; `hub/web/early.js` sets the theme before paint) |
-| markdown | `hub/web/markdown.js` | text escaped first; link and image URLs only http(s), mailto or relative, after dropping the control characters and spaces a browser ignores (test: `node hub/web/test/markdown.mjs`); the hub's `/guide` renderer escapes raw HTML and allows only its own anchors, the repository and https |
+| scripts in the web app | `web::APP_CSP` | `script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob:` and no inline scripts: the app is WebAssembly (`app/`), Dioxus's interop evaluates the JavaScript the app itself sends, and the space loads three.js from a blob it makes |
+| texts and notes in the web app | `app/` | shown as text (Dioxus escapes it); no markdown is rendered to HTML there; the hub's `/guide` renderer escapes raw HTML and allows only its own anchors, the repository and https |
 | hub pages | askama templates | auto-escaped; the only `|safe` is the guide's own rendered HTML |
 | admin | `need_admin` | non-admins get a 404; `/admin/server` (names files on the machine) only for a loopback connection carrying no forwarding header |
 | login guessing | `auth::Limiter`, `web::login` | 10 logins / 10 min, 5 joins / h, 20 uploads / h per address; argon2; an unknown name costs the same time as a wrong password |

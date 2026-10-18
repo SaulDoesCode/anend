@@ -1,4 +1,4 @@
-//! The space: the three.js room (app/src/space.js, over the vendored three.js in hub/web/vendor)
+//! The space: the three.js room (app/src/space.js, over the vendored three.js in app/vendor)
 //! hosted through Dioxus's JS interop. Rust searches and lays texts out (`space.spread`),
 //! JS flies and draws; they talk over one eval channel.
 //!
@@ -17,7 +17,7 @@ use crate::shell::set_pref;
 use crate::ui::*;
 use crate::views::{TChip, use_keys};
 
-const THREE: &str = include_str!("../../../hub/web/vendor/three.module.min.js");
+const THREE: &str = include_str!("../../vendor/three.module.min.js");
 const ENGINE: &str = include_str!("../space.js");
 
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]

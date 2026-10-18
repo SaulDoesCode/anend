@@ -29,11 +29,3 @@ jobs:
         run: |
           rustup target add wasm32-unknown-unknown
           cargo build -p anend-app --target wasm32-unknown-unknown --no-default-features --features web
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      # the offline engine's parity test (hub/web/test/parity.mjs) is retired: the hub's
-      # app API moved to the entry graph and the JS engine is frozen until core-in-WASM
-      # replaces it (docs/next.md, step 3)
-      - name: markdown stays safe in the web app
-        run: node hub/web/test/markdown.mjs
