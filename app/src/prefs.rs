@@ -33,6 +33,11 @@ pub struct Prefs {
     pub saturate: bool,
     /// the sidecar's frequency letters
     pub letters: bool,
+    /// the classifier colouring the memory view's texts (empty: none)
+    pub tint: String,
+    /// Enter in the memory view searches with that classifier: a class's name finds the
+    /// texts most likely in it, any other text the texts it reads most like
+    pub cls_search: bool,
     /// the space's background colour
     pub space_bg: String,
     /// the space buckets by the reversed sum
@@ -68,6 +73,8 @@ impl Default for Prefs {
             gsearch_text: true,
             saturate: true,
             letters: true,
+            tint: String::new(),
+            cls_search: false,
             space_bg: "#e4d4be".into(),
             space_reversed: false,
             space_keep: false,

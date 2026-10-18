@@ -403,3 +403,10 @@ table.confusion td.miss { color: var(--bad); }
 @media (max-width: 700px) { .cls-layout { grid-template-columns: 1fr; } .cls-list { position: static; max-height: 30vh; } }
 /* the page's controls sit at the right: their tips open leftwards, inside the window */
 .page.wide [data-tip]::after { left: auto; right: 0; transform: none; }
+/* a classifier's colours in the memory view */
+.tint-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; justify-content: center; padding: 3px; font: 12.5px var(--font); color: #ddd; }
+.tint-legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
+.tintpick { gap: 4px; margin-left: 6px; }
+.tintpick .icon-l { display: inline-flex; color: var(--bar-dim); }
+.tintpick select { appearance: none; -webkit-appearance: none; border-radius: var(--radius); height: 20px; padding: 0 4px; font-size: 12px; background: transparent; color: var(--bar-text); border: 1px solid color-mix(in srgb, var(--bar-dim) 45%, transparent); }
+.tintpick select option { color: #000; }

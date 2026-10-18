@@ -217,6 +217,14 @@ async fn enter(mut ui: Ui, api: Api, m: Mem, raw: String, ctrl: bool, shift: boo
     if list_command(ui, api.clone(), m, &t).await {
         return;
     }
+    let (tint, cls_search) = {
+        let p = ui.prefs.peek();
+        (p.tint.clone(), p.cls_search)
+    };
+    if cls_search && !tint.is_empty() && !shift {
+        classifier_search(ui, api, m, &tint, &t).await;
+        return;
+    }
     let number: Option<u64> = t.parse().ok();
     if shift {
         // remember by key
@@ -282,6 +290,92 @@ async fn enter(mut ui: Ui, api: Api, m: Mem, raw: String, ctrl: bool, shift: boo
                 }
             }
             Err(e) => ui.fail(e),
+        }
+    }
+}
+
+/// the classifier search mode: a class's name (and words after it) finds the texts most
+/// likely in that class; any other text, the texts the classifier reads most like it
+async fn classifier_search(ui: Ui, api: Api, m: Mem, name: &str, t: &str) {
+    let classes: Vec<String> = match api.call("classify.get", serde_json::json!({ "name": name })).await {
+        Ok(v) => v["classes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c.as_str().map(str::to_string))
+            .collect(),
+        Err(e) => return ui.fail(e),
+    };
+    let lower = t.to_lowercase();
+    let class = classes.iter().find(|c| {
+        let c = c.to_lowercase();
+        lower == c || lower.starts_with(&format!("{c} "))
+    });
+    let mode = ui.mode();
+    match class {
+        Some(c) => {
+            let words = t[c.len()..].trim().to_string();
+            let title = if words.is_empty() {
+                format!("{name}: {c}")
+            } else {
+                format!("{name}: {c} · {words}")
+            };
+            show_sum(ui, m, title.clone(), None, None);
+            match api.model_search(name, c, &words).await {
+                Ok(found) => {
+                    // the texts it counts in the class; when there are none, the likeliest
+                    let members = found.iter().filter(|s| s.member).count();
+                    if members == 0 {
+                        ui.say(format!("{name} counts nothing here as {c}; these are the likeliest"));
+                    }
+                    let hits: Vec<Hit> = found
+                        .into_iter()
+                        .filter(|s| s.member || members == 0)
+                        .take(if members == 0 { 24 } else { usize::MAX })
+                        .filter_map(|s| {
+                            Some(Hit {
+                                key: s.key?,
+                                text: s.text,
+                                note: s.note,
+                            })
+                        })
+                        .collect();
+                    set_topline(ui, &title, mode, hits.first().map(|h| h.text.as_str()), hits.len());
+                    let mut r = m.results;
+                    r.set(hits);
+                }
+                Err(e) => ui.fail(e),
+            }
+        }
+        None => {
+            let title = format!("like “{t}” · {name}");
+            show_sum(ui, m, title.clone(), None, None);
+            match api
+                .call(
+                    "classify.similar",
+                    serde_json::json!({ "name": name, "text": t, "limit": 60 }),
+                )
+                .await
+            {
+                Ok(v) => {
+                    let hits: Vec<Hit> = v["results"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|h| {
+                            Some(Hit {
+                                key: h["key"].as_str()?.to_string(),
+                                text: h["text"].as_str()?.to_string(),
+                                note: h["note"].as_bool().unwrap_or(false),
+                            })
+                        })
+                        .collect();
+                    set_topline(ui, &title, mode, Some(t), hits.len());
+                    let mut r = m.results;
+                    r.set(hits);
+                }
+                Err(e) => ui.fail(e),
+            }
         }
     }
 }
@@ -385,6 +479,7 @@ pub fn Memory() -> Element {
                     "g" | "G" => set_pref(ui, |p| p.gsearch_text = !p.gsearch_text),
                     "s" | "S" => set_pref(ui, |p| p.saturate = !p.saturate),
                     "l" | "L" => set_pref(ui, |p| p.letters = !p.letters),
+                    "c" | "C" if !ui.prefs.peek().tint.is_empty() => set_pref(ui, |p| p.cls_search = !p.cls_search),
                     "ArrowLeft" => match measure {
                         // the sidecar's first: the ordinal sum, gsearched in ordinal
                         Some(me) => {
@@ -538,6 +633,26 @@ fn SelBar(n: usize) -> Element {
 #[component]
 fn Field(style: String, header: Option<Header>, results: Vec<Hit>, mode: Mode, picks: Picks) -> Element {
     let ui = ui();
+    let api = api();
+    let keys: Vec<String> = results.iter().map(|h| h.key.clone()).collect();
+    let keys = use_memo(use_reactive!(|keys| keys));
+    let tints = use_resource(move || {
+        let api = api.clone();
+        let name = ui.prefs.read().tint.clone();
+        let keys = keys();
+        let _ = (ui.changed)();
+        async move {
+            if name.is_empty() || keys.is_empty() {
+                return None;
+            }
+            let keys: Vec<String> = keys.into_iter().take(5000).collect();
+            api.call("classify.tints", serde_json::json!({ "name": name, "keys": keys }))
+                .await
+                .ok()
+        }
+    });
+    let tinted = tints.read().clone().flatten();
+    let (tint_of, legend) = tint_map(tinted.as_ref());
     let mut drag: Signal<Option<(f64, f64, f64)>> = use_signal(|| None);
     let mut rect: Signal<Option<std::rc::Rc<MountedData>>> = use_signal(|| None);
     let start = move |e: MouseEvent, side: f64| {
@@ -570,6 +685,13 @@ fn Field(style: String, header: Option<Header>, results: Vec<Hit>, mode: Mode, p
                     }
                 }
             }
+            if !legend.is_empty() {
+                div { class: "tint-legend", "aria-label": "colours",
+                    for (c , colour , n) in legend {
+                        span { key: "{c}", span { class: "dot", style: "background: {colour};" } "{c} {n}" }
+                    }
+                }
+            }
             div { class: "arts", role: "list",
                 if results.is_empty() {
                     span { class: "dim", style: "color: #bbb; padding: 6px;", "nothing filed here yet" }
@@ -577,6 +699,7 @@ fn Field(style: String, header: Option<Header>, results: Vec<Hit>, mode: Mode, p
                 for h in results {
                     Art {
                         key: "{h.key}",
+                        tint: tint_of.get(&h.key).cloned(),
                         under: gem::underline(&h.text, mode),
                         is_list: picks.list.as_ref().is_some_and(|l| l.key == h.key),
                         is_cand: picks.candidate.as_ref().is_some_and(|l| l.key == h.key),
@@ -620,7 +743,7 @@ fn PfLine(n: u64) -> Element {
 }
 
 #[component]
-fn Art(hit: Hit, under: Option<String>, is_list: bool, is_cand: bool, selected: bool) -> Element {
+fn Art(hit: Hit, under: Option<String>, is_list: bool, is_cand: bool, selected: bool, tint: Option<String>) -> Element {
     let mut ui = ui();
     let api = api();
     let m = use_context::<Mem>();
@@ -638,10 +761,13 @@ fn Art(hit: Hit, under: Option<String>, is_list: bool, is_cand: bool, selected: 
             class.push_str(c);
         }
     }
-    let style = match &under {
+    let mut style = match &under {
         Some(c) => format!("text-decoration: underline; text-decoration-color: {c};"),
         None => String::new(),
     };
+    if let Some(t) = &tint {
+        style.push_str(&format!(" border-left: 5px solid {t};"));
+    }
     let (h1, h2, h3, h4) = (hit.clone(), hit.clone(), hit.clone(), hit.clone());
     let t2 = title.clone();
     let mut hover = m.hover;
@@ -695,6 +821,100 @@ fn Art(hit: Hit, under: Option<String>, is_list: bool, is_cand: bool, selected: 
                 }
             },
             "{hit.text}"
+        }
+    }
+}
+
+/// each class shown, its colour, and how many texts it has here
+type Legend = Vec<(String, String, usize)>;
+
+/// a classifier's tints as each key's colour (its class's, fainter when less sure; grey
+/// when it's in none) and the legend: each class, its colour, how many texts it has here
+fn tint_map(v: Option<&serde_json::Value>) -> (std::collections::HashMap<String, String>, Legend) {
+    let mut map = std::collections::HashMap::new();
+    let Some(v) = v else { return (map, vec![]) };
+    let names: Vec<String> = v["classes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|c| c.as_str().map(str::to_string))
+        .collect();
+    let palette: Vec<String> = v["palette"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|c| c.as_str().map(str::to_string))
+        .collect();
+    let mut counts = vec![0usize; names.len() + 1];
+    for t in v["tints"].as_array().into_iter().flatten() {
+        let Some(key) = t["key"].as_str() else { continue };
+        let strength = t["strength"].as_f64().unwrap_or(0.0).clamp(0.0, 1.0);
+        let colour = match t["class"].as_u64().map(|c| c as usize) {
+            Some(c) if c < palette.len() => {
+                counts[c] += 1;
+                format!(
+                    "color-mix(in srgb, {} {:.0}%, transparent)",
+                    palette[c],
+                    35.0 + 65.0 * strength
+                )
+            }
+            _ => {
+                counts[names.len()] += 1;
+                "#6b6461".to_string()
+            }
+        };
+        map.insert(key.to_string(), colour);
+    }
+    let mut legend: Vec<(String, String, usize)> = names
+        .iter()
+        .zip(&palette)
+        .zip(&counts)
+        .filter(|(_, k)| **k > 0)
+        .map(|((n, c), k)| (n.clone(), c.clone(), *k))
+        .collect();
+    if counts[names.len()] > 0 {
+        legend.push(("unsure".into(), "#6b6461".into(), counts[names.len()]));
+    }
+    (map, legend)
+}
+
+/// the classifier colouring the memory view, picked in the strip, and its search mode
+#[component]
+fn TintPick() -> Element {
+    let ui = ui();
+    let api = api();
+    let p = ui.prefs.read().clone();
+    let models = use_resource(move || {
+        let api = api.clone();
+        let _ = (ui.changed)();
+        async move { api.models().await.unwrap_or_default() }
+    });
+    let trained: Vec<String> = models
+        .read()
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|m| m.trained)
+        .map(|m| m.name)
+        .collect();
+    if trained.is_empty() && p.tint.is_empty() {
+        return rsx! {};
+    }
+    rsx! {
+        span { class: "toggles tintpick",
+            span { class: "icon-l", title: "colour the texts by a classifier's classes", Icon { name: "palette" } }
+            select {
+                "aria-label": "colour by a classifier",
+                title: "colour the texts by a classifier's classes",
+                onchange: move |e| { let v = e.value(); set_pref(ui, |p| { p.tint = v; if p.tint.is_empty() { p.cls_search = false; } }) },
+                option { value: "", selected: p.tint.is_empty(), "no colours" }
+                for n in trained {
+                    option { key: "{n}", value: "{n}", selected: p.tint == n, "{n}" }
+                }
+            }
+            if !p.tint.is_empty() {
+                TChip { label: format!("search with {}: a class's name finds its texts, any other text the texts like it · C", p.tint), icon: "classifier", on: p.cls_search, onclick: move |_| set_pref(ui, |p| p.cls_search = !p.cls_search) }
+            }
         }
     }
 }
@@ -791,5 +1011,6 @@ pub fn MemoryStrip() -> Element {
             TChip { label: "saturate: remember what's searched · S", icon: "bolt", on: p.saturate, onclick: move |_| set_pref(ui, |p| p.saturate = !p.saturate) }
             TChip { label: "letters in the sidecar · L", letter: "abc", on: p.letters, onclick: move |_| set_pref(ui, |p| p.letters = !p.letters) }
         }
+        TintPick {}
     }
 }
