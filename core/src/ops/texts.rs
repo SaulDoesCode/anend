@@ -34,7 +34,11 @@ fn need(r: &Ref) -> StoreResult<u64> {
 /// a note as a classifier reads it: its title, a blank line, its markdown
 fn note_reads(text: &str) -> String {
     let (title, md) = crate::note::split(text);
-    if md.trim().is_empty() { title } else { format!("{title}\n\n{md}") }
+    if md.trim().is_empty() {
+        title
+    } else {
+        format!("{title}\n\n{md}")
+    }
 }
 
 impl crate::texts::Texts for GraphTexts {
@@ -56,7 +60,11 @@ impl crate::texts::Texts for GraphTexts {
         let v = self.0.view()?;
         let Some(rec) = v.record(id)? else { return Ok(None) };
         let t = v.render(id)?;
-        Ok(Some(if rec.mime == mime::MARKDOWN { crate::note::split(&t).0 } else { t }))
+        Ok(Some(if rec.mime == mime::MARKDOWN {
+            crate::note::split(&t).0
+        } else {
+            t
+        }))
     }
 
     fn candidates(&self, limit: usize) -> StoreResult<Vec<(Ref, String, String)>> {

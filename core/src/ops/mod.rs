@@ -300,7 +300,13 @@ pub const READ_ONLY: &[&str] = &[
 ];
 
 /// the ops that make a save
-pub const MAKE_A_SAVE: &[&str] = &["saves.new", "saves.copy", "saves.import", "saves.import_texts", "forge.make"];
+pub const MAKE_A_SAVE: &[&str] = &[
+    "saves.new",
+    "saves.copy",
+    "saves.import",
+    "saves.import_texts",
+    "forge.make",
+];
 
 // ------------------------------------------------------------------ the operations on one save
 
@@ -366,7 +372,10 @@ pub fn call(g: &Graph, removed: &Removed, op: &str, args: &Value) -> Res {
             let any = s(args, "mode") == "or";
             let mut sets: Vec<Vec<u64>> = Vec::new();
             for t in strings(args, "tags") {
-                let ids = match v.find_text(t.trim().trim_start_matches('#').trim(), Some(mime::TAG))?.first() {
+                let ids = match v
+                    .find_text(t.trim().trim_start_matches('#').trim(), Some(mime::TAG))?
+                    .first()
+                {
                     Some(&tid) => v.in_edges(tid, rel::TAG)?,
                     None => vec![],
                 };
@@ -635,7 +644,10 @@ pub fn call(g: &Graph, removed: &Removed, op: &str, args: &Value) -> Res {
                 q.created = Some((a, b));
             }
             if let Some(t) = args.get("tag").and_then(Value::as_str) {
-                match v.find_text(t.trim().trim_start_matches('#').trim(), Some(mime::TAG))?.first() {
+                match v
+                    .find_text(t.trim().trim_start_matches('#').trim(), Some(mime::TAG))?
+                    .first()
+                {
                     Some(&tid) => q.tag = Some(tid),
                     None => return Ok(json!({ "total": 0, "hits": [] })),
                 }
@@ -681,12 +693,19 @@ pub fn bundle(name: &str, g: &Graph) -> Res {
 /// what a bundle holds to restore: its texts rows (weum's or a backup's) and, from a
 /// whole backup, everything else
 pub fn bundle_parts(b: &Value) -> Result<(String, Option<String>), String> {
-    let rows = b.get("memories").or_else(|| b.get("texts")).cloned().unwrap_or(json!([]));
+    let rows = b
+        .get("memories")
+        .or_else(|| b.get("texts"))
+        .cloned()
+        .unwrap_or(json!([]));
     if !rows.is_array() {
         return Err("that bundle's memories should be a list of [text, [key bytes], ...]".into());
     }
     let other = b.get("other").filter(|o| o.is_object()).map(Value::to_string);
-    if b.get("anend").and_then(Value::as_u64) == Some(1) && b.get("notes").is_some_and(|n| n.as_array().is_some_and(|a| !a.is_empty())) {
+    if b.get("anend").and_then(Value::as_u64) == Some(1)
+        && b.get("notes")
+            .is_some_and(|n| n.as_array().is_some_and(|a| !a.is_empty()))
+    {
         return Err("that's an old bundle (notes as their own records); only its memories would come in. Export it again from a current app, or import its weum texts".into());
     }
     Ok((rows.to_string(), other))

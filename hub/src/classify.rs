@@ -915,11 +915,15 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
             };
             let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(500).clamp(1, 5000) as usize;
             let (filed, stale) = st.class_bucket(&stack, c, bands_arg(args))?;
-            let hits: Vec<Value> = filed.iter().take(limit).map(|f| {
-                let (o, r) = anend_core::spread::sums(&f.text);
-                json!({ "key": f.r.label(), "text": f.text, "note": st.is_note(&f.r), "ordinal": o, "reversed": r,
+            let hits: Vec<Value> = filed
+                .iter()
+                .take(limit)
+                .map(|f| {
+                    let (o, r) = anend_core::spread::sums(&f.text);
+                    json!({ "key": f.r.label(), "text": f.text, "note": st.is_note(&f.r), "ordinal": o, "reversed": r,
                         "prob": if c == memo::UNCERTAIN { f.row.confidence() } else { f.row.probs[c as usize] } })
-            }).collect();
+                })
+                .collect();
             Ok(json!({
                 "class": if c == memo::UNCERTAIN { "uncertain".to_string() } else { classes[c as usize].clone() },
                 "count": filed.len(), "stale": stale, "indexed": st.memo_count(&stack)?, "hits": hits,

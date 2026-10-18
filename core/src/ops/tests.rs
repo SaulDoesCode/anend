@@ -1,7 +1,11 @@
 use super::*;
 
 fn temp(tag: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("anend-ops-{tag}-{}-{}", std::process::id(), crate::graph::store::system_ms()));
+    let d = std::env::temp_dir().join(format!(
+        "anend-ops-{tag}-{}-{}",
+        std::process::id(),
+        crate::graph::store::system_ms()
+    ));
     let _ = std::fs::remove_dir_all(&d);
     d
 }
@@ -14,10 +18,19 @@ fn saves_merge_forge() {
     let sv = Saves::new(&dir, "notes");
     let c = |op: &str, a: Value| sv.call(op, &a).unwrap();
     assert_eq!(c("hello", json!({}))["save"], "notes");
-    let k = c("mem.saturate", json!({"text": "listen"}))["key"].as_str().unwrap().to_string();
-    let k2 = c("mem.saturate", json!({"text": "silent"}))["key"].as_str().unwrap().to_string();
+    let k = c("mem.saturate", json!({"text": "listen"}))["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let k2 = c("mem.saturate", json!({"text": "silent"}))["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
     c("lists.enlist", json!({"list": k, "member": k2}));
-    let n = c("notes.save", json!({"note": {"tags": ["a"]}, "text": "# Hello\n\nworld"}));
+    let n = c(
+        "notes.save",
+        json!({"note": {"tags": ["a"]}, "text": "# Hello\n\nworld"}),
+    );
     assert_eq!(n["tags"], json!(["a"]));
     assert!(sv.call("mem.gsearch", &json!({"bucket": "atbash", "key": 1})).is_err());
     let st = c("lists.stats", json!({}));
@@ -35,9 +48,19 @@ fn saves_merge_forge() {
     // forge: notes take away a save holding only truth
     c("saves.new", json!({"name": "t"}));
     c("mem.saturate", json!({"text": "truth"}));
-    let p = c("forge.preview", json!({"ingredients": [{"save": "notes"}, {"save": "t", "effect": "take away"}]}));
-    assert_eq!((p["memories"].as_u64(), p["notes"].as_u64(), p["lists"].as_u64()), (Some(2), Some(1), Some(1)), "{p}");
-    let f = c("forge.make", json!({"name": "f", "ingredients": [{"save": "notes"}, {"save": "t", "effect": "take away"}]}));
+    let p = c(
+        "forge.preview",
+        json!({"ingredients": [{"save": "notes"}, {"save": "t", "effect": "take away"}]}),
+    );
+    assert_eq!(
+        (p["memories"].as_u64(), p["notes"].as_u64(), p["lists"].as_u64()),
+        (Some(2), Some(1), Some(1)),
+        "{p}"
+    );
+    let f = c(
+        "forge.make",
+        json!({"name": "f", "ingredients": [{"save": "notes"}, {"save": "t", "effect": "take away"}]}),
+    );
     assert_eq!(f["memories"], 2);
     c("saves.open", json!({"name": "f"}));
     assert_eq!(c("lists.stats", json!({}))["lists"][0]["count"], 1);

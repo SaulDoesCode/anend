@@ -744,7 +744,11 @@ impl<'a> Universe<'a> {
                 let want: Vec<String> = tags.iter().filter_map(|t| crate::note::normalize_tag(t)).collect();
                 let matches = |have: &[String]| {
                     let has = |t: &String| have.iter().any(|h| crate::note::normalize_tag(h).as_ref() == Some(t));
-                    if *any { want.iter().any(has) } else { want.iter().all(has) }
+                    if *any {
+                        want.iter().any(has)
+                    } else {
+                        want.iter().all(has)
+                    }
                 };
                 let m = if let Some(src) = self.store.texts() {
                     let mut m = Vec::with_capacity(n);

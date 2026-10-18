@@ -110,7 +110,11 @@ impl Hub {
             None => None,
         };
         let author = current.as_ref().map(|c| c.author.clone()).unwrap_or(user.name.clone());
-        self.room_to_share(&author, bytes.len() as u64, current.as_ref().map(|c| c.size).unwrap_or(0))?;
+        self.room_to_share(
+            &author,
+            bytes.len() as u64,
+            current.as_ref().map(|c| c.size).unwrap_or(0),
+        )?;
         let mut c = match current.as_ref() {
             Some(old) => ClassifierRec {
                 version: old.version + 1,

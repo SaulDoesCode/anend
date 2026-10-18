@@ -195,7 +195,12 @@ impl Saves {
         let name = last
             .map(|s| s.trim().to_string())
             .filter(|n| self.path(n).is_ok_and(|p| p.exists()))
-            .or_else(|| self.path(&self.default).ok().filter(|p| p.exists()).map(|_| self.default.clone()))
+            .or_else(|| {
+                self.path(&self.default)
+                    .ok()
+                    .filter(|p| p.exists())
+                    .map(|_| self.default.clone())
+            })
             .or_else(|| self.names().into_iter().next())
             .unwrap_or_else(|| self.default.clone());
         let path = self.path(&name)?;
@@ -382,7 +387,9 @@ impl Saves {
         if op == "hello" {
             let (open, g) = self.current()?;
             let (notes, memories) = super::counts(&g.view()?)?;
-            return Ok(json!({ "save": open, "saves": self.names(), "counts": { "notes": notes, "memories": memories } }));
+            return Ok(
+                json!({ "save": open, "saves": self.names(), "counts": { "notes": notes, "memories": memories } }),
+            );
         }
         if op.starts_with("saves.") || op.starts_with("forge.") {
             return self.saves_call(op, args);
@@ -394,7 +401,9 @@ impl Saves {
     fn saves_call(&self, op: &str, args: &Value) -> Res {
         let (open, g) = self.current()?;
         match op {
-            "saves.list" => Ok(Value::Array(self.names().iter().map(|n| self.info(n, &open, &g)).collect())),
+            "saves.list" => Ok(Value::Array(
+                self.names().iter().map(|n| self.info(n, &open, &g)).collect(),
+            )),
             "saves.open" => {
                 let name = s(args, "name");
                 if !self.path(name)?.exists() {
@@ -561,8 +570,10 @@ impl Saves {
                     .take(12)
                     .map(|i| crate::note::split(&i.text).0)
                     .collect();
-                Ok(json!({ "memories": c.memories(), "notes": c.notes(), "lists": c.links.len(),
-                           "sample": sample, "titles": titles }))
+                Ok(
+                    json!({ "memories": c.memories(), "notes": c.notes(), "lists": c.links.len(),
+                           "sample": sample, "titles": titles }),
+                )
             }
             "forge.make" => {
                 let name = clean(s(args, "name"))?;

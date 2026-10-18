@@ -90,7 +90,11 @@ fn read(path: &Path) -> Result<Inside, String> {
     )?;
     for id in titled.ids {
         let title = anend_core::note::split(&v.render(id).unwrap_or_default()).0;
-        let title = if title.trim().is_empty() { "untitled".to_string() } else { title };
+        let title = if title.trim().is_empty() {
+            "untitled".to_string()
+        } else {
+            title
+        };
         inside.titles.push(title.chars().take(100).collect());
     }
     Ok(inside)

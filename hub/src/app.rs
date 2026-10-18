@@ -229,8 +229,10 @@ pub fn call(ws: &Workspace, op: &str, args: &Value) -> Res {
             Ok(b)
         }
         "saves.import" => {
-            let cls: Vec<anend_core::classifiers::Bundled> = match args.get("bundle").and_then(|b| b.get("classifiers")) {
-                Some(c) => serde_json::from_value(c.clone()).map_err(|e| format!("that bundle's classifiers don't read: {e}"))?,
+            let cls: Vec<anend_core::classifiers::Bundled> = match args.get("bundle").and_then(|b| b.get("classifiers"))
+            {
+                Some(c) => serde_json::from_value(c.clone())
+                    .map_err(|e| format!("that bundle's classifiers don't read: {e}"))?,
                 None => Vec::new(),
             };
             let mut got = ws.saves.call(op, args)?;
@@ -283,8 +285,14 @@ mod tests {
         let c = |op: &str, a: Value| call(&ws, op, &a).unwrap_or_else(|e| panic!("{op}: {e}"));
         let v = c("hello", json!({}));
         assert_eq!(v["save"], "notes");
-        let listen = c("mem.saturate", json!({"text": "listen"}))["key"].as_str().unwrap().to_string();
-        let silent = c("mem.saturate", json!({"text": "silent"}))["key"].as_str().unwrap().to_string();
+        let listen = c("mem.saturate", json!({"text": "listen"}))["key"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let silent = c("mem.saturate", json!({"text": "silent"}))["key"]
+            .as_str()
+            .unwrap()
+            .to_string();
         assert_eq!((listen.as_str(), silent.as_str()), ("0", "1"));
         assert_eq!(c("mem.saturate", json!({"text": "listen"}))["new"], false);
         let g = c("mem.gsearch", json!({"bucket": "ordinal", "key": 79}));
@@ -292,13 +300,23 @@ mod tests {
         assert_eq!(g["hits"][0]["ordinal"], 79);
         let g = c("mem.gsearch", json!({"bucket": "frequency", "key": "enlist"}));
         assert_eq!(g["hits"].as_array().unwrap().len(), 2);
-        assert!(call(&ws, "mem.gsearch", &json!({"bucket": "atbash", "key": 1})).unwrap_err().contains("removed"));
+        assert!(
+            call(&ws, "mem.gsearch", &json!({"bucket": "atbash", "key": 1}))
+                .unwrap_err()
+                .contains("removed")
+        );
         let m = c("mem.measure", json!({"text": "truth"}));
-        assert_eq!((m["s"].as_i64(), m["r"].as_i64(), m["triangle"].as_i64()), (Some(87), Some(48), Some(64)));
+        assert_eq!(
+            (m["s"].as_i64(), m["r"].as_i64(), m["triangle"].as_i64()),
+            (Some(87), Some(48), Some(64))
+        );
         assert!(m.get("atbash").is_none());
         assert_eq!(c("mem.search", json!({"q": "listen"})).as_array().unwrap().len(), 1);
         assert_eq!(c("mem.all", json!({})).as_array().unwrap().len(), 2);
-        assert_eq!(c("mem.buckets", json!({"bucket": "ordinal"}))["buckets"], json!([{"sum": 79, "count": 2}]));
+        assert_eq!(
+            c("mem.buckets", json!({"bucket": "ordinal"}))["buckets"],
+            json!([{"sum": 79, "count": 2}])
+        );
         // forget and put back: lists keep the member
         c("lists.enlist", json!({"list": listen, "member": silent}));
         assert_eq!(c("mem.forget", json!({"key": silent}))["text"], "silent");
@@ -312,7 +330,10 @@ mod tests {
         let key = n["_key"].as_str().unwrap().to_string();
         assert_eq!(c("notes.list", json!({"q": "world"})).as_array().unwrap().len(), 1);
         assert!(call(&ws, "notes.save", &json!({"note": {}, "text": "no title"})).is_err());
-        let n2 = c("notes.save", json!({"note": {"_key": key, "tags": ["x"]}, "text": "# Hello\n\nworld again"}));
+        let n2 = c(
+            "notes.save",
+            json!({"note": {"_key": key, "tags": ["x"]}, "text": "# Hello\n\nworld again"}),
+        );
         assert_eq!(n2["_key"], key.as_str());
         assert_eq!(n2["edits"].as_array().unwrap().len(), 1);
         assert_eq!(c("notes.get", json!({"key": key}))["markdown"], "world again");
@@ -345,7 +366,10 @@ mod tests {
         c("tags.remove", json!({"key": listen, "tag": "word"}));
         assert_eq!(c("tags.entries", json!({"tags": ["word"]})), json!([]));
         assert_eq!(c("entries.query", json!({"kind": "notes"}))["total"], 5);
-        assert_eq!(c("entries.query", json!({"bucket": "ordinal", "from": 70, "to": 80}))["total"], 2);
+        assert_eq!(
+            c("entries.query", json!({"bucket": "ordinal", "from": 70, "to": 80}))["total"],
+            2
+        );
         c("settings.set", json!({"name": "space", "value": "{}"}));
         assert_eq!(c("settings.get", json!({"name": "space"}))["value"], "{}");
         let st = c("stats", json!({}));
@@ -359,22 +383,38 @@ mod tests {
         c("lists.delist", json!({"list": silent, "member": listen}));
         assert_eq!(c("lists.unlist", json!({"list": listen}))["removed"], 1);
 
-        let sp = c("space.spread", json!({"texts": [{"id": "a", "text": "listen"}, {"id": "b", "text": "silent"}, {"id": "c", "text": "truth"}]}));
+        let sp = c(
+            "space.spread",
+            json!({"texts": [{"id": "a", "text": "listen"}, {"id": "b", "text": "silent"}, {"id": "c", "text": "truth"}]}),
+        );
         assert_eq!(sp["nodes"].as_array().unwrap().len(), 3);
         assert_eq!(sp["buckets"], 2);
 
         // saves and the forge
         c("saves.new", json!({"name": "second"}));
         c("mem.saturate", json!({"text": "silent"}));
-        let p = c("forge.preview", json!({"ingredients": [{"save": "notes"}, {"save": "second", "effect": "take away"}]}));
+        let p = c(
+            "forge.preview",
+            json!({"ingredients": [{"save": "notes"}, {"save": "second", "effect": "take away"}]}),
+        );
         assert_eq!((p["memories"].as_u64(), p["notes"].as_u64()), (Some(1), Some(5)), "{p}");
         let many: Vec<Value> = (0..=32).map(|_| json!({"save": "notes"})).collect();
-        assert!(call(&ws, "forge.preview", &json!({"ingredients": many})).unwrap_err().contains("at most"));
-        c("forge.make", json!({"name": "subset", "ingredients": [{"save": "notes"}, {"save": "second", "effect": "take away"}]}));
+        assert!(
+            call(&ws, "forge.preview", &json!({"ingredients": many}))
+                .unwrap_err()
+                .contains("at most")
+        );
+        c(
+            "forge.make",
+            json!({"name": "subset", "ingredients": [{"save": "notes"}, {"save": "second", "effect": "take away"}]}),
+        );
         assert_eq!(c("saves.list", json!({})).as_array().unwrap().len(), 3);
         c("forge.pour", json!({"ingredients": [{"save": "subset"}]}));
         assert_eq!(c("hello", json!({}))["counts"]["notes"], 5);
-        assert!(call(&ws, "saves.delete", &json!({"name": "second"})).is_err(), "the open one stays");
+        assert!(
+            call(&ws, "saves.delete", &json!({"name": "second"})).is_err(),
+            "the open one stays"
+        );
         c("saves.open", json!({"name": "notes"}));
         c("saves.copy", json!({"name": "notes", "to": "copied"}));
         let b = c("saves.export", json!({}));
@@ -386,14 +426,27 @@ mod tests {
         assert_eq!(c("saves.import", json!({"bundle": b, "merge": true}))["memories"], 0);
         c("saves.delete", json!({"name": "notes 2"}));
         // a bundle it can't read leaves nothing behind
-        assert!(call(&ws, "saves.import", &json!({"bundle": {"anend": 2, "memories": 3}, "name": "bad"})).is_err());
+        assert!(
+            call(
+                &ws,
+                "saves.import",
+                &json!({"bundle": {"anend": 2, "memories": 3}, "name": "bad"})
+            )
+            .is_err()
+        );
         assert!(!ws.path("bad").unwrap().exists());
         // weum's all-of-it.json and a backup's two documents
-        let im = c("saves.import_texts", json!({"data": "[[\"truth\", [9]]]", "name": "weum"}));
+        let im = c(
+            "saves.import_texts",
+            json!({"data": "[[\"truth\", [9]]]", "name": "weum"}),
+        );
         assert_eq!(im["memories"], 1);
         let bk = c("saves.backup", json!({}));
         assert!(bk["texts"].is_array() && bk["other"].is_object());
-        let back = c("saves.import_texts", json!({"data": bk["texts"].to_string(), "other": bk["other"], "name": "restored"}));
+        let back = c(
+            "saves.import_texts",
+            json!({"data": bk["texts"].to_string(), "other": bk["other"], "name": "restored"}),
+        );
         assert_eq!(back["notes"], 5);
         c("notes.delete", json!({"key": key}));
         c("saves.rename", json!({"name": "notes", "to": "renamed"}));

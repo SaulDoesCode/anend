@@ -9,10 +9,10 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::graph::Reader;
 use crate::graph::gematria::Measure;
 use crate::graph::record::mime;
 use crate::graph::store::{GResult, Tx, View, rel};
-use crate::graph::Reader;
 
 /// an entry as the forge sees it: (mime, rendered text)
 pub type Key = (u16, String);
@@ -123,7 +123,8 @@ pub fn combine(parts: Vec<(Effect, Contents)>) -> Contents {
         match effect {
             Effect::Add => {
                 let have: HashSet<Key> = out.items.iter().map(Item::key).collect();
-                out.items.extend(c.items.into_iter().filter(|i| !have.contains(&i.key())));
+                out.items
+                    .extend(c.items.into_iter().filter(|i| !have.contains(&i.key())));
                 let have: HashSet<(Key, Key)> = out.links.iter().cloned().collect();
                 out.links.extend(c.links.into_iter().filter(|l| !have.contains(l)));
                 for (k, it) in c.ends {
@@ -252,7 +253,9 @@ pub fn write(tx: &mut Tx, views: &[&View], c: &Contents) -> GResult<Written> {
     // lists, in order; their ends come along when the filter left them out
     let mut grew = HashSet::new();
     for (h, m) in &c.links {
-        let (Some(hi), Some(mi)) = (c.ends.get(h), c.ends.get(m)) else { continue };
+        let (Some(hi), Some(mi)) = (c.ends.get(h), c.ends.get(m)) else {
+            continue;
+        };
         let head = put(tx, hi, &mut w)?;
         let member = put(tx, mi, &mut w)?;
         ids.entry((hi.save, hi.id)).or_insert(head);

@@ -14,9 +14,9 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use crate::app::{self, workspaces};
 #[cfg(feature = "hub")]
 use crate::hub::Details;
+use crate::store::User;
 #[cfg(feature = "hub")]
 use crate::store::{Status, Visibility, may_see};
-use crate::store::User;
 use crate::web::{hub, me, mode};
 
 /// whose saves a call works on (`app::owner`), for this request's mode
@@ -26,7 +26,11 @@ fn owner(depot: &Depot, user: Option<&User>) -> Result<String, String> {
 
 /// the status for a refusal: 401 for no one, 403 for an account still waiting
 fn refusal(depot: &Depot) -> StatusCode {
-    if me(depot).is_none() { StatusCode::UNAUTHORIZED } else { StatusCode::FORBIDDEN }
+    if me(depot).is_none() {
+        StatusCode::UNAUTHORIZED
+    } else {
+        StatusCode::FORBIDDEN
+    }
 }
 
 #[derive(RustEmbed)]
@@ -71,7 +75,13 @@ fn page(depot: &Depot, res: &mut Response) {
     match owner(depot, me(depot)) {
         Ok(_) => serve(res, "index.html", mode(depot)),
         Err(_) if me(depot).is_none() => res.render(Redirect::other("/login?next=/app/")),
-        Err(e) => crate::web::message(res, depot, StatusCode::FORBIDDEN, "not yet", &format!("{}{}.", e[..1].to_uppercase(), &e[1..])),
+        Err(e) => crate::web::message(
+            res,
+            depot,
+            StatusCode::FORBIDDEN,
+            "not yet",
+            &format!("{}{}.", e[..1].to_uppercase(), &e[1..]),
+        ),
     }
 }
 
