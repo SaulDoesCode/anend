@@ -5,6 +5,36 @@ Where the work stands, for picking it up in a new session. Branch:
 
 ## Resuming (read first)
 
+**As of 18 Oct 2026, 03:35 UTC** (the newest entry; the older ones below are history):
+- **Done and pushed:** step 1 (the entry graph store), step 3 (one app API in
+  `core/src/ops`, used by the hub and the desktop), and the Dioxus app with every view.
+  Draft pull request: SaulDoesCode/anend#8. It contains everything on this branch since
+  the merge of #7.
+- **CI:** GitHub Actions has not started a job since 14 Oct (no runner, about 3 seconds,
+  no log; `master` too). That points to Actions billing or settings, not the code. Locally
+  these pass: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D
+  warnings`, `cargo test --workspace`, and the wasm32 web build. Until the jobs run again,
+  those local checks are the only gate.
+- **Running when the session ran low:**
+  - **The GPU backend** (wgpu behind a `gpu` feature: `core/src/classify/gpu/`,
+    `core/examples/gpu_bench.rs`).
+  - **Pretrained import** (`core/src/classify/{safetensors,bpe,pattern,pretrained}.rs`).
+  - **The app's next round:**
+    - verify the web build against a `--mode app --local` hub;
+    - the unbound-input fix for the list, filter and settings inputs (typing fast drops
+      letters);
+    - the zen fade and top-bar autohide;
+    - screenshots with data.
+- **If a track was cut off:** its uncommitted work is in
+  `docs/wip/2026-10-18-snapshot.patch`, a diff of the whole tree at 03:35 UTC. Each track
+  may also have left its own `docs/wip/2026-10-18-*.patch`. Apply with `git apply`,
+  check it builds, and commit.
+- **After these:**
+  - retire Bevy (`src/`) and the old JS app once the new app reaches parity;
+  - turn the gematria presets off by default when the classifiers move to the spec;
+  - the back-burner items;
+  - the README and screenshots last.
+
 As of 13 Oct 2026, evening UTC:
 - **Done:** items 1 (classifiers phase 2) and 3 (web polish).
 - **Were running when the session ran low:** item 2 (desktop polish, in `src/`) and the
