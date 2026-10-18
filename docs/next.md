@@ -522,20 +522,19 @@ a just-made invite, a README section pointing at docs/deploy.md.
   user doesn't want preference-driven "toy" limits. Next:
   - **A GPU backend:** wgpu, behind the engine's kernel boundary; checked against the CPU
     results; benchmarked on the user's hardware, since this container has no GPU.
-    Status (18 Oct): `core/src/classify/gpu/` behind the `gpu` cargo feature (wgpu 30,
-    WGSL; the default build and wasm do not pull wgpu). Done and pushed: the kernels
-    (tiled GEMM with ascending chains, 8-lane dot/sum, RMSNorm fwd/back, softmax fwd/back,
-    SwiGLU fwd/back, RoPE, causal scores, `math::exp`/sigmoid), `Precision::{Exact, Fast}`
-    (Exact launders products so they cannot fuse and divides/square-roots in integer
-    arithmetic), and the exactness probe `gpu::probe`: on llvmpipe (lavapipe Vulkan, the
-    container's software adapter) every kernel matches the CPU bit for bit in both
-    precisions (`cargo test -p anend-core --features gpu kernels_match -- --nocapture`;
-    tests skip with a message where there is no adapter). In progress
-    (`docs/wip/2026-10-18-gpu.patch`): `gpu::net::GpuNet` (the trunk resident on the
-    device, grouped-query attention and QKV biases included, heads and pooling on the CPU)
-    and `GpuDecoder` (KV cache on the device). Next: factor the decoder's one-row
-    embedding out of `model::Decoder::step`, GPU-vs-CPU model tests, the `device` option
-    in specs and training options, backward on the device, `core/examples/gpu_bench.rs`.
+    **Done (18 Oct):** `core/src/classify/gpu/` behind the `gpu` cargo feature (wgpu 30,
+    WGSL; the default build and wasm do not pull wgpu): the kernels, `Precision::{Exact,
+    Fast}`, the exactness probe, `GpuNet` (the trunk on the device, grouped KV heads and
+    biases included), `GpuDecoder` (KV cache on the device) and training forward+backward
+    on the device; `"device": "gpu" | "gpu_fast"` in specs, `TrainOpts::device`,
+    `GenOpts::device` (CPU stays the default and the reference; docs/models.md "On the
+    GPU"). On llvmpipe (the container's software Vulkan) every kernel, whole passes,
+    decoding and training match the CPU bit for bit. `core/examples/gpu_bench.rs` measures
+    CPU vs GPU tokens/s (forward, decoding, training) for the presets, "auto" and a ladder
+    up to what the device holds — **to run on the user's hardware** (llvmpipe numbers say
+    nothing about a GPU). Left (STATUS.md "The GPU backend"): batched decoding of several
+    candidates per submission, AdamW on the device, a faster GEMM for big models,
+    classification inference on the device, the WebGPU (browser) build.
   - **Importing pretrained open models (done in core, 18 Oct; tested on synthetic
     checkpoints only).** `classify::safetensors` (F32/F16/BF16/F64, sharded indexes, read
     on demand), `classify::bpe` (HuggingFace `tokenizer.json`: byte-level BPE as in Llama 3,

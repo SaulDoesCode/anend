@@ -167,12 +167,49 @@ Left:
 Example for the user's machine: `core/examples/pretrained.rs` (SmolLM2-135M; download
 command in its doc). Left: see docs/next.md "Lifting the model ceiling".
 
+## The GPU backend (done, 18 Oct; tested on llvmpipe, benchmarked there only)
+
+`core/src/classify/gpu/` behind the cargo feature `gpu` (wgpu 30, WGSL compute shaders; the
+default build and wasm do not pull wgpu: `cargo tree -p anend-core | grep wgpu` is empty).
+
+| area | where | tests (`cargo test -p anend-core --features gpu gpu::`) |
+|---|---|---|
+| device, buffers, `Run` (dispatches recorded, one submission, reads), shader source with exact/fast preludes | gpu/mod.rs | — |
+| kernels: tiled GEMM 64×64 (strided A and B, batched with grouped B, causal row limits, accumulate), per-output GEMM for few rows, 8-lane dot rows, RMSNorm fwd/back + column sums, softmax fwd (causal rows)/back, SwiGLU fwd/back, RoPE fwd/back, causal scores, strided copies, elementwise ops; `math::exp`/sigmoid ported operation for operation | gpu/kernels.wgsl | `kernels_match_the_cpu` |
+| `Precision::Exact` (products laundered through an XOR with a uniform zero so they cannot fuse; ÷ and √ correctly rounded in integer arithmetic) and `Fast` (plain operators) | gpu/mod.rs | both probed |
+| exactness probe: every kernel on device and CPU, values differing, max ulps, max relative difference | gpu/probe.rs | `kernels_match_the_cpu` |
+| `GpuNet`: the trunk resident on the device (grouped KV heads, QKV biases, QK-norm, causal and bidirectional attention, the generative head); embedding, pooling and classification heads on the CPU | gpu/net.rs | `trunk_and_heads_match_the_cpu` |
+| `GpuDecoder`: KV cache on the device, `Decoder`'s restarts | gpu/net.rs | `decoder_matches_the_cpu` |
+| training: forward with dropout masks, backward through the trunk on the device (per-example sums in example order, like `batch_grad`), embedding/heads/losses/AdamW on the CPU | gpu/train.rs, device.rs | `training_matches_the_cpu` |
+| `device::Device::{Cpu, Gpu, GpuFast}`: `TrainOpts::device`, `GenOpts::device`, spec `"device"`; CPU default; a build without the feature refuses with a message | device.rs, train.rs, generate.rs, spec.rs | `devices_parse_and_the_gpu_needs_the_feature` |
+
+The probe on llvmpipe (LLVM 20, Mesa 25.2, lavapipe Vulkan; the container has no GPU):
+**every kernel bit-exact in both precisions** (llvmpipe does not fuse or approximate), and
+whole forward passes, decoding and 2 epochs of training with dropout give the CPU's bits
+(the tests assert equality wherever the probe reports exact, a tolerance elsewhere). One
+fix the probe found: the shader compiler simplified exp's `(x + 1.5·2^23) − 1.5·2^23`
+rounding trick away; `keep()` (XOR with the uniform zero) stops that in both precisions.
+
+`cargo run --release -p anend-core --features gpu --example gpu_bench -- 1 3` on this
+container (llvmpipe is software rendering on the same 4 vCPUs, so it measures overhead,
+not a GPU): small (0.9 M weights, 256 tokens) forward 10 842 tokens/s CPU vs 560 GPU,
+decoding 5090 vs 86, training 4829 vs 175; every GPU row matched the CPU's logits bit
+for bit. The numbers that matter come from running it on the user's hardware.
+
+Left: per-dispatch bind groups and a submission + read per decoding step cost the most on
+small models (batch decoding several candidates per submission, and bind group caching,
+would cut it); weights are re-uploaded after every optimizer step (AdamW on the device
+would avoid it); a subgroup/cooperative-matrix GEMM for large models (still one chain per
+output for exactness, so no split-k); classification-only inference (`Model::run`,
+`predict`) still on the CPU; pictures/patch paths untouched; the browser (WebGPU) build
+needs an async device request and a wasm feature set.
+
 ## Next (not done)
 
 - ~~the desktop app's classifiers view~~: done (src/classify_ui.rs, filters_ui.rs, index_panel.rs, tint.rs; see docs/next.md item 4).
 - JS port of inference for offline use; search filter panel; default classifiers for
   new saves; filter presets as lists.
-- GPU backend behind `kernels` (see its module doc for bit-exactness notes).
+- GPU backend: done (above); what is left is listed there.
 - Row-parallel matmuls are used only for single long windows at inference; training is
   data-parallel over examples.
 - JS port of math/kernels with Math.fround.
