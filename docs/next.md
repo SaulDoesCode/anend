@@ -194,8 +194,26 @@ libxdo-dev`), web through WebAssembly. Features: `desktop` (default), `web`, `hu
   pagination, figures, two-click delete) and `views/reader.rs` (pages, a tiny grid for
   short texts, expand one with ← →). Driven under Xvfb: shots in the scratchpad's
   `shots-dioxus/` (memory view, menu, hover line, buckets).
-- **Left:** notes editor, tags, stats, models (minimal until the model spec), filters
-  (over `entries.query`), the space (three.js interop), more screenshots.
+- **All views in (15–18 Oct):** notes (chronological list, the pad not bound to a signal
+  while typing, tags, two-click delete, long titles on hover), tags (on any entry, all/any,
+  the entries beside), stats (the whole save), models (the spec's frame: inputs, heads,
+  data, critics; run and yes/no with undo over the backend's classifier calls; the
+  desktop's graph backend says "not yet" until docs/models.md lands), filters (words, sum
+  range, written between, tag, kind over `entries.query`, kept by name in the save's
+  settings), the space (`app/src/space.js` over the vendored three.js: labels are projected
+  HTML sized by distance, crisp and shrinking near, since WebKitGTK flattens CSS 3D
+  without compositing; click puts the triangle in the top bar; arrows ease onto the
+  nearest text; the room colour is a setting with readable ink; the card is dismissable).
+  The web build: `app/web/build.sh` → `app/web/dist` (serve it where the hub answers
+  `/app/ws`).
+- **Verified:** desktop under Xvfb (memory, menu, hover line, buckets, selection, space with
+  a hop and the card, lists, reader, notes typing, stats, models, filters, settings, night);
+  the web build in Playwright's chromium renders the same (no hub there, so calls fail).
+  Shots: scratchpad `shots-dioxus/`.
+- **Left:** the hub's app API on the graph (so the web build has data; another agent's);
+  controlled inputs other than the bar and the notes pad (list members, filters, settings)
+  could drop letters typed very fast, the same fix applies; a zen fade; IME untested;
+  models wait for the spec.
 - **Checking while core is mid-edit:** `scratchpad/wtcheck.sh cargo clippy -p anend-app`
   builds `app/` against the committed core in a worktree.
 
