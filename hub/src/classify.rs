@@ -618,7 +618,7 @@ pub fn call(store: Arc<Store>, op: &str, args: &Value) -> Res {
                     let (r, _, shown) = &cands[i];
                     let o = &outs[i];
                     json!({
-                        "key": r.label(), "text": shown, "note": matches!(r, Ref::Note(_)),
+                        "key": r.label(), "text": shown, "note": st.is_note(r),
                         "prob": o.probs[c], "top": o.top, "top_class": classes.get(o.top),
                         "member": o.members.contains(&c),
                     })
@@ -677,7 +677,7 @@ pub fn call(store: Arc<Store>, op: &str, args: &Value) -> Res {
                 .take(limit)
                 .map(|i| {
                     let (r, _, shown) = &cands[i];
-                    json!({ "key": r.label(), "text": shown, "note": matches!(r, Ref::Note(_)), "cosine": cos[i] })
+                    json!({ "key": r.label(), "text": shown, "note": st.is_note(r), "cosine": cos[i] })
                 })
                 .collect();
             Ok(json!({ "text": j.text, "results": results }))
@@ -917,7 +917,7 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
             let (filed, stale) = st.class_bucket(&stack, c, bands_arg(args))?;
             let hits: Vec<Value> = filed.iter().take(limit).map(|f| {
                 let (o, r) = anend_core::spread::sums(&f.text);
-                json!({ "key": f.r.label(), "text": f.text, "note": matches!(f.r, Ref::Note(_)), "ordinal": o, "reversed": r,
+                json!({ "key": f.r.label(), "text": f.text, "note": st.is_note(&f.r), "ordinal": o, "reversed": r,
                         "prob": if c == memo::UNCERTAIN { f.row.confidence() } else { f.row.probs[c as usize] } })
             }).collect();
             Ok(json!({
@@ -941,7 +941,7 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
             let found = st.memo_near(&stack, &me, by, j.key.as_ref(), limit)?;
             Ok(json!({
                 "text": j.text, "indexed": st.memo_count(&stack)?, "row": row_json(&stack.def().class_names(), &me),
-                "results": found.iter().map(|(r, t, c)| json!({ "key": r.label(), "text": t, "note": matches!(r, Ref::Note(_)), "cosine": c })).collect::<Vec<_>>(),
+                "results": found.iter().map(|(r, t, c)| json!({ "key": r.label(), "text": t, "note": st.is_note(r), "cosine": c })).collect::<Vec<_>>(),
             }))
         }
         "classify.tints" => {

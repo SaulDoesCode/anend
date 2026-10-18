@@ -343,7 +343,7 @@ pub fn take_into(ws: &Workspace, file: &Path, max: u64, args: &Value) -> Result<
     let m = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| clsmodule::read(&bytes, max as usize)))
         .map_err(|_| "that module can't be read".to_string())??;
     ws.room(false)?;
-    let (open, store) = ws.store()?;
+    let (open, store) = ws.models()?;
     let mut done = crate::classify::import_opts_and_take(&store, &m, args)?;
     done["save"] = json!(open);
     Ok(done)
@@ -353,7 +353,7 @@ pub fn take_into(ws: &Workspace, file: &Path, max: u64, args: &Value) -> Result<
 /// a classifier from a workspace's open save as module bytes, everything it builds on
 /// bundled. Runs on a blocking thread.
 pub fn export_from(ws: &Workspace, name: &str, description: &str, author: &str) -> Result<Vec<u8>, String> {
-    let (_, store) = ws.store()?;
+    let (_, store) = ws.models()?;
     store.export_module(
         name,
         &clsmodule::ExportOpts {

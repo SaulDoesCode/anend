@@ -19,31 +19,47 @@ most 200; past that, calls that would add something answer "your saves fill …"
 reading and deleting still work. A `--local` hub answers only requests addressed to
 `localhost`, an IP address or its `--url` (see [security](security.md)).
 
-A **hit** is `{"key": "0,12", "text": "...", "note": false, "ordinal": 79, "reversed": 83}`.
-A key is a memory's bytes joined by commas, or `note:<key>` for a note.
+A save is an **entry graph** ([format](format.md)): every text, note, list name and tag
+is an entry under a key, and lists, tags and notes-on are edges between entries. The
+desktop app answers the same ops in process with the same code (`anend_core::ops`), so
+both answer alike.
+
+A **key** is an entry's weum label, its key bytes joined by commas (`0,12`); `note:0,12`
+reads as `0,12`. A **hit** is `{"key": "0,12", "text": "...", "note": false, "ordinal":
+79, "reversed": 83}`: a note (an entry of mime `text/markdown`, `# title` and markdown)
+shows as its title. Sums are weum's ordinal and reversed; **atbash is gone** (it grouped
+texts as reversed does), and asking for it answers an error.
 
 | op | args | data |
 |---|---|---|
-| `hello` | | `{save, saves: [name], counts: {notes, memories}}` |
-| `saves.list` | | `[{name, open, notes, memories, size, modified}]` |
+| `hello` | | `{save, saves: [name], counts: {notes, memories}}` (memories: entries that are neither notes nor tags) |
+| `saves.list` | | `[{name, open, notes, memories, size, modified}]` (counts for the open save only) |
 | `saves.open` / `saves.new` | `{name}` | `{save}` |
-| `saves.copy` | `{name, to?}` | `{save}` |
-| `saves.rename` | `{name, to}` | `{save}` |
+| `saves.copy` | `{name, to?}` | `{save}` (through a backup and restore, classifiers copied along) |
+| `saves.rename` | `{name, to}` (the open one too) | `{save}` |
 | `saves.delete` | `{name}` (not the open one) | `null` |
 | `saves.export` | `{name?}` (the open save if left out) | the save as a [bundle](#bundles) |
-| `saves.import` | `{bundle, name?, merge?}`: a new save keeping the bundle's keys (named after it, or `name`, with a number when taken), or with `merge: true` into the open save, where what's new gets fresh keys | `{save, memories, notes, lists}` or `{merged: true, memories, notes, lists}` |
-| `notes.list` | `{q?, tags?, mode?}`: `q` the words the notes must have; `tags` the tags they must have, all of them, or any with `mode: "or"` | `[{key, title, tags, created, modified, edits, preview, words}]`, newest first |
-| `notes.tags` | | `[{tag, count}]`: every tag the notes have and how many have it, the most used first (then by name) |
-| `notes.get` | `{key}` | the note: `{_key, title, markdown, tags, created, edits}` |
-| `notes.save` | `{note, text?}`: `text` is the editor's `# title` + markdown | the stored note (new notes get a key) |
+| `saves.import` | `{bundle, name?, merge?}`: a new save keeping the bundle's keys (named after it, or `name`, with a number when taken); with `merge: true` into the open save: a whole bundle's entries are merged (the same text is one entry; new ones get fresh keys, their lists, tags and notes-on come along), weum rows alone keep their keys | `{save, memories, notes, lists, ...}` or `{merged: true, memories, notes, lists}` (what was new) |
+| `saves.backup` | `{name?}` | the desktop writes `texts.json` and `other.json` into `backups/` and answers `{paths}`; the hub answers `{paths: [], texts, other}` |
+| `saves.import_texts` | `{data, other?, name?}`: weum's `all-of-it.json` or a backup's `texts.json` (`data`, text), with a backup's `other.json` (`other`) a whole save; into a new save `name`, or (texts alone) into the open save | `{save, memories, replaced, skipped, borrowing}` |
+| `notes.list` | `{q?, tags?, mode?, since?, until?}`: `q` words the notes must have; `tags` all of them, or any with `mode: "or"`; created between `since` and `until` (RFC 3339) | `[{key, title, tags, created, modified, edits, preview, words}]`, newest first |
+| `notes.tags` / `tags.all` | | `[{tag, count}]`: every tag and how many entries carry it, the most used first (then by name) |
+| `notes.get` | `{key}` | `{_key, title, markdown, tags, created, edits, modified}` |
+| `notes.save` | `{note, text?, on?}`: `text` is the editor's `# title` + markdown; `on` a key the note is about (a note edge) | the stored note (new notes get a key; an edit keeps the old text as a version) |
 | `notes.delete` | `{key}` | `null` |
-| `mem.measure` | `{text}` | `{ordinal, reversed, atbash, frequency, gsum, pf_ordinal, pf_reversed, triangle, s, r}`; `triangle` is ⌊√(s·r)⌋ |
-| `mem.gsearch` | `{bucket: ordinal\|reversed\|atbash\|frequency, key: number or text}` | `{bucket, hits}` |
+| `notes.on` | `{key}` | `[hit]`: the notes on an entry, oldest first |
+| `tags.add` / `tags.remove` | `{key, tag}` | `null` |
+| `tags.entries` | `{tags, mode?}` | `[hit]` carrying all (or any) of them |
+| `mem.measure` | `{text}` | `{ordinal, reversed, frequency, gsum, pf_ordinal, pf_reversed, triangle, s, r}`; `triangle` is ⌊√(s·r)⌋ |
+| `mem.gsearch` | `{bucket: ordinal\|reversed\|frequency, key: number or text}` | `{bucket, hits}` |
 | `mem.search` | `{q, variations?: true}` | `[hit]` |
-| `mem.saturate` | `{text}` | `{key, new}` |
-| `mem.forget` | `{key}` | `{text}` |
+| `mem.saturate` | `{text}` | `{key, new}` (the entry with that text, made when there's none) |
+| `mem.forget` | `{key}` (any entry) | `{text}` |
 | `mem.remember` | `{key}` | hit |
+| `mem.put` | `{key, text}` | `null`: edits the entry, or puts a forgotten one back with its edges |
 | `mem.all` | `{limit?: 5000}` | `[hit]` |
+| `mem.buckets` | `{bucket: ordinal\|reversed}` | `{buckets: [{sum, count}]}` |
+| `entries.query` | `{words?, bucket?, from?, to?, since?, until?, tag?, kind?: notes\|memories, limit?: 300}` | `{total, hits}` |
 | `lists.stats` | | `{lists: [{list, name, members: [hit], count, ordinal_sum, reversed_sum, ordinal_mean, reversed_mean, whole: measure, vector: [26]}], dot: [[cosine]]}` (`dot` is empty past 1000 lists) |
 | `lists.enlist` / `lists.delist` | `{list, member}` (keys) | `null` |
 | `lists.unlist` | `{list}` | `{removed}` |
@@ -51,9 +67,14 @@ A key is a memory's bytes joined by commas, or `note:<key>` for a note.
 | `forge.preview` | `{ingredients: [{save, effect: add\|take away\|keep shared}] (at most 32), filter?}` | `{memories, notes, lists, sample, titles}` |
 | `forge.make` | the same and `{name}` | `{save, memories, notes, lists}` |
 | `forge.pour` | the same | what went into the open save |
-| `stats` | | `{notes, words, saves, memories, tags: [[tag, n]], first, latest}` |
+| `settings.get` / `settings.set` | `{name}` / `{name, value}` | `{value}` / `null` |
+| `stats` | | `{notes, words, saves, memories, tags: [[tag, n]], first, latest, entries, by_mime, edges, versions, body_bytes, borrowing}` |
 
-The forge's `filter` takes `{words, ordinal_from, ordinal_to, reversed_from, reversed_to, memories, notes, lists}`.
+The forge's `filter` takes `{words, ordinal_from, ordinal_to, reversed_from,
+reversed_to, memories, notes, lists}`. In the forge an entry is its mime and rendered
+text: `add` joins saves (the same text once), `take away` drops what another save has,
+`keep shared` keeps only what it has too; list pairs follow the same rules, tags come
+with the entries carrying them.
 
 A spread node goes into the world in front of a camera at the origin, looking down
 -z, as `(x·k, y·k, -(d + z))` with `k = (d + z) / d`.
@@ -62,7 +83,7 @@ A spread node goes into the world in front of a camera at the origin, looking do
 
 A save's classifiers (`core/src/classifiers.rs`; the engine is `core/src/classify/`):
 each is trained on lists, one class per list, the members' texts as examples (a note
-reads as its title and markdown). `name` picks the classifier in every call. A `class` is
+reads as its title and markdown). They keep their own tables in a file beside the save (`<name>.models`), reading the graph's lists and texts. `name` picks the classifier in every call. A `class` is
 a class name or its index. A text to judge is given as `key` (a memory or note) or
 `text`. Without a hub, the web app answers these with "classifiers need a hub for now".
 
@@ -151,7 +172,7 @@ probability band (0 for 0–10 % … 9 for 90–100 %).
 
 A filter expression is JSON with `op`: `and`/`or` `{of: [..]}`, `not` `{of}`, `class`
 `{classifier, class, min?, max?, top?}` (min defaults to the steered threshold; the
-classifier's validators apply), `words` `{q}`, `sum` `{bucket: ordinal|reversed|atbash,
+classifier's validators apply), `words` `{q}`, `sum` `{bucket: ordinal|reversed,
 from?, to?}`, `list` `{list}`, `tags` `{tags, any?}`, `kind` `{kind: memories|notes}`,
 `preset` `{name}`. A validator in `gate` mode zeroes a classifier's probabilities on
 texts it doesn't pass; in `weigh` mode multiplies them by its own.
@@ -177,26 +198,13 @@ hub's own pages (`Origin` must match), answers in the usual envelope.
 
 ## Bundles
 
-A save as plain JSON, keys and all (`core/src/bundle.rs`). The web app keeps one in the
-browser's IndexedDB when it runs without a hub, and moves saves between the browser and a
-workspace with `saves.export` and `saves.import`; a bundle is also a file you can keep.
+A save as plain JSON: its [backup](format.md#backup) in one document,
+`{"anend": 2, "name", "memories": texts.json's rows, "other": other.json}`, plus
+`classifiers` (`{definition, weights?, feedback?}` each, the weights base64) when it has
+any. Importing it restores the save keys and all; merging it leaves the classifiers out.
+A bundle of weum rows alone (`{"memories": [[text, [key bytes]], ...]}`) imports as weum's
+`all-of-it.json` does. Old bundles (`anend: 1` with notes as records) aren't read.
 
-The app decides once, as it loads: it posts `api/hello` beside its page, and a JSON
-envelope back means a hub served it, so every call goes to the hub and IndexedDB is never
-opened. Anything else (a static server's 404 or 501, no server at all, or `?offline` in
-the address) and it runs offline: `hub/web/local` answers the same calls in the page,
-the way app.rs does, and keeps each save in IndexedDB as a bundle and the key allocator's
-state, written after every call that changes something. A hub that drops out later is
-still the hub; the app reconnects. `node hub/web/test/parity.mjs` holds the two to the
-same answers.
-
-```json
-{ "anend": 1, "name": "notes",
-  "notes": [{ "_key": "1000000", "title": "a note", "markdown": "body", "tags": [], "created": "2026-10-13T09:00:00Z", "edits": [] }],
-  "memories": [["listen", [0]], ["silent", [1]]],
-  "lists": [["0", "1"], ["0", "note:1000000"]],
-  "settings": { "space map: home": "7b2278223a317d" } }
-```
-
-`memories` are weum's `[text, key bytes]` (1 to 4 bytes); `lists` are `[list, member]`
-labels (a memory's key bytes comma separated, or `note:<key>`); `settings` values are hex.
+The web app's offline engine (`hub/web/local`, IndexedDB) is **frozen**: it still
+answers the old op set over old bundles, but it no longer matches the hub, and its parity
+test is retired. The Rust core compiled to WebAssembly replaces it ([next](next.md)).

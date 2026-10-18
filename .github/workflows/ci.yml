@@ -32,9 +32,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: the web app's offline engine matches the hub, and markdown stays safe
-        run: |
-          cargo build -p anend-hub
-          node hub/web/test/parity.mjs | tee parity.log
-          grep -q "all the same" parity.log
-          node hub/web/test/markdown.mjs
+      # the offline engine's parity test (hub/web/test/parity.mjs) is retired: the hub's
+      # app API moved to the entry graph and the JS engine is frozen until core-in-WASM
+      # replaces it (docs/next.md, step 3)
+      - name: markdown stays safe in the web app
+        run: node hub/web/test/markdown.mjs

@@ -352,7 +352,7 @@ pub async fn share(req: &mut Request, depot: &mut Depot, res: &mut Response) {
         let user = user.ok_or("log in to share on the hub")?;
         let o = owner(depot, Some(&user))?;
         let ws = workspaces().get(&o);
-        let (open, _) = ws.store()?;
+        let (open, _) = ws.graph()?;
         let path = ws.path(&open)?;
         let s = |k: &str| args.get(k).and_then(Value::as_str).unwrap_or("").to_string();
         let name = if s("name").is_empty() { open.clone() } else { s("name") };
