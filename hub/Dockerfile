@@ -12,6 +12,10 @@ FROM rust:1-bookworm AS build
 ARG FEATURES=""
 WORKDIR /src
 COPY . .
+# the web app (app/, WebAssembly) goes into the hub's binary
+RUN rustup target add wasm32-unknown-unknown \
+    && cargo install --locked wasm-bindgen-cli --version 0.2.129 \
+    && sh app/web/build.sh
 RUN cargo build --release --locked -p anend-hub $FEATURES
 
 FROM debian:bookworm-slim
