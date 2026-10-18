@@ -154,6 +154,19 @@ Left:
 - `git`: commit 79b25ff on the branch duplicates another agent's hub commit (an `--amend` on a
   shared working tree); harmless (identical changes, merged cleanly), noted here.
 
+## Pretrained open models (done in core, 18 Oct; synthetic checkpoints only)
+
+| area | where | tests |
+|---|---|---|
+| safetensors: header, F32/F16/BF16/F64 → f32 (halves exact), shards by `model.safetensors.index.json`, tensors read on demand, a writer | safetensors.rs | every half/bfloat16 value round trips; shards; bad headers refused in words |
+| regex subset for pre-tokenizers (alternation, groups, `(?i:)`, lookahead, quantifiers, classes, `\p{L}`/`\p{N}`…), leftmost-first backtracking | pattern.rs | GPT-2 and Llama 3 patterns split as the reference; unsupported constructs named |
+| BPE from `tokenizer.json`: byte-level and SentencePiece style (byte fallback, ▁), merges as strings or pairs, added/special tokens (lstrip/rstrip), normalizers, pre-tokenizers (ByteLevel, Split, Digits, Metaspace), decoders; `Lexicon` (start/end/stop tokens) | bpe.rs | hand-made fixtures of both kinds: encode, decode, specials, every byte round trips, unsupported parts named |
+| engine: grouped key/value heads (`Config::kv_heads`), q/k/v biases (`qkv_bias`), rope scaling (`linear`, `llama3`), a token vocabulary (`vocab_size`, `Net::lexicon`) through windows, crops, losses, evaluation, `Decoder` (`push_token`, `from_tokens`), sampling, guidance, the file format (tokenizer saved; larger shape limits for these models); growth refuses head changes there; byte models bit for bit as before (old fixtures, saved bytes, gradients hashed against the previous commit) | model.rs, train.rs, generate.rs, io.rs, grow.rs | model gradient checks; decoder = full pass with GQA |
+| `config.json` of llama / mistral / qwen2 / qwen3 → `Config`, weights mapped (transposed into `[in × out]`, q/k/v side by side, tied heads copied), unsupported fields named; spec `"from": {"pretrained": dir}` | pretrained.rs, spec.rs | four synthetic architectures (GQA, biases + BF16 shards, QK-norm + F16 + odd head_dim, SentencePiece + MHA) match an f64 reference from the transformers code; generate with critics and guidance (threads 1 = 2), fine-tune lowers NLL, save/load equal; a spec trains, runs, generates with a critic model and saves |
+
+Example for the user's machine: `core/examples/pretrained.rs` (SmolLM2-135M; download
+command in its doc). Left: see docs/next.md "Lifting the model ceiling".
+
 ## Next (not done)
 
 - ~~the desktop app's classifiers view~~: done (src/classify_ui.rs, filters_ui.rs, index_panel.rs, tint.rs; see docs/next.md item 4).

@@ -536,10 +536,28 @@ a just-made invite, a README section pointing at docs/deploy.md.
     and `GpuDecoder` (KV cache on the device). Next: factor the decoder's one-row
     embedding out of `model::Decoder::step`, GPU-vs-CPU model tests, the `device` option
     in specs and training options, backward on the device, `core/examples/gpu_bench.rs`.
-  - **Importing pretrained open models:** safetensors weights plus a BPE tokenizer. The
-    engine already has Llama-family blocks (RMSNorm, SwiGLU, RoPE), so it can run real
-    pretrained LMs, steered by the user's classifiers as critics. Downloads happen on the
-    user's machine (model hubs are blocked here); test the loader with synthetic weights.
+  - **Importing pretrained open models (done in core, 18 Oct; tested on synthetic
+    checkpoints only).** `classify::safetensors` (F32/F16/BF16/F64, sharded indexes, read
+    on demand), `classify::bpe` (HuggingFace `tokenizer.json`: byte-level BPE as in Llama 3,
+    Qwen2/3, SmolLM; SentencePiece-style BPE with byte fallback as in Llama 2, TinyLlama,
+    Mistral; added/special tokens; `classify::pattern` runs the pre-tokenizer regexes),
+    `classify::pretrained` (config.json of `llama`, `mistral`, `qwen2`, `qwen3` onto the
+    engine: grouped key/value heads, q/k/v biases, QK-norm, `head_dim`, tied embeddings,
+    rope theta and `linear`/`llama3` scaling, rms eps; anything else refused by field). The
+    engine's `Net` gained a token vocabulary with a lexicon (start/end/stop tokens), so
+    pretrained models run, decode, generate with critics/constraints/guidance, reinforce,
+    fine-tune through `train` (extra classifier heads on their trunk too) and save as
+    classifier files with their tokenizer. Byte models are unchanged bit for bit. Specs:
+    `"from": {"pretrained": "<dir>"}` (docs/models.md). Example to run on the user's
+    machine: `core/examples/pretrained.rs` against SmolLM2-135M (download command in its
+    doc). Each synthetic architecture matches an f64 reference written from the
+    transformers code to 2e-3 relative, and the cached decoder equals the full pass bit for
+    bit. **Left:** a run on real checkpoints (outputs vs. transformers, speed; the user's
+    machine), NFC/NFKC normalisation (NFC is assumed), `\p{M}` and other unicode classes in
+    pre-tokenizer patterns (std's tables approximate `\p{L}`), YaRN/dynamic rope, sliding
+    windows longer than the window, chat templates, memory: weights are f32 (a bf16
+    store would halve it), tied embeddings are copied untied; the save's `Source`, hub ops
+    and UI for pretrained specs; GPU paths for vocabulary models (`device`).
   - **Rule:** small sizes only where measured compute requires them, and never gematria
     by default.
 - **Gematria as a model input (user, 15 Oct): optional, off by default.** It is always
