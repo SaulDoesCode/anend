@@ -10,14 +10,16 @@
 //! Prints the device, the exactness probe, then per case: weights, window length,
 //! forward tokens/s (CPU on every core, GPU exact and fast), whether the GPU's
 //! generative logits equal the CPU's bit for bit, decoding tokens/s with the KV cache,
-//! and training tokens/s (forward + backward) where the device trains.
+//! and training tokens/s (forward + backward + optimizer, two steps of four windows).
 
 use std::time::{Duration, Instant};
 
 use anend_core::classify::bench::{self, LADDER, Task};
+use anend_core::classify::device::Device;
 use anend_core::classify::gpu::{self, Precision, net::GpuDecoder, net::GpuNet};
 use anend_core::classify::model::{Config, Decoder, Gains, GenSpec, Mode, Net, Pooling};
-use anend_core::classify::{Pool, pool, text};
+use anend_core::classify::train::{self, Example, Target, TrainOpts};
+use anend_core::classify::{Classifier, Flow, Pool, pool, text};
 
 fn rate(per_case: Duration, mut f: impl FnMut() -> usize) -> f64 {
     f(); // warm-up (pipelines compile, buffers settle)
@@ -87,6 +89,7 @@ fn main() {
             "small".into(),
             Config {
                 causal: true,
+                pooling: Pooling::Mean,
                 ..Config::small().gematria(false)
             },
         ),
@@ -94,6 +97,7 @@ fn main() {
             "base".into(),
             Config {
                 causal: true,
+                pooling: Pooling::Mean,
                 ..Config::base().gematria(false)
             },
         ),
@@ -101,6 +105,7 @@ fn main() {
             format!("auto (d {} × {} layers)", auto.d_model, auto.layers),
             Config {
                 causal: true,
+                pooling: Pooling::Mean,
                 ..auto.gematria(false)
             },
         ),
@@ -124,8 +129,18 @@ fn main() {
         .map(|i| b"the quick brown fox jumps over a lazy dog. "[i % 43])
         .collect();
     println!(
-        "\n{:<28} {:>9} {:>5} {:>10} {:>10} {:>10} {:>6} {:>9} {:>9}",
-        "case", "weights", "len", "cpu tok/s", "gpu exact", "gpu fast", "same", "cpu dec/s", "gpu dec/s"
+        "\n{:<28} {:>9} {:>5} {:>10} {:>10} {:>10} {:>6} {:>9} {:>9} {:>9} {:>9}",
+        "case",
+        "weights",
+        "len",
+        "cpu tok/s",
+        "gpu exact",
+        "gpu fast",
+        "same",
+        "cpu dec/s",
+        "gpu dec/s",
+        "cpu trn/s",
+        "gpu trn/s"
     );
     let mut cpu_ok = true;
     for (name, cfg) in cases {
@@ -211,8 +226,35 @@ fn main() {
         } else {
             f64::NAN
         };
+        // training (forward + backward + AdamW) on a few windows, where a forward fits
+        let train_rate = |device: Device| -> f64 {
+            let mut clf = Classifier::with_gen(cfg.clone(), &[], Some(GenSpec::new("next")), 1).unwrap();
+            let data: Vec<Example> = (0..8)
+                .map(|i| Example::bytes(&text[i * 7..i * 7 + cfg.room()], 0, Target::Next { from: 0 }))
+                .collect();
+            let all: Vec<usize> = (0..data.len()).collect();
+            let o = TrainOpts {
+                epochs: 1,
+                batch: 4,
+                val_fraction: 0.0,
+                max_steps: 2,
+                device,
+                ..TrainOpts::default()
+            };
+            train::fit(&mut clf, &data, &all, &[], &o, |_| Flow::Go).map_or(f64::NAN, |r| r.tokens_per_sec)
+        };
+        let ctrain = if cpu_t.is_finite() {
+            train_rate(Device::Cpu)
+        } else {
+            f64::NAN
+        };
+        let gtrain = if gpu_t[0].is_finite() {
+            train_rate(Device::Gpu)
+        } else {
+            f64::NAN
+        };
         println!(
-            "{name:<28} {:>8.1}M {n:>5} {cpu_t:>10.0} {:>10.0} {:>10.0} {same:>6} {cdec:>9.0} {gdec:>9.0}",
+            "{name:<28} {:>8.1}M {n:>5} {cpu_t:>10.0} {:>10.0} {:>10.0} {same:>6} {cdec:>9.0} {gdec:>9.0} {ctrain:>9.0} {gtrain:>9.0}",
             net.weight_count() as f64 / 1e6,
             gpu_t[0],
             gpu_t[1],
