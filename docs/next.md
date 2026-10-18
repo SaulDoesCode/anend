@@ -32,7 +32,14 @@ Where the work stands, for picking it up in a new session. Branch:
   its texts, any other text the texts it reads most like).
 - **Verified** by tests (`ops::classify::tests`, `backend::local::tests::classifiers`) and by
   driving the desktop under Xvfb and the web build against `anend-hub --mode app --local`.
-- **Next:** spec models (`models.*` ops and a spec panel), then the guide.
+- **Done this round:** items 1–3 of the brief (one classify.* implementation in core, the
+  classifiers view, colouring and classifier search in the memory view); shots in
+  `app/docs/shots/desktop-models-*.png`, `web-models-training.png`.
+- **In progress:** nothing uncommitted. Small rough edges: the tiny preset is weak on a few
+  dozen texts (more texts help), Ctrl+Z in the bar undoes the bar (Esc first).
+- **Next:** item 4, spec models (`models.*` ops in core: create from a spec JSON kept in the
+  `.models` file, train as a job, run, generate with critics, pretrained `from` and
+  `device`; a spec panel in the models view; docs/app-api.md), then the guide.
 
 **As of 18 Oct 2026, evening UTC** (history now):
 - **The app is the Dioxus app** (`app/`): the desktop app (`anend-app`, on the entry graph
