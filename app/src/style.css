@@ -322,7 +322,7 @@ kbd { font: 12px var(--mono); border: 1px solid color-mix(in srgb, var(--dim) 50
 .space-host { position: absolute; inset: 0; overflow: hidden; outline: 0; }
 .space-host.looking { cursor: none; }
 .space-gl, .space-css { position: absolute !important; inset: 0; }
-.space-css { pointer-events: none; overflow: hidden; }
+.space-css { pointer-events: none; overflow: hidden; z-index: 1; }
 .space-css .slabel { position: absolute; left: 0; top: 0; will-change: transform; }
 .slabel {
   pointer-events: auto; cursor: pointer; white-space: nowrap; line-height: 1.15; padding: 0 3px;
