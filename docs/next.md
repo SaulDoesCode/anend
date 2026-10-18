@@ -240,19 +240,22 @@ libxdo-dev`), web through WebAssembly. Features: `desktop` (default), `web`, `hu
   a hop and the card, lists, reader, notes typing, stats, models, filters, settings, night);
   the web build in Playwright's chromium renders the same (no hub there, so calls fail).
   Shots: scratchpad `shots-dioxus/`.
-- **Round 2 (18 Oct), in progress:** the web build verified end to end against
-  `anend-hub --mode app --local` over `/app/ws` (memory search, menu tag, a new list,
-  multi-select into it, lists, reader, notes typed fast, tags, stats, models, filters,
-  space, settings; shots in scratchpad `shots-web/`). The page has to come from the hub's
-  origin (the socket answers 403 to another Origin); `?hub=host:port` points the page at a
-  hub, and a small proxy in the scratchpad serves `app/web/dist` as if from the hub. App
-  side: backup and weum import now use `saves.backup` / `saves.import_texts` on both
-  backends; each view keeps its own bar text; the list picker offers the picked list even
-  while empty; typed inputs (list name and members, filters, notes' tags, save names, the
-  hub address) are unbound (`initial_value`, remade by key when filled from outside).
-  **Needs a hub change:** none found so far. **Left this round:** check fast typing in
-  those inputs, the zen fade and the top-bar autohide (as the old app's settings), fresh
-  small screenshots for the README (desktop and web, with data).
+- **Round 2 (18 Oct): done.** The web build works end to end against
+  `anend-hub --mode app --local` over `/app/ws`: memory search, the menu's tag, a new list,
+  multi-select into it, the list's page, reader, notes typed fast, tags, stats, models,
+  filters, space, settings. The page must come from the hub's origin (the socket answers
+  403 to another Origin): `app/web/dist` needs serving by the hub (a hub change, when the
+  hub serves this app instead of hub/web), or `?hub=host:port` plus a proxy as in the
+  scratchpad's `sptest/proxy.py`. App side: backup and weum import use `saves.backup` /
+  `saves.import_texts` on both backends; each view keeps its bar text; the list picker
+  offers the picked list while it's empty; typed inputs are unbound (`initial_value`,
+  remade by key when filled from outside), fast typing checked in a save's name, a
+  filter's words and a list member; zen (fade after a delay) and the top bar's autohide
+  (from the window's top edge, kept while the pointer stays on it) in settings, as the old
+  app's. Small screenshots with data for the README: `app/docs/shots/`.
+- **Needs a hub change:** serve `app/web/dist` at `/app/` (instead of hub/web) so the web
+  build shares the hub's origin.
+- **Left:** IME untested; models wait for the spec.
 - **Checking while core is mid-edit:** `scratchpad/wtcheck.sh cargo clippy -p anend-app`
   builds `app/` against the committed core in a worktree.
 
