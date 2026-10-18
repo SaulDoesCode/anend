@@ -1,609 +1,116 @@
-diff --git a/app/src/backend/hub.rs b/app/src/backend/hub.rs
-index 63a541e..9e4bcb4 100644
---- a/app/src/backend/hub.rs
-+++ b/app/src/backend/hub.rs
-@@ -36,10 +36,23 @@ impl Hub {
-     /// the hub that served this page
-     pub fn here() -> Hub {
-         let loc = web_sys::window().map(|w| w.location());
--        let (proto, host) = loc
--            .map(|l| (l.protocol().unwrap_or_default(), l.host().unwrap_or_default()))
-+        let (proto, host, search) = loc
-+            .map(|l| {
-+                (
-+                    l.protocol().unwrap_or_default(),
-+                    l.host().unwrap_or_default(),
-+                    l.search().unwrap_or_default(),
-+                )
-+            })
-             .unwrap_or_default();
-         let ws = if proto == "https:" { "wss" } else { "ws" };
-+        // `?hub=host:port` talks to a hub elsewhere (the page served apart from it)
-+        let host = search
-+            .trim_start_matches('?')
-+            .split('&')
-+            .find_map(|kv| kv.strip_prefix("hub="))
-+            .map(str::to_string)
-+            .unwrap_or(host);
-         Hub {
-             url: format!("{ws}://{host}/app/ws"),
-             st: Default::default(),
-diff --git a/app/src/backend/mod.rs b/app/src/backend/mod.rs
-index 714e3f0..0edf2a2 100644
---- a/app/src/backend/mod.rs
-+++ b/app/src/backend/mod.rs
-@@ -368,30 +368,15 @@ pub trait Backend {
-         ))
-     }
-     /// weum's `await memory.backup`: the texts in one JSON, everything else in another;
--    /// on disk the backend writes the two files (their paths come back), elsewhere the
--    /// two documents come back to be downloaded
-+    /// on disk the backend writes the two files (their paths come back), a hub hands the
-+    /// two documents back to be downloaded
-     fn backup(&self, name: &str) -> Fut<Backup> {
--        if self.on_disk() {
--            return typed(self.call("saves.backup", json!({ "name": name })));
--        }
--        let f = self.call("saves.export", json!({ "name": name }));
--        Box::pin(async move {
--            let b = f.await?;
--            Ok(Backup::from_bundle(&b))
--        })
-+        typed(self.call("saves.backup", json!({ "name": name })))
-     }
-     /// weum's `all-of-it.json` (or a backup's texts.json) into the open save, or a new one
-     /// named `new_save`
-     fn import_texts(&self, json_text: &str, new_save: &str) -> Fut<Imported> {
--        if self.on_disk() {
--            return typed(self.call("saves.import_texts", json!({ "data": json_text, "name": new_save })));
--        }
--        let parsed: Result<Value, String> = serde_json::from_str(json_text).map_err(|e| e.to_string());
--        let bundle = parsed.and_then(|v| weum_bundle(new_save, &v).map(|b| b.0));
--        match bundle {
--            Ok(b) => self.import_bundle(b, new_save, new_save.is_empty()),
--            Err(e) => Box::pin(async move { Err(e) }),
--        }
-+        typed(self.call("saves.import_texts", json!({ "data": json_text, "name": new_save })))
-     }
- 
-     // ---- texts (memories) and sums
-@@ -630,65 +615,3 @@ pub trait Backend {
-         unit(self.call("settings.set", json!({ "name": name, "value": value })))
-     }
- }
--
--impl Backup {
--    /// splits a bundle (core/src/bundle.rs) into the texts and everything else
--    pub fn from_bundle(b: &Value) -> Backup {
--        let mut other = b.clone();
--        let texts = other.get_mut("memories").map(Value::take).unwrap_or(json!([]));
--        if let Some(o) = other.as_object_mut() {
--            o.remove("memories");
--        }
--        Backup {
--            paths: Vec::new(),
--            texts,
--            other,
--        }
--    }
--}
--
--/// weum's `all-of-it.json` (`[[text, [key bytes]], ...]`) as a bundle to import
--pub fn weum_bundle(name: &str, all_of_it: &Value) -> Result<(Value, usize), String> {
--    let arr = all_of_it
--        .as_array()
--        .ok_or("that isn't weum's all-of-it.json: it should be a list of [text, [key bytes]]")?;
--    let mut memories = Vec::with_capacity(arr.len());
--    for e in arr {
--        let text = e.get(0).and_then(Value::as_str);
--        let key = e.get(1).and_then(Value::as_array);
--        if let (Some(t), Some(k)) = (text, key) {
--            let bytes: Option<Vec<u8>> = k
--                .iter()
--                .map(|b| b.as_u64().and_then(|b| u8::try_from(b).ok()))
--                .collect();
--            if let Some(bytes) = bytes.filter(|b| !b.is_empty() && b.len() <= 4) {
--                memories.push(json!([t, bytes]));
--            }
--        }
--    }
--    if memories.is_empty() && !arr.is_empty() {
--        return Err("none of those entries reads as [text, [key bytes]]".into());
--    }
--    let n = memories.len();
--    Ok((json!({ "anend": 1, "name": name, "memories": memories }), n))
--}
--
--#[cfg(test)]
--mod tests {
--    use super::*;
--
--    #[test]
--    fn weum_import_reads() {
--        let (b, n) = weum_bundle("w", &json!([["listen", [0]], ["silent", [1, 2]], ["bad", "x"]])).unwrap();
--        assert_eq!(n, 2);
--        assert_eq!(b["memories"][1], json!(["silent", [1, 2]]));
--        assert!(weum_bundle("w", &json!({})).is_err());
--    }
--
--    #[test]
--    fn backup_splits() {
--        let b = Backup::from_bundle(&json!({ "anend": 1, "memories": [["a", [0]]], "notes": [] }));
--        assert_eq!(b.texts, json!([["a", [0]]]));
--        assert!(b.other.get("memories").is_none() && b.other.get("notes").is_some());
--    }
--}
+diff --git a/app/src/prefs.rs b/app/src/prefs.rs
+index a58d0c0..9b01013 100644
+--- a/app/src/prefs.rs
++++ b/app/src/prefs.rs
+@@ -39,6 +39,12 @@ pub struct Prefs {
+     pub space_reversed: bool,
+     /// the space adds new results to what's there
+     pub space_keep: bool,
++    /// fade the bars away while the mouse and keys rest
++    pub zen: bool,
++    /// seconds of stillness before zen fades
++    pub zen_delay: f32,
++    /// slide the top bar away until the pointer comes near it
++    pub hide_bar: bool,
+     /// sections folded shut, by name (settings, lists…)
+     pub collapsed: BTreeSet<String>,
+     pub view: String,
+@@ -65,6 +71,9 @@ impl Default for Prefs {
+             space_bg: "#e4d4be".into(),
+             space_reversed: false,
+             space_keep: false,
++            zen: false,
++            zen_delay: 2.5,
++            hide_bar: false,
+             collapsed: ["hub".to_string()].into_iter().collect(),
+             view: "memory".into(),
+             save: None,
 diff --git a/app/src/shell.rs b/app/src/shell.rs
-index 2f37047..86dc62d 100644
+index 86dc62d..042f3cc 100644
 --- a/app/src/shell.rs
 +++ b/app/src/shell.rs
-@@ -60,6 +60,7 @@ pub fn App() -> Element {
-         bar_history: Signal::new(Default::default()),
-         keys: Signal::new(Vec::new()),
-         changed: Signal::new(0),
-+        bar_texts: Signal::new(Default::default()),
-         seq: Signal::new(0),
-     });
+@@ -31,6 +31,21 @@ window.addEventListener('keydown', (e) => {
+   if (prevent) e.preventDefault();
+   dioxus.send({ key: k, code: e.code, ctrl: c, shift: e.shiftKey, alt: e.altKey, bar, text: bar ? t.value : '' });
+ });
++// zen: the bars fade while the mouse and keys rest; the top bar slides in near the top
++let zenTimer = 0;
++const stir = (y) => {
++  const app = document.querySelector('.app');
++  if (!app) return;
++  app.classList.remove('idle');
++  clearTimeout(zenTimer);
++  if (app.dataset.zen === '1') zenTimer = setTimeout(() => {
++    if (!app.querySelector('.dock:focus-within, .overlay, .menu')) app.classList.add('idle');
++  }, (parseFloat(app.dataset.zenDelay) || 2.5) * 1000);
++  if (y !== undefined) app.classList.toggle('peek', y < 44);
++};
++window.addEventListener('mousemove', (e) => stir(e.clientY), { passive: true });
++window.addEventListener('keydown', () => stir(), { passive: true });
++window.addEventListener('mousedown', (e) => stir(e.clientY), { passive: true });
+ "#;
  
-@@ -191,6 +192,15 @@ fn on_key(mut ui: Ui, api: Api, k: KeyPress) {
- }
- 
- pub fn go(mut ui: Ui, v: View) {
-+    let from = *ui.view.peek();
-+    if from == v {
-+        return;
-+    }
-+    // each view keeps its own bar text
-+    let now = ui.bar.peek().clone();
-+    ui.bar_texts.write().insert(from, now);
-+    let back = ui.bar_texts.peek().get(&v).cloned().unwrap_or_default();
-+    ui.set_bar(&back);
-     ui.view.set(v);
-     ui.prefs.write().view = v.name().to_string();
-     ui.save_prefs();
-diff --git a/app/src/ui.rs b/app/src/ui.rs
-index 376c843..cc4d8cf 100644
---- a/app/src/ui.rs
-+++ b/app/src/ui.rs
-@@ -216,6 +216,8 @@ pub struct Ui {
-     pub keys: Signal<Vec<(View, Callback<KeyPress, bool>)>>,
-     /// bumped when the save's data changed (views reload)
-     pub changed: Signal<u64>,
-+    /// what the bar held in each view, put back when you return to it
-+    pub bar_texts: Signal<std::collections::HashMap<View, String>>,
-     pub seq: Signal<u64>,
- }
- 
-diff --git a/app/src/views/lists.rs b/app/src/views/lists.rs
-index 0f172e3..6484b8d 100644
---- a/app/src/views/lists.rs
-+++ b/app/src/views/lists.rs
-@@ -124,7 +124,7 @@ fn ListPage(list: ListInfo, back: EventHandler<()>) -> Element {
-                     class: "name",
-                     r#type: "text",
-                     "aria-label": "the list's name",
--                    value: "{name}",
-+                    initial_value: "{name}",
-                     style: "flex: 1; height: auto; background: none;",
-                     oninput: move |e| name.set(e.value()),
-                     onchange: move |_| {
-@@ -191,7 +191,7 @@ fn Member(list: String, hit: Hit, n: usize) -> Element {
-             input {
-                 r#type: "text",
-                 "aria-label": "member {n}",
--                value: "{text}",
-+                initial_value: "{text}",
-                 readonly: hit.note,
-                 oninput: move |e| text.set(e.value()),
-                 onchange: move |_| {
-diff --git a/app/src/views/memory.rs b/app/src/views/memory.rs
-index f86799f..d8e9141 100644
---- a/app/src/views/memory.rs
-+++ b/app/src/views/memory.rs
-@@ -448,6 +448,23 @@ pub fn Memory() -> Element {
-     }
- }
- 
-+/// the lists, and the picked list (Shift+click, or a new one) even while it's empty
-+fn with_picked(mut lists: Vec<crate::backend::ListInfo>, picked: Option<Hit>) -> Vec<crate::backend::ListInfo> {
-+    if let Some(h) = picked
-+        && !lists.iter().any(|l| l.list == h.key)
-+    {
-+        lists.insert(
-+            0,
-+            crate::backend::ListInfo {
-+                list: h.key,
-+                name: h.text,
-+                ..Default::default()
-+            },
-+        );
-+    }
-+    lists
-+}
+ fn measure_of(t: &str) -> Option<Measure> {
+@@ -102,6 +117,7 @@ pub fn App() -> Element {
+     let vars = crate::theme::css_vars(&p.palette, &p.colours);
+     let zoom = p.zoom;
+     let fs = p.font_size;
++    let (zen, zen_delay, hide_bar) = (p.zen, p.zen_delay, p.hide_bar);
+     let view = (ui.view)();
+     // zoom only when it isn't 1 (WebKit's css zoom upsets the space's 3d transforms)
+     let zoomed = if (zoom - 1.0).abs() > 0.001 {
+@@ -116,7 +132,13 @@ pub fn App() -> Element {
+     drop(p);
+     rsx! {
+         style { {CSS} }
+-        div { class: "app v-{view.name()}", style: "{style}",
++        div {
++            class: "app v-{view.name()}",
++            class: if zen { "zen" } else { "" },
++            class: if hide_bar { "hide-bar" } else { "" },
++            "data-zen": if zen { "1" } else { "0" },
++            "data-zen-delay": "{zen_delay}",
++            style: "{style}",
+             TopBar {}
+             div { class: "views",
+                 for v in View::ALL {
+diff --git a/app/src/style.css b/app/src/style.css
+index 1e36c05..d9b5986 100644
+--- a/app/src/style.css
++++ b/app/src/style.css
+@@ -346,3 +346,12 @@ kbd { font: 12px var(--mono); border: 1px solid color-mix(in srgb, var(--dim) 50
+ .metrics .gsum { font: 11.5px var(--mono); margin: 4px 0; overflow-wrap: anywhere; }
+ .space-empty { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); z-index: 1; pointer-events: none; width: min(440px, calc(100% - 32px)); text-align: center; color: var(--room-ink); font-size: 15px; }
+ .space-help { position: absolute; left: 4px; bottom: 4px; right: 4px; z-index: 2; font-size: 12.5px; background: color-mix(in srgb, var(--cards) 94%, transparent); color: var(--text); padding: 6px 10px; border-radius: var(--radius); }
 +
- #[component]
- fn SelBar(n: usize) -> Element {
-     let mut ui = ui();
-@@ -479,8 +496,8 @@ fn SelBar(n: usize) -> Element {
-         if picking() {
-             div { class: "listpick",
-                 match &*lists.read() {
--                    Some(Some(l)) if !l.lists.is_empty() => rsx! {
--                        for li in l.lists.clone() {
-+                    Some(Some(l)) if !l.lists.is_empty() || ui.picks.read().list.is_some() => rsx! {
-+                        for li in with_picked(l.lists.clone(), ui.picks.read().list.clone()) {
-                             button {
-                                 key: "{li.list}",
-                                 title: "{li.count} members · {li.list}",
-diff --git a/app/src/views/models.rs b/app/src/views/models.rs
-index 6f7cb67..83ab1dc 100644
---- a/app/src/views/models.rs
-+++ b/app/src/views/models.rs
-@@ -150,6 +150,7 @@ pub fn Filters() -> Element {
-     let mut since = use_signal(String::new);
-     let mut until = use_signal(String::new);
-     let mut name = use_signal(String::new);
-+    let mut form = use_signal(|| 0u64);
-     let mut found: Signal<Option<(u64, Vec<Hit>)>> = use_signal(|| None);
-     let api_s = api.clone();
-     let saved = use_resource(move || {
-@@ -205,6 +206,7 @@ pub fn Filters() -> Element {
-                 None => w.words = t,
-             }
-             drop(w);
-+            form += 1;
-             run();
-             true
-         });
-@@ -216,27 +218,29 @@ pub fn Filters() -> Element {
-     rsx! {
-         div { class: "page",
-             div { class: "row", h2 { "filters" } span { class: "dim small", "every condition must hold" } }
--            div { class: "card",
-+            // remade when a kept filter or the bar fills it (its inputs aren't bound while typing)
-+            for g in [form()] {
-+            div { key: "{g}", class: "card",
-                 div { class: "cond", Icon { name: "search" } "words"
--                    input { r#type: "text", value: "{cur.words}", placeholder: "any", oninput: move |e| q.write().words = e.value() } }
-+                    input { r#type: "text", initial_value: "{cur.words}", placeholder: "any", oninput: move |e| q.write().words = e.value() } }
-                 div { class: "cond", Icon { name: "hash" } "sum"
-                     select { value: "{cur.bucket}", onchange: move |e| q.write().bucket = e.value(),
-                         option { value: "", "any" } option { value: "ordinal", "ordinal" } option { value: "reversed", "reversed" } }
--                    "from" input { r#type: "number", value: cur.from.map(|v| v.to_string()).unwrap_or_default(), oninput: move |e| q.write().from = e.value().parse().ok() }
--                    "to" input { r#type: "number", value: cur.to.map(|v| v.to_string()).unwrap_or_default(), oninput: move |e| q.write().to = e.value().parse().ok() } }
-+                    "from" input { r#type: "number", initial_value: cur.from.map(|v| v.to_string()).unwrap_or_default(), oninput: move |e| q.write().from = e.value().parse().ok() }
-+                    "to" input { r#type: "number", initial_value: cur.to.map(|v| v.to_string()).unwrap_or_default(), oninput: move |e| q.write().to = e.value().parse().ok() } }
-                 div { class: "cond", Icon { name: "sort" } "written between"
--                    input { r#type: "date", value: "{since}", oninput: move |e| since.set(e.value()) } "and"
--                    input { r#type: "date", value: "{until}", oninput: move |e| until.set(e.value()) } }
-+                    input { r#type: "date", initial_value: "{since}", oninput: move |e| since.set(e.value()) } "and"
-+                    input { r#type: "date", initial_value: "{until}", oninput: move |e| until.set(e.value()) } }
-                 div { class: "cond", Icon { name: "tag" } "tag"
--                    input { r#type: "text", value: cur.tag.clone().unwrap_or_default(), placeholder: "any", oninput: move |e| { let v = e.value(); q.write().tag = (!v.is_empty()).then_some(v); } } }
-+                    input { r#type: "text", initial_value: cur.tag.clone().unwrap_or_default(), placeholder: "any", oninput: move |e| { let v = e.value(); q.write().tag = (!v.is_empty()).then_some(v); } } }
-                 div { class: "cond", Icon { name: "filter" } "kind"
-                     for (k , label) in [("", "everything"), ("memories", "texts"), ("notes", "notes")] {
-                         button { key: "{k}", class: if cur.kind == k { "chip on" } else { "chip" }, onclick: move |_| q.write().kind = k.to_string(), "{label}" }
-                     } }
-                 div { class: "row",
--                    button { class: "primary", onclick: move |_| run2(), Icon { name: "play" } "run" }
--                    input { r#type: "text", placeholder: "a name to keep it", value: "{name}", oninput: move |e| name.set(e.value()) }
--                    button { disabled: name().trim().is_empty(), onclick: move |_| {
-+                    button { class: "primary", onclick: { let run2 = run2.clone(); move |_| run2() }, Icon { name: "play" } "run" }
-+                    input { r#type: "text", placeholder: "a name to keep it", initial_value: "{name}", oninput: move |e| name.set(e.value()) }
-+                    button { disabled: name().trim().is_empty(), onclick: { let api_save = api_save.clone(); move |_| {
-                             let api = api_save.clone();
-                             let mut all = saved.peek().clone().unwrap_or_default();
-                             let n = name.peek().trim().to_string();
-@@ -248,9 +252,10 @@ pub fn Filters() -> Element {
-                                     Err(e) => ui.fail(e),
-                                 }
-                             });
--                        }, Icon { name: "save" } "keep" }
-+                        } }, Icon { name: "save" } "keep" }
-                 }
-             }
-+            }
-             if !saved_list.is_empty() {
-                 div { class: "row",
-                     span { class: "dim", "kept:" }
-@@ -259,6 +264,7 @@ pub fn Filters() -> Element {
-                                 let run = run.clone();
-                                 move |_| {
-                                     if let Ok(query) = serde_json::from_value::<EntryQuery>(v["q"].clone()) { q.set(query); }
-+                                    form += 1;
-                                     since.set(v["since"].as_str().unwrap_or("").to_string());
-                                     until.set(v["until"].as_str().unwrap_or("").to_string());
-                                     name.set(n.clone());
-diff --git a/app/src/views/notes.rs b/app/src/views/notes.rs
-index 4d72ef9..14191db 100644
---- a/app/src/views/notes.rs
-+++ b/app/src/views/notes.rs
-@@ -77,123 +77,125 @@ pub fn Notes() -> Element {
-     let shown_title = anend_core::note::split(&text()).0;
-     let api_d = api.clone();
-     rsx! {
--        div { class: "notes", style: "position: absolute; inset: 0;",
--            div { class: "card notelist",
--                button {
--                    class: "primary",
--                    onclick: move |_| {
--                        open.set(Some(Note::default()));
--                        text.set("# \n\n".into());
--                        seq += 1;
--                        tags.set(String::new());
--                        dirty.set(false);
--                    },
--                    Icon { name: "new" }
--                    "a new note"
--                }
--                ul { role: "listbox", "aria-label": "notes, newest first",
--                    if notes.is_empty() {
--                        li { class: "dim", "no notes" if !q().is_empty() { " with “{q}”" } }
-+            div { class: "notes", style: "position: absolute; inset: 0;",
-+                div { class: "card notelist",
-+                    button {
-+                        class: "primary",
-+                        onclick: move |_| {
-+                            open.set(Some(Note::default()));
-+                            text.set("# \n\n".into());
-+                            seq += 1;
-+                            tags.set(String::new());
-+                            dirty.set(false);
-+                        },
-+                        Icon { name: "new" }
-+                        "a new note"
-                     }
--                    for n in notes {
--                        li {
--                            key: "{n.key}",
--                            class: if n.key == cur_key { "on" } else { "" },
--                            title: "{n.title}",
--                            role: "option",
--                            tabindex: "0",
--                            onclick: {
--                                let api = api.clone();
--                                let key = n.key.clone();
--                                move |_| {
-+                    ul { role: "listbox", "aria-label": "notes, newest first",
-+                        if notes.is_empty() {
-+                            li { class: "dim", "no notes" if !q().is_empty() { " with “{q}”" } }
-+                        }
-+                        for n in notes {
-+                            li {
-+                                key: "{n.key}",
-+                                class: if n.key == cur_key { "on" } else { "" },
-+                                title: "{n.title}",
-+                                role: "option",
-+                                tabindex: "0",
-+                                onclick: {
-                                     let api = api.clone();
--                                    let key = key.clone();
--                                    dioxus::dioxus_core::spawn_forever(async move {
--                                        match api.note(&key).await {
--                                            Ok(note) => {
--                                                text.set(anend_core::note::compose(&note.title, &note.markdown));
--                                                tags.set(note.tags.join(", "));
--                                                open.set(Some(note));
--                                                seq += 1;
--                                                dirty.set(false);
--                                                armed.set(false);
-+                                    let key = n.key.clone();
-+                                    move |_| {
-+                                        let api = api.clone();
-+                                        let key = key.clone();
-+                                        dioxus::dioxus_core::spawn_forever(async move {
-+                                            match api.note(&key).await {
-+                                                Ok(note) => {
-+                                                    text.set(anend_core::note::compose(&note.title, &note.markdown));
-+                                                    tags.set(note.tags.join(", "));
-+                                                    open.set(Some(note));
-+                                                    seq += 1;
-+                                                    dirty.set(false);
-+                                                    armed.set(false);
-+                                                }
-+                                                Err(e) => ui.fail(e),
-                                             }
--                                            Err(e) => ui.fail(e),
--                                        }
--                                    });
--                                }
--                            },
--                            "{n.title}"
--                            span { class: "when", "{when(&n.created)}" if !n.tags.is_empty() { {format!(" · {}", n.tags.join(", "))} } }
-+                                        });
-+                                    }
-+                                },
-+                                "{n.title}"
-+                                span { class: "when", "{when(&n.created)}" if !n.tags.is_empty() { {format!(" · {}", n.tags.join(", "))} } }
-+                            }
-                         }
-                     }
-                 }
--            }
--            div { class: "card editor",
--                if let Some(note) = open() {
--                    div { class: "head",
--                        span { class: "title", title: "{shown_title}", "{shown_title}" }
--                        label { class: "row", Icon { name: "tag" }
--                            input { r#type: "text", placeholder: "tags, comma separated", value: "{tags}", "aria-label": "tags",
--                                oninput: move |e| { tags.set(e.value()); dirty.set(true); } }
-+                div { class: "card editor",
-+                    if let Some(note) = open() {
-+                        div { class: "head",
-+                            span { class: "title", title: "{shown_title}", "{shown_title}" }
-+                            label { class: "row", Icon { name: "tag" }
-+    for g in [format!("{}-{}", cur_key, seq())] {
-+                                input { key: "{g}", r#type: "text", placeholder: "tags, comma separated", initial_value: "{tags}", "aria-label": "tags",
-+                                    oninput: move |e| { tags.set(e.value()); dirty.set(true); } }
-+    }
-+                            }
-+                            button { class: if dirty() { "primary" } else { "" }, "data-tip": "save · Ctrl+S", "aria-label": "save",
-+                                onclick: { let s = save_k.clone(); move |_| s() }, Icon { name: "save" } }
-+                            if !note.key.is_empty() {
-+                                button {
-+                                    class: if armed() { "armed" } else { "plain" },
-+                                    "data-tip": "delete (click twice)",
-+                                    "aria-label": "delete",
-+                                    onclick: move |_| {
-+                                        if !armed() { armed.set(true); return; }
-+                                        let api = api_d.clone();
-+                                        let key = note.key.clone();
-+                                        dioxus::dioxus_core::spawn_forever(async move {
-+                                            match api.delete_note(&key).await {
-+                                                Ok(()) => { open.set(None); ui.say("deleted"); ui.touched(); }
-+                                                Err(e) => ui.fail(e),
-+                                            }
-+                                        });
-+                                    },
-+                                    Icon { name: "delete" }
-+                                    if armed() { "delete?" }
-+                                }
-+                            }
-+                        }
-+                        if !note.created.is_empty() {
-+                            span { class: "dim small", "written {when(&note.created)}" if !note.edits.is_empty() { " · {note.edits.len()} edits" } }
-                         }
--                        button { class: if dirty() { "primary" } else { "" }, "data-tip": "save · Ctrl+S", "aria-label": "save",
--                            onclick: { let s = save_k.clone(); move |_| s() }, Icon { name: "save" } }
--                        if !note.key.is_empty() {
--                            button {
--                                class: if armed() { "armed" } else { "plain" },
--                                "data-tip": "delete (click twice)",
--                                "aria-label": "delete",
--                                onclick: move |_| {
--                                    if !armed() { armed.set(true); return; }
--                                    let api = api_d.clone();
--                                    let key = note.key.clone();
--                                    dioxus::dioxus_core::spawn_forever(async move {
--                                        match api.delete_note(&key).await {
--                                            Ok(()) => { open.set(None); ui.say("deleted"); ui.touched(); }
--                                            Err(e) => ui.fail(e),
-+                        // not bound to the signal while typing (a round trip per key would drop
-+                        // letters typed fast); its text is put in when a note opens
-+                        for pad in [format!("{}-{}", cur_key, seq())] {
-+                            textarea {
-+                                key: "{pad}",
-+                                id: "note-pad",
-+                                "aria-label": "the note: # title, then markdown",
-+                                spellcheck: "true",
-+                                onmounted: move |_| {
-+                                    let js = format!(
-+                                        "const p = document.getElementById('note-pad'); if (p) {{ p.value = {}; }}",
-+                                        serde_json::to_string(&*text.peek()).unwrap_or_default()
-+                                    );
-+                                    document::eval(&js);
-+                                },
-+                                oninput: move |e| { text.set(e.value()); dirty.set(true); },
-+                                onkeydown: {
-+                                    let s = save.clone();
-+                                    move |e: KeyboardEvent| {
-+                                        if e.modifiers().ctrl() && e.key() == Key::Character("s".into()) {
-+                                            e.prevent_default();
-+                                            s();
-                                         }
--                                    });
-+                                    }
-                                 },
--                                Icon { name: "delete" }
--                                if armed() { "delete?" }
-                             }
-                         }
-+                    } else {
-+                        div { class: "empty", "Pick a note, or make a new one. A note is a text whose first line is its # title." }
-                     }
--                    if !note.created.is_empty() {
--                        span { class: "dim small", "written {when(&note.created)}" if !note.edits.is_empty() { " · {note.edits.len()} edits" } }
--                    }
--                    // not bound to the signal while typing (a round trip per key would drop
--                    // letters typed fast); its text is put in when a note opens
--                    for pad in [format!("{}-{}", cur_key, seq())] {
--                        textarea {
--                            key: "{pad}",
--                            id: "note-pad",
--                            "aria-label": "the note: # title, then markdown",
--                            spellcheck: "true",
--                            onmounted: move |_| {
--                                let js = format!(
--                                    "const p = document.getElementById('note-pad'); if (p) {{ p.value = {}; }}",
--                                    serde_json::to_string(&*text.peek()).unwrap_or_default()
--                                );
--                                document::eval(&js);
--                            },
--                            oninput: move |e| { text.set(e.value()); dirty.set(true); },
--                            onkeydown: {
--                                let s = save.clone();
--                                move |e: KeyboardEvent| {
--                                    if e.modifiers().ctrl() && e.key() == Key::Character("s".into()) {
--                                        e.prevent_default();
--                                        s();
--                                    }
--                                }
--                            },
--                        }
--                    }
--                } else {
--                    div { class: "empty", "Pick a note, or make a new one. A note is a text whose first line is its # title." }
-                 }
-             }
-         }
--    }
- }
++/* zen: the bars fade while you rest (the views keep their room); the top bar can slide away
++   and come back when the pointer nears the top */
++.app .top, .app .dock, .app .mem-head, .app .mem-hover { transition: opacity .6s, transform .25s ease; }
++.app.zen.idle .top, .app.zen.idle .dock, .app.zen.idle .mem-hover { opacity: 0; }
++.app.zen.idle { cursor: none; }
++.app.hide-bar { grid-template-rows: 0 minmax(0, 1fr) auto; }
++.app.hide-bar .top { position: fixed; left: 0; right: 0; top: 0; height: var(--top); z-index: 30; transform: translateY(-100%); box-shadow: 0 2px 10px rgb(0 0 0 / .3); }
++.app.hide-bar.peek .top, .app.hide-bar .top:focus-within, .app.hide-bar .top:hover { transform: none; }
 diff --git a/app/src/views/settings.rs b/app/src/views/settings.rs
-index bb99c2d..6e26eb6 100644
+index 6e26eb6..b9e12fd 100644
 --- a/app/src/views/settings.rs
 +++ b/app/src/views/settings.rs
-@@ -160,6 +160,7 @@ fn Saves() -> Element {
-         async move { api.saves().await }
-     });
-     let mut name = use_signal(String::new);
-+    let mut made = use_signal(|| 0u64);
-     let mut step = use_signal(|| Step::Closed);
-     let mut armed = use_signal(|| None::<String>);
-     let list: Vec<SaveInfo> = match &*saves.read() {
-@@ -202,8 +203,9 @@ fn Saves() -> Element {
-                                                 match api.backup(&n).await {
-                                                     Ok(b) if !b.paths.is_empty() => ui.say(format!("backed up: {}", b.paths.join(" and "))),
-                                                     Ok(b) => {
--                                                        download(&format!("{n} texts.json"), &b.texts.to_string());
--                                                        download(&format!("{n} other.json"), &b.other.to_string());
-+                                                        let text = |v: &serde_json::Value| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string());
-+                                                        download(&format!("{n} texts.json"), &text(&b.texts));
-+                                                        download(&format!("{n} other.json"), &text(&b.other));
-                                                         ui.say("backed up: two downloads");
-                                                     }
-                                                     Err(e) => ui.fail(e),
-@@ -242,8 +244,10 @@ fn Saves() -> Element {
+@@ -86,6 +86,15 @@ fn Looks() -> Element {
+                     oninput: move |e| set_pref(ui, |p| p.font_size = e.value().parse().unwrap_or(14.0)) }
+                 span { "{p.font_size}px" }
              }
-             label { r#for: "newsave", "a new save" }
++            label { "zen" }
++            div { class: "row",
++                label { class: "row", input { r#type: "checkbox", checked: p.zen, onchange: move |e| set_pref(ui, |p| p.zen = e.checked()) } "fade the bars while you rest" }
++                input { r#type: "range", min: "0.5", max: "10", step: "0.5", value: "{p.zen_delay}", "aria-label": "seconds before zen fades",
++                    oninput: move |e| set_pref(ui, |p| p.zen_delay = e.value().parse().unwrap_or(2.5)) }
++                span { "after {p.zen_delay}s" }
++            }
++            label { "the top bar" }
++            label { class: "row", input { r#type: "checkbox", checked: p.hide_bar, onchange: move |e| set_pref(ui, |p| p.hide_bar = e.checked()) } "slide it away until the pointer comes near the top" }
+             label { r#for: "zoom", "zoom" }
              div { class: "row",
--                input { id: "newsave", r#type: "text", placeholder: "its name", value: "{name}", oninput: move |e| name.set(e.value()) }
--                button { onclick: { let api = api.clone(); move |_| { let n = name(); act(api.new_save(&n), format!("made and opened {n}")); name.set(String::new()); } },
-+                for g in [made()] {
-+                    input { key: "{g}", id: "newsave", r#type: "text", placeholder: "its name", initial_value: "{name}", oninput: move |e| name.set(e.value()) }
-+                }
-+                button { onclick: { let api = api.clone(); move |_| { let n = name(); act(api.new_save(&n), format!("made and opened {n}")); name.set(String::new()); made += 1; } },
-                     Icon { name: "new" } "make it" }
-                 button { class: "plain", onclick: move |_| step.set(Step::Read { target: String::new(), data: String::new(), rows: 0, sample: vec![] }),
-                     Icon { name: "upload" } "a new save from all-of-it.json" }
-@@ -312,7 +316,7 @@ fn ImportSteps(step: Signal<Step>) -> Element {
-                 div { class: "row",
-                     if target.is_empty() {
-                         "into a new save named"
--                        input { r#type: "text", value: "{new_name}", oninput: move |e| new_name.set(e.value()) }
-+                        input { r#type: "text", initial_value: "{new_name}", oninput: move |e| new_name.set(e.value()) }
-                     } else {
-                         "into “{target}”: keys already there are replaced (the old text kept as a version)"
-                     }
-@@ -418,7 +422,7 @@ fn Hub() -> Element {
-     rsx! {
-         Fold { name: "hub", title: "the hub",
-             label { r#for: "hub", "its address" }
--            input { id: "hub", r#type: "text", placeholder: "http://localhost:8080", value: "{p.hub_url}",
-+            input { id: "hub", r#type: "text", placeholder: "http://localhost:8080", initial_value: "{p.hub_url}",
-                 oninput: move |e| set_pref(ui, |p| p.hub_url = e.value()) }
-             div { class: "wide dim small", "Sharing saves and models on the hub comes back here when the hub moves to the entry graph." }
-         }
+                 input { id: "zoom", r#type: "range", min: "0.5", max: "3", step: "0.05", value: "{p.zoom}",
 diff --git a/core/src/classify/bpe.rs b/core/src/classify/bpe.rs
 index cff7971..4eb94cb 100644
 --- a/core/src/classify/bpe.rs
@@ -854,10 +361,10 @@ index d4824cf..85f6339 100644
 +    }
  }
 diff --git a/core/src/classify/gpu/net.rs b/core/src/classify/gpu/net.rs
-index 3df58f8..28c7ae0 100644
+index 3df58f8..c49b7a1 100644
 --- a/core/src/classify/gpu/net.rs
 +++ b/core/src/classify/gpu/net.rs
-@@ -1 +1,594 @@
+@@ -1 +1,620 @@
 -//! a Net's trunk resident on the device (in progress)
 +//! A [`Net`]'s trunk resident on the device: the weights uploaded once, each window's
 +//! embedded tokens uploaded, every block run as a list of kernel dispatches in one
@@ -873,7 +380,7 @@ index 3df58f8..28c7ae0 100644
 +use super::{Buf, Gpu, Precision, Run, View};
 +use crate::classify::kernels as k;
 +use crate::classify::model::{Gains, Net, Pooling};
-+use crate::classify::text::Window;
++use crate::classify::text::{self, Window};
 +
 +struct GBlock {
 +    heads: usize,
@@ -904,7 +411,7 @@ index 3df58f8..28c7ae0 100644
 +    gen_out: usize,
 +    blocks: Vec<GBlock>,
 +    nf: Buf,
-+    gen: Option<(Buf, Buf)>,
++    genh: Option<(Buf, Buf)>,
 +    cos: Buf,
 +    sin: Buf,
 +}
@@ -994,7 +501,7 @@ index 3df58f8..28c7ae0 100644
 +            gen_out: cfg.gen_out(),
 +            blocks,
 +            nf: g.upload(&net.nf),
-+            gen: net.generator.as_ref().map(|_| (g.upload(&net.gen_w), g.upload(&net.gen_b))),
++            genh: net.generator.as_ref().map(|_| (g.upload(&net.gen_w), g.upload(&net.gen_b))),
 +            cos: g.upload(cos),
 +            sin: g.upload(sin),
 +        })
@@ -1023,7 +530,7 @@ index 3df58f8..28c7ae0 100644
 +            }
 +        }
 +        g.write(&self.nf, 0, &net.nf);
-+        if let Some((w, b)) = &self.gen {
++        if let Some((w, b)) = &self.genh {
 +            g.write(w, 0, &net.gen_w);
 +            g.write(b, 0, &net.gen_b);
 +        }
@@ -1133,9 +640,9 @@ index 3df58f8..28c7ae0 100644
 +    }
 +
 +    /// the final norm (with its x̂, rstd) and, with a generative head, its logits
-+    pub(crate) fn top_fwd(&self, r: &mut Run, x: &Buf, xf: &Buf, nf: Option<(&Buf, &Buf)>, gen: Option<&Buf>, n: usize) {
++    pub(crate) fn top_fwd(&self, r: &mut Run, x: &Buf, xf: &Buf, nf: Option<(&Buf, &Buf)>, genh: Option<&Buf>, n: usize) {
 +        r.norm_fwd((x, 0), &self.nf, (xf, 0), nf.map(|(a, b)| ((a, 0), (b, 0))), n, self.d, self.eps);
-+        if let (Some(y), Some((w, b))) = (gen, &self.gen) {
++        if let (Some(y), Some((w, b))) = (genh, &self.genh) {
 +            let go = self.gen_out;
 +            r.gemm(View::rows(xf, self.d), View::rows(w, go), View::rows(y, go), n, self.d, go, 1, false, None);
 +            r.add_rows(y, b, n * go, go);
@@ -1164,10 +671,10 @@ index 3df58f8..28c7ae0 100644
 +            std::mem::swap(&mut xa, &mut xb);
 +        }
 +        let xf = g.zeros(n * d);
-+        let gen = (want_gen && self.gen.is_some()).then(|| g.zeros(n * self.gen_out));
-+        self.top_fwd(&mut r, xa, &xf, None, gen.as_ref(), n);
++        let genh = (want_gen && self.genh.is_some()).then(|| g.zeros(n * self.gen_out));
++        self.top_fwd(&mut r, xa, &xf, None, genh.as_ref(), n);
 +        let t0 = r.read(&xf, 0, n * d);
-+        let t1 = gen.as_ref().map(|y| r.read(y, 0, y.len));
++        let t1 = genh.as_ref().map(|y| r.read(y, 0, y.len));
 +        let mut out = r.submit();
 +        let yv = t1.map(|i| std::mem::take(&mut out[i]));
 +        (std::mem::take(&mut out[t0]), yv)
@@ -1247,6 +754,32 @@ index 3df58f8..28c7ae0 100644
 +    let mut y = k::matmul(k::rows(z, z.len()), &hd.w, 1, z.len(), hd.width(), None);
 +    y.iter_mut().zip(&hd.b).for_each(|(a, b)| *a += b);
 +    y
++}
++
++/// the embedding of the token a decoder reads at position `seq.len()`, with the feature
++/// channels a causal window gives it there (as `Decoder::step` computes them)
++fn step_embedding(net: &Net, seq: &[u32], token: u32, gains: &Gains) -> Vec<f32> {
++    let cfg = &net.cfg;
++    let pos = seq.len();
++    let mut w1 = Window {
++        tokens: vec![token],
++        letter: vec![0],
++        ordinal: vec![0],
++        reversed: vec![0],
++        atbash: vec![0],
++        root: vec![0],
++        ..Window::default()
++    };
++    if pos > 0 && (cfg.letters || cfg.words) {
++        let bytes: Vec<u8> = seq.iter().map(|&t| t as u8).collect();
++        let w = text::window_with(&bytes, true, false);
++        w1.letter[0] = w.letter[pos];
++        w1.ordinal[0] = w.ordinal[pos];
++        w1.reversed[0] = w.reversed[pos];
++        w1.atbash[0] = w.atbash[pos];
++        w1.root[0] = w.root[pos];
++    }
++    net.embed(&w1, gains)
 +}
 +
 +/// `model::Decoder` on the device: one token at a time with the keys and values of
@@ -1397,7 +930,7 @@ index 3df58f8..28c7ae0 100644
 +        let cfg = &net.cfg;
 +        let (d, dh, eps, ml) = (gn.d, gn.dh, gn.eps, gn.max_len);
 +        let pos = self.seq.len();
-+        let x = crate::classify::model::step_embedding(net, &self.seq, token, &self.gains);
++        let x = step_embedding(net, &self.seq, token, &self.gains);
 +        let g = gn.g;
 +        g.write(&st.x, 0, &x);
 +        let mut r = g.run(gn.prec);
@@ -1675,10 +1208,18 @@ index 5726f45..dff360c 100644
      n += d + if c.pooling == Pooling::Attention { d } else { 0 };
      let pooled = if c.pooling == Pooling::ClsMean { 2 * d } else { d };
 diff --git a/core/src/classify/mod.rs b/core/src/classify/mod.rs
-index c1ca10d..68570c6 100644
+index c1ca10d..3991bc4 100644
 --- a/core/src/classify/mod.rs
 +++ b/core/src/classify/mod.rs
-@@ -143,8 +143,7 @@ impl Classifier {
+@@ -40,6 +40,7 @@ pub mod metrics;
+ pub mod model;
+ pub mod pattern;
+ pub mod pool;
++pub mod pretrained;
+ pub mod safetensors;
+ pub mod spec;
+ pub mod steer;
+@@ -143,8 +144,7 @@ impl Classifier {
  
      /// the windows of any bytes (causal windows for a causal model)
      pub fn windows_of(&self, data: &[u8]) -> Vec<Window> {
@@ -1689,7 +1230,7 @@ index c1ca10d..68570c6 100644
  
      /// every window of a text through the net with the given gains, averaged in window
 diff --git a/core/src/classify/model.rs b/core/src/classify/model.rs
-index 7c08dfa..ea1a177 100644
+index 7c08dfa..62a3c41 100644
 --- a/core/src/classify/model.rs
 +++ b/core/src/classify/model.rs
 @@ -14,8 +14,11 @@
@@ -2592,38 +2133,19 @@ index 7c08dfa..ea1a177 100644
  /// a window for this net's sequence length
  pub fn window_of(cfg: &Config, bytes: &[u8]) -> Window {
      text::window(&bytes[..bytes.len().min(cfg.room())])
-@@ -1655,3 +1989,28 @@ mod tests {
-         assert!((700..800).contains(&kept));
-     }
- }
-+
-+#[cfg(test)]
-+mod gradhash {
-+    use super::*;
-+    #[test]
-+    fn gradhash() {
-+        let cfg = Config { causal: true, numbers: true, pooling: Pooling::Mean, ..Config::tiny().gematria(false) };
-+        let heads = [HeadSpec::single("a", &["x", "y"])];
-+        let mut net = Net::with_gen(cfg.clone(), &heads, Some(GenSpec::new("next")), 4).unwrap();
-+        let mut r = Rng::new(10);
-+        for (_, t) in net.params_mut() { for v in t.iter_mut() { *v += r.symmetric(0.05); } }
-+        let mut w = text::window_with(b"owl and cat", true, true);
-+        w.push_numbers(&[0.5, -1.25]);
-+        let n = w.len();
-+        let ch: Vec<f32> = (0..2).map(|_| r.symmetric(1.0)).collect();
-+        let cg: Vec<f32> = (0..n * GEN_OUT).map(|_| r.symmetric(1.0)).collect();
-+        let tr = net.forward(&w, &[], &Gains::default(), Mode::EVAL, None);
-+        let mut g = net.zeros_like();
-+        net.backward_gen(&tr, std::slice::from_ref(&ch), &cg, &net.transposes(), &mut g);
-+        let mut h = 0u64;
-+        for (_, t) in g.params() { for v in t { h = math::mix(h ^ v.to_bits() as u64); } }
-+        for v in net.gen_logits(&tr) { h = math::mix(h ^ v.to_bits() as u64); }
-+        println!("GRADHASH {h:x}");
-+    }
-+}
+@@ -1580,7 +1914,8 @@ mod tests {
+                 let dn = loss(&net);
+                 net.params_mut()[ti].1[i] = orig;
+                 let num = (up - dn) / (2.0 * eps);
+-                let tol = 5e-3 + 3e-2 * num.abs().max(gt[i].abs());
++                // f32 differences of a sum over every logit: a little noise at this eps
++                let tol = 8e-3 + 3e-2 * num.abs().max(gt[i].abs());
+                 assert!(
+                     (num - gt[i]).abs() <= tol,
+                     "tensor {ti} [{i}]: numeric {num} analytic {}",
 diff --git a/core/src/classify/pretrained.rs b/core/src/classify/pretrained.rs
 new file mode 100644
-index 0000000..f959481
+index 0000000..3e93349
 --- /dev/null
 +++ b/core/src/classify/pretrained.rs
 @@ -0,0 +1,804 @@
@@ -3031,7 +2553,7 @@ index 0000000..f959481
 +                kv: 2,
 +                dh: 8,
 +                ff: 40,
-+                vocab: 272,
++                vocab: 288,
 +                tied: true,
 +                bias: false,
 +                qk_norm: false,
@@ -3166,7 +2688,7 @@ index 0000000..f959481
 +        let rope = |x: &mut [f64], pos: usize| {
 +            let h = s.dh / 2;
 +            for i in 0..h {
-+                let f = theta.powf(-(2 * i) as f64 / s.dh as f64);
++                let f = theta.powf(-((2 * i) as f64) / s.dh as f64);
 +                let (sn, c) = (pos as f64 * f).sin_cos();
 +                let (a, b) = (x[i], x[i + h]);
 +                x[i] = a * c - b * sn;
