@@ -61,6 +61,10 @@ pub fn Reader() -> Element {
     let pages = all.len().div_ceil(per).max(1);
     let p = page().min(pages - 1);
     let n = all.len();
+    let total = match &*found.read() {
+        Some(Ok((t, _))) => *t as usize,
+        _ => n,
+    };
     use_keys(View::Reader, move |k: KeyPress| {
         if k.bar && k.key == "Enter" {
             words.set(k.text.trim().to_string());
@@ -94,7 +98,7 @@ pub fn Reader() -> Element {
                 for k in [Kind::All, Kind::Notes, Kind::Texts] {
                     button { key: "{k.name()}", class: if kind() == k { "chip on" } else { "chip" }, onclick: move |_| { kind.set(k); page.set(0); }, "{k.name()}" }
                 }
-                span { class: "dim small", "{n} found" if !words().is_empty() { " for “{words}”" } " · click one to read it big" }
+                span { class: "dim small", "{total} found" if total > n { " (the first {n} here)" } if !words().is_empty() { " for “{words}”" } " · click one to read it big" }
             }
             div { class: if tiny { "reader-grid tiny" } else { "reader-grid" },
                 for (i , h) in shown {
