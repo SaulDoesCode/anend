@@ -12,3 +12,14 @@ redb = "4.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 pulldown-cmark = { version = "0.13", default-features = false }
+# the GPU compute backend (classify::gpu), off by default so the default build and
+# wasm stay std only; `cargo test -p anend-core --features gpu`
+wgpu = { version = "30", optional = true }
+pollster = { version = "0.4", optional = true }
+
+[features]
+gpu = ["dep:wgpu", "dep:pollster"]
+
+[[example]]
+name = "gpu_bench"
+required-features = ["gpu"]

@@ -374,8 +374,13 @@ impl Rope {
         Rope { half, cos, sin }
     }
 
+    /// the cosines and sines, [max_len × head_dim/2] each (for the GPU backend)
+    pub fn tables(&self) -> (&[f32], &[f32]) {
+        (&self.cos, &self.sin)
+    }
+
     /// rotates rows [n × 2·half] in place: (a, b) → (a·c − b·s, a·s + b·c), pairs (i, i+half)
-    fn apply(&self, x: &mut [f32], n: usize) {
+    pub fn apply(&self, x: &mut [f32], n: usize) {
         let d = 2 * self.half;
         for t in 0..n {
             self.apply_at(&mut x[t * d..(t + 1) * d], t);
@@ -383,7 +388,7 @@ impl Rope {
     }
 
     /// rotates one row as position t
-    fn apply_at(&self, row: &mut [f32], t: usize) {
+    pub fn apply_at(&self, row: &mut [f32], t: usize) {
         let h = self.half;
         let (cs, sn) = (&self.cos[t * h..(t + 1) * h], &self.sin[t * h..(t + 1) * h]);
         for i in 0..h {
@@ -394,7 +399,7 @@ impl Rope {
     }
 
     /// the transpose: (da, db) → (da·c + db·s, db·c − da·s)
-    fn back(&self, dx: &mut [f32], n: usize) {
+    pub fn back(&self, dx: &mut [f32], n: usize) {
         let (h, d) = (self.half, 2 * self.half);
         for t in 0..n {
             let row = &mut dx[t * d..(t + 1) * d];

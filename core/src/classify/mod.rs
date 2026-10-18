@@ -30,6 +30,8 @@ pub mod bpe;
 pub mod codec;
 pub mod compose;
 pub mod generate;
+#[cfg(feature = "gpu")]
+pub mod gpu;
 pub mod grow;
 pub mod io;
 pub mod kernels;
