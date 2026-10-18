@@ -5,6 +5,15 @@ Where the work stands, for picking it up in a new session. Branch:
 
 ## Resuming (read first)
 
+**Classifiers round (18 Oct, evening UTC):**
+- **Done:**
+  - `classify.*` lives in core (`ops::classify`), shared by the hub and the desktop (6e04714).
+  - The models view is a working classifiers view on desktop and web (926c0db).
+- **In progress:** memory-view classifier tints, saved as `docs/wip/classifiers-snapshot.patch`.
+- **Next:** finish the tints and a classifier search mode in memory. Then spec models:
+  `models.*` ops (create from spec JSON, train, run, generate, `from` pretrained,
+  `device`) and a spec panel in the models view.
+
 **As of 18 Oct 2026, evening UTC** (the newest entry; the older ones below are history):
 - **The app is the Dioxus app** (`app/`): the desktop app (`anend-app`, on the entry graph
   in process) and the web app from the same code, which the hub serves at `/app/`
