@@ -1,348 +1,161 @@
 # anend
 
-anend started out as a Go blog server: posts ("writs") in ArangoDB, magic-link email
-logins, and a sand-coloured admin panel for writing markdown. Both halves are Rust now.
+anend is a memory palace for short texts. You type a word or phrase and it is stored as
+an entry with its gematria sums. You find it again by its numbers, its words, its tags or
+the lists it's in, and you can fly through your memories laid out in space. It
+continues [weum](docs/weum-reference/README.md), whose numbers it reproduces exactly.
 
-**anend notes** is its Rust successor: a desktop markdown note app with no server. It
-keeps the admin panel's look and workflow, and is built with
-[Bevy 0.20](https://bevy.org)'s feathers widgets. Notes are stored locally in an
-embedded [redb](https://www.redb.org) (4.3) database, and you can keep several of them
-as saves and swap between them like a game's.
+It comes as:
 
-**anend hub** is what became of the server: a self-hosted place to share saves, the way a
-game has a workshop or a mod hub. People join, share their saves, star and download each
-other's, and earn points, levels and badges when others use what they made; the app
-browses and shares straight from its settings. See [the hub](#the-hub).
-
-**New here?** [The guide](docs/guide.md) explains what anend is and how to use every part
-of it, in the desktop app and the web app (a hub serves it at `/guide` too).
-
-![the editor](docs/editor.png)
-![the reader](docs/reader.png)
-![the memory view](docs/memory.png)
-![the space](docs/space.png)
-![the settings](docs/settings.png)
-![the night colours](docs/night.png)
-
-## Using it
+- **the app** (`app/`, [Dioxus](https://dioxuslabs.com)): a desktop app, and the same
+  app built to WebAssembly for the browser;
+- **the hub** (`hub/`, [Salvo](https://salvo.rs)): a self-hosted server that runs the app
+  for its members and serves it at `/app/`, and a place to share saves, like a game's
+  workshop;
+- **the core** (`core/`): what both share. That includes the entry graph store, gematria,
+  the app's API, and a deterministic transformer engine for classifiers and generators.
 
 | | |
 |---|---|
-| **editor** | the note list (with **+ new**) next to the editor card. The first `# line` is the note's title, the rest is markdown. **‹** (or **Ctrl+B**) slides the list away to the left; it peeks back out while the pointer is at the left edge. |
-| **tags** | type a tag in the box at the top of the card and press Enter (or `,`); click a tag to remove it |
-| **view / edit** | switch between the markdown source and the rendered note |
-| **reader** | your notes, newest first, the way the old front page listed writs; click a `#tag` to filter |
-| **stats** | counts of notes, words, saves and tags |
-| **memory** | weum's memory view: short texts ("memories") and your notes, searched by gematria or by words |
-| **command bar** | the line at the bottom, one for every view (see below) |
-| **space** | weum's spatial memory (remem): fly through a room where memory texts float, laid out by their sums. **Ctrl+right click** a text and the search line in the top bar ends with its triangle: sides s (ordinal), r (reversed) and ⌊√(s·r)⌋, drawn small, with its angles (or "don't close" when the three can't make one) |
-| **lists** | every list in the save, side by side: its members (× takes one out), its figures (members, the sums of the whole list, its means, its gsum and pfR chain), its 26 letter frequencies drawn as a vector, and a grid of how alike every two lists are (the cosine of those vectors, as if each list were an entry in a learning system). Type in the bar and press Enter to put the text into the chosen list, or start a new one |
-| **settings** | saves, fonts, colours, sizes, zen mode and the bars: the top bar and the command bar can swap places, and the note list can sit on the right (also **Ctrl+,**); the key remap menu is in there too (also **K**, or **Ctrl+K** in the space) |
+| ![memory](app/docs/shots/desktop-memory-menu.png) | ![space](app/docs/shots/desktop-space.png) |
+| the memory view, with its menu | the space |
+| ![buckets](app/docs/shots/desktop-memory-buckets.png) | ![notes](app/docs/shots/desktop-notes.png) |
+| sums as buckets | notes |
+| ![reader at night](app/docs/shots/desktop-reader-night.png) | ![a list in the browser](app/docs/shots/web-list.png) |
+| the reader, night colours | a list's page (web) |
+| ![stats](app/docs/shots/web-stats.png) | ![filters](app/docs/shots/web-filters.png) |
+| stats (web) | filters (web) |
 
-Shortcuts: **Ctrl+S** save, **Ctrl+N** new note, **Ctrl+E** toggle view/edit, **Ctrl+B** the note list,
-**Ctrl+1..6** editor / reader / memory / stats / space / lists, **Ctrl+,** settings, **/** the
-command bar. All of them can be changed in **keys**.
+## The views
 
-Unsaved changes (marked `•` in the list) are saved when you switch notes or close the
-window. A note needs a `# title` before it can be saved.
-
-## The command bar
-
-There's one place to type, the bar at the bottom, and it does what the view you're in
-needs. Its name at the left says which; each view keeps its own text, so switching views
-doesn't lose what you typed.
-
-| view | the bar | at its right |
-|---|---|---|
-| editor, reader, stats | finds notes: the list (and the reader) narrow to notes with words starting with what you type; Enter opens the first | how many notes match |
-| memory | weum's term bar (below) | the sidecar of the term's sums, the buckets, the toggles |
-| space | the space's terminal (below) | the terminal's sums and the chips |
-
-**/** goes to the bar, **Escape** leaves it.
-
-## Saves and settings
-
-Every database is a save. **settings** lists the saves in your saves folder, the open one
-first and then the most recently used, each with its notes, memories, date and size:
-**load** one (the open note is saved first), start a **new save** by name, **copy**,
-**rename** (the open one too) or **delete** one (not the open one, and only after a
-second click). The folder box changes the saves folder; a path ending in `.redb` there
-opens (or starts) that file instead. The app comes back to the save you had open.
-
-Also in settings:
+**Ctrl+1 … Ctrl+9** switch views, **Ctrl+,** opens settings, and **Esc** closes things.
+Every view has the command bar at the bottom, and each view keeps its own text there.
 
 | | |
 |---|---|
-| **fonts** | the interface font (every text in the app, the space's floating texts too) and the memory view's font, from the fonts on your system; filter the list by typing |
-| **zen** | while the mouse rests the bars and panels fade away (after 1, 2.5, 5 or 10 seconds); typing in the editor doesn't bring them back, moving the mouse does |
-| **colours** | every colour the app uses has a name (window, bars, bar text, cards, writing pad, buttons, accent, text, links, code, the space's room...): pick one and set it with the hue, saturation and lightness sliders or a hex. **sand** (the old admin panel's), **night**, **paper** and **sea** are starting points; **reset** puts one colour back. The memory view keeps weum's own colours |
-| **sizes** | the whole interface's scale, and the top bar's and command bar's heights in pixels, the way a desktop panel is set; their text and buttons are sized to fit |
-| **hide the top bar** | it slides up out of the way and back down when the pointer comes to the top edge |
-| **slide the note list away** | the same as **Ctrl+B**: it stays away until the pointer comes to the left edge |
-| **the space's search line** | in the space, what was searched, its counts and its sum's prime factor chain sit in the top bar (fading with it under zen); this turns that off |
+| **memory** (Ctrl+1) | weum's memory view. **Enter** on text gsearches its sum and saves it when it's new. **Enter** on a number gsearches that bucket. **Ctrl+Enter** saves, **Shift+Enter** shows a key, **Delete** forgets. `Enlist` `List` `Delist` `Unlist` work on lists. **r / o / f** pick the bucket (reversed, ordinal, frequency), and **← →** gsearch the term's sums. Hover shows the gsum line, and texts that share a sum are underlined in its colour. The circles at the left edge are the buckets. **Alt+click** selects several texts to put in a list or tag. Right-click opens the menu: edit, tag, select, list, candidate, key, forget. |
+| **space** (Ctrl+2) | memory texts floating in a room ([three.js](https://threejs.org)), laid out by their sums. Clicking a text puts its triangle in the top bar: sides s (ordinal), r (reversed) and ⌊√(s·r)⌋. The arrow keys glide to the nearest text in that direction, and its card opens on the right. |
+| **lists** (Ctrl+3) | every list as a tile. A list's page has an editable name and members, and figures for the whole list: its sums, means, gsum and pfR chain. |
+| **reader** (Ctrl+4) | everything that matches, in pages. Short texts appear as a tiny grid, and notes appear as markdown. |
+| **notes** (Ctrl+5) | markdown notes, in a list by date, with tags and a read mode. A note can be attached to any entry. |
+| **tags** (Ctrl+6) | tags on any entry: pick tags (all or any) and see the entries that have them. |
+| **stats** (Ctrl+7) | figures for the whole save |
+| **models** (Ctrl+8) | the outline of a model spec (inputs, heads, data, critics). For now it says "not yet": classifiers are being moved onto the spec. |
+| **filters** (Ctrl+9) | words, a sum range, written between two dates, a tag, a kind. Each filter is kept by name in the save. |
 
-**hub**, in settings, under the saves: give it a hub's address and an app token (made on
-your page on the hub) and connect. Browse the hub's saves (search, and sort by new, stars,
-downloads or featured) and **download** one: it's checked, then lands in your saves
-folder, ready to load. **Share this save** sends the open one with a name, description and
-tags. The app only ever talks to the hub you give it, on a background thread.
+The top bar holds the view icons, the search line with its triangle, undo (**Ctrl+Z**) and
+settings. **Ctrl+= / Ctrl+−** zoom and **0** resets it.
 
-These settings and your key bindings live in `config.json` in the platform config folder
-(`~/.config/anend` on Linux, `~/Library/Application Support/anend` on macOS,
-`%APPDATA%\anend` on Windows), not in a save, so they stay the same whichever save is
-open. `ANEND_CONFIG` points it somewhere else.
+**Settings** are a dialog with folding sections:
+- colours (palettes, or your own) and the text size;
+- the memory view's sizes and spacing, and the space's room colour;
+- zen: the bars fade while you rest, and the top bar can hide until the pointer reaches
+  the top edge;
+- keys, and the hub (a hub's address, to browse and share);
+- saves: open, new, copy, delete, **backup**, and **import from weum**.
 
-## Memory and gsearch
+## Saves
 
-The memory view is weum's `memory.html`, without the browser. Type in the command bar;
-the sidecar at its right shows the term's four gsearch keys:
+A save is one file, an entry graph in [redb](https://www.redb.org). Every text, note,
+tag, list and setting is an entry with timestamps. Lists and tags are edges between
+entries. Identical texts are stored once, and an entry can borrow another's text.
+[docs/format.md](docs/format.md) describes the format. The desktop keeps saves in
+`<data dir>/anend/saves/` (`~/.local/share/anend/saves` on Linux), and starts with `main`.
 
-| bucket | measure |
-|---|---|
-| ordinal | a=1 .. z=26 |
-| reversed | a=26 .. z=1 |
-| atbash | every letter swapped for its mirror in its alphabet, `n + 1 − v`: a=26 .. z=1 for Latin (the reversed value), α=24 .. ω=1 for Greek, א=22 .. ת=1 for Hebrew |
-| frequency | the letter frequency table, so anagrams share a bucket (shown as the sorted letters, `eilnst`) |
+**Backup** writes `texts.json` (every text) and `other.json` (everything else) into the
+save's `backups/` folder. **Import from weum** reads weum's `all-of-it.json` (made by
+`memory.backup` in weum), and the texts keep their keys. Saves from older anend versions
+aren't read.
 
-**Term bar**
+Gematria modes are **ordinal** (a=1 … z=26), **reversed** (a=26 … z=1) and **frequency**
+(the letters sorted, so anagrams share a bucket). Byte sums (bytes valued 1–256) are a
+separate measure, in `core/src/measure.rs`.
 
-| | |
-|---|---|
-| Enter on a number | gsearch it in the current bucket, under its prime factor reduction line (weum's `pfR`, numbers clickable) |
-| Enter on text | gsearch the text's key in the current bucket and show the text itself, saving it as a memory when it's new. With gsearch-typed-text off (**G**): an ordinary word search over every variation weum's search tries (case, plurals, suffixes) |
-| Ctrl+Enter | gsearch the text and save it |
-| Shift+Enter | show the item under a key (`3,4`, or `note:1000001`) |
-| Delete | forget the memory under the key typed |
-| `Enlist` `List` `Delist` `Unlist` | list commands, using the list and candidate picked below |
-| Escape | leave the term bar so the single keys work (**/** goes back) |
-
-**Results**: click puts a text in the term bar, double-click its key, Ctrl+click picks it
-as list candidate, Shift+click as the list, Ctrl+right-click forgets it and saves it again
-under a new key, middle-click opens a note. Hovering shows weum's gsum line (sums,
-difference, vowels, consonants, words, atbash).
-
-**Underlines**: a text that shares its reversed sum with any other text is underlined in
-a colour taken from its reversed sum (all its matches share the hue) and ordinal sum (the
-shade). Texts alone with their reversed sum get none.
-
-**Single keys** (outside text boxes): **O** / **R** / **A** / **F** pick the bucket (**R**
-again goes back to ordinal), **←** **→** **↑** **↓** gsearch the term's ordinal /
-reversed / atbash / letters, **G** gsearch typed text, **S** save searches as memories,
-**W** white mode. The buckets and toggles also sit at the bar's right, to click.
-
-To bring weum's memories over, back them up there (`memory.backup` writes
-`all-of-it.json`) and run
+## Building and running
 
 ```sh
-anend --import-weum all-of-it.json
+# the desktop app (Linux needs libwebkit2gtk-4.1-dev and libxdo-dev)
+cargo run --release -p anend-app
+
+# the app for the browser: needs the wasm32-unknown-unknown target and wasm-bindgen-cli 0.2.129
+app/web/build.sh            # writes app/web/dist
+
+# a hub on your own machine: no logins, the app at http://127.0.0.1:8080/app/
+cargo run --release -p anend-hub -- --local
 ```
 
-They keep their keys, and new memories continue weum's key allocation (one byte keys,
-then two, three and four, reusing forgotten ones). Images and embedding search (esearch)
-from weum aren't part of the app.
+Build the web app before the hub, so the hub can serve it at `/app/`. Without it,
+`/app/` shows a page saying to run `app/web/build.sh`.
 
-## The space
-
-The space is remem (kuis), weum's spatial memory, as a view of the app. Memory texts
-float in a warm room as camera-facing billboards, drawn as GPU vector text with
-[bevy_slugtext](https://github.com/SaulDoesCode/bevy_slugtext). A gsearch pulls its
-bucket's memories in and spread lays them out in front of you: each bucket (texts with
-the same reversed sum, or ordinal with **reversed** on) clusters on an Archimedean spiral
-by its sum, deeper the higher the sum, with texts repelling each other (more so when one
-isn't the other's atbash). Texts sharing a bucket are underlined in its colour.
-
-**Flying**: hold the right mouse button to look, **W A S D** move, **Space** / **C** up and
-down, **Q** / **E** roll, **Shift** fast, **[** **]** or the wheel over empty space change
-the speed, **R** levels the horizon, **Home** goes back to the start.
-
-**Texts**: drag one to move it (a spread text you move stays pinned, **U** toggles that),
-the wheel on a text pushes it away or pulls it near, click puts its text in the terminal,
-double click edits it (a memory text: its key into the terminal), double click on empty
-space or **N** makes a new text, **Enter** edits the selected one, **Delete** removes it,
-**Ctrl+C** copies it, **Ctrl+Z** undoes (a forget too). Ctrl+click picks a list candidate,
-Shift+click the list, Ctrl+right click gsearches ⌊√(s·r)⌋. Hovering shows its metrics
-card: s, r, their sums, product, roots and differences, vowels, consonants, words, its
-key and bucket, every number gsearching itself.
-
-**Terminal**, the command bar in the space (**/**, or **Enter** with nothing selected; it
-says "editing" while you edit a text in it): a number gsearches that bucket,
-text gsearches its sum (with **gsearch** off, searches its words), **Ctrl+Enter**
-saturates the text and gsearches its sum, **Shift+Enter** recalls a key, **Delete**
-forgets the key typed, **↑** **↓** walk the history, **Esc** goes back to flying. `#123`,
-`#r123` and `#name` go to an ordinal bucket, a reversed one or a saved map. The words
-`Enlist` `List` `Delist` `Unlist` `Count` `Backup` `Clear` `ClearAll` `Settle` `Maps` and
-`Save name` are commands. The chips at its right: **gsearch**, **reversed** (**F**),
-**saturate** (searches save new texts) and **keep** (new results join the spread instead
-of replacing it).
-
-**More keys**: **O** the spread's sliders, **P** pauses the physics, **K** settles it now,
-**←** **→** gsearch the terminal's sums, **X** exports every text to a JSON file in your
-Downloads, **Shift+X** saves the map in the database (**Maps** lists them), **H** help,
-**I** the position card. Every key can be remapped in **keys**. weum's esearch, speech
-and image memories aren't part of it.
-
-## Downloads
-
-Builds for Linux and Windows are on the repository's
-[releases page](https://github.com/SaulDoesCode/anend/releases), each with the app
-(`anend`) and the hub (`anend-hub`). On Linux the app needs the Wayland or X11
-libraries a desktop already has.
-
-They're made by GitHub Actions (`.github/workflows/release.yml`). To make a release, tag a
-commit and push the tag:
-
-```sh
-git tag v0.2.0
-git push origin v0.2.0
-```
-
-The workflow builds both on Linux and Windows and attaches a `.tar.gz` and a
-`.zip` to a new release named after the tag, with notes listing the merged pull requests.
-**Run workflow** on the repository's Actions tab (release) builds the same packages as
-downloadable artifacts without making a release. `.github/workflows/ci.yml` checks
-formatting, clippy and the tests of both on every push to master and every pull request.
-
-## Building
-
-```sh
-cargo run --release
-```
-
-Bevy 0.20 needs Rust 1.97.1 or newer. On Linux you also need the usual Bevy system
-packages, e.g. on Debian/Ubuntu: `libwayland-dev libxkbcommon-dev libfontconfig1-dev` (plus
-`libxkbcommon-x11-0` at runtime on X11). The memory view uses a system serif font
-(Times New Roman, or whatever serif fontconfig offers).
-
-The tokenizer, the gematria sums and the frequency table have AVX2 kernels picked at
-runtime on x86_64, with scalar fallbacks elsewhere.
-
-## Data
-
-A save holds the notes, the memories, the search tables and the space's maps and
-settings. Saves go in the saves folder, by default the platform data directory
-(`~/.local/share/anend` on Linux, `~/Library/Application Support/anend` on macOS,
-`%APPDATA%\anend` on Windows), starting with `notes.redb`; settings can move it.
-`--db <file>` opens a particular save for one run.
-
-To bring writs over from the old server, export the `writs` collection (for example
-`arangoexport --collection writs --type json`) and import it:
-
-```sh
-anend --import writs.json
-```
-
-This keeps their keys, titles, markdown, tags, dates and edit history.
+Before a change goes in, run the checks: `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and the
+wasm build (`cargo build -p anend-app --target wasm32-unknown-unknown
+--no-default-features --features web`). `.github/workflows/ci.yml` runs the same
+checks, and `release.yml` builds the desktop app and the hub (with the web app inside)
+for Linux and Windows when a `v*` tag is pushed.
 
 ## The hub
 
 ![the hub](docs/hub.png)
 
-`anend-hub` (in `hub/`, built with [Salvo](https://salvo.rs)) is a website and an API for
-sharing saves. Start one and make yourself its admin:
-
 ```sh
 cargo run --release -p anend-hub -- --admin yourname
 ```
 
-It prints a login link (good once, within an hour); open it and set a password on your
-page. The hub listens on `127.0.0.1:8080` and keeps everything in `./hub-data`: its own
-redb database (people, sessions, saves' details, stars) and the save files in
-`hub-data/saves/`. Back it up by copying the folder while the hub is stopped.
+This prints a one-time login link. The hub keeps everything in `./hub-data`, and listens
+on `127.0.0.1:8080`.
+- **`--mode`** picks what it serves:
+  - `hub`: the sharing site;
+  - `app`: the web app for members, each with their own saves;
+  - `both`: both, the default.
+- **`--join`** sets how people get in: `invite`, `apply` or `open`.
+- **Visibility:** each save is private, unlisted or public.
 
-**What's in it**
+Members share saves, star and download each other's, and earn points, levels and badges
+when others use what they made. The admin panel reviews saves and people.
+[docs/deploy.md](docs/deploy.md) covers running one for real: modes, joining, TLS,
+backups, Docker, and running it as a paid service. [docs/security.md](docs/security.md)
+covers the security model.
 
-| | |
-|---|---|
-| **the grid** | every shared save as a card, headed by its name's ordinal and reversed sums in a colour taken from them; search by words, author or `#tag`, sort by new, stars, downloads or featured |
-| **a save's page** | its description and tags, some of its memories with their sums, its notes' titles, stars, downloads, and the download |
-| **joining** | name and password (email optional). By default it's an application an admin answers; `--open` lets people straight in |
-| **sharing** | upload a `.redb` save with a name, description and tags. The hub opens its own copy to check it's a save the app made (a copy of an open save is fine) and reads its counts and memories. It waits for an admin unless you're trusted; a new version keeps its stars and downloads |
-| **the game** | points when others use what you share: 50 when a save is let in, 5 a star, 1 for each person who downloads it, 100 when it's featured, and 1 for each save you star. Levels go seeker, reader, scribe, counter, cipherer, numerologist, gematrian, archivist, palace keeper, sage; badges for milestones (first save, prolific, beloved, well read, library, memory palace, curator, founder...). Stars and downloads count once per person, and your own don't count |
-| **people** | a page each, with level, badges, saves and a bio; the leaderboard ranks them, and the most starred saves |
-| **admin** | saves waiting (let in, or turn down with a reason), people applying, everyone (member, trusted (no review), admin, ban, make a login link), and every save (approve, turn down, feature, remove) |
-| **app tokens** | made on your page and pasted into the app (settings → hub), which uses them to share (see [the API](docs/hub-api.md)) |
+The web app and the desktop make the same calls ([the app API](docs/app-api.md)), over
+a WebSocket at `/app/ws` or `POST /app/api/{op}`. Anything that speaks JSON can drive
+a save. [docs/hub-api.md](docs/hub-api.md) covers the sharing API.
 
-**Options**: `--addr` where it listens, `--url` the address people reach it at (for login
-links, and https cookies when it starts with `https://`), `--data` its folder, `--name` and
-`--about` what it calls itself, `--open`, `--max-upload` in MB (64), `--quota` in MB (1024: how much disk each member's saves in the web app may fill; 0 for no limit), `--behind-proxy` to
-trust `X-Forwarded-For`, `--no-ratelimit`, `--local` (below), and `--tls-cert` /
-`--tls-key` (PEM files) to speak https itself. Those two can also be set on
-**admin → server settings**, a page that only opens from the machine the hub runs on; they
-take effect at the next start. Without them it speaks plain http, and a reverse proxy
-(Caddy, nginx) can do the https.
+## Models
 
-### The app in a browser
+`core/src/classify` is a transformer engine written from scratch: RMSNorm, SwiGLU, RoPE,
+grouped key/value heads. The same inputs give the same output bits on any machine and
+thread count. Models are described by a declarative spec ([docs/models.md](docs/models.md)):
+- **inputs:** bytes, numbers, pictures, and optionally gematria channels (off unless you
+  choose them);
+- **heads:** classify, regress, and generate;
+- **data queries**, and **critics:** classifiers that steer generation, by reranking,
+  guidance or reinforcement.
 
-The hub is also the app's daemon: **/app/** is the app as a web page (plain HTML, CSS and
-JavaScript in `hub/web/`, built into the binary, with [three.js](https://threejs.org) for the
-space), talking to the hub over a WebSocket (`/app/ws`, falling back to `POST
-/app/api/{op}`). It has the desktop app's views: the editor, reader, stats, the memory
-view, the space (the texts as crisp CSS3D labels in a WebGL room, the search line with its
-triangle), lists, and settings with saves (download and upload too), the forge, the hub
-and colours. Each person who logs in gets their own workspace of saves in
-`hub-data/users/<name>/saves`.
+**Pretrained models:** Llama-family checkpoints (Llama, Mistral, Qwen2/3, SmolLM) load
+from safetensors and a `tokenizer.json`. Use `"from": {"pretrained": "<dir>"}` in a spec,
+or see `core/examples/pretrained.rs`.
 
-```sh
-cargo run --release -p anend-hub -- --local     # just you: no logins, one workspace
-```
+**The GPU:** an optional backend (`--features gpu`, wgpu) runs inference and training on
+the GPU. It is bit-exact on a software GPU, and is turned on per run with
+`"device": "gpu"`. `core/examples/gpu_bench.rs` measures it on your hardware.
 
-**Offline**: the same files work from any static web server (`python3 -m http.server -d
-hub/web`, a static host) with no hub at all. When no hub answers at load, the page runs the
-app's calls itself in JavaScript (`hub/web/local/`, the same results as the hub's down to
-the last bit; `node hub/web/test/parity.mjs` checks it against a live `--local` hub) and
-keeps its saves in the browser's IndexedDB. Only then: a page a hub serves always works on
-the hub. A save moves between the two as a bundle, a JSON file with every key kept
-(settings → export bundle, then import bundle on the other side).
-
-`--local` is for running it on your own machine; on a shared hub people log in and the
-app is theirs. The calls are listed in [the app API](docs/app-api.md), so anything that
-speaks WebSocket or JSON can drive a save. To keep it running as a service,
-`hub/anend-hub.service` is a systemd unit (its comments say where to put things).
-
-Passwords are hashed with argon2; sessions and tokens are random and stored only as
-hashes; forms posted from other sites are refused; logins, joins and uploads are limited
-per address.
+[core/src/classify/STATUS.md](core/src/classify/STATUS.md) has the details and what's
+measured.
 
 ## Layout
 
-| file | what |
+| | |
 |---|---|
-| `core/` | `anend-core`, what the app and the hub share: the note model, redb storage, markdown, the SIMD sums, the memory tables, weum, the spread layout and the triangle, list figures, the forge |
-| `src/main.rs` | startup, command line, window |
-| `src/lists_ui.rs` | the lists view |
-| `src/ui.rs` | the interface: layout scenes, actions, rebuild systems, markdown rendering |
-| `src/theme.rs` | the sand palette from `admin.css` as a feathers theme |
-| `core/src/note.rs` | the note model, title/body splitting, dates |
-| `core/src/store.rs` | redb storage |
-| `core/src/markdown.rs` | markdown to styled text blocks |
-| `core/src/simd.rs` | AVX2 tokenizer, gematria dual sum (ordinal, reversed, atbash) and letter frequencies |
-| `core/src/memory.rs` | the memory and search tables: weum's allocator, token index, the four gsearch buckets, lists |
-| `core/src/weum.rs` | ports of memory.js helpers: pfR, the gsum line, the search variations |
-| `src/memory_ui.rs` | the memory view |
-| `src/keys.rs` | actions, bindings and the remap logic |
-| `core/src/fmath.rs` | sin, cos and hypot the same on every machine and in the browser |
-| `core/src/bundle.rs` | a save as JSON, keys and all |
-| `core/src/spread.rs` | spread.js: the layout of memory texts by their sums, checked step by step against the original |
-| `src/space.rs` | the space: flying, the texts as slug billboards, picking, the terminal's memory commands, maps |
-| `src/space_ui.rs` | the space's panels: position line, help, metrics, sliders, search line |
-| `src/bar.rs` | the command bar every view shares |
-| `src/settings.rs` | the settings menu and the saves: load, new, copy, rename, delete |
-| `src/config.rs` | the settings file |
-| `src/typeface.rs` | swapping the interface font and the memory view's font |
-| `src/zen.rs` | zen's fade, the hiding top bar and the sliding note list |
-| `src/palette.rs` | the colours the settings change, and repainting the interface with them |
-| `src/sizing.rs` | the interface scale and the bars' heights |
-| `src/hub.rs` | talking to a hub: its API, downloads, uploads |
-| `src/hub_ui.rs` | the hub section of the settings |
-| `hub/src/main.rs` | the hub: command line and routes |
-| `hub/src/hub.rs` | taking uploads in, finding saves, stars, downloads, reviews |
-| `hub/src/store.rs` | the hub's redb tables |
-| `hub/src/inspect.rs` | reading an uploaded save |
-| `hub/src/game.rs` | points, levels and badges |
-| `hub/src/auth.rs` | passwords, sessions, tokens, login links, rate limits |
-| `hub/src/web.rs`, `hub/templates/` | the pages |
-| `hub/src/api.rs` | the JSON API |
-| `hub/src/app.rs` | the app's calls on a workspace of saves (the daemon) |
-| `hub/src/appweb.rs` | the web app's files, its WebSocket and posts, moving saves in and out |
-| `hub/src/server.rs`, `hub/templates/server.html` | the https settings page |
-| `hub/web/` | the web app: `app.js` (routes, bars, keys), `api.js` (the socket), `space.js` (three.js), `views/` |
+| `core/src/graph/` | the entry graph store: records, the 5-bit codec with references and calls, posting lists, edges, queries |
+| `core/src/ops/` | the app API over a save and a folder of saves, merge and forge, shared by the desktop and the hub |
+| `core/src/classify/` | the transformer engine, the spec, generation, pretrained import, the GPU backend |
+| `core/src/measure.rs` | byte sums |
+| `app/src/` | the Dioxus app: `shell.rs` (bars, keys, menu), `views/`, `backend/` (`local.rs` the graph in-process, `hub.rs` the WebSocket), `gem.rs` (weum's numbers), `space.js` |
+| `app/web/` | the web build: `build.sh`, the page, its loader |
+| `hub/src/` | the hub: modes, accounts, saves, sharing, the game, the app's API (`app.rs`, `appweb.rs`) |
+| `docs/` | the formats, the APIs, deployment, security, models, and `next.md` (the plan and status) |
+| `docs/weum-reference/` | weum's own code, the reference for its numbers |
+
+[docs/guide.md](docs/guide.md) still describes the older apps in places, and will be
+updated.
