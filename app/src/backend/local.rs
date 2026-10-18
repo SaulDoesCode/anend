@@ -5,12 +5,14 @@
 //! The operations are the app API's (docs/app-api.md), answered by `anend_core::ops`, the
 //! same code the hub answers them with: keys are weum labels of entry ids, a note is an
 //! entry of mime `text/markdown` (`# title` and markdown), lists are `member` edges, tags
-//! `tag` edges. Models wait for the model spec (docs/models.md).
+//! `tag` edges. A save's classifiers live in `<save>.models` beside it
+//! (`anend_core::ops::classify`), trained on threads of their own as on the hub.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anend_core::ops::Saves;
+use anend_core::ops::classify::Limits;
 use serde_json::Value;
 
 use super::{Backend, Fut};
@@ -28,7 +30,7 @@ impl Local {
     pub fn open(dir: &Path, save: Option<&Path>) -> Result<Local, String> {
         let path = save.map(Path::to_path_buf).unwrap_or_else(|| dir.join("main.redb"));
         Ok(Local {
-            saves: Arc::new(Saves::at(&path)?),
+            saves: Arc::new(Saves::at(&path)?.with_models(Limits::NONE)),
         })
     }
 
@@ -37,9 +39,6 @@ impl Local {
     }
 
     fn dispatch(&self, op: &str, args: &Value) -> Res {
-        if op.starts_with("classify.") || op.starts_with("filters.") {
-            return Err("models come with the model spec (docs/models.md); not in this build yet".into());
-        }
         self.saves.call(op, args)
     }
 }
@@ -76,7 +75,11 @@ mod tests {
     use serde_json::json;
 
     fn temp() -> (Local, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("anend-app-test-{}", std::process::id()));
+        temp_named("main")
+    }
+
+    fn temp_named(tag: &str) -> (Local, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("anend-app-test-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         (Local::open(&dir, None).unwrap(), dir)
     }
@@ -123,6 +126,65 @@ mod tests {
         let im = wait(b.import_texts(r#"[["truth", [9]]]"#, "")).unwrap();
         assert_eq!(im.memories, 1);
         assert_eq!(wait(b.remember("9")).unwrap().text, "truth");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// classifiers on the desktop: made from lists, trained in the background, asked,
+    /// told yes or no, and the answer taken back
+    #[test]
+    fn classifiers() {
+        let (b, dir) = temp_named("classify");
+        let f = ["apple", "banana", "cherry", "mango", "peach", "plum", "grape", "melon"];
+        let r = [
+            "rock", "stone", "granite", "basalt", "flint", "slate", "quartz", "shale",
+        ];
+        let (fruit, _) = wait(b.saturate("fruit")).unwrap();
+        let (rocks, _) = wait(b.saturate("rocks")).unwrap();
+        for i in 0..20 {
+            let (a, _) =
+                wait(b.saturate(&format!("{} {} {}", f[i % 8], f[(i * 3 + 1) % 8], f[(i / 8 + 4) % 8]))).unwrap();
+            let (c, _) =
+                wait(b.saturate(&format!("{} {} {}", r[i % 8], r[(i * 5 + 2) % 8], r[(i / 8 + 4) % 8]))).unwrap();
+            wait(b.enlist(&fruit, &a)).unwrap();
+            wait(b.enlist(&rocks, &c)).unwrap();
+        }
+        wait(b.create_model("kind", &[fruit.clone(), rocks.clone()], "tiny")).unwrap();
+        let list = wait(b.models()).unwrap();
+        assert_eq!((list[0].name.as_str(), list[0].trained), ("kind", false));
+        assert_eq!(list[0].classes, ["fruit", "rocks"]);
+        let j = wait(b.train_model("kind", 6)).unwrap();
+        assert_eq!(j.state, "running");
+        let mut done = j;
+        for _ in 0..1200 {
+            done = wait(b.model_job("kind")).unwrap();
+            if done.state != "running" {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert_eq!(done.state, "done", "{done:?}");
+        assert!(wait(b.models()).unwrap()[0].trained);
+        let p = wait(b.run_model("kind", "granite slate flint")).unwrap();
+        assert_eq!(p["results"][0]["class"], "rocks", "{p}");
+        let t = "melon basalt grape";
+        let prob = || {
+            wait(b.run_model("kind", t)).unwrap()["results"][0]["probs"][1]
+                .as_f64()
+                .unwrap()
+        };
+        let p0 = prob();
+        wait(b.model_feedback("kind", None, t, "rocks", true)).unwrap();
+        let p1 = prob();
+        assert!(p1 > p0, "{p0} {p1}");
+        wait(b.undo_model_feedback("kind")).unwrap();
+        assert_eq!(prob(), p0);
+        // the classifiers go with the save: copied, then deleted with it
+        wait(b.copy_save("main", "other")).unwrap();
+        assert!(dir.join("other.models").exists());
+        wait(b.delete_save("other")).unwrap();
+        assert!(!dir.join("other.models").exists());
+        wait(b.delete_model("kind")).unwrap();
+        assert!(wait(b.models()).unwrap().is_empty());
         std::fs::remove_dir_all(dir).ok();
     }
 }

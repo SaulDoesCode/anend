@@ -11,19 +11,19 @@
 //! `ops::GraphTexts`), renamed, copied, deleted and exported with it.
 
 use anend_core::graph::Graph;
-use anend_core::ops::{self, GraphTexts, Saves};
+use anend_core::ops::classify::Limits;
+use anend_core::ops::{self, Saves};
 use anend_core::store::Store;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::store::User;
 
 pub type Res = Result<Value, String>;
 
-/// the extension of a save's classifiers file
-pub const MODELS: &str = "models";
+pub use anend_core::ops::classify::MODELS;
 
 /// whose saves a call works on: on a `--local` server (`local`) the one workspace;
 /// otherwise the signed-in, active member's own
@@ -117,45 +117,17 @@ pub fn clean(name: &str) -> Result<String, String> {
     ops::clean(name)
 }
 
-/// every classifiers store open in this process, by file (redb holds a file once)
-fn open_models() -> &'static Mutex<HashMap<PathBuf, Weak<Store>>> {
-    static M: OnceLock<Mutex<HashMap<PathBuf, Weak<Store>>>> = OnceLock::new();
-    M.get_or_init(Default::default)
-}
-
-/// a save's classifiers, reading its graph's texts
-pub fn models_at(path: &Path, graph: Arc<Graph>) -> Result<Arc<Store>, String> {
-    // the last holder (a training thread, say) may still be closing the file: its handle
-    // is gone from the map but redb hasn't let go of the lock yet, so wait a moment
-    for _ in 0..200 {
-        let mut all = open_models().lock().unwrap_or_else(|e| e.into_inner());
-        all.retain(|_, w| w.strong_count() > 0);
-        if let Some(s) = all.get(path).and_then(Weak::upgrade) {
-            return Ok(s);
-        }
-        match Store::open_over(path, Arc::new(GraphTexts(graph.clone()))) {
-            Ok(s) => {
-                let s = Arc::new(s);
-                all.insert(path.to_path_buf(), Arc::downgrade(&s));
-                return Ok(s);
-            }
-            Err(e) if e.contains("already open") => {
-                drop(all);
-                std::thread::sleep(std::time::Duration::from_millis(5));
-            }
-            Err(e) => return Err(e),
-        }
-    }
-    Err("the classifiers are busy closing; try again".into())
-}
-
 impl Workspace {
     pub fn new(dir: PathBuf) -> Workspace {
         Workspace {
             saves: Saves::new(&dir, "notes")
                 .remembering()
                 .backups_answered()
-                .with_companions(&[MODELS]),
+                .with_models(if crate::mode::local() {
+                    Limits::NONE
+                } else {
+                    Limits::shared()
+                }),
             dir,
         }
     }
@@ -171,9 +143,7 @@ impl Workspace {
 
     /// a save's classifiers (the open save's when `name` is empty)
     pub fn models_of(&self, name: &str) -> Result<(String, Arc<Store>), String> {
-        let (n, g) = self.saves.graph(name)?;
-        let path = self.saves.companion(&n, MODELS)?;
-        Ok((n, models_at(&path, g)?))
+        self.saves.models_of(name)
     }
 
     /// the open save's name and its classifiers
@@ -227,40 +197,7 @@ pub fn call(ws: &Workspace, op: &str, args: &Value) -> Res {
         let into_open = op == "saves.import_texts" && ops::s(args, "name").trim().is_empty();
         ws.room(ops::MAKE_A_SAVE.contains(&op) && !merging && !into_open)?;
     }
-    if op.starts_with("classify.") || op.starts_with("filters.") {
-        let (_, models) = ws.models()?;
-        return crate::classify::call(models, op, args);
-    }
-    match op {
-        // a bundle carries the save's classifiers too
-        "saves.export" => {
-            let mut b = ws.saves.call(op, args)?;
-            let (_, models) = ws.models_of(ops::s(args, "name"))?;
-            let cls = models.export_classifiers()?;
-            if !cls.is_empty() {
-                b["classifiers"] = serde_json::to_value(cls).map_err(|e| e.to_string())?;
-            }
-            Ok(b)
-        }
-        "saves.import" => {
-            let cls: Vec<anend_core::classifiers::Bundled> = match args.get("bundle").and_then(|b| b.get("classifiers"))
-            {
-                Some(c) => serde_json::from_value(c.clone())
-                    .map_err(|e| format!("that bundle's classifiers don't read: {e}"))?,
-                None => Vec::new(),
-            };
-            let mut got = ws.saves.call(op, args)?;
-            // merged: the classifiers stay out (their lists would point elsewhere)
-            if let Some(name) = got.get("save").and_then(Value::as_str).map(str::to_string)
-                && !cls.is_empty()
-            {
-                let (_, models) = ws.models_of(&name)?;
-                got["classifiers"] = json!(models.import_classifiers(&cls)?);
-            }
-            Ok(got)
-        }
-        _ => ws.saves.call(op, args),
-    }
+    ws.saves.call(op, args)
 }
 
 /// a hub save (an entry graph file) into the workspace (`merge`: into the open save

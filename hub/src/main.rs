@@ -14,8 +14,6 @@ mod app;
 #[cfg(feature = "app")]
 mod appweb;
 mod auth;
-#[cfg(feature = "app")]
-mod classify;
 #[cfg(feature = "hub")]
 mod clshub;
 #[cfg(all(test, feature = "hub", feature = "app"))]

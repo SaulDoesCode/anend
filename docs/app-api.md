@@ -85,7 +85,9 @@ A save's classifiers (`core/src/classifiers.rs`; the engine is `core/src/classif
 each is trained on lists, one class per list, the members' texts as examples (a note
 reads as its title and markdown). They keep their own tables in a file beside the save (`<name>.models`), reading the graph's lists and texts. `name` picks the classifier in every call. A `class` is
 a class name or its index. A text to judge is given as `key` (a memory or note) or
-`text`. Without a hub, the web app answers these with "classifiers need a hub for now".
+`text`. One implementation answers them on the desktop and the hub alike
+(`core/src/ops/classify.rs`, through `ops::Saves::with_models`); the hub adds only its
+quotas and job limits (two trainings or indexings at once per member, two hours each).
 
 | op | args | data |
 |---|---|---|
@@ -103,6 +105,7 @@ a class name or its index. A text to judge is given as `key` (a memory or note) 
 | `classify.steer` | `{name, steer: {bias?: [..] or {class: value}, temperature?, threshold?, gains?: {letter, word, side, extra}, reset?}, save?: true}` | `{steer, classes, saved, bias: {texts, mean_kl, max_kl, flipped, shift, prior, prior_skew, imbalance}}` (`bias` null until trained) |
 | `classify.feedback` | `{name, key or text, class, yes, weight?: 1}` | `{entry: {classifier, key, text, class, yes, weight, time, stack, before, after}}` |
 | `classify.feedback_stack` | the same | `{entry, report: {before, after, grad_norms, losses}, touched: [names]}` |
+| `classify.unfeedback` | `{name}` | `{entry, left}`: takes back the latest yes/no on `name` (one or through its stack): the classifiers it wrote get their weights back exactly, and the entry leaves the feedback log; the last 20 can be taken back, until the next training |
 | `classify.enlist` | `{name, class, threshold?}` (the steered threshold if left out) | `{list, name, members}` |
 | `classify.represent` | `{name, key or text}` | `{vector}` |
 | `classify.similar` | `{name, key or text, limit?: 20}` | `{text, results: [{key, text, note, cosine}]}` |

@@ -102,6 +102,9 @@ pub struct Saves {
     /// other files that belong to a save, `<name>.<extension>`: renamed, copied and
     /// deleted with it (the hub's classifiers)
     companions: Vec<String>,
+    /// whether each save has its models (`<name>.models`, `super::classify`), and the
+    /// limits their jobs run under
+    models: Option<super::classify::Limits>,
     open: Mutex<Option<Open>>,
     pub removed: Removed,
 }
@@ -114,6 +117,7 @@ impl Saves {
             remember: false,
             backups_on_disk: true,
             companions: Vec::new(),
+            models: None,
             open: Mutex::new(None),
             removed: Default::default(),
         }
@@ -151,6 +155,18 @@ impl Saves {
 
     pub fn with_companions(mut self, extensions: &[&str]) -> Saves {
         self.companions = extensions.iter().map(|e| e.to_string()).collect();
+        self
+    }
+
+    /// each save has its classifiers in `<name>.models` beside it (`super::classify`),
+    /// answering `classify.*` and `filters.*` and travelling in bundles, their jobs run
+    /// under `limits`
+    pub fn with_models(mut self, limits: super::classify::Limits) -> Saves {
+        let ext = super::classify::MODELS.to_string();
+        if !self.companions.contains(&ext) {
+            self.companions.push(ext);
+        }
+        self.models = Some(limits);
         self
     }
 
@@ -382,8 +398,20 @@ impl Saves {
         target.write(|tx| merge::write(tx, &refs, &c))
     }
 
-    /// one op of the app API: the saves' own here, the rest on the open save
+    /// one op of the app API: the saves' own here, the models' in `super::classify`,
+    /// the rest on the open save
     pub fn call(&self, op: &str, args: &Value) -> Res {
+        match &self.models {
+            Some(limits) if super::classify::routed(op) => super::classify::saves_call(self, op, args, limits),
+            None if op.starts_with("classify.") || op.starts_with("filters.") => {
+                Err("these saves keep no models".into())
+            }
+            _ => self.call_plain(op, args),
+        }
+    }
+
+    /// [`Saves::call`] without the models
+    pub(super) fn call_plain(&self, op: &str, args: &Value) -> Res {
         if op == "hello" {
             let (open, g) = self.current()?;
             let (notes, memories) = super::counts(&g.view()?)?;

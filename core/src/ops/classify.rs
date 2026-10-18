@@ -1,29 +1,31 @@
 //! The app's classifier operations (`classify.*`, listed in docs/app-api.md), over the
-//! open save's classifiers (`anend_core::classifiers`). Training runs on a thread of its
+//! open save's classifiers (`crate::classifiers`). Training runs on a thread of its
 //! own: `classify.train` snapshots the examples, answers at once, and the thread writes
 //! the weights when it's done; `classify.job` reports how it goes and `classify.cancel`
 //! stops it (a cancelled run writes nothing).
 
-use anend_core::classifiers::{self as clfs, Input, Judged, Stack, Summary, Tick, TrainArgs};
-use anend_core::classify::steer::Output;
-use anend_core::classify::{Flow, Gains, HeadKind, Pool};
-use anend_core::memory::Ref;
-use anend_core::store::Store;
-use anend_core::{clsmodule, filters, memo};
+use crate::classifiers::{self as clfs, Input, Judged, Stack, Summary, Tick, TrainArgs};
+use crate::classify::steer::Output;
+use crate::classify::{Flow, Gains, HeadKind, Pool};
+use crate::memory::Ref;
+use crate::store::Store;
+use crate::{clsmodule, filters, memo};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
-use crate::app::Res;
+use super::{GraphTexts, Res, Saves};
+use crate::graph::Graph;
 
 /// how many memories and notes a search, a list or a neighbour search looks through
 const SCAN: usize = 20_000;
 
 fn pool() -> &'static Pool {
     static POOL: OnceLock<Pool> = OnceLock::new();
-    POOL.get_or_init(|| Pool::new(anend_core::classify::pool::available()))
+    POOL.get_or_init(|| Pool::new(crate::classify::pool::available()))
 }
 
 // ---------------------------------------------------------------- jobs
@@ -137,18 +139,38 @@ fn not_training(store: &Store, names: &[String]) -> Result<(), String> {
     }
 }
 
-/// a running hub (not `--local`) shares its machine: each workspace runs at most this
-/// many trainings and indexings at once, the hub at most [`hub_jobs`], and a training
-/// stops after [`TRAIN_LIMIT`]
+/// how much a machine shared by many (a hub, not `--local`) lets each save's folder run:
+/// at most `per_folder` trainings and indexings at once, `total` in all, and a training
+/// stops after `train`; [`Limits::NONE`] for a machine of one's own (the desktop)
+#[derive(Clone, Copy, Debug)]
+pub struct Limits {
+    pub shared: bool,
+    pub per_folder: usize,
+    pub total: usize,
+    pub train: Option<std::time::Duration>,
+}
+
+/// the shared hub's: each workspace runs at most this many trainings and indexings
 pub const WORKSPACE_JOBS: usize = 2;
 pub const TRAIN_LIMIT: std::time::Duration = std::time::Duration::from_secs(2 * 3600);
 
-fn hub_jobs() -> usize {
-    anend_core::classify::pool::available().max(4)
-}
+impl Limits {
+    pub const NONE: Limits = Limits {
+        shared: false,
+        per_folder: usize::MAX,
+        total: usize::MAX,
+        train: None,
+    };
 
-fn shared() -> bool {
-    !crate::mode::local()
+    /// a hub's for its members
+    pub fn shared() -> Limits {
+        Limits {
+            shared: true,
+            per_folder: WORKSPACE_JOBS,
+            total: crate::classify::pool::available().max(4),
+            train: Some(TRAIN_LIMIT),
+        }
+    }
 }
 
 /// the workspace folder a job key's save is in
@@ -157,9 +179,9 @@ fn key_folder(key: &str) -> &str {
     path.rsplit_once(['/', '\\']).map_or("", |(dir, _)| dir)
 }
 
-/// whether another job may start for `store`'s workspace (on a shared hub)
-fn room_for_a_job(store: &Store) -> Result<(), String> {
-    if !shared() {
+/// whether another job may start for `store`'s folder
+fn room_for_a_job(store: &Store, limits: &Limits) -> Result<(), String> {
+    if !limits.shared {
         return Ok(());
     }
     let mine = job_key(store, "");
@@ -179,19 +201,20 @@ fn room_for_a_job(store: &Store) -> Result<(), String> {
             .filter(|(_, j)| index_snapshot(j)["state"] == "running")
             .map(|(k, _)| k.clone()),
     );
-    if running.iter().filter(|k| key_folder(k) == mine).count() >= WORKSPACE_JOBS {
+    if running.iter().filter(|k| key_folder(k) == mine).count() >= limits.per_folder {
         return Err(format!(
-            "{WORKSPACE_JOBS} trainings or indexings are running in your saves already; wait for one to end"
+            "{} trainings or indexings are running in your saves already; wait for one to end",
+            limits.per_folder
         ));
     }
-    if running.len() >= hub_jobs() {
+    if running.len() >= limits.total {
         return Err("the hub is busy training for others; try again in a while".into());
     }
     Ok(())
 }
 
-fn start(store: Arc<Store>, name: &str, a: &TrainArgs, wait: bool) -> Res {
-    room_for_a_job(&store)?;
+fn start(store: Arc<Store>, name: &str, a: &TrainArgs, wait: bool, limits: &Limits) -> Res {
+    room_for_a_job(&store, limits)?;
     let mut t = store.prepare(name, a)?;
     let job = Arc::new(Job {
         cancel: AtomicBool::new(false),
@@ -213,7 +236,7 @@ fn start(store: Arc<Store>, name: &str, a: &TrainArgs, wait: bool) -> Res {
         all.insert(key, job.clone());
     }
     let j = job.clone();
-    let limit = shared().then_some(TRAIN_LIMIT);
+    let limit = limits.train;
     let mut work = move || {
         let mut too_long = false;
         let r = t.run(|tick| {
@@ -229,7 +252,7 @@ fn start(store: Arc<Store>, name: &str, a: &TrainArgs, wait: bool) -> Res {
             if too_long {
                 Err(format!(
                     "the hub stops a training after {} hours; try fewer epochs or rounds, or a smaller preset",
-                    TRAIN_LIMIT.as_secs() / 3600
+                    limit.map_or(0, |l| l.as_secs() / 3600)
                 ))
             } else if s.cancelled {
                 Ok((s, "cancelled"))
@@ -263,9 +286,7 @@ fn start(store: Arc<Store>, name: &str, a: &TrainArgs, wait: bool) -> Res {
 
 // ---------------------------------------------------------------- json
 
-fn s<'a>(args: &'a Value, k: &str) -> &'a str {
-    args.get(k).and_then(Value::as_str).unwrap_or("")
-}
+use super::s;
 
 fn name_arg(args: &Value) -> Result<&str, String> {
     match s(args, "name").trim() {
@@ -355,13 +376,14 @@ fn details(store: &Store, d: &clfs::Definition) -> Res {
     let fb = store.classifier_feedback(&d.name)?;
     let net = store
         .classifier_weights(&d.name)?
-        .and_then(|b| anend_core::classify::Classifier::from_bytes(&b).ok());
+        .and_then(|b| crate::classify::Classifier::from_bytes(&b).ok());
     let o = v.as_object_mut().expect("an object");
     o.insert("steer".into(), json!(d.steer));
     o.insert("history".into(), json!(d.history));
     o.insert("train".into(), json!(d.train));
     o.insert("created".into(), json!(d.created));
     o.insert("feedback_count".into(), json!(fb.len()));
+    o.insert("undo".into(), json!(store.undo_count(&d.name)?));
     let recent: Vec<_> = fb.iter().rev().take(50).collect();
     o.insert("feedback".into(), json!(recent));
     o.insert(
@@ -388,7 +410,7 @@ fn details(store: &Store, d: &clfs::Definition) -> Res {
 
 /// steering from the args over the current one: `bias` as a list or {class: value},
 /// `temperature`, `threshold`, `gains` {letter, word, side, extra}
-fn steer_from(def: &clfs::Definition, a: &Value) -> Result<anend_core::classify::Steer, String> {
+fn steer_from(def: &clfs::Definition, a: &Value) -> Result<crate::classify::Steer, String> {
     let mut st = def.steer.clone();
     let h = &mut st.heads[0];
     let names = def.class_names();
@@ -426,7 +448,7 @@ fn steer_from(def: &clfs::Definition, a: &Value) -> Result<anend_core::classify:
     }
     if a.get("reset").and_then(Value::as_bool) == Some(true) {
         st.gains = Gains::default();
-        st.heads[0] = anend_core::classify::HeadSteer::neutral(names.len());
+        st.heads[0] = crate::classify::HeadSteer::neutral(names.len());
     }
     Ok(st)
 }
@@ -481,7 +503,7 @@ fn inputs_arg(args: &Value) -> Result<Vec<Input>, String> {
 
 // ---------------------------------------------------------------- the calls
 
-pub fn call(store: Arc<Store>, op: &str, args: &Value) -> Res {
+pub fn call(store: Arc<Store>, op: &str, args: &Value, limits: &Limits) -> Res {
     let st: &Store = &store;
     match op {
         "classify.list" => Ok(Value::Array(st.classifiers()?.iter().map(|d| summary(st, d)).collect())),
@@ -556,7 +578,7 @@ pub fn call(store: Arc<Store>, op: &str, args: &Value) -> Res {
         "classify.train" => {
             let name = name_arg(args)?;
             let wait = args.get("wait").and_then(Value::as_bool).unwrap_or(false);
-            start(store.clone(), name, &train_args(args), wait)
+            start(store.clone(), name, &train_args(args), wait, limits)
         }
         "classify.job" => {
             let name = name_arg(args)?;
@@ -679,7 +701,7 @@ pub fn call(store: Arc<Store>, op: &str, args: &Value) -> Res {
                 .collect();
             let texts: Vec<&str> = cands.iter().map(|c| c.1.as_str()).collect();
             let vs = clf.represent_many(&texts, pool());
-            let cos: Vec<f32> = vs.iter().map(|v| anend_core::classify::cosine(&me, v)).collect();
+            let cos: Vec<f32> = vs.iter().map(|v| crate::classify::cosine(&me, v)).collect();
             let mut order: Vec<usize> = (0..cands.len()).collect();
             order.sort_by(|&a, &b| cos[b].total_cmp(&cos[a]).then(a.cmp(&b)));
             let results: Vec<Value> = order
@@ -737,6 +759,12 @@ pub fn call(store: Arc<Store>, op: &str, args: &Value) -> Res {
                 Ok(json!({ "entry": e, "report": rep, "touched": touched }))
             }
         }
+        "classify.unfeedback" => {
+            let name = name_arg(args)?;
+            not_training(st, &st.stack(name)?.names())?;
+            let e = st.unfeedback(name)?;
+            Ok(json!({ "entry": e, "left": st.undo_count(name)? }))
+        }
         "classify.enlist" => {
             let name = name_arg(args)?;
             let def = st.classifier(name)?;
@@ -746,7 +774,7 @@ pub fn call(store: Arc<Store>, op: &str, args: &Value) -> Res {
             let text = st.remember(&head).map(|h| h.text).unwrap_or_default();
             Ok(json!({ "list": head.label(), "name": text, "members": n }))
         }
-        _ => phase3(store.clone(), op, args),
+        _ => phase3(store.clone(), op, args, limits),
     }
 }
 
@@ -793,7 +821,7 @@ fn row_json(classes: &[String], r: &memo::Row) -> Value {
     })
 }
 
-fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
+fn phase3(store: Arc<Store>, op: &str, args: &Value, limits: &Limits) -> Res {
     let st: &Store = &store;
     match op {
         "classify.index" => {
@@ -810,7 +838,7 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
                 ),
                 None => None,
             };
-            room_for_a_job(st)?;
+            room_for_a_job(st, limits)?;
             let key = job_key(st, &name);
             let job = Arc::new(IndexJob {
                 cancel: AtomicBool::new(false),
@@ -929,7 +957,7 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value) -> Res {
                 .iter()
                 .take(limit)
                 .map(|f| {
-                    let (o, r) = anend_core::spread::sums(&f.text);
+                    let (o, r) = crate::spread::sums(&f.text);
                     json!({ "key": f.r.label(), "text": f.text, "note": st.is_note(&f.r), "ordinal": o, "reversed": r,
                         "prob": if c == memo::UNCERTAIN { f.row.confidence() } else { f.row.probs[c as usize] } })
                 })
@@ -1136,10 +1164,113 @@ pub fn import_opts_and_take(st: &Store, m: &clsmodule::Module, args: &Value) -> 
     Ok(json!(st.import_module(m, &o)?))
 }
 
+// ---------------------------------------------------------------- a save's models
+
+/// the extension of a save's classifiers file, `<save>.models` beside `<save>.redb`
+pub const MODELS: &str = "models";
+
+/// every classifiers store open in this process, by file (redb holds a file once)
+fn open_models() -> &'static Mutex<HashMap<PathBuf, Weak<Store>>> {
+    static M: OnceLock<Mutex<HashMap<PathBuf, Weak<Store>>>> = OnceLock::new();
+    M.get_or_init(Default::default)
+}
+
+/// a save's classifiers (`path`, its `.models` file), reading its graph's texts; shared
+/// with whoever has them open already (a training thread, say)
+pub fn models_at(path: &Path, graph: Arc<Graph>) -> Result<Arc<Store>, String> {
+    // the last holder may still be closing the file: its handle is gone from the map but
+    // redb hasn't let go of the lock yet, so wait a moment
+    for _ in 0..200 {
+        let mut all = open_models().lock().unwrap_or_else(|e| e.into_inner());
+        all.retain(|_, w| w.strong_count() > 0);
+        if let Some(s) = all.get(path).and_then(Weak::upgrade) {
+            return Ok(s);
+        }
+        match Store::open_over(path, Arc::new(GraphTexts(graph.clone()))) {
+            Ok(s) => {
+                let s = Arc::new(s);
+                all.insert(path.to_path_buf(), Arc::downgrade(&s));
+                return Ok(s);
+            }
+            Err(e) if e.contains("already open") => {
+                drop(all);
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err("the classifiers are busy closing; try again".into())
+}
+
+impl Saves {
+    /// a save's name and classifiers (the open save's when `name` is empty)
+    pub fn models_of(&self, name: &str) -> Result<(String, Arc<Store>), String> {
+        let (n, g) = self.graph(name)?;
+        let path = self.companion(&n, MODELS)?;
+        Ok((n, models_at(&path, g)?))
+    }
+
+    /// the open save's name and classifiers
+    pub fn models(&self) -> Result<(String, Arc<Store>), String> {
+        self.models_of("")
+    }
+}
+
+/// whether a [`Saves`] with models answers `op` here
+pub fn routed(op: &str) -> bool {
+    op.starts_with("classify.") || op.starts_with("filters.") || op == "saves.export" || op == "saves.import"
+}
+
+/// the ops that need a save's models: `classify.*` and `filters.*` on the open save's,
+/// and bundles (`saves.export`, `saves.import`) carrying the classifiers
+pub fn saves_call(saves: &Saves, op: &str, args: &Value, limits: &Limits) -> Res {
+    if op.starts_with("classify.") || op.starts_with("filters.") {
+        let (_, models) = saves.models()?;
+        return call(models, op, args, limits);
+    }
+    match op {
+        "saves.export" => {
+            let mut b = saves.call_plain(op, args)?;
+            let (_, models) = saves.models_of(s(args, "name"))?;
+            let cls = models.export_classifiers()?;
+            if !cls.is_empty() {
+                b["classifiers"] = serde_json::to_value(cls).map_err(|e| e.to_string())?;
+            }
+            Ok(b)
+        }
+        "saves.import" => {
+            let cls: Vec<clfs::Bundled> = match args.get("bundle").and_then(|b| b.get("classifiers")) {
+                Some(c) => serde_json::from_value(c.clone())
+                    .map_err(|e| format!("that bundle's classifiers don't read: {e}"))?,
+                None => Vec::new(),
+            };
+            let mut got = saves.call_plain(op, args)?;
+            // merged: the classifiers stay out (their lists would point elsewhere)
+            if let Some(name) = got.get("save").and_then(Value::as_str).map(str::to_string)
+                && !cls.is_empty()
+            {
+                let (_, models) = saves.models_of(&name)?;
+                got["classifiers"] = json!(models.import_classifiers(&cls)?);
+            }
+            Ok(got)
+        }
+        _ => saves.call_plain(op, args),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{Workspace, call as app_call};
+
+    fn temp(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "anend-clfops-{tag}-{}-{}",
+            std::process::id(),
+            crate::graph::store::system_ms()
+        ));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
 
     #[test]
     fn job_folders() {
@@ -1156,9 +1287,9 @@ mod tests {
 
     #[test]
     fn classifier_calls() {
-        let dir = std::env::temp_dir().join(format!("anend-clfops-{}", rand::random::<u64>()));
-        let ws = Workspace::new(dir.clone());
-        let c = |op: &str, a: Value| app_call(&ws, op, &a);
+        let dir = temp("calls");
+        let ws = Saves::new(&dir, "notes").with_models(Limits::NONE);
+        let c = |op: &str, a: Value| ws.call(op, &a);
         let key = |t: &str| {
             c("mem.saturate", json!({ "text": t })).unwrap()["key"]
                 .as_str()
@@ -1256,10 +1387,38 @@ mod tests {
             json!({ "name": "kind", "text": t, "class": "rocks", "yes": false, "weight": 2.0 }),
         )
         .unwrap();
-        assert!(prob() < p1);
+        let p2 = prob();
+        assert!(p2 < p1);
         let got = c("classify.get", json!({ "name": "kind" })).unwrap();
         assert_eq!(got["feedback_count"], 2);
         assert_eq!(got["version"], 3);
+        assert_eq!(got["undo"], 2);
+        // taken back, one at a time, to exactly what it said before
+        let u = c("classify.unfeedback", json!({ "name": "kind" })).unwrap();
+        assert_eq!(
+            (u["entry"]["yes"].as_bool(), u["left"].as_u64()),
+            (Some(false), Some(1))
+        );
+        assert_eq!(prob(), p1);
+        c("classify.unfeedback", json!({ "name": "kind" })).unwrap();
+        assert_eq!(prob(), p0);
+        assert!(c("classify.unfeedback", json!({ "name": "kind" })).is_err());
+        let got = c("classify.get", json!({ "name": "kind" })).unwrap();
+        assert_eq!(
+            (got["feedback_count"].as_u64(), got["version"].as_u64()),
+            (Some(0), Some(1))
+        );
+        c(
+            "classify.feedback",
+            json!({ "name": "kind", "text": t, "class": "rocks", "yes": true }),
+        )
+        .unwrap();
+        c(
+            "classify.feedback",
+            json!({ "name": "kind", "text": t, "class": "rocks", "yes": false, "weight": 2.0 }),
+        )
+        .unwrap();
+        assert_eq!(prob(), p2);
 
         // steering: a bias towards fruit moves things, and the report says how much
         let s0 = c("classify.steer", json!({ "name": "kind", "steer": {}, "save": false })).unwrap();

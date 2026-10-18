@@ -38,6 +38,11 @@ use crate::store::{NOTES, Store, StoreResult};
 pub const DEFINITIONS: TableDefinition<&str, &[u8]> = TableDefinition::new("classifiers");
 pub const WEIGHTS: TableDefinition<&str, &[u8]> = TableDefinition::new("classifier weights");
 pub const FEEDBACK: TableDefinition<(&str, u64), &[u8]> = TableDefinition::new("classifier feedback");
+/// (name, n) -> what a yes/no on that classifier changed, to take it back (`Undo`)
+pub const UNDO: TableDefinition<(&str, u64), &[u8]> = TableDefinition::new("classifier undo");
+
+/// how many yes/no answers on a classifier can be taken back
+pub const UNDO_KEPT: u64 = 20;
 
 /// how many history events a definition keeps (oldest dropped first)
 pub const HISTORY_KEPT: usize = 200;
@@ -50,7 +55,16 @@ pub fn create_tables(txn: &WriteTransaction) -> StoreResult<()> {
     txn.open_table(DEFINITIONS).map_err(err)?;
     txn.open_table(WEIGHTS).map_err(err)?;
     txn.open_table(FEEDBACK).map_err(err)?;
+    txn.open_table(UNDO).map_err(err)?;
     Ok(())
+}
+
+/// what one yes/no changed: the feedback it logged, and each classifier it wrote as it
+/// was before (its definition's JSON and its weights in base64)
+#[derive(Serialize, Deserialize)]
+struct Undo {
+    feedback: u64,
+    was: Vec<(String, String, Option<String>)>,
 }
 
 // ---------------------------------------------------------------- what's stored
@@ -681,6 +695,8 @@ impl Store {
             txn.open_table(WEIGHTS).map_err(err)?.remove(name).map_err(err)?;
             let mut f = txn.open_table(FEEDBACK).map_err(err)?;
             f.retain_in((name, 0)..=(name, u64::MAX), |_, _| false).map_err(err)?;
+            let mut u = txn.open_table(UNDO).map_err(err)?;
+            u.retain_in((name, 0)..=(name, u64::MAX), |_, _| false).map_err(err)?;
         }
         txn.commit().map_err(err)?;
         self.memo_clear(name)?;
@@ -942,6 +958,8 @@ impl Store {
             seconds: s.seconds,
         });
         self.put_classifier(&mut def, Some(t.stack.clf()))?;
+        // the yes/no answers before it can't be taken back past new weights
+        self.drop_undo(name)?;
         Ok(def)
     }
 
@@ -974,9 +992,9 @@ impl Store {
 
     // ---- feedback
 
-    fn log_feedback(&self, e: &FeedbackEntry) -> StoreResult<()> {
+    fn log_feedback(&self, e: &FeedbackEntry) -> StoreResult<u64> {
         let txn = self.db.begin_write().map_err(err)?;
-        {
+        let n = {
             let mut t = txn.open_table(FEEDBACK).map_err(err)?;
             let name = e.classifier.as_str();
             let next = t
@@ -988,8 +1006,113 @@ impl Store {
                 .map_or(0, |(k, _)| k.value().1 + 1);
             let json = serde_json::to_vec(e).map_err(err)?;
             t.insert((name, next), json.as_slice()).map_err(err)?;
+            next
+        };
+        txn.commit().map_err(err)?;
+        Ok(n)
+    }
+
+    /// the classifiers `names` as they are now, for an [`Undo`]
+    fn snapshot(&self, names: &[String]) -> StoreResult<Vec<(String, String, Option<String>)>> {
+        let txn = self.db.begin_read().map_err(err)?;
+        let d = txn.open_table(DEFINITIONS).map_err(err)?;
+        let w = txn.open_table(WEIGHTS).map_err(err)?;
+        let mut out = Vec::new();
+        for n in names {
+            let Some(def) = d.get(n.as_str()).map_err(err)? else {
+                continue;
+            };
+            let def = String::from_utf8_lossy(def.value()).into_owned();
+            let weights = w.get(n.as_str()).map_err(err)?.map(|g| base64(g.value()));
+            out.push((n.clone(), def, weights));
+        }
+        Ok(out)
+    }
+
+    /// keeps what a yes/no on `name` changed, the oldest beyond [`UNDO_KEPT`] dropped
+    fn keep_undo(&self, name: &str, u: &Undo) -> StoreResult<()> {
+        let txn = self.db.begin_write().map_err(err)?;
+        {
+            let mut t = txn.open_table(UNDO).map_err(err)?;
+            let next = t
+                .range((name, 0)..=(name, u64::MAX))
+                .map_err(err)?
+                .next_back()
+                .transpose()
+                .map_err(err)?
+                .map_or(0, |(k, _)| k.value().1 + 1);
+            let json = serde_json::to_vec(u).map_err(err)?;
+            t.insert((name, next), json.as_slice()).map_err(err)?;
+            if next >= UNDO_KEPT {
+                let cut = next - UNDO_KEPT;
+                t.retain_in((name, 0)..=(name, cut), |_, _| false).map_err(err)?;
+            }
         }
         txn.commit().map_err(err)
+    }
+
+    /// forgets what could be taken back on `name`, and every yes/no through a stack
+    /// that wrote it (its weights changed another way)
+    pub fn drop_undo(&self, name: &str) -> StoreResult<()> {
+        let txn = self.db.begin_write().map_err(err)?;
+        txn.open_table(UNDO)
+            .map_err(err)?
+            .retain(|_, v| serde_json::from_slice::<Undo>(v).is_ok_and(|u| u.was.iter().all(|w| w.0 != name)))
+            .map_err(err)?;
+        txn.commit().map_err(err)
+    }
+
+    /// how many yes/no answers on `name` can be taken back
+    pub fn undo_count(&self, name: &str) -> StoreResult<usize> {
+        let txn = self.db.begin_read().map_err(err)?;
+        let t = txn.open_table(UNDO).map_err(err)?;
+        Ok(t.range((name, 0)..=(name, u64::MAX)).map_err(err)?.count())
+    }
+
+    /// takes back the latest yes/no on `name`: every classifier it wrote gets its
+    /// definition and weights back as they were, and the feedback leaves the log
+    /// (so training no longer replays it); the entry taken back
+    pub fn unfeedback(&self, name: &str) -> StoreResult<FeedbackEntry> {
+        self.classifier(name)?;
+        let txn = self.db.begin_write().map_err(err)?;
+        let entry = {
+            let mut t = txn.open_table(UNDO).map_err(err)?;
+            let last = t
+                .range((name, 0)..=(name, u64::MAX))
+                .map_err(err)?
+                .next_back()
+                .transpose()
+                .map_err(err)?
+                .map(|(k, v)| (k.value().1, v.value().to_vec()));
+            let Some((n, bytes)) = last else {
+                return Err(format!("there's no yes or no on {name:?} to take back"));
+            };
+            t.remove((name, n)).map_err(err)?;
+            let u: Undo = serde_json::from_slice(&bytes).map_err(err)?;
+            let mut d = txn.open_table(DEFINITIONS).map_err(err)?;
+            let mut w = txn.open_table(WEIGHTS).map_err(err)?;
+            for (n, def, weights) in &u.was {
+                d.insert(n.as_str(), def.as_bytes()).map_err(err)?;
+                match weights.as_deref().map(unbase64) {
+                    Some(Some(b)) => {
+                        w.insert(n.as_str(), b.as_slice()).map_err(err)?;
+                    }
+                    Some(None) => return Err("a kept copy of the weights doesn't read".into()),
+                    None => {
+                        w.remove(n.as_str()).map_err(err)?;
+                    }
+                }
+            }
+            let mut f = txn.open_table(FEEDBACK).map_err(err)?;
+            let e = f.remove((name, u.feedback)).map_err(err)?.map(|g| g.value().to_vec());
+            match e {
+                Some(e) => serde_json::from_slice::<FeedbackEntry>(&e).map_err(err)?,
+                None => return Err("that yes or no isn't in the log any more".into()),
+            }
+        };
+        txn.commit().map_err(err)?;
+        // the texts it filed under the classifier answer as before, so the memo stays
+        Ok(entry)
     }
 
     /// a classifier's feedback log, oldest first
@@ -1067,8 +1190,10 @@ impl Store {
             before: rep.before[0],
             after: rep.after[0],
         };
+        let was = self.snapshot(std::slice::from_ref(&def.name))?;
         self.put_classifier(&mut def, Some(clf))?;
-        self.log_feedback(&e)?;
+        let feedback = self.log_feedback(&e)?;
+        self.keep_undo(&def.name, &Undo { feedback, was })?;
         Ok(e)
     }
 
@@ -1103,6 +1228,7 @@ impl Store {
             },
         )?;
         let mut touched = Vec::new();
+        let was = self.snapshot(&stack.names())?;
         for (i, d) in stack.defs.iter().enumerate() {
             if rep.grad_norms[i] > 0.0 || i == stack.node {
                 let mut d = self.classifier(&d.name)?;
@@ -1130,7 +1256,9 @@ impl Store {
             before: rep.before,
             after: rep.after,
         };
-        self.log_feedback(&e)?;
+        let feedback = self.log_feedback(&e)?;
+        let was = was.into_iter().filter(|w| touched.contains(&w.0)).collect();
+        self.keep_undo(&def.name, &Undo { feedback, was })?;
         Ok((e, rep, touched))
     }
 

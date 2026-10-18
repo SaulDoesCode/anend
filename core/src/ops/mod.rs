@@ -7,6 +7,8 @@
 //! notes on an entry note edges. [`call`] answers the ops on one save; [`Saves`] (not in
 //! the browser build) keeps a folder of saves and answers `saves.*` and `forge.*` too.
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod classify;
 pub mod merge;
 #[cfg(not(target_arch = "wasm32"))]
 mod saves;

@@ -348,7 +348,7 @@ pub fn take_into(ws: &Workspace, file: &Path, max: u64, args: &Value) -> Result<
         .map_err(|_| "that module can't be read".to_string())??;
     ws.room(false)?;
     let (open, store) = ws.models()?;
-    let mut done = crate::classify::import_opts_and_take(&store, &m, args)?;
+    let mut done = anend_core::ops::classify::import_opts_and_take(&store, &m, args)?;
     done["save"] = json!(open);
     Ok(done)
 }
