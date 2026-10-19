@@ -2,6 +2,53 @@
 
 The user asked for these to be held until the current round is done, then picked up in order.
 
+## Order of work: follow these stages, not the item numbers
+
+The numbers below are kept stable so they can be referred to; the order is set here. The user
+leaves the arrangement to us ("causal ergonomics is your department"). Each stage ends in
+something the user can try, and each round of work stays small enough to finish between usage
+limits. parity.md keeps its rule: nothing is removed without a line saying why.
+
+- **Stage A, everyday use is solid:**
+  - F1–F8;
+  - items 1–3 (the bar);
+  - item 12 (one notes count; the notes view as the typing view);
+  - the remaining brief items (space search modes, save checkpoints, the IME test).
+- **Stage B, one model for things and their copies:** a single design for "a definition
+  and its placed instances", used by text placements and duplicates (F4), chains (8),
+  blocks (5), prefabs (19) and scenes.
+  - Packed storage with defaults as `Option`s (5).
+  - Large texts (6), since storage and rendering choices depend on it.
+  - Write the design into docs/format.md before building on it.
+- **Stage C, the language:** the 5-bit esolang with a readable syntax, the notes view as its
+  code editor, and a headless standard library (11, 12). Then models as language
+  primitives (18). Everything scripted later is built on this.
+- **Stage D, the renderer:** move the desktop's 3D view to wgpu, with WebGPU on the web
+  sharing the code (25), before more scene features are built in three.js. Then culling
+  (24) and far billboards with deterministic fall-off (22).
+- **Stage E, building scenes:**
+  - block rotation (5);
+  - the picture-to-texture pipeline (7) and the skybox (23);
+  - spheres and curved blocks (21), lights baked onto blocks (20);
+  - local spreads in staging blocks (14);
+  - the visual spec builder (4), since generated textures feed in here.
+- **Stage F, behaviour:**
+  - ray-casting blocks running programs (15), with ray modes including last hit (28);
+  - keyframes and bezier timing (16);
+  - subassemblies and prefabs (19);
+  - switch and logic-gate prefabs as the proof (27);
+  - audio emitters and the sounds table (17).
+- **Stage G, being in the world:** first-person mode with Thief-like movement, the grapple and
+  superflight that collects texts (9), and prefab placement there (19).
+- **Stage H, languages and tags:**
+  - custom tag sets and non-English word types (13);
+  - training conlang checking in the UI (10);
+  - correcting word types, as one family with the grammar checker.
+- **Throughout:** the unified asset and ontology browser (26), grown a little at each stage
+  as new kinds of data appear, rather than built all at once at the end.
+- **Also throughout, each stage:** one real-hardware check by the user (a GPU training run, a
+  Windows release build), and parity.md updated.
+
 ## Do first: fixes from using the app (19 Oct, evening UTC)
 
 These come from the user using the app and go before every numbered item below.
