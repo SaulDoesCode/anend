@@ -245,3 +245,66 @@ views touched against their previous behaviour before committing.
     - **Placing in first-person mode** (not only in the flycam): aim a preview ghost where you
       look, snap it to surfaces and the grid, rotate it with keys or the wheel, see a
       collision check (red if it would overlap), and place it with a click.
+
+## The scene engine and the game in it (19 Oct, night UTC)
+
+The intent behind these: the space is a game, a holistic idea. Each feature should connect to
+the others (text, models, programs, blocks, scenes, media), and the edge cases are considered
+across them, not one feature at a time.
+
+20. **Lights.**
+    - **Kinds:** flat (ambient or directional), point and cone (spot), each orientable,
+      colourable and scalable (range and intensity).
+    - **Baked:** scenes are made of blocks, so lighting is baked onto block faces (lightmaps
+      or per-face/vertex light), re-baked incrementally when a light or block changes, and
+      kept with the scene.
+    - **Live where needed:** dynamic lights only for what moves (scripted lights, carried
+      lights).
+
+21. **More shapes with little extra machinery.**
+    - **Spheres** as a block kind.
+    - **Curved blocks by shader:** optional bending in two ways, a curtain ripple (a wave along
+      one axis) and a horizontal fold in the middle, with controls for amount, phase and
+      frequency. Textures follow the bend, and raycasts and collisions use the bent shape (or
+      a stated approximation).
+    - Together these cover most richer geometry without a mesh pipeline.
+
+22. **Far-away billboards, with deterministic fall-off.**
+    - **Billboards:** past a distance, geometry is replaced by billboards (impostors) to save
+      the cost of drawing many distant things.
+    - **Raycasts still hit them** up to a set distance.
+    - **Fall-off is deterministic,** at exact distances and the same everywhere, so it can be
+      used on purpose in design, e.g. rays that stop counting past a radius, or visibility
+      puzzles.
+
+23. **A skybox,** textured from the same texture sources and pipeline as the blocks (item 7).
+
+24. **Culling:** occlusion culling for blocks, and backface culling.
+
+25. **The desktop's 3D view moves off three.js for speed:** wgpu and well-chosen crates, e.g.
+    glam, plus a physics or BVH crate if it helps. The web keeps a WebGPU path with the same
+    renderer code where it can (wgpu targets WebGPU), and three.js only as a fallback until
+    parity. The scene format and behaviour are identical between the two.
+
+26. **One place to manage the ontologies and the media, like a game engine's asset browser.**
+    - **One unified view,** organised by kind of data rather than a pane per kind. It shows
+      entries, lists, tag sets, classifiers, spec models, programs, pictures, sounds, textures,
+      prefabs, scenes and animations, with how they connect: what uses what.
+    - **Import:** drag and drop, copy and paste, and file pickers for every media kind
+      (text, pictures, sound, other files), with kinds detected automatically.
+    - **Asset semantics:** preview, rename, duplicate, delete with "used by" checks, search and
+      filter.
+    - **Same on desktop and web.**
+
+27. **Skeuomorphic prefabs that prove the block scripting.**
+    - **A switch:** a white block with a paddle on top, scripted to toggle.
+    - **Logic gates** (AND, OR, NOT, XOR, latch and so on) built from modular components inside
+      prefabs.
+    - **Built in the 5-bit language,** composed from reusable component programs. They are both
+      demos and building blocks: wire switches through gates to doors, lights and sounds.
+
+28. **Raycasts that register the last hit:** an optional mode that counts the last thing hit, not
+    the first. If two blocks stand in front of a third, the ray passes through the first two
+    and registers on the third. Further modes: first hit (the default), last hit, all hits in
+    order, and the nth hit, plus filters for which kinds or tags a ray can see. The ray
+    settings menu (item 15) picks the mode.
