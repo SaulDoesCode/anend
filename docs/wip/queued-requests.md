@@ -2,6 +2,43 @@
 
 The user asked for these to be held until the current round is done, then picked up in order.
 
+## Do first: fixes from using the app (19 Oct, evening UTC)
+
+These come from the user using the app and go before every numbered item below.
+
+- **F1. Space details window stays in the window.** When the window is resized, the movable
+  details window is clamped back inside the viewport. It got lost off-screen after the window
+  was made smaller. Clamp on resize, on drag and on restore from saved positions.
+- **F2. Right-click menu on texts in the space view:** edit, pin/unpin, duplicate, delete, open
+  in notes/reader, add to list, chain, copy, and the rest the details window offers.
+- **F3. The bar lets go of focus after Enter in the space view** (still open; see item 3). The
+  keys move again until the bar is focused.
+- **F4. Duplicating and deleting copies safely.**
+  - Double-click currently duplicates a text, and deleting a copy risks deleting the original
+    entry.
+  - A copy is an instance (a placement) of the same entry. Deleting a copy removes only that
+    placement. Deleting the entry itself is a separate, clearly named action with a
+    confirmation, shown when it is the last placement.
+  - Show which placement is the original or primary, and how many copies exist.
+  - Make double-click duplication deliberate (a modifier or the menu), or confirm it with an
+    undoable toast.
+- **F5. Space view camera and controls.** Right-drag look moved in a circle spins the whole view,
+  so the rotation maths is wrong.
+  - Use yaw and pitch kept separately (pitch clamped, no roll) or a proper orbit camera around
+    a pivot, with no accumulated roll from composing incremental rotations.
+  - Smooth damping, and sensitivity in the settings.
+  - Make it feel smooth and fun.
+- **F6. Saved scenes (spaces/maps) in the space view:** see the list of saved scenes, and load,
+  rename and delete them, with a confirmation and undo for delete.
+- **F7. The notes view opens with its sidebar shown,** not the blank page; remember the user's
+  choice after that.
+- **F8. GPU build warning.** `static SHARED: OnceLock<Result<Gpu, String>>` in
+  core/src/classify/gpu/mod.rs:152 triggers `recursion_depth_exceeding_limit` (future
+  incompatible) while proving `Gpu: Send/Sync` through wgpu's types. Fix it without raising
+  the crate's recursion limit if a cleaner way exists, e.g. assert Send/Sync on a small
+  wrapper, or keep the device in an `Arc` behind an explicitly typed accessor. Check that the
+  gpu feature build is warning-free.
+
 ## 19 Oct, afternoon UTC
 
 1. **Bottom bar width:** the typing bar has a minimum width of 15.5 cm. Use CSS `min-width: 15.5cm`
@@ -135,3 +172,55 @@ views touched against their previous behaviour before committing.
       kind with the code features listed there.
     - **Fix: one notes count.** The notes count shows twice in the notes view; keep one, in the
       most useful place, and record it in parity.md.
+
+13. **Word types for text that isn't English.** The word-type labels misread non-English text,
+    e.g. Afrikaans.
+    - **Short term:** a confidence threshold below which no type is shown, plus a language guess
+      per text (a small language-id classifier, or stopword and character n-gram statistics)
+      that turns English-only rules off for other languages.
+    - **Longer term, one holistic design:** word-type tagging, the grammar and spelling
+      checker (b2ee841, 30a1ac9) and the conlang checker (item 10) become one trainable family.
+      Each language has its own tagger, checker and corrector, chosen by the language guess or
+      per note, and all are correctable in the UI.
+    - **Correcting word types should be fun:** click a label and pick the right type; the tagger
+      learns, and its accuracy and progress are shown, with the same Skinner-box feedback loop
+      as item 10.
+
+14. **Local spreads inside staging blocks.** A block can define a zone, and the free spread can
+    run inside that block's area only, so there can be aesthetic worlds with local spreads.
+    Texts in the zone spread among themselves, bounded by the block, without special handling
+    elsewhere. Zones can nest, and each zone has its own physics settings.
+
+15. **Blocks that cast rays and run programs (causal dominos).**
+    - **Rays:** clicking a block can cast a ray. A per-block menu sets:
+      - whether it listens for events (click, ray hit, zone enter/leave, timer, a program
+        signal);
+      - where its ray goes: **sticky** (specific target blocks or texts), or **fixed** (a set
+        direction that hits whatever it crosses), with an option to start loose and become
+        sticky on first contact.
+    - **Programs:** on trigger, the block runs a program, an entry in the project's 5-bit
+      language (item 11), chosen per block.
+    - **Chains of cause:** blocks act on each other like dominos and build stateful systems.
+      One action moves blocks, so a fixed ray carried by an animated block triggers the
+      blocks it sweeps across.
+    - **Deterministic:** the same fixed physics step, and the same on desktop and web.
+
+16. **Scripted changes to blocks, with keyframes.**
+    - **What programs can change:** texture, position, orientation, scale, and procedures for
+      moving.
+    - **Keyframes, like CSS:** attribute values at moments, interpolated, with an animation and a
+      timing function.
+    - **Visual editing:** a cubic-bezier curve editor for the timing, a timeline of keyframes,
+      and scrubbing and preview.
+    - **Shared storage:** animations are entries, reusable across blocks.
+
+17. **Audio emitters in scenes.** Place sound sources, with triggers on zone enter/leave or from
+    programs, falloff and looping. Together with first-person mode (item 9) and items 14–16,
+    this makes walking-simulator experiences that change, not static ones. Sounds come from
+    files in the save, as a sounds table like pictures.
+
+18. **Classifiers and transformers as primitives in the programming language.** Programs can
+    call classifiers (predict, steer, feedback), spec models (run, generate) and searches, as
+    standard-library functions with typed results. Blocks and scenes can then behave richly,
+    e.g. a block that reacts to how a text classifies or that generates its next texture.
+    The hub's limits apply on shared hubs.
