@@ -187,6 +187,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | export / import `.anendcls` | classify_ui.rs | has |
 | colour views by a classifier | classify_ui.rs | has (picked in the memory strip) |
 | device: CPU / GPU / GPU fast, and which device a job ran on | asked 19 Oct | has (classifier and spec training; falls back to the CPU with a note when there's no adapter or the hub keeps members on its CPU; desktop and `anend-hub` build with `gpu`, a shared hub needs `--gpu`) |
+| the gpu build is warning-free (no `recursion_depth_exceeding_limit` on the shared device) | asked 19 Oct (F8) | has (19 Oct): `Gpu` is Send + Sync by an explicit impl, each field checked on its own (`fields_are_send_and_sync`) |
 | spec models (templates, JSON editor, train, run, write) | Dioxus only | has |
 
 ## Filters

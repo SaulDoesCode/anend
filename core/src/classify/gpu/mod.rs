@@ -149,7 +149,34 @@ pub struct Gpu {
     align: u64,
 }
 
+// Proving `Gpu: Send + Sync` structurally walks wgpu's types deep enough on some
+// backends to hit the compiler's recursion limit (the future-incompatible
+// `recursion_depth_exceeding_limit` warning on `SHARED`). Every field is Send + Sync on
+// native targets (wgpu's handles are, the rest is std); the test below checks each field's
+// type on its own, so the static needs no structural proof.
+// SAFETY: see above. On wasm wgpu's handles are not Send, so there the structural
+// proof stays (and fails, as it should: the browser build has no shared GPU).
+#[cfg(not(target_arch = "wasm32"))]
+unsafe impl Send for Gpu {}
+#[cfg(not(target_arch = "wasm32"))]
+unsafe impl Sync for Gpu {}
+
 static SHARED: OnceLock<Result<Gpu, String>> = OnceLock::new();
+
+#[cfg(test)]
+#[allow(dead_code)]
+fn fields_are_send_and_sync() {
+    fn both<T: Send + Sync>() {}
+    both::<wgpu::Device>();
+    both::<wgpu::Queue>();
+    both::<wgpu::AdapterInfo>();
+    both::<wgpu::Limits>();
+    both::<wgpu::BindGroupLayout>();
+    both::<wgpu::PipelineLayout>();
+    both::<OnceLock<wgpu::ShaderModule>>();
+    both::<Mutex<HashMap<(&'static str, Precision), wgpu::ComputePipeline>>>();
+    both::<wgpu::Buffer>();
+}
 
 /// the process's GPU, opened on first use; `Err` says why there is none (no adapter, or
 /// `ANEND_GPU=off`). `WGPU_BACKEND` (vulkan, metal, dx12, gl) and `WGPU_ADAPTER_NAME`
