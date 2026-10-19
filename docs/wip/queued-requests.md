@@ -78,3 +78,49 @@ views touched against their previous behaviour before committing.
    - **Stored compactly:** textures are kept by content hash and shared across blocks. A block
      refers to its texture recipe, which is regenerated deterministically from its seed.
    - **Desktop and web alike.**
+
+## The project plan from here (19 Oct, evening UTC)
+
+8. **Chains of texts in the space's text and block modes.** A text can be linked in a chain with
+   other texts, e.g. the paragraphs of one piece.
+   - **Dragging:** dragging the head or any node brings the whole chain along. It follows with
+     spring links and settles into a readable arrangement (reading order kept, spacing by each
+     text's size, no overlap or scrunching), so a chain of paragraphs can be carried around as a
+     unit.
+   - **Model:** chains are stored in the save as ordered links between entries (the entry
+     graph's edges), and work with the free spread and pins. Make, break, reorder and cut a
+     chain from the UI.
+
+9. **First-person mode in the 3D block and text space** (optional; the orbit/editor camera stays
+   the default):
+   - **Walking:** collisions with blocks and gravity, with Thief 3-like controls: walk, crouch,
+     lean, mantle, sneak speed, and the keys rebindable through keys.rs.
+   - **Grapple hook:** aim at a block or text, attach, swing and reel in, with rope physics.
+   - **Superflight:** a Just Cause 2-like fly mode with fast flight and boosts. Flying through
+     texts adds them to a buffer, in the order hit and shown as a trail. The buffer can be
+     minted into an entry, a chain or a list, or typed into the bar, so you write by flying.
+   - **Deterministic physics,** in fixed steps, the same on desktop and web.
+
+10. **Grammar checking for constructed languages, by shaping the checker in the UI.** The
+    transformers are general, so the spelling and grammar checker must not be preset-only.
+    - **Teach it in the UI,** Skinner-box style: mark spans right or wrong, accept or reject
+      suggestions, reward or punish the checker, build a conlang's lexicon and rules as lists.
+    - **It learns:** the detector and the corrector train on that feedback, plus generated
+      corruptions of the user's own conlang texts.
+    - **Many languages:** each one is a set of classifiers and spec models saved with the save,
+      chosen per note.
+    - **Visible progress:** precision and recall over held-out marked spans.
+
+11. **The 5-bit text format as a usable esolang.** core/src/graph/codec.rs is the 5-bit token
+    codec, and graph/interp.rs is already Turing complete with recursion and `if`. Give it a
+    high-level representation people can read and write: a surface syntax that maps one-to-one
+    to the packed form, documented in docs/format.md.
+    - **Nodes view:** editable there with code features: syntax highlighting, structure and
+      outline, go to definition and references, inline evaluation and results, step
+      debugging, errors on the node, completion from the standard library, formatting.
+    - **Part of the whole ontology:** programs are entries, they reference entries, lists,
+      classifiers, spec models, pictures, blocks and chains, and they can act on them.
+    - **A standard library** with headless access to the project's functions: everything the
+      app API's ops do (entries, lists, filters, classifiers, specs, pictures, space, blocks,
+      hub), so programs script the project without the UI. Run from the bar, the editor and
+      a CLI (`anend run`), with the hub's limits on shared hubs.
