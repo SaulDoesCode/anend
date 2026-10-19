@@ -395,33 +395,45 @@ These settle the Stage B design. Where they differ from the draft above, the ans
    keyed like block textures: the key is the entry, and the multimap values are the
    instantiations. Texts are billboards, so an instance is only a position: no rotation and
    no scale.
-2. **Scenes are saves.** A scene table with hierarchical features, sharing the text
-   entries it places.
-   - Each multimap value is a prefix and a list: the text, then the positions where it is
-     instantiated.
+2. **Many scenes live inside one save,** like Logic World saves inside the larger save. A
+   scene is not a save of its own.
+   - Each save holds a scene table with hierarchical features, sharing the save's text
+     entries across all its scenes.
+   - In a scene, each multimap value is a prefix and a list: the text, then the positions
+     where it is instantiated.
    - Blocks and their metadata are stored with the scene in the same way.
 3. **Prototype inheritance, like JavaScript.** When a prefab changes, its instances change
    too.
    - The exception is a discrete copy, which severs the link to the prototype.
    - The choice is made up front: **detach** (no inheritance from then on) or **modify**
      (keep inheriting, with local overrides).
-4. **A chain is a note,** as weum meant it: a text key as the title and a text key as the
-   body, two entries in a trenchcoat.
-   - In the space, a chain is one transform for the head text, and the rest is positioned
-     relative to it deterministically.
-   - The rest never collides with blocks or other texts, using the same physics as the
-     spread.
-   - The texts float together and stay readable left to right. A rotation constraint flips
-     them to face the viewer depending on the viewing angle.
+4. **Chains are their own kind of thing; notes stay exactly as they are.** (The user's first
+   wording was "a chain is a note"; it was changed so notes, in the notes view and attached
+   to entries, keep working unchanged.)
+   - A chain is an entry: a title entry plus an ordered list of member entries, such as a run
+     of paragraphs. It can be searched, listed and opened like any entry.
+   - In a scene, a chain has one position, for its head. The members lay out from it in order,
+     deterministically, without colliding with blocks or other texts (the same physics as the
+     spread). They float together and stay readable left to right, with a rotation
+     constraint that flips them to face the viewer.
+   - Weum's "two entries in a trenchcoat" becomes one use of chains: placing a note in a scene
+     shows it as a chain of two, its title and its body. The note itself isn't changed.
 5. **Merging works on wholes,** CRDT-like with no finer granularity (weights can't be
    blended), using the forge's set operations: each thing is included or excluded.
    - Where two scenes overlap in space, placements settle by deterministic physics and
      collision, like keep semantics but done up front.
 6. **Sizes and positions.**
-   - Texts at about hand size, rendered smallish, is liked; keep it.
-   - Blocks default to about melon size or a little smaller.
-   - Positions are free transforms, not a grid. Blocks scale freely. Any storage
-     quantisation must be lossless or invisible, and must never snap anything.
+   - Hand-sized objects render fairly small, and that's liked; keep it.
+   - Blocks default to about melon size or a little smaller, and scale freely. Positions are
+     free transforms, never snapped to a grid. Any storage quantisation must be lossless or
+     invisible.
+   - **A text placement carries a font size as a plain `u8`:**
+     - `0` means the default size, set in settings;
+     - `1`–`255` set it explicitly.
+
+     No `Option` is needed: in the packed format a `0` costs one 5-bit chunk, so
+     default-sized texts stay as cheap as now. Texts are still billboards, with no rotation,
+     and the font size is their only scale.
 7. **Long texts are split visually at word boundaries.** At most 80 characters a line and six
    lines a piece, spliced into whole pieces. No glass ceilings: these limits, like the hub's
    limits, are configurable settings, not constants.
