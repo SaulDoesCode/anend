@@ -71,6 +71,15 @@ stays a standing requirement:
        own properties, English vs not-English (from bundled word lists), well-spelled vs
        corrupted text (the spelling corpus), sentence vs fragment, plus the familiar fruit,
        stones and animals.
+     - **Real data from public-domain sets** (the user asked for these, 20 Oct), alongside the
+       generated ones:
+       - prefer public domain or CC0, e.g. Project Gutenberg texts (public domain in the
+         US; the hub tests already fetch some) and US government works;
+       - allow permissive licences with attribution where nothing public-domain exists
+         (Tatoeba is CC BY, Universal Dependencies treebanks vary, WordNet has its own
+         licence), keeping each set's licence and source in a LICENSES note beside it;
+       - verify every set's licence before it is bundled;
+       - download large sets on demand rather than shipping them in the binary.
      - **Each one shows its held-out score,** so it doubles as a test of the classifier
        functions. Pretrained weights ship as small fixtures where training takes too long.
 - **Standing requirements from the user (20 Oct):**
