@@ -5,6 +5,33 @@ Where the work stands, for picking it up in a new session. Branch:
 
 ## Resuming (read first)
 
+**Spec JSONs and pictures in the save; then the backlog (19 Oct, morning UTC):**
+- **Done:**
+  - Spec model definitions live in the save's own tables (`graph spec models`,
+    `core/src/graph/assets.rs`; `core/src/specs.rs`); the weights stay in `.models` (`spec
+    model weights` + `spec model weights fit`: stale ones unused). Older saves move theirs
+    in when the models file opens (`specs::migrate`, lossless; test
+    `ops::models::tests::old_saves_move_their_specs_into_the_save`). Backups (`other.json`
+    `specs`), bundles, copies, renames, the hub's share/take and merges carry them (a clash
+    comes in as `<name> 2`; `ops::merge::assets`). docs/models.md "Where a save keeps its
+    spec models".
+  - Pictures: tables `graph pictures` / `graph picture bytes` / `graph picture lists`
+    (lists by name), `pictures.*` ops (`core/src/ops/pictures.rs`, the `image` crate,
+    PNG/JPEG; shared-hub limits 4 MB, 8192 px, 2000 a save), spec data `{"from":
+    "pictures", "list": ..}` and `models.run` input `{picture: id}`; they travel like the
+    specs. The lists view's pictures panel (`app/src/views/pictures.rs`): drop or pick
+    files (a path on the desktop), thumbnails, lists, delete; a "pictures" spec template.
+    Checked: tests (`ops::pictures::tests`, `ops::models::tests::picture_models_*`), the
+    desktop under Xvfb (path add, tag, delete; drag-and-drop can't be driven by xdotool),
+    the web build against `anend-hub --mode app --local` in Playwright (picker, a
+    synthetic drop, tagging, the template trained to 100% on 8 pictures, delete). Shots
+    `app/docs/shots/desktop-pictures.png`, `web-pictures.png`.
+- **Next, in order** (each committed and pushed): word types on hover; the search filter
+  panel; replacements in the editor; the spatial table; space search modes; save
+  checkpoints; a real IME test.
+- **Disk:** build with `CARGO_INCREMENTAL=0` (target/debug/incremental grew to 5 GB and
+  filled the disk once); `rm -f target/debug/deps/*anend*` drops stale test binaries.
+
 **Spec models round (19 Oct, early UTC):**
 - **Done:**
   - `models.*` ops in core (`core/src/ops/models.rs`, storage `core/src/specs.rs` in the

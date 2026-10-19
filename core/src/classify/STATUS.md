@@ -149,7 +149,10 @@ Left:
   done 19 Oct: `ops::models` (the save's lists by name or key, tags, pairs, snapshotted when
   training starts; `models.*` in docs/app-api.md, the same on the desktop and the hub),
   stored by `crate::specs` in the save's `.models` file and bundles, and the models view's
-  spec models tab. Left: the scripting language writing specs; picture data from the save.
+  spec models tab. Left: the scripting language writing specs. ~~Picture data from the
+  save~~: done 19 Oct (`{"from": "pictures", "list": ..}` over the save's pictures table,
+  `ops::pictures`; spec definitions moved into the save's own tables, weights stay in
+  `.models`).
 - A patch-embedding (continuous) input for picture classifiers; images now always go through
   the codebook.
 - Guidance is per byte and judges partial text; it helped 4 authors of 6 here. Sentence-level
