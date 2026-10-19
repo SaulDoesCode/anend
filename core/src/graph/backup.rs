@@ -22,6 +22,8 @@
 //!   source, created, modified, version, history), without their trained weights;
 //! - `pictures`: `[{id, mime, width, height, name, added, size, data}, ...]`, `data` the
 //!   file's bytes in base64; `picture_lists`: `[[list name, picture id], ...]`.
+//! - `blocks`: `[{id, kind, texture, x, y, z, w, h, d}, ...]` (`graph::blocks`), restored
+//!   with their ids.
 
 use serde_json::{Value, json};
 
@@ -251,6 +253,7 @@ impl Graph {
                 v
             }).collect::<Vec<_>>(),
             "picture_lists": self.picture_list_rows()?,
+            "blocks": self.blocks(None)?,
         });
         Ok((
             serde_json::to_string(&Value::Array(rows)).map_err(err)?,
@@ -388,6 +391,14 @@ impl Graph {
                 self.tag_picture(id, l, true)?;
             }
         }
+        let blocks: Vec<super::blocks::Block> = o
+            .get("blocks")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|b| serde_json::from_value(b.clone()).ok())
+            .collect();
+        self.put_blocks(&blocks)?;
         Ok(())
     }
 }

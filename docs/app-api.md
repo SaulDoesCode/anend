@@ -304,6 +304,42 @@ since the Unix epoch), size (bytes), lists: [names]}`.
   need room under it, the rest work when it's full. On one's own machine a picture is at
   most 64 MB and 32768 pixels a side, with no count limit.
 
+## Blocks (spatial saves)
+
+Blocks placed in the space, kept in the save's own tables (`graph blocks`, a redb
+multimap, and `graph block ids`), so they travel with the file, its backups and bundles
+(`blocks` in the backup's other file, restored with their ids) and merges (fresh ids; a
+text block finds its text in the target by what it says, a picture block its picture by
+hash). A block shows a **texture**: a text of the save (`kind: "text"`, `texture` its
+key: the entry label, a note's `note:` prefix taken off), a picture (`"picture"`, its
+id) or a plain colour (`"plain"`, `#rrggbb`). The table's key is `kind:texture` and its
+values are one 32 byte transform per block (the id, then x y z w h d as f32), so a text
+shown a thousand times is stored once with a thousand transforms. One implementation
+answers them on the desktop and the hub (`core/src/ops/blocks.rs`, `core/src/graph/blocks.rs`).
+
+A block: `{id, kind, texture, x, y, z, w, h, d}`, its centre and its sides in space units.
+Sides are kept between 0.05 and 10000, places within 10⁶ of the origin. The texture tiles
+at one tile per unit, so a bigger block shows more tiles rather than a stretched one (the
+app sets each face's UVs from its size, with repeat wrapping). The answers that list
+blocks are `{blocks: [block], textures: {"kind:texture": about}}`, where `about` is
+`{text}` for a text (sent once however many blocks show it), `{name, width, height}` for
+a picture, `{colour}` for a colour, and `{gone: true}` when what it showed was deleted.
+
+| op | args | data |
+|---|---|---|
+| `blocks.list` | `{lo?, hi?, kind?, texture?}` | the blocks, by id; `lo` and `hi` (`[x, y, z]` each) keep those whose boxes meet that region |
+| `blocks.stats` | | `{blocks, textures}` |
+| `blocks.add` | `{kind, texture, x?, y?, z?, w?, h?, d?}` or `{blocks: [..]}` | the new blocks and `ids` (place 0, sides 1 unless given) |
+| `blocks.move` | `{id, x?, y?, z?, by?}` | the block, moved (to x y z, or `by` `[dx, dy, dz]`); its size stays |
+| `blocks.scale` | `{id, w?, h?, d?}` | the block, resized; its place stays |
+| `blocks.set` | `{id, x?..d?, by?}` or `{changes: [..]}` | the blocks, each field given replaced |
+| `blocks.duplicate` | `{id or ids, by?: [1, 0, 0]}` | the copies (same texture, fresh ids) and `ids` |
+| `blocks.delete` | `{id or ids}` | `{removed: [block]}`: what was taken, to hand back to `blocks.restore` |
+| `blocks.restore` | `{blocks}` | `{restored}`: blocks put back with their ids (an undo); taken ids and missing textures are skipped |
+
+- **Limits**: at most 5000 blocks a call; on a shared hub a save holds at most 50 000.
+  `blocks.list`, `blocks.stats` and `blocks.delete` work when a member's quota is full.
+
 ## Saves in and out
 
 | | |

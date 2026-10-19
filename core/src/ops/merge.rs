@@ -303,9 +303,10 @@ pub fn merge(tx: &mut Tx, src: &View) -> GResult<Written> {
 pub struct AssetsWritten {
     pub models: usize,
     pub pictures: usize,
+    pub blocks: usize,
 }
 
-/// a save's spec models and pictures into another (a merge's second half; the entries
+/// a save's spec models, pictures and blocks into another (a merge's second half; the entries
 /// go through [`merge`]). Pictures are known by their content hash, so one in both saves
 /// stays one; their lists are joined. A spec model whose name the target has already:
 /// the same spec (its JSON as written) is the same model and nothing changes; a
@@ -341,6 +342,28 @@ pub fn assets(target: &crate::graph::Graph, src: &crate::graph::Graph) -> GResul
         if target.picture(&id)?.is_some() {
             target.tag_picture(&id, &list, true)?;
         }
+    }
+    // blocks get fresh ids; a text block finds its text in the target (the entries
+    // came first), a picture block its picture
+    let mut new = Vec::new();
+    for b in src.blocks(None)? {
+        use crate::graph::blocks::Kind;
+        let texture = match b.kind {
+            Kind::Text => {
+                let Some(id) = crate::graph::record::parse_label(&b.texture) else {
+                    continue;
+                };
+                let Ok(e) = src.entry(id) else { continue };
+                let text = src.render(id)?;
+                crate::graph::record::label(target.save_text(&text, e.record.mime)?.0)
+            }
+            Kind::Picture if target.picture(&b.texture)?.is_none() => continue,
+            _ => b.texture.clone(),
+        };
+        new.push((b.kind, texture, b.t));
+    }
+    if !new.is_empty() {
+        w.blocks = target.add_blocks(&new)?.len();
     }
     Ok(w)
 }

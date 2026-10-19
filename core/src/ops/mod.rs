@@ -8,6 +8,8 @@
 //! the browser build) keeps a folder of saves and answers `saves.*` and `forge.*` too.
 
 #[cfg(not(target_arch = "wasm32"))]
+pub mod blocks;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod classify;
 pub mod merge;
 #[cfg(not(target_arch = "wasm32"))]

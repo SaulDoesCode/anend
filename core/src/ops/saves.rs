@@ -401,6 +401,11 @@ impl Saves {
     /// one op of the app API: the saves' own here, the models' in `super::classify`,
     /// the rest on the open save
     pub fn call(&self, op: &str, args: &Value) -> Res {
+        if super::blocks::routed(op) {
+            let (_, g) = self.current()?;
+            let limits = self.models.unwrap_or(super::classify::Limits::NONE);
+            return super::blocks::call(&g, op, args, &limits);
+        }
         if super::pictures::routed(op) {
             let (_, g) = self.current()?;
             let limits = self.models.unwrap_or(super::classify::Limits::NONE);
@@ -577,7 +582,7 @@ impl Saves {
                     };
                     return Ok(
                         json!({ "merged": true, "memories": w.memories, "notes": w.notes, "lists": w.lists,
-                                      "models": a.models, "pictures": a.pictures }),
+                                      "models": a.models, "pictures": a.pictures, "blocks": a.blocks }),
                     );
                 }
                 let want = match s(args, "name") {

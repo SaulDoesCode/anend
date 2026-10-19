@@ -38,7 +38,7 @@ pub const SETTINGS: TableDefinition<&str, &[u8]> = TableDefinition::new("graph s
 pub const MIMES: TableDefinition<&str, u16> = TableDefinition::new("graph mimes");
 
 /// the names of every table, for stats
-pub const TABLE_NAMES: [&str; 18] = [
+pub const TABLE_NAMES: [&str; 20] = [
     "graph entries",
     "graph edges",
     "graph edges in",
@@ -57,6 +57,8 @@ pub const TABLE_NAMES: [&str; 18] = [
     "graph pictures",
     "graph picture bytes",
     "graph picture lists",
+    "graph blocks",
+    "graph block ids",
 ];
 
 /// the store's layout version, in `graph meta` under "format"
@@ -1794,6 +1796,7 @@ fn ensure_tables(txn: &WriteTransaction) -> GResult<()> {
     txn.open_table(SETTINGS).map_err(err)?;
     txn.open_table(MIMES).map_err(err)?;
     super::assets::ensure_tables(txn)?;
+    super::blocks::ensure_tables(txn)?;
     Ok(())
 }
 
@@ -2110,6 +2113,8 @@ impl Graph {
         plain!(super::assets::PICTURES, "pictures");
         plain!(super::assets::PICTURE_BYTES, "picture bytes");
         multi!(super::assets::PICTURE_LISTS, "picture lists");
+        multi!(super::blocks::BLOCKS, "blocks");
+        plain!(super::blocks::BLOCK_IDS, "block ids");
         Ok(out)
     }
 
