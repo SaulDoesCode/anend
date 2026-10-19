@@ -40,7 +40,7 @@ views touched against their previous behaviour before committing.
      `Option`s. `None` means the default orientation (identity) and the default scale (1), and
      takes no bytes beyond a flag bit, so most instances are only a position.
    - **Packed storage for block and text entries:** reuse the project's existing bit-packing and
-     self-reference encodings. Find them in core before writing new ones.
+     self-reference encodings. They live in `core/src/graph/codec.rs`, `record.rs` and `postings.rs`.
      - Per instance: a flags byte or bits for which optional parts are present; positions as
        varints or quantised deltas, sorted within a key so neighbours delta well; a
        self-reference for an instance that repeats an earlier one's rotation or scale.
