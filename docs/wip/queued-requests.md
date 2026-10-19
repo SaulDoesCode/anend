@@ -52,6 +52,39 @@ stays a standing requirement:
   - items 1–3 (the bar);
   - item 12 (one notes count; the notes view as the typing view);
   - the remaining brief items (space search modes, save checkpoints, the IME test).
+- **Before Stage B's code, two pieces the user wants soon (20 Oct):**
+  1. **The GPU for classifying, not only training.** Today only training jobs can use the
+     GPU. `classify.predict`, `classify.search`, indexing, buckets and tints all run on the
+     CPU, which makes classifier search slow. Run batched inference on the GPU: many texts
+     per dispatch through `GpuNet`, with a CPU fallback that says why.
+     - **A GPU report so the user's logs can stand in for hardware we lack:** a button in
+       settings and an op (`gpu.report`) that write a JSON file. It holds the adapter and
+       driver, the limits, the exactness probe for every kernel against the CPU, and the
+       timings of a fixed synthetic train run and of predicting 10k texts, on CPU and GPU.
+       The user runs it and pastes the file; we compare it with the CPU reference. Tests keep
+       comparing GPU and CPU results as now.
+  2. **Starter classifiers whose correctness a machine can check.** A "start with
+     examples" set in the classifiers view's empty state (parity.md: "starter examples",
+     missing).
+     - **Generated deterministically,** with labels that follow from a rule: number
+       properties (even/odd, prime/composite, digit root, divisibility), the gematria sums'
+       own properties, English vs not-English (from bundled word lists), well-spelled vs
+       corrupted text (the spelling corpus), sentence vs fragment, plus the familiar fruit,
+       stones and animals.
+     - **Each one shows its held-out score,** so it doubles as a test of the classifier
+       functions. Pretrained weights ship as small fixtures where training takes too long.
+- **Standing requirements from the user (20 Oct):**
+  - **Core functionality first, usable visually.** Working code comes before write-ups;
+    the guide and README are updated once per stable milestone, not per feature.
+  - **The game experience has to be enjoyable to spend time in,** fit for people to use,
+    not only to demo.
+  - **Long texts: the user's approach** is separate typing segments, each updated on its
+    own, with the string stitched back together. Only the segment being typed in is sent and
+    re-highlighted, which avoids the pause. Use this in Stage B's large-text work (item 6).
+  - **Conlang checking needs an interface for training by hand** (items 10 and 13). That
+    is ontology work: tag sets, verdicts and progress made visible.
+  - **Builds:** if it builds on the user's machine, that's fine; don't spend effort on CI
+    until it matters.
 - **Stage B, step 0 (before any code):** the design section in docs/format.md was drafted
   before the user's answers, and its body still conflicts with them in places: a 1/100-unit
   position grid (answer 6: no grid), chains as a container mime (answer 4: chains are their

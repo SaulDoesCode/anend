@@ -19,9 +19,13 @@ goes away without a line there saying why.
   is written yet.
 - `b2cd700` a slid-away note list slides in when the pointer nears its edge (parity row
   updated).
-- **Pick up:**
-  - wait for the user's answers to format.md's open questions, then build Stage B as
-    designed;
+- **Pick up (no waiting on the user; see the queue's "How work proceeds"):**
+  - the user's answers to format.md's questions are in (answers 1–9 at the end of that
+    section); first rewrite the section's body to agree with them (the queue's "Stage B,
+    step 0");
+  - then the two pieces the queue puts before Stage B's code: GPU inference for
+    classifying, with a `gpu.report`; and starter classifiers that a machine can check;
+  - then Stage B's code;
   - still missing from parity.md's small items: the saves folder setting, listing the
     system's fonts (desktop only; a webview can't), and the space's full search line (pf
     chain, counts with icons).
@@ -43,7 +47,7 @@ by-hand check (Xvfb desktop, Playwright web) and a parity.md line:
   (~100 ms a key at 526 KB on the web); windowed highlighting belongs with item 6 (Stage B).
   The desktop IME wasn't tried (no input method in the container). Chains in the space menu
   come with item 8.
-- **Next: Stage B** (one model for definitions and placed instances: F4's placements,
+- **Next: Stage B** (superseded: see "Pick up" above; one model for definitions and placed instances: F4's placements,
   chains 8, blocks 5, prefabs 19, scenes; packed storage; large texts 6; write the design
   into docs/format.md first). Only after the user has tried Stage A.
 - **Paused before Stage A, not started:** starter examples for classifiers (parity.md's
