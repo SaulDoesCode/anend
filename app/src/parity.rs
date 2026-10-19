@@ -174,6 +174,44 @@ mod tests {
         assert!(mem.contains("labels: true, ruby: true"));
     }
 
+    /// the space's texts carry the same gematria grouping underline as the memory view's
+    #[test]
+    fn space_keeps_the_grouping_underlines() {
+        let js = include_str!("space.js");
+        assert!(
+            js.matches("borderBottomColor = t.under").count() >= 2,
+            "space.js must draw t.under"
+        );
+        let rs = include_str!("views/space.rs");
+        assert!(
+            rs.contains("\"under\": gem::underline(&h.text"),
+            "the space's texts must carry their underline"
+        );
+        assert!(rs.contains("f[\"under\"] = json!(gem::underline("), "a map's texts too");
+    }
+
+    /// the command bar's input spans the bar with the same room at both ends, so its
+    /// centred text doesn't move when what's beside it changes size
+    #[test]
+    fn the_bar_text_stays_put() {
+        let css = include_str!("style.css");
+        assert!(
+            css.contains("padding: 0 var(--side-w);"),
+            "the input keeps equal room at both ends"
+        );
+        assert!(
+            css.contains(".cmdbar .side {\n  position: absolute;"),
+            "the side sits over the bar, not beside the input"
+        );
+    }
+
+    /// the reader's note cards show when each note was written
+    #[test]
+    fn reader_cards_keep_their_dates() {
+        let rs = include_str!("views/reader.rs");
+        assert!(rs.contains("short_date(&c)") && rs.contains("written "));
+    }
+
     #[test]
     fn views_stay() {
         let have: Vec<&str> = crate::ui::View::ALL.iter().map(|v| v.name()).collect();

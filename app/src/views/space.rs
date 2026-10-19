@@ -360,6 +360,8 @@ fn show(ui: Ui, api: Api, sp: Sp, hits: Vec<Hit>) {
                     "key": h.key, "text": h.text, "note": h.note,
                     "s": s, "r": r, "q": q, "hue": anend_core::spread::seed_hue(q as i64),
                     "shared": count.get(&q).copied().unwrap_or(0) >= 2,
+                    // the gematria grouping underline, the memory view's colour for it
+                    "under": gem::underline(&h.text, if reversed { Mode::Reversed } else { Mode::Ordinal }),
                     "chars": f["chars"], "words": f["words"], "kind": f["kind"], "types": f["types"],
                     "created": f["created"], "lists": f["lists"], "freq": letter_counts(&h.text),
                 });
@@ -469,6 +471,18 @@ async fn route(ui: Ui, api: Api, sp: Sp, addr: &str) {
         let q = if reversed { s } else { r };
         f["q"] = json!(q);
         f["hue"] = json!(anend_core::spread::seed_hue(q as i64));
+        let text = rows
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|r| r[4]["key"].as_str() == Some(k.as_str()))
+            .and_then(|r| r[0].as_str())
+            .unwrap_or("")
+            .to_string();
+        f["under"] = json!(gem::underline(
+            &text,
+            if reversed { Mode::Reversed } else { Mode::Ordinal }
+        ));
         fm.insert(k, f);
     }
     let hits: Vec<Hit> = rows

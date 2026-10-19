@@ -198,7 +198,7 @@ export class Space {
       let n = this.nodes.get(String(t.key));
       if (n) {
         Object.assign(n.f, t);
-        n.el.style.borderBottomColor = t.shared ? `hsl(${t.hue} 70% 45%)` : 'transparent';
+        n.el.style.borderBottomColor = t.under || 'transparent';
         continue;
       }
       n = this.make(t, false);
@@ -215,7 +215,8 @@ export class Space {
     const el = document.createElement('div');
     el.className = 'slabel' + (free ? ' free' : '') + (t.note ? ' note' : '');
     el.textContent = t.note ? `✎ ${t.text}` : t.text;
-    el.style.borderBottomColor = t.shared ? `hsl(${t.hue} 70% 45%)` : 'transparent';
+    // the gematria grouping underline (the memory view's colour), on every text that has one
+    el.style.borderBottomColor = t.under || 'transparent';
     if (t.colour) el.style.color = t.colour;
     el.tabIndex = -1;
     const n = { key: String(t.key), f: t, el, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, hw: 1, hh: 0.4, pinned: false, free };

@@ -27,6 +27,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | one command bar shared by every view, each view keeping its own text | bar.rs | has |
 | command bar: the view's name at its left | bar.rs `BarMode` | dropped: the user asked 19 Oct for the bar's left side not to name the view |
 | command bar: the view's additions (counts, hints) at its right end | bar.rs `BarSide`, `notes_side` | has (19 Oct): one bar; the notes' count is there |
+| **must keep:** typing in the command bar, the text stays put: the input spans the bar with equal room at both ends and the view's additions sit over its right end, so their changing sizes never move the text (19 Oct, measured under Xvfb: the text's centre stayed at x = 600.5 over four words while the sums changed; guard `parity::tests::the_bar_text_stays_put`) | asked 19 Oct | has |
 | the memory view's and the space's sums and toggles in the bar | bar.rs `BarStrip` | has (19 Oct): in the one bar's right end, not a strip over it (the user asked for one bar) |
 | the bar's undo / redo (Ctrl+Z / Ctrl+Shift+Z in the bar) | Dioxus only | has |
 | toasts | memory_ui.rs, space_ui.rs | has |
@@ -87,6 +88,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | feature | was in | status |
 |---|---|---|
 | notes as cards with title, date (long date, "edited …" relative), tags, rendered markdown | ui.rs `rebuild_reader` | has: the opened one (19 Oct); the cards show the text |
+| **must keep:** a note's card in the reader shows when it was written (and "edited …" when it was), and the opened note its full dates (19 Oct; guard `parity::tests::reader_cards_keep_their_dates`) | ui.rs `rebuild_reader` | has |
 | a tag chip filters the reader to that tag, "show all" | ui.rs | has (from the opened note's tags; × shows all) |
 | edit button on a card opens the editor | ui.rs | has (on the opened note) |
 | the bar narrows by words | bar.rs | has |
@@ -138,6 +140,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | chips: gsearch, reversed (F), saturate, keep | space_ui.rs | has |
 | the search line in the top bar (what, counts with icons, pf chain, the triangle with sides and angles) | space_ui.rs `rebuild_qline` | partly: title, mode, count, triangle |
 | bucket underline colours (seedCLR), class colours from a classifier | space.rs, tint.rs | has |
+| **must keep:** every space text underlined in its gematria grouping colour, the same as the memory view's (the reversed-ordinal match groups), together with the spread and the smooth labels (lost in the 19 Oct spread rewrite, which underlined only texts sharing a bucket in the room; back the same day; guard `parity::tests::space_keeps_the_grouping_underlines`) | space.rs, the earlier Dioxus space.js | has |
 | the solid box in the room | space.rs `SOLIDS` | dropped: a test fixture of remem's, never used for anything |
 | list / candidate marks | Dioxus | has |
 | one bar (the space's strip merged into the command bar) | asked 19 Oct | has (19 Oct) |

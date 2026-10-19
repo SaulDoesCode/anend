@@ -56,6 +56,21 @@ pub fn Reader() -> Element {
         };
         async move { api.query(&q).await }
     });
+    // each note's dates, for its card (as the Bevy reader showed them)
+    let api_n = api.clone();
+    let dates = use_resource(move || {
+        let api = api_n.clone();
+        let _ = (ui.changed)();
+        async move {
+            api.notes(&crate::backend::NoteQuery::default())
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|n| (n.key.clone(), (n.created.clone(), n.modified.clone(), n.edits)))
+                .collect::<std::collections::HashMap<_, _>>()
+        }
+    });
+    let dates = dates.read().clone().unwrap_or_default();
     let all: Vec<Hit> = match &*found.read() {
         Some(Ok((_, h))) => h.clone(),
         _ => vec![],
@@ -137,7 +152,20 @@ pub fn Reader() -> Element {
                         onkeydown: move |e: KeyboardEvent| if e.key() == Key::Enter { expanded.set(Some(i)) },
                         if h.note {
                             h3 { "{h.text}" }
-                            span { class: "dim small", "a note · {h.key}" }
+                            {
+                                let d = dates.get(h.key.trim_start_matches("note:")).cloned();
+                                rsx! {
+                                    span { class: "dim small rdate",
+                                        match d {
+                                            Some((c, m, e)) => rsx! {
+                                                "{short_date(&c)}"
+                                                if e > 0 && !m.is_empty() && m != c { " · edited {relative(&m)}" }
+                                            },
+                                            None => rsx! { "a note" },
+                                        }
+                                    }
+                                }
+                            }
                         } else {
                             div { class: "body", "{h.text}" }
                         }
@@ -153,6 +181,21 @@ pub fn Reader() -> Element {
             }
         }
     }
+}
+
+/// a card's date: `19 October 2026`
+fn short_date(iso: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(iso)
+        .map(|t| t.with_timezone(&chrono::Local).format("%-d %B %Y").to_string())
+        .unwrap_or_default()
+}
+
+/// how long ago, in words
+fn relative(iso: &str) -> String {
+    let full = long_date(iso);
+    full.rsplit_once('(')
+        .map(|(_, r)| r.trim_end_matches(')').to_string())
+        .unwrap_or(full)
 }
 
 /// a date for people: `19 Oct 2026, 08:46`, and how long ago
