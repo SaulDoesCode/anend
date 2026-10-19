@@ -137,7 +137,7 @@ fn Verdict(entry: String, v: Value, on_change: EventHandler<()>) -> Element {
             }
             div { class: "probs",
                 for (i , c) in classes.iter().enumerate() {
-                    div { key: "{c}", class: if i == top { "prob top" } else { "prob" },
+                    div { key: "{c}", class: if i == top { "prob best" } else { "prob" },
                         span { class: "c", "{c}" }
                         span { class: "probbar wide", span { style: "width: {(probs.get(i).copied().unwrap_or(0.0) * 100.0).clamp(0.0, 100.0):.1}%; background: {palette.get(i).cloned().unwrap_or_default()};" } }
                         span { class: "p", {format!("{:.1}%", probs.get(i).copied().unwrap_or(0.0) * 100.0)} }

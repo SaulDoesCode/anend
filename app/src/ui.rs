@@ -224,6 +224,8 @@ pub struct Ui {
     pub side: Signal<std::collections::HashMap<View, String>>,
     /// the keys menu waits for a key for this action
     pub listening: Signal<Option<crate::keys::Action>>,
+    /// a note another view asked the notes view to open
+    pub open_note: Signal<Option<String>>,
 }
 
 pub fn ui() -> Ui {

@@ -208,8 +208,17 @@ button.tchip.on { color: var(--bar-text); opacity: 1; }
 .tw.t-preposition { --tc: var(--t-preposition); } .tw.t-conjunction { --tc: var(--t-conjunction); } .tw.t-interjection { --tc: var(--t-interjection); }
 .tw.t-name { --tc: var(--t-name); } .tw.t-number { --tc: var(--t-number); } .tw.t-date, .tw.t-time { --tc: var(--t-date); }
 .tw.t-link, .tw.t-email { --tc: var(--t-link); } .tw.t-hashtag { --tc: var(--t-hashtag); }
-.art .tagged { text-decoration: none; display: inline; }
-.art:has(.tagged) { text-decoration: none !important; padding-bottom: 4px; max-height: none; }
+/* in a text (an article) the words stay inline under its own gematria underline; each
+   type is only the coloured label under its word (ruby), so the two never mix */
+.art .tagged { display: inline; }
+.art:has(.tagged) { max-height: none; line-height: 1.9; }
+ruby.rw { ruby-position: under; ruby-align: center; }
+ruby.rw rt { font: 700 max(10px, .5em)/1.2 var(--font); letter-spacing: .02em; color: var(--tc); }
+ruby.rw.t-noun { --tc: var(--t-noun); } ruby.rw.t-verb { --tc: var(--t-verb); } ruby.rw.t-adjective { --tc: var(--t-adjective); }
+ruby.rw.t-adverb { --tc: var(--t-adverb); } ruby.rw.t-pronoun { --tc: var(--t-pronoun); } ruby.rw.t-determiner { --tc: var(--t-determiner); }
+ruby.rw.t-preposition { --tc: var(--t-preposition); } ruby.rw.t-conjunction { --tc: var(--t-conjunction); } ruby.rw.t-interjection { --tc: var(--t-interjection); }
+ruby.rw.t-name { --tc: var(--t-name); } ruby.rw.t-number { --tc: var(--t-number); } ruby.rw.t-date, ruby.rw.t-time { --tc: var(--t-date); }
+ruby.rw.t-link, ruby.rw.t-email { --tc: var(--t-link); } ruby.rw.t-hashtag { --tc: var(--t-hashtag); }
 .types-legend .tw { flex-direction: row; gap: 4px; color: var(--tc); align-items: baseline; }
 .mem-types { text-align: center; font: 17px/2 var(--serif); padding: 0 10px 4px; flex: none; color: #ddd; }
 .mem-types .tw .w { color: #fff; }
@@ -321,7 +330,9 @@ kbd { font: 12px var(--mono); border: 1px solid color-mix(in srgb, var(--dim) 50
 .rcard .body { font-size: .95em; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
 .rcard.tiny { max-height: 90px; padding: 6px 8px; }
 .expand { max-width: 820px; margin: 0 auto; padding: 18px 22px; }
-.expand h2 { font-size: 1.8em; }
+.expand h2 { font-size: 1.8em; margin-bottom: .1em; }
+.expand { display: flex; flex-direction: column; gap: 8px; }
+.expand .dates b { font-weight: 600; color: var(--text); }
 .expand .text { white-space: pre-wrap; font-size: 1.12em; line-height: 1.6; overflow-wrap: anywhere; }
 .md h1 { font-size: 1.5em; } .md h2 { font-size: 1.3em; } .md pre { background: var(--code); padding: 8px; border-radius: var(--radius); overflow: auto; }
 .md code { font-family: var(--mono); background: var(--code); padding: 0 3px; border-radius: 3px; }
@@ -390,7 +401,7 @@ button.plain.on { background: var(--accent); color: var(--on-button); }
 .verdict .probs { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 2px 14px; }
 .prob { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
 .prob .c { width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.prob.top .c { font-weight: 700; }
+.prob.best .c { font-weight: 700; }
 .prob .p { width: 46px; text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
 
 /* ---------------------------------------------------------------- tags, stats, models, filters */

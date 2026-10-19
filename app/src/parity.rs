@@ -149,6 +149,25 @@ mod tests {
         }
     }
 
+    /// the memory view's gematria underline (the colour of a text's reversed-sum group)
+    /// stays under word-type labels: no rule on a text or its labelled words takes the
+    /// underline away or draws one of its own
+    #[test]
+    fn word_types_keep_the_gematria_underline() {
+        let css = include_str!("style.css");
+        for rule in css.split('}') {
+            let (sel, body) = rule.split_once('{').unwrap_or(("", ""));
+            if sel.contains(".art") || sel.contains("ruby.rw") {
+                assert!(!body.contains("text-decoration: none"), "{sel} hides the underline");
+                assert!(!body.contains("border-bottom"), "{sel} draws a line of its own");
+                assert!(!body.contains("text-decoration-color"), "{sel} recolours the underline");
+            }
+        }
+        let mem = include_str!("views/memory.rs");
+        assert!(mem.contains("text-decoration: underline; text-decoration-color: {c};"));
+        assert!(mem.contains("labels: true, ruby: true"));
+    }
+
     #[test]
     fn views_stay() {
         let have: Vec<&str> = crate::ui::View::ALL.iter().map(|v| v.name()).collect();

@@ -86,13 +86,13 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 
 | feature | was in | status |
 |---|---|---|
-| notes as cards with title, date (long date, "edited …" relative), tags, rendered markdown | ui.rs `rebuild_reader` | partly: cards show the text; the opened note has no dates |
-| a tag chip filters the reader to that tag, "show all" | ui.rs | missing |
-| edit button on a card opens the editor | ui.rs | missing |
+| notes as cards with title, date (long date, "edited …" relative), tags, rendered markdown | ui.rs `rebuild_reader` | has: the opened one (19 Oct); the cards show the text |
+| a tag chip filters the reader to that tag, "show all" | ui.rs | has (from the opened note's tags; × shows all) |
+| edit button on a card opens the editor | ui.rs | has (on the opened note) |
 | the bar narrows by words | bar.rs | has |
 | notes, texts or everything; pages; expand one to read big, ← → steps | Dioxus only | has |
-| the opened item's dates (created, updated) | asked 19 Oct | missing |
-| classifiers on the opened item: pick classifiers, see each class's probability | asked 19 Oct | missing |
+| the opened item's dates (created, updated) | asked 19 Oct | has (19 Oct): written and last changed, long and relative, the edits count |
+| classifiers on the opened item: pick classifiers, see each class's probability | asked 19 Oct | has (19 Oct): views/judge.rs, with yes / no |
 
 ## Memory view
 
@@ -109,7 +109,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | click: into the bar; double click: key; hover line (key + gsum) | memory_ui.rs | has |
 | middle click opens a note in the editor | memory_ui.rs | missing |
 | Ctrl+right click: forget and re-saturate under a new key | memory_ui.rs | dropped for weum's Ctrl+right click (gsearch ⌊√(s·r)⌋), which the space had too; re-keying is not offered |
-| underlines by shared reversed sum | memory_ui.rs | has |
+| underlines by shared reversed sum (the gematria colour of a text's reversed-ordinal match group) | memory_ui.rs | has; **must stay**: word-type labels (T) are a separate channel (a coloured label under each word) and never take, replace or recolour the underline (guard: `parity::tests::word_types_keep_the_gematria_underline`) |
 | colouring by a classifier (bar at the left, legend) | tint.rs | has |
 | empty-state hint | memory_ui.rs | has |
 | word types on hover: which types, not only how many (noun, verb, name, number, link…, coloured) | asked 19 Oct | has (19 Oct): core `kinds::tag`, a rule tagger (noun, verb, adjective, adverb, pronoun, determiner, preposition, conjunction, interjection, name, number, date, time, link, email, hashtag); the hover line labels each word in its type's colour; T labels every text, with a legend |

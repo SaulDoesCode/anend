@@ -599,7 +599,15 @@ pub(crate) fn type_label(t: &str) -> &'static str {
 /// a text with each word labelled by its type (core's `kinds::tag`), in that type's colour;
 /// the spaces and punctuation between words kept as they are
 #[component]
-pub(crate) fn TaggedText(text: String, #[props(default = true)] labels: bool) -> Element {
+pub(crate) fn TaggedText(
+    text: String,
+    #[props(default = true)] labels: bool,
+    /// as ruby: the words stay inline text, so a text's own underline (the gematria
+    /// colour of its reversed-sum group) runs under them untouched; the type is the label
+    /// under each word, in its colour, never an underline
+    #[props(default)]
+    ruby: bool,
+) -> Element {
     let tags = anend_core::kinds::tag(&text);
     let mut parts: Vec<(String, Option<&'static str>)> = Vec::new();
     let mut at = 0;
@@ -617,6 +625,12 @@ pub(crate) fn TaggedText(text: String, #[props(default = true)] labels: bool) ->
         span { class: "tagged",
             for (i , (piece , ty)) in parts.into_iter().enumerate() {
                 match ty {
+                    Some(ty) if ruby => rsx! {
+                        ruby { key: "{i}", class: "rw t-{ty}", title: "{ty}",
+                            "{piece}"
+                            rt { "{type_label(ty)}" }
+                        }
+                    },
                     Some(ty) => rsx! {
                         span { key: "{i}", class: "tw t-{ty}", title: "{ty}",
                             span { class: "w", "{piece}" }
@@ -1165,7 +1179,7 @@ fn Art(hit: Hit, under: Option<String>, is_list: bool, is_cand: bool, selected: 
                     ui.menu.set(Some(Menu { hit: h3.clone(), x: p.x, y: p.y }));
                 }
             },
-            if tagged { TaggedText { text: hit.text.clone(), labels: true } } else { "{hit.text}" }
+            if tagged { TaggedText { text: hit.text.clone(), labels: true, ruby: true } } else { "{hit.text}" }
         }
     }
 }

@@ -120,6 +120,33 @@ pub fn Notes() -> Element {
         }
         true
     });
+    // a note another view asked to open (the reader's edit)
+    {
+        let api = api.clone();
+        use_effect(move || {
+            let Some(key) = (ui.open_note)() else { return };
+            let mut asked = ui.open_note;
+            asked.set(None);
+            let api = api.clone();
+            spawn(async move {
+                match api.note(&key).await {
+                    Ok(note) => {
+                        text.set(
+                            note.source
+                                .clone()
+                                .unwrap_or_else(|| anend_core::note::compose(&note.title, &note.markdown)),
+                        );
+                        tags.set(note.tags.clone());
+                        open.set(Some(note));
+                        reading.set(false);
+                        seq += 1;
+                        dirty.set(false);
+                    }
+                    Err(e) => ui.fail(e),
+                }
+            });
+        });
+    }
     // the bar's right end: how many notes there are, or match
     use_effect(move || {
         let n = list
