@@ -33,6 +33,14 @@ docs/architecture.md (the whole).
   - The game, logic and language matter most. The everyday gematria features get fixes, not
     new features, unless asked.
   - No glass ceilings: limits are settings, not constants.
+  - **The desktop app is the primary target.** The web build follows it, not the other way
+    round. Heavy 3D moves off three.js to wgpu (the renderer line).
+  - **Models from scratch come first.** The project's own engine trains and generates from
+    the save's data. Pretrained imports (safetensors, llama-style checkpoints, already in
+    core/src/classify/pretrained.rs) stay an option, never the default path.
+  - **Defaults are explicit.** When a convenient default narrows what the user asked for (a
+    framework, a pretrained model, a limit, a schedule), it is named in
+    docs/wip/questions.md, not adopted silently.
   - If it builds on the user's machine, that's enough; CI can wait until it matters.
 
 ## The list
