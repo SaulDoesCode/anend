@@ -48,3 +48,33 @@ views touched against their previous behaviour before committing.
      - Old records still read correctly: version the format and migrate on open.
      - Tests: round-trips (including edge values) and size measurements in the commit message,
        e.g. bytes per instance before and after for 10k copies of one text.
+
+6. **Very large texts in the space and memory views.** The project is not limited to short texts,
+   neither by design nor by intent. Texts can be any length (a chapter, a book), so both views
+   need a story for them:
+   - **Space view:** a long text shows as a compact slug (title or first line, length,
+     sum), never its whole body as a label. It opens into a scrollable reader-like pane, and
+     zooming in can reveal more of it (paragraph by paragraph, not all at once).
+   - **Memory view:** long texts are paged or folded into lines and paragraphs with a
+     virtualised list. The underlines (gematria match groups) and word types are computed per
+     visible window, not for the whole text on every frame.
+   - **Everywhere:**
+     - nothing loads, measures or renders a whole huge text at once when a window is enough;
+     - the figures (sum, letters, word types) are computed incrementally and cached;
+     - the bar, the editor and search stay responsive with a 1 MB text;
+     - core stores and indexes long texts without per-text size caps. Remove or justify any
+       cap found and record it in parity.md.
+   - **Tests and benchmarks:** a 1 MB and a 10 MB text, with timings for open, scroll, search
+     and spread recorded.
+
+7. **Images to block textures, as a pipeline the app models.** The path from making a picture
+   to texturing a block needs its own ontology in the app, rather than ad hoc steps:
+   - **Sources:** generated pictures (spec models with a picture output), pictures added to the
+     save, and rendered texts.
+   - **Steps:** pick or generate, then crop, tile settings (repeat, offset, scale per face) and
+     variants, then assign to a block kind or to one face.
+   - **Shown in the UI:** sources, steps and what feeds what, using the visual-builder style of
+     item 4, with previews at each step.
+   - **Stored compactly:** textures are kept by content hash and shared across blocks. A block
+     refers to its texture recipe, which is regenerated deterministically from its seed.
+   - **Desktop and web alike.**
