@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 
 use crate::backend::{ListInfo, ModelSummary, Scored};
 use crate::ui::*;
+use crate::views::clsmore::Tab;
 use crate::views::use_keys;
 
 /// what the open classifier's page is showing
@@ -381,6 +382,22 @@ fn ClassifierPage(name: String, on_gone: EventHandler<()>) -> Element {
     let mut armed = use_signal(|| false);
     let mut job: Signal<Option<Value>> = use_signal(|| None);
     let mut watching = use_signal(|| true);
+    let tab = use_signal(|| Tab::Learn);
+    let api_all = api.clone();
+    let all = use_resource(move || {
+        let api = api_all.clone();
+        let _ = (ui.changed)();
+        async move { api.call("classify.list", json!({})).await.ok() }
+    });
+    let all_names: Vec<String> = all
+        .read()
+        .clone()
+        .flatten()
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|c| c["name"].as_str().map(str::to_string))
+        .collect();
     let n0 = name.clone();
     let api_d = api.clone();
     let details = use_resource(move || {
@@ -493,15 +510,27 @@ fn ClassifierPage(name: String, on_gone: EventHandler<()>) -> Element {
                     }
                 }
             }
-            Train { name: name.clone(), details: d.clone(), job: job(), on_start: move |j: Value| { job.set(Some(j)); watching.set(true); } }
-            if trained {
-                Try { name: name.clone(), classes: classes.clone() }
-                Steer { name: name.clone(), details: d.clone() }
-                Search { name: name.clone(), classes: classes.clone(), outputs: d["outputs"].clone() }
-            } else if !running {
-                div { class: "card dim", "Train it to try it on texts, steer it, search with it and tell it yes or no." }
+            crate::views::clsmore::Tabs { tab }
+            match tab() {
+                Tab::Learn => rsx! {
+                    Train { name: name.clone(), details: d.clone(), job: job(), on_start: move |j: Value| { job.set(Some(j)); watching.set(true); } }
+                    if trained {
+                        Steer { name: name.clone(), details: d.clone() }
+                    }
+                    crate::views::clsmore::Growth { details: d.clone() }
+                    Verdicts { name: name.clone(), details: d.clone(), on_change: move |_| rev += 1 }
+                },
+                _ if !trained => rsx! {
+                    div { class: "card dim", if running { "It's training: the learn tab shows how it goes." } else { "Train it first (the learn tab): then try it on texts, search with it, file the save into its buckets and check it with other classifiers." } }
+                },
+                Tab::Use => rsx! {
+                    Try { name: name.clone(), classes: classes.clone() }
+                    crate::views::clsmore::Why { name: name.clone() }
+                    Search { name: name.clone(), classes: classes.clone(), outputs: d["outputs"].clone() }
+                },
+                Tab::Buckets => rsx! { crate::views::clsmore::Buckets { name: name.clone() } },
+                Tab::Checks => rsx! { crate::views::clsmore::Checks { name: name.clone(), all: all_names.clone() } },
             }
-            Verdicts { name: name.clone(), details: d.clone(), on_change: move |_| rev += 1 }
         }
     }
 }
@@ -871,6 +900,8 @@ fn Steer(name: String, details: Value) -> Element {
     let mut bias = use_signal(|| nums(&h["bias"]));
     let mut temperature = use_signal(|| h["temperature"].as_f64().unwrap_or(1.0));
     let mut threshold = use_signal(|| h["threshold"].as_f64().unwrap_or(0.5));
+    let g0 = &details["steer"]["gains"];
+    let mut gains = use_signal(|| ["letter", "word", "side", "extra"].map(|k| g0[k].as_f64().unwrap_or(1.0)));
     let mut report: Signal<Option<Value>> = use_signal(|| None);
     let mut form = use_signal(|| 0u64);
     let apply = {
@@ -880,7 +911,11 @@ fn Steer(name: String, details: Value) -> Element {
             let steer = if reset {
                 json!({ "reset": true })
             } else {
-                json!({ "bias": *bias.peek(), "temperature": *temperature.peek(), "threshold": *threshold.peek() })
+                {
+                    let g = *gains.peek();
+                    json!({ "bias": *bias.peek(), "temperature": *temperature.peek(), "threshold": *threshold.peek(),
+                            "gains": { "letter": g[0], "word": g[1], "side": g[2], "extra": g[3] } })
+                }
             };
             dioxus::dioxus_core::spawn_forever(async move {
                 match api.call("classify.steer", json!({ "name": n, "steer": steer })).await {
@@ -890,6 +925,8 @@ fn Steer(name: String, details: Value) -> Element {
                             bias.set(nums(&h["bias"]));
                             temperature.set(h["temperature"].as_f64().unwrap_or(1.0));
                             threshold.set(h["threshold"].as_f64().unwrap_or(0.5));
+                            let g = &v["steer"]["gains"];
+                            gains.set(["letter", "word", "side", "extra"].map(|k| g[k].as_f64().unwrap_or(1.0)));
                             form += 1;
                         }
                         report.set(Some(v["bias"].clone()));
@@ -935,6 +972,17 @@ fn Steer(name: String, details: Value) -> Element {
                             initial_value: "{threshold}", oninput: move |e| if let Ok(v) = e.value().parse() { threshold.set(v) },
                             onchange: { let a = a3.clone(); move |_| a(false) } }
                         span { class: "num", {pct(threshold())} }
+                    }
+                    label { class: "wide-label", "channel gains" }
+                    div { class: "dim small", "how much each kind of input counts: the letters, the words' sums, the text's own measures, other classifiers" }
+                    for (i , what) in ["letters", "word sums", "the text's measures", "other classifiers"].into_iter().enumerate() {
+                        label { key: "gl{i}", "{what}" }
+                        div { class: "row",
+                            input { r#type: "range", min: "0", max: "3", step: "0.05", style: "flex: 1;", "aria-label": "the gain of {what}",
+                                initial_value: "{gains()[i]}", oninput: move |e| if let Ok(v) = e.value().parse::<f64>() { gains.write()[i] = v; },
+                                onchange: { let a = a1.clone(); move |_| a(false) } }
+                            span { class: "num", {format!("{:.2}", gains()[i])} }
+                        }
                     }
                 }
             }

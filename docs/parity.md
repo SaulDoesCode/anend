@@ -169,13 +169,13 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 |---|---|---|
 | list, new from lists (classes, not-list, builds on, size, one class / several) | classify_ui.rs | has |
 | starter examples (fruit, stones, animals) | classify_ui.rs | missing |
-| training: epochs, rounds, from scratch, progress, loss line, cancel, metrics, confusion, growth | classify_ui.rs | partly: no growth history |
-| use: try a text, yes/no per class, "why" (each classifier's part, end to end) | classify_ui.rs, `classify.contributions` | partly: no "why" |
-| steering: bias per class, temperature, threshold, channel gains, the bias it adds (flipped, KL) | classify_ui.rs | partly: no channel gains |
-| buckets: every text filed by class and sureness (tenths), index again | classify_ui.rs, `classify.buckets` | missing |
-| near texts by meaning (embedding) or verdict | classify_ui.rs, `classify.near` | missing |
+| training: epochs, rounds, from scratch, progress, loss line, cancel, metrics, confusion, growth | classify_ui.rs | has (growth history back 19 Oct); the page has the Bevy tabs again: learn, use, buckets, checks |
+| use: try a text, yes/no per class, "why" (each classifier's part, end to end) | classify_ui.rs, `classify.contributions` | has |
+| steering: bias per class, temperature, threshold, channel gains, the bias it adds (flipped, KL) | classify_ui.rs | has |
+| buckets: every text filed by class and sureness (tenths), index again | classify_ui.rs, `classify.buckets` | has (19 Oct): views/clsmore.rs |
+| near texts by meaning (embedding) or verdict | classify_ui.rs, `classify.near` | has |
 | outputs as a list (write the list) | classify_ui.rs, `classify.enlist` | has |
-| checks: validators, disagreements | cls_more.rs | missing |
+| checks: validators, disagreements | cls_more.rs | has |
 | share / take classifiers on the hub | cls_more.rs, JS clsmore.js | missing |
 | export / import `.anendcls` | classify_ui.rs | has |
 | colour views by a classifier | classify_ui.rs | has (picked in the memory strip) |
