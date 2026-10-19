@@ -230,3 +230,18 @@ views touched against their previous behaviour before committing.
     standard-library functions with typed results. Blocks and scenes can then behave richly,
     e.g. a block that reacts to how a text classifies or that generates its next texture.
     The hub's limits apply on shared hubs.
+
+19. **Grouping blocks into subassemblies, with a prefab menu.**
+    - **Grouping:** configured blocks that work together (their ray settings, listeners,
+      programs, keyframes, textures and relative transforms) can be grouped into a
+      subassembly. Internal references, such as sticky ray targets that point inside the
+      group, are stored relative to the group.
+    - **Prefab menu:** saved subassemblies with thumbnails, kept with the save and shareable
+      through the hub. Spawn one into the world as a new instance; its internal links are
+      remapped to the new copies, so each spawned copy works on its own. Edit a prefab and
+      choose whether existing instances update.
+    - **Cheap storage:** a prefab is one definition plus a transform per instance, the same
+      multimap idea as blocks (item 5).
+    - **Placing in first-person mode** (not only in the flycam): aim a preview ghost where you
+      look, snap it to surfaces and the grid, rotate it with keys or the wheel, see a
+      collision check (red if it would overlap), and place it with a click.
