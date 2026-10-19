@@ -2,99 +2,12 @@
 
 The user asked for these to be held until the current round is done, then picked up in order.
 
-## How work proceeds (the user carries no gate)
+## The order of work is docs/checklist.md
 
-The user doesn't want to be the gate between stages. Work moves on by itself, and the user's
-part is optional: ideas, answers when asked, and trying things when they feel like it.
+docs/checklist.md is one linear list, ticked as it goes, with no stages and no dates. The
+numbered items below (#n) hold the detail it refers to.
 
-- **Stages run back to back.** Each stage ends when its own checks pass:
-  - the four local checks, plus tests for what it adds;
-  - a by-hand check of every visible change on desktop (Xvfb) and web (Playwright), with
-    screenshots in app/docs/shots/;
-  - docs/parity.md updated, with nothing removed without a line saying why.
-
-  The next stage then starts. No stage waits for the user to try the last one.
-- **Milestones are offered, not required.** At the end of each stage, a pull request is
-  opened that summarises what the stage did, so there is a stable point to merge whenever the
-  user wants. Unmerged pull requests don't block anything; work continues on the branch.
-- **Questions go in one file:** docs/wip/questions.md. When a design choice is the user's to
-  make, a sensible default is picked so work isn't blocked. The default is written down there
-  as "chosen for now, change if you like", kept reversible, and built. Ask in conversation
-  only when no default is reasonable.
-- **The user's ideas are built on as given,** in their plain sense. When a choice is
-  needed, ask plainly and directly, without hedging, without restating the idea back as an
-  interpretation, and without contrived phrasing that avoids reference. Take the answer as
-  given and build it. If something built turns out wrong, own it and change it.
-
-- **Usage limits:** pushes after every piece of work, a check-in after each limit that resumes
-  the work, and the Resuming block in docs/next.md kept current. A cut-off then costs at most
-  the step in progress, and the user doesn't have to restart anything.
-- **Reports are short:** what was done, what's next, and anything waiting in questions.md.
-
-## Order of work: follow these stages, not the item numbers
-
-The numbers below are kept stable so they can be referred to; the order is set here. The user
-leaves the arrangement to us ("causal ergonomics is your department"). Each stage ends in
-something the user can try, and each round of work stays small enough to finish between usage
-limits. parity.md keeps its rule: nothing is removed without a line saying why.
-
-**The user's priority (19 Oct):** the game, the logic and the language matter most (stages
-C, D, F and G). The everyday gematria features are already in place; after stage A they get
-fixes, not new features, unless the user asks. Local-first resilience comes with stage B and
-stays a standing requirement:
-- everything works offline without a hub;
-- saves are complete, documented and exportable;
-- the models are stored deterministically, so they stay inspectable.
-
-- **Stage A, everyday use is solid:** done 19 Oct (evening UTC; docs/next.md's Resuming
-  block lists the commits); waiting for the user to try it before Stage B.
-  - F1–F8;
-  - items 1–3 (the bar);
-  - item 12 (one notes count; the notes view as the typing view);
-  - the remaining brief items (space search modes, save checkpoints, the IME test).
-- **Before Stage B's code, two pieces the user wants soon (20 Oct):**
-  1. **The GPU for classifying, not only training.** Today only training jobs can use the
-     GPU. `classify.predict`, `classify.search`, indexing, buckets and tints all run on the
-     CPU, which makes classifier search slow. Run batched inference on the GPU: many texts
-     per dispatch through `GpuNet`, with a CPU fallback that says why.
-     - **A GPU report so the user's logs can stand in for hardware we lack:** a button in
-       settings and an op (`gpu.report`) that write a JSON file. It holds the adapter and
-       driver, the limits, the exactness probe for every kernel against the CPU, and the
-       timings of a fixed synthetic train run and of predicting 10k texts, on CPU and GPU.
-       The user runs it and pastes the file; we compare it with the CPU reference. Tests keep
-       comparing GPU and CPU results as now.
-  2. **Starter classifiers whose correctness a machine can check.** A "start with
-     examples" set in the classifiers view's empty state (parity.md: "starter examples",
-     missing).
-     - **Generated deterministically,** with labels that follow from a rule: number
-       properties (even/odd, prime/composite, digit root, divisibility), the gematria sums'
-       own properties, English vs not-English (from bundled word lists), well-spelled vs
-       corrupted text (the spelling corpus), sentence vs fragment, plus the familiar fruit,
-       stones and animals.
-     - **Real data from public-domain sets** (the user asked for these, 20 Oct), alongside the
-       generated ones:
-       - prefer public domain or CC0, e.g. Project Gutenberg texts (public domain in the
-         US; the hub tests already fetch some) and US government works;
-       - allow permissive licences with attribution where nothing public-domain exists
-         (Tatoeba is CC BY, Universal Dependencies treebanks vary, WordNet has its own
-         licence), keeping each set's licence and source in a LICENSES note beside it;
-       - verify every set's licence before it is bundled;
-       - download large sets on demand rather than shipping them in the binary.
-     - **Each one shows its held-out score,** so it doubles as a test of the classifier
-       functions. Pretrained weights ship as small fixtures where training takes too long.
-- **Standing requirements from the user (20 Oct):**
-  - **Core functionality first, usable visually.** Working code comes before write-ups;
-    the guide and README are updated once per stable milestone, not per feature.
-  - **The game experience has to be enjoyable to spend time in,** fit for people to use,
-    not only to demo.
-  - **Long texts: the user's approach** is separate typing segments, each updated on its
-    own, with the string stitched back together. Only the segment being typed in is sent and
-    re-highlighted, which avoids the pause. Use this in Stage B's large-text work (item 6).
-  - **Conlang checking needs an interface for training by hand** (items 10 and 13). That
-    is ontology work: tag sets, verdicts and progress made visible.
-  - **Builds:** if it builds on the user's machine, that's fine; don't spend effort on CI
-    until it matters.
-- **Stage B, step 0 (before any code):** the design section in docs/format.md was drafted
+- **The design section's conflicts with the answers:** the design section in docs/format.md was drafted
   before the user's answers, and its body still conflicts with them in places: a 1/100-unit
   position grid (answer 6: no grid), chains as a container mime (answer 4: chains are their
   own entries, and notes are unchanged), scenes as a container in one room (answer 2: many
@@ -102,44 +15,6 @@ stays a standing requirement:
   memory entries), no font size on text placements (answer 6: a `u8`, 0 for default), a
   64 KiB piece size as a limit (answer 9: no limit; the piece size is a setting). Rewrite
   the body so it agrees with the answers, delete the superseded parts, and only then build.
-- **Stage B, one model for things and their copies:** a single design for "a definition
-  and its placed instances", used by text placements and duplicates (F4), chains (8),
-  blocks (5), prefabs (19) and scenes.
-  - Packed storage with defaults as `Option`s (5).
-  - Large texts (6), since storage and rendering choices depend on it.
-  - Write the design into docs/format.md before building on it.
-- **Stage C, the language:** the 5-bit esolang with a readable syntax, the notes view as its
-  code editor, and a headless standard library (11, 12). Then models as language
-  primitives (18). Everything scripted later is built on this.
-- **Stage C2, the whole (docs/architecture.md):** taxonomies (classifiers in hierarchies),
-  typed pipes from sources through filters to effects, effects computed rather than stored,
-  and views as programs, with today's views rebuilt as presets guarded by parity.md. Stage H
-  builds on it.
-- **Stage D, the renderer:** move the desktop's 3D view to wgpu, with WebGPU on the web
-  sharing the code (25), before more scene features are built in three.js. Then culling
-  (24) and far billboards with deterministic fall-off (22).
-- **Stage E, building scenes:**
-  - block rotation (5);
-  - the picture-to-texture pipeline (7) and the skybox (23);
-  - spheres and curved blocks (21), lights baked onto blocks (20);
-  - local spreads in staging blocks (14);
-  - the visual spec builder (4), since generated textures feed in here.
-- **Stage F, behaviour:**
-  - ray-casting blocks running programs (15), with ray modes including last hit (28);
-  - keyframes and bezier timing (16);
-  - subassemblies and prefabs (19);
-  - switch and logic-gate prefabs as the proof (27);
-  - audio emitters and the sounds table (17).
-- **Stage G, being in the world:** first-person mode with Thief-like movement, the grapple and
-  superflight that collects texts (9), and prefab placement there (19).
-- **Stage H, languages and tags:**
-  - custom tag sets and non-English word types (13);
-  - training conlang checking in the UI (10);
-  - correcting word types, as one family with the grammar checker.
-- **Throughout:** the unified asset and ontology browser (26), grown a little at each stage
-  as new kinds of data appear, rather than built all at once at the end.
-- **Also throughout, each stage:** one real-hardware check by the user (a GPU training run, a
-  Windows release build), and parity.md updated.
 
 ## Do first: fixes from using the app (19 Oct, evening UTC)
 

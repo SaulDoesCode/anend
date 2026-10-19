@@ -10,6 +10,10 @@ user-visible feature, setting, key or panel updates docs/parity.md in the same c
 `app/src/parity.rs`'s expected lists when a setting, key action or view changes). Nothing
 goes away without a line there saying why.
 
+**The order of work is docs/checklist.md** (one linear list, ticked as it goes; no stages,
+nothing waits on the user). Pick up at its first unticked line. The notes below are history;
+where they speak of stages, the checklist replaces them.
+
 **After Stage A (19 Oct, late evening UTC), while the user tries it:**
 - `b5b6b22` docs/format.md "One model for a definition and its placed instances": Stage B's
   design. It covers the tables (`graph instances` keyed by (definition ref, container),

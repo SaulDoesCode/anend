@@ -1,6 +1,6 @@
 # The whole: a taxonomy engine with typed pipes, views as programs
 
-This is the idea that holds the project together. Each stage builds toward it, so that
+This is the idea that holds the project together. The checklist (docs/checklist.md) builds toward it, so that
 features stop being one-off hard-coded views that drift or get lost.
 
 ## In the user's words (20 Oct)
@@ -46,7 +46,7 @@ features stop being one-off hard-coded views that drift or get lost.
    cached in the memo (derived and rebuildable at any time), never written into entries as
    facts. A materialized view is a cached pipe result, kept until its inputs change.
 4. **Views are programs.** A view is a pipe plus a layout, written in the 5-bit language's
-   readable syntax (stage C).
+   readable syntax (the language lines of the checklist).
    - Today's hand-made views (memory, lists, reader, filters) become built-in presets of
      the same system, so a new kind of view doesn't need new Rust.
    - Parity is kept by turning each existing view into a preset that behaves exactly as now,
@@ -54,24 +54,19 @@ features stop being one-off hard-coded views that drift or get lost.
 5. **The 3D world has three separate layers:**
    - the **spread**, which is free and physics-driven: pipe effects supply its forces, with
      no placements involved;
-   - **scenes**, placed texts and blocks (Stage B's instance model);
-   - **programmable blocks**, rays, events and programs (stage F).
+   - **scenes**, placed texts and blocks (the instance model);
+   - **programmable blocks**, rays, events and programs.
 
    Pipes can drive all three.
 6. **Testable as the main feature.** Every taxonomy node and pipe has held-out scores or
    rule-checked results (the machine-checkable starter classifiers are the first ones), so
    "semantic localism, Turing complete" is shown working, not claimed.
 
-## Where it lands in the stages
+## Where it lands in the checklist
 
-- **Stage B** gives instances, which pipes can place.
-- **Stage C** gives the language. Pipes, views and taxonomies get a readable syntax there,
-  and the standard library exposes classifiers and models.
-- **A new stage C2, right after C:** taxonomies and pipes as the shared ontology. The
-  filters page becomes the pipe editor, and the built-in views are rebuilt as presets with
-  parity.md guarding them. Then the conlang and word-type work (stage H) is built on
-  taxonomies.
-- **Stages D–G:** the renderer and scenes use pipes for their effects.
+The language comes first, so pipes, views and taxonomies have a syntax. Then the taxonomy
+lines (taxonomies, pipes, views as programs, then languages and tags). The renderer and the
+scenes use pipes for their effects. See docs/checklist.md.
 
 ## Open questions
 
