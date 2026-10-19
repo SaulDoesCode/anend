@@ -235,6 +235,18 @@ mod tests {
         }
     }
 
+    /// Enter in the space's bar gives the keys back to flying
+    #[test]
+    fn the_space_bar_lets_go_after_enter() {
+        let rs = include_str!("views/space.rs");
+        let at = rs.find("\"Enter\" => {").expect("the bar's Enter");
+        let arm = &rs[at..at + 700];
+        assert!(
+            arm.contains("spawn_forever(enter(") && arm.contains("b.blur()"),
+            "{arm}"
+        );
+    }
+
     /// the command bar's input spans the bar with the same room at both ends, so its
     /// centred text doesn't move when what's beside it changes size
     #[test]

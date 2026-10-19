@@ -138,6 +138,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | help card (H) with the keys as bound | space_ui.rs | has |
 | first-time hint | space_ui.rs | has: the empty room says how to start |
 | terminal: Enter, Ctrl+Enter, Shift+Enter, Delete, ↑ ↓ history (kept) | space.rs | has |
+| **must keep:** Enter in the space's bar does what it did and then lets go of the bar, so W A S D and the arrows fly again; typing starts again with a click on the bar or the focus key (19 Oct, F3 / queued 3; checked under Xvfb: Enter, then W moved the camera 6.2 units; guard `parity::tests::the_space_bar_lets_go_after_enter`) | asked 19 Oct | has |
 | `#123`, `#r123`, `#name` addresses; the last address reopened | space.rs `route` | has |
 | words: Enlist List Delist Unlist Count Backup Clear ClearAll Settle Maps Save name | space.rs `COMMANDS` | has (and Help) |
 | maps: save (Shift+X / Save name), list (Maps), open (#name); export the texts to a file (X) | space.rs | has: maps in the save's `space.maps` setting; export to the data folder's exports (desktop) or a download (web) |

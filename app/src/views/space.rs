@@ -932,6 +932,11 @@ pub fn Space() -> Element {
                 match k.key.as_str() {
                     "Enter" => {
                         dioxus::dioxus_core::spawn_forever(enter(ui, api.clone(), sp, k.text.clone(), k.ctrl, k.shift));
+                        // the bar lets go, so the flying keys move again; a click on the bar
+                        // (or the focus key) types again
+                        document::eval(
+                            "const b = document.getElementById('bar'); if (b) b.blur(); const h = document.getElementById('space-host'); if (h) h.focus({ preventScroll: true });",
+                        );
                         return true;
                     }
                     "Delete" => {
