@@ -182,7 +182,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | share / take classifiers on the hub | cls_more.rs, JS clsmore.js | has (in the settings' hub section) |
 | export / import `.anendcls` | classify_ui.rs | has |
 | colour views by a classifier | classify_ui.rs | has (picked in the memory strip) |
-| device: CPU / GPU / GPU fast, and which device a job ran on | asked 19 Oct | missing |
+| device: CPU / GPU / GPU fast, and which device a job ran on | asked 19 Oct | has (classifier and spec training; falls back to the CPU with a note when there's no adapter or the hub keeps members on its CPU; desktop and `anend-hub` build with `gpu`, a shared hub needs `--gpu`) |
 | spec models (templates, JSON editor, train, run, write) | Dioxus only | has |
 
 ## Filters

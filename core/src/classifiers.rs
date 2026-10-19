@@ -430,6 +430,8 @@ pub struct Training {
     pub rounds: usize,
     /// the version of the weights it started from
     pub from_version: u64,
+    /// why it runs on the CPU when a GPU was asked for
+    pub device_note: Option<String>,
 }
 
 /// what a run did
@@ -548,6 +550,9 @@ pub struct TrainArgs {
     pub rounds: Option<usize>,
     /// start from new weights instead of the trained ones
     pub fresh: bool,
+    /// where to train: the CPU (the reference), the GPU exact or fast; a GPU this build
+    /// or machine doesn't have falls back to the CPU, saying why
+    pub device: crate::classify::device::Device,
 }
 
 /// what yes/no feedback is about: a text, and the memory or note it came from
@@ -912,6 +917,16 @@ impl Store {
         // more threads than the machine has only slows it (and each is a real thread)
         o.threads = a.threads.unwrap_or(o.threads).min(crate::classify::pool::available());
         o.seed = crate::classify::math::key(&[def.seed, def.version]);
+        let device_note = match a.device.check() {
+            Ok(()) => {
+                o.device = a.device;
+                None
+            }
+            Err(e) => {
+                o.device = crate::classify::device::Device::Cpu;
+                Some(format!("no GPU here ({e}): trained on the CPU"))
+            }
+        };
         if stack.node > 0 {
             let pool = o.pool();
             data = stack.graph.with_extras(stack.node, &data, &pool);
@@ -922,6 +937,7 @@ impl Store {
             opts: o,
             rounds: a.rounds.unwrap_or(1).clamp(1, 50),
             from_version: def.version,
+            device_note,
         })
     }
 

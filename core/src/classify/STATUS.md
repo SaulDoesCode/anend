@@ -176,7 +176,12 @@ command in its doc). Left: see docs/next.md "Lifting the model ceiling".
 ## The GPU backend (done, 18 Oct; tested on llvmpipe, benchmarked there only)
 
 `core/src/classify/gpu/` behind the cargo feature `gpu` (wgpu 30, WGSL compute shaders; the
-default build and wasm do not pull wgpu: `cargo tree -p anend-core | grep wgpu` is empty).
+core's default build and wasm do not pull wgpu: `cargo tree -p anend-core | grep wgpu` is empty).
+Since 19 Oct the desktop app (`desktop` feature) and `anend-hub` (default feature `gpu`)
+build with it: `classify.train`/`classify.start` and `models.train` take `"device"`
+(`cpu`, `gpu`, `gpu_fast`), the job reports the device it ran on and, when it fell back to
+the CPU (no adapter, or a shared hub not started with `--gpu`), why (`device_note`). The
+app's training cards have the picker. Test: `ops::classify::devices_fall_back_and_hubs_decide`.
 
 | area | where | tests (`cargo test -p anend-core --features gpu gpu::`) |
 |---|---|---|

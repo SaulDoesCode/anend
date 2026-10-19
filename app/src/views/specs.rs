@@ -584,6 +584,7 @@ fn SpecTrain(name: String, details: Value, job: Option<Value>, on_start: EventHa
     let api = api();
     let mut epochs: Signal<Option<u32>> = use_signal(|| None);
     let mut fresh = use_signal(|| false);
+    let device = use_signal(|| details["spec"]["device"].as_str().unwrap_or("cpu").to_string());
     let state = job
         .as_ref()
         .and_then(|j| j["state"].as_str())
@@ -595,9 +596,15 @@ fn SpecTrain(name: String, details: Value, job: Option<Value>, on_start: EventHa
     let (api_t, n_t, api_c, n_c) = (api.clone(), name.clone(), api.clone(), name.clone());
     let start = move |_| {
         let (api, n) = (api_t.clone(), n_t.clone());
-        let (e, f) = (*epochs.peek(), *fresh.peek());
+        let (e, f, d) = (*epochs.peek(), *fresh.peek(), device.peek().clone());
         dioxus::dioxus_core::spawn_forever(async move {
-            match api.train_spec(&n, e, f).await {
+            match api
+                .call(
+                    "models.train",
+                    json!({ "name": n, "epochs": e, "fresh": f, "device": d }),
+                )
+                .await
+            {
                 Ok(j) => {
                     ui.say(format!("training {n}…"));
                     on_start.call(j);
@@ -629,6 +636,7 @@ fn SpecTrain(name: String, details: Value, job: Option<Value>, on_start: EventHa
                         label { class: "row small", title: "from new weights instead of going on from these",
                             input { r#type: "checkbox", checked: fresh(), onchange: move |e| fresh.set(e.checked()) } "from scratch" }
                     }
+                    crate::views::classifiers::DevicePick { device }
                     button { class: "primary", onclick: start, Icon { name: "play" } if trained { "train more" } else { "train" } }
                 } else {
                     button { onclick: cancel, Icon { name: "pause" } "cancel" }

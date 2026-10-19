@@ -67,6 +67,20 @@ pub struct JobState {
     /// a spec model's summary when its training is done (`ops::models`)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<Value>,
+    /// where it runs: cpu, gpu or gpu_fast
+    pub device: String,
+    /// why it runs on the CPU when the GPU was asked for
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_note: Option<String>,
+}
+
+pub(crate) fn device_name(d: crate::classify::device::Device) -> &'static str {
+    use crate::classify::device::Device;
+    match d {
+        Device::Cpu => "cpu",
+        Device::Gpu => "gpu",
+        Device::GpuFast => "gpu_fast",
+    }
 }
 
 pub struct Job {
@@ -155,6 +169,8 @@ pub struct Limits {
     pub per_folder: usize,
     pub total: usize,
     pub train: Option<std::time::Duration>,
+    /// whether jobs may run on the GPU (a shared hub: only with `--gpu`)
+    pub gpu: bool,
 }
 
 /// the shared hub's: each workspace runs at most this many trainings and indexings
@@ -167,6 +183,7 @@ impl Limits {
         per_folder: usize::MAX,
         total: usize::MAX,
         train: None,
+        gpu: true,
     };
 
     /// a hub's for its members
@@ -176,6 +193,7 @@ impl Limits {
             per_folder: WORKSPACE_JOBS,
             total: crate::classify::pool::available().max(4),
             train: Some(TRAIN_LIMIT),
+            gpu: false,
         }
     }
 }
@@ -222,6 +240,9 @@ pub(super) fn room_for_a_job(store: &Store, limits: &Limits) -> Result<(), Strin
 
 fn start(store: Arc<Store>, name: &str, a: &TrainArgs, wait: bool, limits: &Limits) -> Res {
     room_for_a_job(&store, limits)?;
+    if a.device.is_gpu() && !limits.gpu {
+        return Err("this hub trains on its CPU (its admin can allow the GPU with --gpu)".into());
+    }
     let mut t = store.prepare(name, a)?;
     let job = Arc::new(Job {
         cancel: AtomicBool::new(false),
@@ -230,6 +251,8 @@ fn start(store: Arc<Store>, name: &str, a: &TrainArgs, wait: bool, limits: &Limi
             state: "running".into(),
             rounds: t.rounds,
             examples: t.data.len(),
+            device: device_name(t.opts.device).into(),
+            device_note: t.device_note.clone(),
             ..JobState::default()
         }),
         started: std::time::Instant::now(),
@@ -488,6 +511,17 @@ fn train_args(args: &Value) -> TrainArgs {
         threads: u("threads"),
         rounds: u("rounds"),
         fresh: args.get("fresh").and_then(Value::as_bool).unwrap_or(false),
+        device: device_arg(args),
+    }
+}
+
+/// `"device"`: cpu (the default), gpu or gpu_fast
+pub(crate) fn device_arg(args: &Value) -> crate::classify::device::Device {
+    use crate::classify::device::Device;
+    match s(args, "device").trim() {
+        "gpu" => Device::Gpu,
+        "gpu_fast" | "gpu fast" => Device::GpuFast,
+        _ => Device::Cpu,
     }
 }
 
@@ -1311,6 +1345,56 @@ mod tests {
         assert_eq!(key_folder("plain"), "");
     }
 
+    /// a GPU asked for where there's none trains on the CPU and says so; a shared hub
+    /// refuses the GPU unless its admin allowed it
+    #[test]
+    fn devices_fall_back_and_hubs_decide() {
+        assert_eq!(
+            device_arg(&json!({ "device": "gpu_fast" })),
+            crate::classify::device::Device::GpuFast
+        );
+        assert_eq!(device_arg(&json!({})), crate::classify::device::Device::Cpu);
+        let dir = temp("devices");
+        let ws = Saves::new(&dir, "notes").with_models(Limits::NONE);
+        let c = |op: &str, a: Value| ws.call(op, &a);
+        let key = |t: &str| {
+            c("mem.saturate", json!({ "text": t })).unwrap()["key"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let (a, b) = (key("fruit"), key("rocks"));
+        for t in ["apple pie", "plum jam", "ripe pear"] {
+            c("lists.enlist", json!({ "list": a, "member": key(t) })).unwrap();
+        }
+        for t in ["granite", "slate roof", "flint"] {
+            c("lists.enlist", json!({ "list": b, "member": key(t) })).unwrap();
+        }
+        c(
+            "classify.create",
+            json!({ "name": "k", "classes": [a, b], "preset": "tiny" }),
+        )
+        .unwrap();
+        let j = c(
+            "classify.train",
+            json!({ "name": "k", "epochs": 1, "device": "gpu", "wait": true }),
+        )
+        .unwrap();
+        if cfg!(feature = "gpu") && crate::classify::device::Device::Gpu.check().is_ok() {
+            assert_eq!(j["device"], "gpu", "{j}");
+        } else {
+            assert_eq!(j["device"], "cpu", "{j}");
+            assert!(j["device_note"].as_str().unwrap().contains("no GPU"), "{j}");
+        }
+        assert_eq!(j["state"], "done", "{j}");
+        let shared = Saves::new(&dir, "notes").with_models(Limits::shared());
+        let e = shared
+            .call("classify.train", &json!({ "name": "k", "device": "gpu" }))
+            .unwrap_err();
+        assert!(e.contains("--gpu"), "{e}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn classifier_calls() {
         let dir = temp("calls");
@@ -1352,6 +1436,7 @@ mod tests {
         // in the background, then waited for
         let j = c("classify.train", json!({ "name": "kind", "epochs": 6, "threads": 2 })).unwrap();
         assert_eq!(j["state"], "running");
+        assert_eq!(j["device"], "cpu", "the CPU unless asked: {j}");
         let mut done = Value::Null;
         for _ in 0..600 {
             done = c("classify.job", json!({ "name": "kind" })).unwrap();

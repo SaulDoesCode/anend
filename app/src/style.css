@@ -674,3 +674,4 @@ a.btn { text-decoration: none; }
 /* the hub section (views/hubui.rs) */
 .hub-list { display: flex; flex-direction: column; gap: 4px; max-height: 340px; overflow: auto; background: var(--pad); border-radius: var(--radius); padding: 6px 8px; }
 .hub-item { padding: 3px 0; border-bottom: 1px solid color-mix(in srgb, var(--dim) 18%, transparent); }
+.progress + .row .device { color: var(--accent); font-weight: 600; }

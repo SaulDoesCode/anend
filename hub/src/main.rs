@@ -79,6 +79,9 @@ limits
                        included (default 512; 0 for no limit)
   --quota MB           how much disk each member's saves in the web app may fill
                        (default 1024; 0 for no limit; --local has none)
+  --gpu                let members' classifiers and spec models train on this machine's GPU
+                       (built with the `gpu` feature, the default; without a GPU they fall
+                       back to the CPU and say so). A --local hub always may
   --pretrained DIR     a folder of pretrained models (each a HuggingFace folder) that spec
                        models in the web app may start from; repeatable. Without one a
                        shared hub loads none (--local loads any folder)
@@ -155,6 +158,10 @@ fn parse_args() -> Result<Args, String> {
                 mode_set = true;
             }
             "--local" => local = true,
+            "--gpu" => {
+                #[cfg(feature = "app")]
+                let _ = crate::app::GPU.set(true);
+            }
             "--addr" => a.addr = value("--addr")?,
             "--url" => a.url = Some(value("--url")?),
             "--data" => a.data = PathBuf::from(value("--data")?),

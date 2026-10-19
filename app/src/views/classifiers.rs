@@ -592,6 +592,7 @@ fn Train(name: String, details: Value, job: Option<Value>, on_start: EventHandle
     let api = api();
     let mut epochs = use_signal(|| 8u32);
     let mut fresh = use_signal(|| false);
+    let device = use_signal(|| "cpu".to_string());
     let state = job
         .as_ref()
         .and_then(|j| j["state"].as_str())
@@ -607,7 +608,7 @@ fn Train(name: String, details: Value, job: Option<Value>, on_start: EventHandle
     let (api_t, n_t, api_c, n_c) = (api.clone(), name.clone(), api.clone(), name.clone());
     let start = move |_| {
         let (api, n) = (api_t.clone(), n_t.clone());
-        let args = json!({ "name": n, "epochs": *epochs.peek(), "fresh": *fresh.peek() });
+        let args = json!({ "name": n, "epochs": *epochs.peek(), "fresh": *fresh.peek(), "device": *device.peek() });
         dioxus::dioxus_core::spawn_forever(async move {
             match api.call("classify.train", args).await {
                 Ok(j) => {
@@ -641,6 +642,7 @@ fn Train(name: String, details: Value, job: Option<Value>, on_start: EventHandle
                         label { class: "row small", title: "from new weights instead of going on from these",
                             input { r#type: "checkbox", checked: fresh(), onchange: move |e| fresh.set(e.checked()) } "from scratch" }
                     }
+                    DevicePick { device }
                     button { class: "primary", onclick: start, Icon { name: "play" } if trained { "train more" } else { "train" } }
                 } else {
                     button { onclick: cancel, Icon { name: "pause" } "cancel" }
@@ -651,6 +653,10 @@ fn Train(name: String, details: Value, job: Option<Value>, on_start: EventHandle
             } else {
                 if state == "failed" {
                     div { class: "bad small", {j_err(&job)} }
+                }
+                if let Some(j) = job.as_ref().filter(|j| j["state"] == "done") {
+                    div { class: "dim small", "the last run: " {format!("{:.1} s {}", j["seconds"].as_f64().unwrap_or(0.0), device_words(j["device"].as_str().unwrap_or("")))}
+                        if let Some(n) = j["device_note"].as_str() { span { class: "bad", " · {n}" } } }
                 }
                 if state == "cancelled" {
                     div { class: "dim small", "the last run was cancelled; nothing was written" }
@@ -670,6 +676,33 @@ fn j_err(job: &Option<Value>) -> String {
         .and_then(|j| j["error"].as_str())
         .unwrap_or("it failed")
         .to_string()
+}
+
+/// where a training runs: the CPU (the reference, bit for bit the same everywhere), the GPU
+/// in exact precision, or the GPU fast (plain operators, within a hair of the CPU)
+#[component]
+pub(crate) fn DevicePick(device: Signal<String>) -> Element {
+    let mut device = device;
+    rsx! {
+        label { class: "row small", title: "where it trains: without a GPU (or on a hub that keeps members on its CPU) it falls back to the CPU and says so",
+            "on"
+            select { "aria-label": "where it trains", value: "{device}", onchange: move |e| device.set(e.value()),
+                option { value: "cpu", selected: device() == "cpu", "the CPU" }
+                option { value: "gpu", selected: device() == "gpu", "the GPU" }
+                option { value: "gpu_fast", selected: device() == "gpu_fast", "the GPU, fast" }
+            }
+        }
+    }
+}
+
+/// a job's device in words
+pub(crate) fn device_words(d: &str) -> &'static str {
+    match d {
+        "gpu" => "on the GPU",
+        "gpu_fast" => "on the GPU (fast)",
+        "cpu" => "on the CPU",
+        _ => "",
+    }
 }
 
 #[component]
@@ -695,6 +728,10 @@ pub(crate) fn Progress(job: Value) -> Element {
             if rounds > 1 { span { class: "dim", {format!("round {} of {rounds}", job["round"].as_u64().unwrap_or(0) + 1)} } }
             span { class: "dim", {format!("loss {:.3}", job["loss"].as_f64().unwrap_or(0.0))} }
             span { class: "dim", {format!("{:.0} tokens/s · {:.0} s · {} texts", job["tokens_per_sec"].as_f64().unwrap_or(0.0), job["seconds"].as_f64().unwrap_or(0.0), job["examples"])} }
+            span { class: "device", {device_words(job["device"].as_str().unwrap_or(""))} }
+        }
+        if let Some(n) = job["device_note"].as_str() {
+            div { class: "small bad", "{n}" }
         }
         if !line.is_empty() {
             svg { class: "spark", width: "240", height: "34", view_box: "0 0 240 34", role: "img", "aria-label": "the loss as it trains",

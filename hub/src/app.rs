@@ -73,6 +73,8 @@ impl Workspaces {
 /// how much disk a member's saves may fill on a shared hub, in bytes (`--quota`; unset or
 /// 0: no limit, and a `--local` hub has none)
 pub static QUOTA: OnceLock<u64> = OnceLock::new();
+/// members' trainings may run on the GPU (`--gpu`; a `--local` hub always may)
+pub static GPU: OnceLock<bool> = OnceLock::new();
 /// how many saves a member may keep on a shared hub
 pub const MAX_SAVES: usize = 200;
 
@@ -139,7 +141,10 @@ impl Workspace {
                 .with_models(if crate::mode::local() {
                     Limits::NONE
                 } else {
-                    Limits::shared()
+                    Limits {
+                        gpu: GPU.get().copied().unwrap_or(false),
+                        ..Limits::shared()
+                    }
                 }),
             dir,
         }

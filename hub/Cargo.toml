@@ -11,9 +11,12 @@ publish = false
 # with `--no-default-features --features hub` (or `app`). The accounts, the admin panel
 # and the database are in every build, so one data folder works with any of them.
 [features]
-default = ["hub", "app"]
+default = ["hub", "app", "gpu"]
 hub = []
 app = []
+# training and writing on the GPU (wgpu compute shaders, anend-core's `gpu`); a shared hub
+# still keeps its members on the CPU unless started with `--gpu`
+gpu = ["anend-core/gpu"]
 
 [dependencies]
 anend-core = { path = "../core" }

@@ -137,7 +137,7 @@ fn within(spec: &ModelSpec, limits: &Limits) -> Result<(), SpecError> {
     if !limits.shared {
         return Ok(());
     }
-    if spec.device != Device::Cpu {
+    if spec.device != Device::Cpu && !limits.gpu {
         return Err(at(spec, "device", "this hub trains and writes on its CPU".into()));
     }
     if spec.from.is_none() {
@@ -577,6 +577,18 @@ fn start(store: Arc<Store>, g: &Arc<Graph>, args: &Value, limits: &Limits) -> Re
     let name = name_arg(args)?;
     let r = record(g, name)?;
     let mut sp = r.spec()?;
+    // a device asked for at training time overrides the spec's; a GPU this build or
+    // machine lacks falls back to the CPU, saying why
+    let mut device_note = None;
+    if args.get("device").is_some() {
+        sp.device = cl::device_arg(args);
+    }
+    if let Err(e) = sp.device.check() {
+        if sp.device.is_gpu() {
+            device_note = Some(format!("no GPU here ({e}): trained on the CPU"));
+        }
+        sp.device = Device::Cpu;
+    }
     within(&sp, limits).map_err(spec_err)?;
     let u = |k: &str| args.get(k).and_then(Value::as_u64).map(|x| x as usize);
     if let Some(e) = u("epochs") {
@@ -626,6 +638,8 @@ fn start(store: Arc<Store>, g: &Arc<Graph>, args: &Value, limits: &Limits) -> Re
             rounds: 1,
             round: 1,
             examples: found,
+            device: cl::device_name(sp.device).into(),
+            device_note,
             ..JobState::default()
         }),
         started: std::time::Instant::now(),
