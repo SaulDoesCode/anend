@@ -690,3 +690,5 @@ a.btn { text-decoration: none; }
 .progress + .row .device { color: var(--accent); font-weight: 600; }
 /* the room never selects as text when dragged across */
 .space-host, .space-host * { user-select: none; -webkit-user-select: none; }
+
+.menu.smenu { max-height: calc(100vh - 16px); overflow-y: auto; }

@@ -247,6 +247,30 @@ mod tests {
         );
     }
 
+    /// the room's right-click menu, and copies that are placements, not entries
+    #[test]
+    fn space_texts_have_a_menu_and_safe_copies() {
+        let rs = include_str!("views/space.rs");
+        for needle in [
+            "fn SpaceMenu(",
+            "\"cmd\": \"dup\"",
+            "\"cmd\": \"removenode\"",
+            "forget the entry",
+            "e.shift && !t.is_empty()",
+        ] {
+            assert!(rs.contains(needle), "space.rs lost {needle}");
+        }
+        let js = include_str!("space.js");
+        for needle in [
+            "placements(entry)",
+            "duplicate(node)",
+            "removeNode(node)",
+            "copyKey(entry)",
+        ] {
+            assert!(js.contains(needle), "space.js lost {needle}");
+        }
+    }
+
     /// the command bar's input spans the bar with the same room at both ends, so its
     /// centred text doesn't move when what's beside it changes size
     #[test]

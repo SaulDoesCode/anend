@@ -202,6 +202,14 @@ struct SpaceEvent {
     pinned: bool,
     #[serde(default)]
     data: Value,
+    /// the placement in the room (a copy's own key); `key` is the entry's
+    #[serde(default)]
+    node: String,
+    /// how many placements the entry has in the room, and whether this is the first
+    #[serde(default)]
+    copies: u32,
+    #[serde(default)]
+    primary: bool,
 }
 
 fn boot_js() -> String {
@@ -249,6 +257,9 @@ try {{
     else if (c.cmd === 'blockspot') dioxus.send({{ kind: 'spot', data: {{ ...sp.blockSpot(), want: c.want }} }});
     else if (c.cmd === 'blockfields') sp.setBlockFields(c.id, c.t);
     else if (c.cmd === 'pickblock') sp.pickBlock(c.id);
+    else if (c.cmd === 'dup') {{ const k = sp.duplicate(c.node); dioxus.send({{ kind: 'toast', text: k ? 'a copy: another placement of the same entry · Ctrl+Z takes it away' : 'select a text first' }}); }}
+    else if (c.cmd === 'removenode') {{ const k = sp.removeNode(c.node); dioxus.send({{ kind: 'toast', text: k ? 'taken out of the room (the entry stays) · Ctrl+Z puts it back' : 'gone already' }}); }}
+    else if (c.cmd === 'pinnode') dioxus.send({{ kind: 'toast', text: sp.pinNode(c.node) || 'gone already' }});
   }}
 }} catch (e) {{
   dioxus.send({{ kind: 'error', text: String(e && e.message || e) }});
@@ -277,6 +288,8 @@ struct Sp {
     block: Signal<Option<Value>>,
     /// how many blocks and textures the save has
     block_use: Signal<(u64, u64)>,
+    /// the right-click menu on a text
+    menu: Signal<Option<SpaceEvent>>,
 }
 
 impl Sp {
@@ -866,6 +879,7 @@ pub fn Space() -> Element {
         q_bucket: use_signal(HashMap::new),
         block: use_signal(|| None),
         block_use: use_signal(|| (0, 0)),
+        menu: use_signal(|| None),
     };
     // the engine and its channel
     {
@@ -1082,6 +1096,9 @@ pub fn Space() -> Element {
                     },
                 }
             }
+            if let Some(m) = (sp.menu)() {
+                SpaceMenu { ev: m, sp_menu: sp.menu, on_send: move |v: Value| sp.send(v), on_gsearch: { let api = api_b.clone(); move |(n, md): (u64, Mode)| envale(ui, api.clone(), sp, n, md) } }
+            }
             if p.space.show_blocks {
                 Blocks {
                     selected: (sp.selected)(),
@@ -1199,9 +1216,17 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
             selected.set(Some(e.clone()));
             start_edit(ui, &e);
         }
+        // a double click on the empty room makes a new free text: an empty one to type in,
+        // or with Shift the bar's text (deliberately: it used to copy the bar's text, which
+        // after a click is the text clicked)
         "newtext" => {
             let t = ui.bar.peek().trim().to_string();
-            sp.send(json!({ "cmd": "free", "text": if t.is_empty() { "text".to_string() } else { t } }));
+            let t = if e.shift && !t.is_empty() {
+                t
+            } else {
+                "text".to_string()
+            };
+            sp.send(json!({ "cmd": "free", "text": t }));
         }
         "dblclick" => {
             if e.free {
@@ -1268,13 +1293,12 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
             }
         }
         "menu" => {
-            if e.free {
-                start_edit(ui, &e);
-            } else if e.ctrl {
+            if e.ctrl && !e.free {
                 let m = gem::Measure::of(&hit.text);
                 dioxus::dioxus_core::spawn_forever(gsearch(ui, api, sp, m.triangle(), space_mode(ui), Some(hit.text)));
             } else {
-                ui.menu.set(Some(Menu { hit, x: e.x, y: e.y }));
+                let mut m = sp.menu;
+                m.set(Some(e.clone()));
             }
         }
         _ => {}
@@ -1509,6 +1533,129 @@ fn add_block_from(on_send: EventHandler<Value>, kind: &str, texture: &str) {
     on_send.call(json!({ "cmd": "blockspot", "want": { "kind": kind, "texture": texture } }));
 }
 
+/// the right-click menu on a text in the room: what the details window offers and more;
+/// a copy is another placement of the same entry, so taking one out of the room never
+/// touches the entry, and forgetting the entry itself is its own, confirmed, item
+#[component]
+fn SpaceMenu(
+    ev: SpaceEvent,
+    sp_menu: Signal<Option<SpaceEvent>>,
+    on_send: EventHandler<Value>,
+    on_gsearch: EventHandler<(u64, Mode)>,
+) -> Element {
+    let ui = ui();
+    let api = api();
+    let mut armed = use_signal(|| false);
+    let mut close = move || sp_menu.set(None);
+    let hit = Hit {
+        key: ev.key.clone(),
+        text: ev.text.clone(),
+        note: ev.note,
+    };
+    let node = ev.node.clone();
+    let m = gem::Measure::of(&ev.text);
+    let list = ui.picks.read().list.clone();
+    let (x, y) = (ev.x, ev.y);
+    let copies = ev.copies.max(1);
+    let which = if ev.free {
+        "a free text (in this room only)".to_string()
+    } else if copies > 1 {
+        format!(
+            "{} · {} placements in the room",
+            if ev.primary { "the first placement" } else { "a copy" },
+            copies
+        )
+    } else {
+        "its only placement in the room".to_string()
+    };
+    rsx! {
+        div { class: "backdrop", onclick: move |_| close(), oncontextmenu: move |e| { e.prevent_default(); close() } }
+        div {
+            class: "menu smenu",
+            role: "menu",
+            style: "left: min({x}px, calc(100vw - 330px)); top: max(8px, min({y}px, calc(100vh - 560px)));",
+            div { class: "title", "{ev.text}" }
+            div { class: "title dim small", "{which}" }
+            button { role: "menuitem", onclick: { let ev = ev.clone(); let h = hit.clone(); move |_| {
+                    if ev.free { start_edit(ui, &ev); } else {
+                        ui.set_bar(&h.text);
+                        let mut p = ui.pending; p.set(Pending::Edit(h.clone()));
+                        ui.focus_bar();
+                        ui.say("edit it in the bar; Enter puts it back under the same key, Esc leaves it");
+                    }
+                    close();
+                } }, Icon { name: "edit" } "edit" kbd { "{ui.key_of(Action::EditText)}" } }
+            button { role: "menuitem", onclick: { let n = node.clone(); move |_| { on_send.call(json!({ "cmd": "pinnode", "node": n })); close(); } },
+                Icon { name: "pin" } if ev.pinned { "unpin" } else { "pin" } kbd { "{ui.key_of(Action::Pin)}" } }
+            button { role: "menuitem", onclick: { let n = node.clone(); move |_| { on_send.call(json!({ "cmd": "dup", "node": n })); close(); } },
+                Icon { name: "copy" } "a copy beside it" span { class: "dim small", " (same entry)" } }
+            button { role: "menuitem", onclick: { let t = ev.text.clone(); move |_| { copy_text(ui, &t); close(); } },
+                Icon { name: "copy" } "copy the text" kbd { "{ui.key_of(Action::CopyText)}" } }
+            if !ev.free {
+                if ev.note {
+                    button { role: "menuitem", onclick: { let k = ev.key.clone(); move |_| { let mut o = ui.open_note; o.set(Some(k.clone())); crate::shell::go(ui, View::Notes); close(); } },
+                        Icon { name: "editor" } "open in notes" }
+                } else {
+                    button { role: "menuitem", onclick: { let t = ev.text.clone(); move |_| { crate::shell::go(ui, View::Memory); ui.set_bar(&t); close(); } },
+                        Icon { name: "memory" } "into the memory view's bar" }
+                }
+                if let Some(l) = list.clone().filter(|l| l.key != ev.key) {
+                    button { role: "menuitem", onclick: { let api = api.clone(); let k = ev.key.clone(); let l = l.clone(); move |_| {
+                            let api = api.clone(); let k = k.clone(); let l = l.clone();
+                            dioxus::dioxus_core::spawn_forever(async move {
+                                match api.enlist(&l.key, &k).await {
+                                    Ok(()) => { ui.say(format!("put into the list {}", l.text)); ui.touched(); }
+                                    Err(e) => ui.fail(e),
+                                }
+                            });
+                            close();
+                        } },
+                        Icon { name: "list" } "put it in the list “{l.text}”" }
+                }
+                button { role: "menuitem", onclick: { let h = hit.clone(); move |_| { let mut p = ui.picks; p.write().list = Some(h.clone()); ui.say(format!("list: {}", h.text)); close(); } },
+                    Icon { name: "list" } "make it the list" kbd { "Shift+click" } }
+                button { role: "menuitem", onclick: { let h = hit.clone(); move |_| { let mut p = ui.picks; p.write().candidate = Some(h.clone()); ui.say(format!("candidate: {}", h.text)); close(); } },
+                    Icon { name: "pick" } "make it the candidate" kbd { "Ctrl+click" } }
+                button { role: "menuitem", onclick: { let h = hit.clone(); move |_| {
+                        let mut p = ui.pending; p.set(Pending::Tag(vec![h.clone()]));
+                        ui.set_bar(""); ui.focus_bar(); ui.say("type a tag and press Enter"); close();
+                    } }, Icon { name: "tag" } "tag…" }
+                button { role: "menuitem", onclick: move |_| { on_gsearch.call((m.ordinal, Mode::Ordinal)); close(); }, Icon { name: "search" } "gsearch its sum {m.ordinal}" }
+                button { role: "menuitem", onclick: move |_| { on_gsearch.call((m.reversed, Mode::Reversed)); close(); }, Icon { name: "search" } "gsearch its reversed sum {m.reversed}" }
+                button { role: "menuitem", onclick: move |_| { on_gsearch.call((m.triangle(), space_mode(ui))); close(); }, Icon { name: "search" } "gsearch ⌊√(s·r)⌋ {m.triangle()}" kbd { "Ctrl+right click" } }
+                button { role: "menuitem", onclick: { let k = ev.key.clone(); move |_| { ui.set_bar(&k); close(); } }, Icon { name: "keys" } "its key into the bar" }
+            }
+            button { role: "menuitem", onclick: move |_| { set_pref(ui, |p| p.space.show_details = true); close(); }, Icon { name: "view" } "the details window" kbd { "{ui.key_of(Action::Details)}" } }
+            button { role: "menuitem", onclick: { let n = node.clone(); move |_| { on_send.call(json!({ "cmd": "removenode", "node": n })); close(); } },
+                Icon { name: "close" } if ev.free { "take it out of the room" } else { "take this placement out of the room" } kbd { "{ui.key_of(Action::DeleteText)}" } }
+            if !ev.free {
+                button {
+                    role: "menuitem",
+                    class: if armed() { "armed" } else { "" },
+                    title: "deletes the entry from the save: every placement of it goes; Ctrl+Z brings it back",
+                    onclick: { let api = api.clone(); let h = hit.clone(); move |_| {
+                        if !armed() { armed.set(true); return; }
+                        let api = api.clone(); let h = h.clone();
+                        dioxus::dioxus_core::spawn_forever(async move {
+                            match api.forget(&h.key).await {
+                                Ok(text) => {
+                                    ui.did(Did::Forgot { key: h.key.clone(), text: text.clone() });
+                                    ui.say(format!("forgot the entry “{text}” ({}) · Ctrl+Z takes it back", h.key));
+                                    ui.touched();
+                                }
+                                Err(e) => ui.fail(e),
+                            }
+                        });
+                        close();
+                    } },
+                    Icon { name: "delete" }
+                    if armed() { "forget the entry? click again" } else if copies > 1 { "forget the entry ({copies} placements)…" } else { "forget the entry…" }
+                }
+            }
+        }
+    }
+}
+
 /// a window over the room that moves by its title bar and remembers where it was left;
 /// its close button shows when the pointer is over it
 #[component]
@@ -1644,6 +1791,7 @@ fn Details(ev: SpaceEvent, on_gsearch: EventHandler<(u64, Mode)>) -> Element {
                         " {q}"
                     }
                     if ev.pinned { " · pinned" }
+                    if ev.copies > 1 { {format!(" · {} of {} placements", if ev.primary { "the first" } else { "a copy" }, ev.copies)} }
                 }
             } else {
                 div { class: "dim small",

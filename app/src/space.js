@@ -226,7 +226,7 @@ export class Space {
     return this.order.length - before;
   }
 
-  make(t, free) {
+  make(t, free, nodeKey) {
     const el = document.createElement('div');
     el.className = 'slabel' + (free ? ' free' : '') + (t.note ? ' note' : '');
     el.textContent = t.note ? `✎ ${t.text}` : t.text;
@@ -234,7 +234,7 @@ export class Space {
     el.style.borderBottomColor = t.under || 'transparent';
     if (t.colour) el.style.color = t.colour;
     el.tabIndex = -1;
-    const n = { key: String(t.key), f: t, el, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, hw: 1, hh: 0.4, pinned: false, free };
+    const n = { key: nodeKey || String(t.key), f: t, el, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, hw: 1, hh: 0.4, pinned: false, free };
     this.overlay.append(el);
     this.nodes.set(n.key, n);
     this.order.push(n);
@@ -521,6 +521,48 @@ export class Space {
     return n.key;
   }
 
+  copyKey(entry) {
+    let i = 2;
+    while (this.nodes.has(`${entry}~${i}`)) i++;
+    return `${entry}~${i}`;
+  }
+
+  // another placement of the selected (or named) text beside it: the same entry, not a
+  // new one; Ctrl+Z takes it away
+  duplicate(node) {
+    const n = node ? this.nodes.get(node) : this.selected;
+    if (!n) return null;
+    const c = this.make({ ...n.f }, n.free, n.free ? `t:${Date.now().toString(36)}${this.freeN++}` : this.copyKey(n.f.key));
+    if (n.size) { c.size = n.size; this.measure(c); }
+    c.x = n.x + n.hw * 2 + 0.6; c.y = n.y; c.z = n.z;
+    c.pinned = true;
+    c.el.classList.add('pinned');
+    this.record({ kind: 'add', n: c });
+    this.pick(c);
+    this.sim = null;
+    this.render();
+    this.info(true);
+    return c.key;
+  }
+
+  // takes one placement out of the room (the entry stays in the save)
+  removeNode(node) {
+    const n = this.nodes.get(node);
+    if (!n) return null;
+    this.record({ kind: 'remove', n });
+    this.drop(n);
+    this.render();
+    this.info(true);
+    return n.key;
+  }
+
+  pinNode(node) {
+    const n = this.nodes.get(node);
+    if (!n) return null;
+    this.pick(n);
+    return this.pinSelected();
+  }
+
   // a free text (not a memory) ahead of the camera
   addFree(text) {
     const key = `t:${Date.now().toString(36)}${this.freeN++}`;
@@ -567,9 +609,9 @@ export class Space {
     const w = new THREE.Vector3();
     for (const [text, x, y, z, o] of rows) {
       const key = o && o.key ? String(o.key) : `t:${Date.now().toString(36)}${this.freeN++}`;
-      const f = (o && o.key && feats[o.key]) || { key, text, note: false };
+      const f = { ...((o && o.key && feats[o.key]) || { key, text, note: false }) };
       f.text = text;
-      const n = this.make(f, !(o && o.key));
+      const n = this.make(f, !(o && o.key), this.nodes.has(key) ? this.copyKey(key) : null);
       if (o && o.size) { n.size = o.size; this.measure(n); }
       this.local(w.set(x, y, z), n);
       n.pinned = true;
@@ -905,9 +947,17 @@ export class Space {
 
   // ------------------------------------------------------------------ input
 
+  // the placements of one entry in the room (a copy is another placement of the same
+  // entry, never another entry)
+  placements(entry) {
+    return this.order.filter((x) => !x.free && String(x.f.key) === String(entry));
+  }
+
   ev(kind, n, e, extra) {
+    const same = n && !n.free ? this.placements(n.f.key) : [];
     return {
-      kind, key: n ? n.key : '', text: n ? n.f.text : '', note: !!(n && n.f.note), free: !!(n && n.free),
+      kind, key: n ? (n.free ? n.key : String(n.f.key)) : '', node: n ? n.key : '',
+      copies: same.length, primary: !!(n && !n.free && same[0] === n), text: n ? n.f.text : '', note: !!(n && n.f.note), free: !!(n && n.free),
       x: e ? e.clientX : 0, y: e ? e.clientY : 0, ctrl: !!(e && (e.ctrlKey || e.metaKey)), shift: !!(e && e.shiftKey), alt: !!(e && e.altKey),
       q: n ? n.f.q || 0 : 0, hue: n ? n.f.hue || 0 : 0, pinned: !!(n && n.pinned), data: extra || '',
     };
