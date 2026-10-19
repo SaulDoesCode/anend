@@ -133,6 +133,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | new text (N, double click empty), edit (Enter), delete, copy (Ctrl+C), undo (Ctrl+Z) | space.rs | has (edits go through the bar; undo covers moves, pins, removals, new texts and edits, then the app's undo) |
 | the metrics card (s, r, s+r, s·r, √, ⌊√⌋, s−r, wide, lean, gap, v, c, w, letters; key, bucket colour ×n, pinned; pf line), numbers gsearch | space_ui.rs | has (19 Oct): every number; the bucket's count ×n is not shown |
 | the details panel movable, its close button hidden until hover | asked 19 Oct | has (19 Oct): dragged by its title, where it was left kept; M shows / hides it |
+| **must keep:** the space's windows (details, physics, blocks) stay inside the room: clamped by the layout when the window is resized (and on restore from a saved place), clamped again when a drag ends; dragging them selects no text (19 Oct, F1; checked under Xvfb by shrinking the window to 700×600 and back) | asked 19 Oct | has |
 | position card (I): x y z, speed, roll, texts, spread state | space_ui.rs | has |
 | help card (H) with the keys as bound | space_ui.rs | has |
 | first-time hint | space_ui.rs | has: the empty room says how to start |

@@ -1505,14 +1505,22 @@ fn Win(id: String, title: Element, at: (f64, f64), on_close: EventHandler<()>, c
     let (x, y) = place();
     let id2 = id.clone();
     rsx! {
-        div { class: "win", style: "left: {x:.0}px; top: {y:.0}px;", role: "dialog",
+        // kept inside the room however the window is resized: the place is clamped by the
+        // layout itself, so a window left far right comes back when the room narrows
+        div {
+            class: "win",
+            style: "left: clamp(0px, {x:.0}px, max(0px, calc(100% - var(--win-w)))); top: clamp(0px, {y:.0}px, max(0px, calc(100% - var(--over-bottom, 40px) - 44px)));",
+            role: "dialog",
             div {
                 class: "win-head",
                 title: "drag to move it",
                 onpointerdown: move |e| {
+                    // from where it shows (clamped), not where it was left; no text selection
+                    e.prevent_default();
                     let c = e.client_coordinates();
-                    let (x, y) = place();
-                    grab.set(Some((c.x - x, c.y - y)));
+                    let o = e.element_coordinates();
+                    place.set((c.x - o.x, c.y - o.y));
+                    grab.set(Some((o.x, o.y)));
                 },
                 {title}
                 button {
@@ -1537,10 +1545,17 @@ fn Win(id: String, title: Element, at: (f64, f64), on_close: EventHandler<()>, c
                 },
                 onpointerup: move |_| {
                     grab.set(None);
-                    let at = place();
                     let id = id2.clone();
-                    set_pref(ui, move |p| {
-                        p.space.wins.insert(id, at);
+                    spawn(async move {
+                        // kept clamped to the window as it is now
+                        let mut ev = document::eval("dioxus.send([innerWidth, innerHeight]);");
+                        let (w, h) = ev.recv::<(f64, f64)>().await.unwrap_or((1e6, 1e6));
+                        let (x, y) = place();
+                        let at = (x.clamp(0.0, (w - 120.0).max(0.0)), y.clamp(0.0, (h - 80.0).max(0.0)));
+                        place.set(at);
+                        set_pref(ui, move |p| {
+                            p.space.wins.insert(id, at);
+                        });
                     });
                 },
             }
