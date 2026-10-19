@@ -639,3 +639,10 @@ button.band:hover { box-shadow: inset 0 0 0 1px var(--accent); }
 .result .t { cursor: pointer; }
 .wide-label { margin-top: 6px; font-weight: 600; color: var(--text) !important; }
 h3 .dim.small, h3 .small { font-weight: 400; }
+
+/* the filters' builder (views/flt.rs) */
+.fgroup { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border-left: 3px solid color-mix(in srgb, var(--accent) 60%, transparent); background: color-mix(in srgb, var(--pad) 45%, transparent); border-radius: var(--radius); margin: 2px 0; }
+.fgroup.root { border-left-color: var(--accent); }
+.fgroup .cond { gap: 6px; padding: 2px 0; }
+.fgroup select { height: 24px; }
+.kept { padding: 3px 0; border-top: 1px solid color-mix(in srgb, var(--dim) 15%, transparent); }

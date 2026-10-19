@@ -3,6 +3,7 @@
 
 pub mod classifiers;
 pub mod clsmore;
+pub mod flt;
 pub mod judge;
 pub mod lists;
 pub mod memory;

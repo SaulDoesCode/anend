@@ -186,10 +186,10 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 
 | feature | was in | status |
 |---|---|---|
-| conditions by classifier verdict, words, lists, tags, kind | filters_ui.rs, `filters.*` | partly: words, sum range, time range, tag, kind (no classifier, no list conditions) |
-| "all of" / "any of" groups, nested | filters_ui.rs | missing |
-| presets that include each other | filters_ui.rs | partly: saved filters by name |
-| write the results out as a list | filters_ui.rs, `filters.enlist` | missing |
+| conditions by classifier verdict, words, lists, tags, kind | filters_ui.rs, `filters.*` | has (19 Oct): views/flt.rs, beside the query filters (words, sum, time, tag, kind) |
+| "all of" / "any of" groups, nested | filters_ui.rs | has, and "not" on any condition or group |
+| presets that include each other | filters_ui.rs | has |
+| write the results out as a list | filters_ui.rs, `filters.enlist` | has |
 | select dropdowns sized so the text sits inside them | — | has (19 Oct): every select draws its own arrow, text centred (style.css) |
 
 ## Forge

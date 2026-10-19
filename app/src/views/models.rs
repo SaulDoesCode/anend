@@ -85,7 +85,7 @@ pub fn Filters() -> Element {
     let run2 = run.clone();
     rsx! {
         div { class: "page",
-            div { class: "row", h2 { "filters" } span { class: "dim small", "every condition must hold" } }
+            div { class: "row", h2 { "filters" } span { class: "dim small", "find texts by words, sums, time, tags and kind; below, by what classifiers say, in groups" } }
             // remade when a kept filter or the bar fills it (its inputs aren't bound while typing)
             for g in [form()] {
             div { key: "{g}", class: "card",
@@ -142,6 +142,7 @@ pub fn Filters() -> Element {
                     }
                 }
             }
+            crate::views::flt::Builder {}
             if let Some((total, hits)) = found() {
                 div { class: "card",
                     h3 { "{total} found" if total as usize > hits.len() { " (the first {hits.len()})" } }
