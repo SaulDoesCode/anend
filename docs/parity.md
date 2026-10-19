@@ -76,6 +76,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | save (Ctrl+S), new note (Ctrl+N) | keys.rs | has; a note without a # title isn't saved, as before |
 | delete with a confirmation | ui.rs `confirm_delete` | has (two clicks) |
 | slide the note list away / back (Ctrl+B), list on the right, hide until the pointer nears the edge | ui.rs, config `hide_list`, `list_right` | partly: Ctrl+B and the button; the list on the right (settings); no pointer reveal |
+| **must keep:** the notes view opens with its note list shown, never a blank page; sliding the list away holds while a note is open, and comes back when none is (19 Oct, F7; checked under Xvfb with `hide_list` on) | asked 19 Oct | has |
 | the note's classifiers: pick which classifiers index it, each one's class chip and a yes/no | index_panel.rs, JS notecls.js | has (19 Oct): views/judge.rs, every class's probability too (Ctrl+I) |
 | markdown highlighting in the pad | highlight.rs | has |
 | the bar finds notes by words; Enter opens the first; "n of m notes" at the bar's end | bar.rs | has (Enter narrows, Enter again opens the first) |

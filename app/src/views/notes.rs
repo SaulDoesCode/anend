@@ -337,6 +337,9 @@ pub fn Notes() -> Element {
         let p = ui.prefs.read();
         (p.hide_list, p.list_right, p.highlight)
     };
+    // with no note open the list is all there is: it shows whatever was chosen (the choice
+    // to slide it away holds while a note is open)
+    let hide_list = hide_list && open().is_some();
     let check = ui.prefs.read().check_spelling;
     let shown_flags: Vec<crate::highlight::Flag> = {
         let (t, fl) = &*flags.read();
@@ -583,7 +586,7 @@ pub fn Notes() -> Element {
                     }
                 } else {
                     div { class: "empty",
-                        p { "Pick a note, or make a new one ({ui.key_of(Action::NewNote)}). A note is a text whose first line is its # title." }
+                        p { "Pick a note in the list, or make a new one ({ui.key_of(Action::NewNote)}). A note is a text whose first line is its # title." }
                     }
                 }
             }
