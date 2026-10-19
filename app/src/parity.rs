@@ -292,7 +292,7 @@ mod tests {
     fn the_bar_text_stays_put() {
         let css = include_str!("style.css");
         assert!(
-            css.contains("padding: 0 var(--side-w);"),
+            css.contains("padding: 0 var(--reserve);") && css.contains("min-width: 15.5cm"),
             "the input keeps equal room at both ends"
         );
         assert!(
