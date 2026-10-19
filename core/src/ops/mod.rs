@@ -300,6 +300,7 @@ pub const READ_ONLY: &[&str] = &[
     "forge.preview",
     "entries.query",
     "settings.get",
+    "entries.info",
     "stats",
 ];
 
@@ -670,6 +671,47 @@ pub fn call(g: &Graph, removed: &Removed, op: &str, args: &Value) -> Res {
         }
 
         // ---- settings in the save
+        "entries.info" => {
+            let id = id_arg(args, "key")?;
+            let v = g.view()?;
+            let rec = v.record(id)?.ok_or("didn't find that")?;
+            let label = record::label(id);
+            let text = v.render(id)?;
+            let detected = crate::kinds::detect(&text);
+            let fixed = v
+                .setting(&format!("kind {label}"))?
+                .map(|b| String::from_utf8_lossy(&b).into_owned());
+            Ok(json!({
+                "key": label,
+                "mime": v.mime_name(rec.mime)?,
+                "created": iso(rec.created),
+                "edited": iso(rec.edited),
+                "kind": fixed.as_deref().unwrap_or(detected),
+                "detected": detected,
+                "fixed": fixed.is_some(),
+                "kinds": crate::kinds::KINDS,
+            }))
+        }
+        "entries.set_kind" => {
+            let id = id_arg(args, "key")?;
+            let kind = s(args, "kind").trim();
+            if !kind.is_empty() && !crate::kinds::KINDS.contains(&kind) {
+                return Err(format!("a kind is one of {}", crate::kinds::KINDS.join(", ")));
+            }
+            let name = format!("kind {}", record::label(id));
+            g.write(|tx| {
+                if !tx.exists(id)? {
+                    return Err("didn't find that".into());
+                }
+                // the detected kind again: nothing kept
+                if kind.is_empty() {
+                    tx.remove_setting(&name)
+                } else {
+                    tx.set_setting(&name, kind.as_bytes())
+                }
+            })?;
+            Ok(Value::Null)
+        }
         "settings.get" => {
             let v = g.view()?;
             Ok(json!({ "value": v.setting(s(args, "name"))?.map(|b| String::from_utf8_lossy(&b).into_owned()) }))

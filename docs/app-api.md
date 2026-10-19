@@ -60,6 +60,8 @@ texts as reversed does), and asking for it answers an error.
 | `mem.all` | `{limit?: 5000}` | `[hit]` |
 | `mem.buckets` | `{bucket: ordinal\|reversed}` | `{buckets: [{sum, count}]}` |
 | `entries.query` | `{words?, bucket?, from?, to?, since?, until?, tag?, kind?: notes\|memories, limit?: 300}` | `{total, hits}` |
+| `entries.info` | `{key}` | `{key, mime, created, edited, kind, detected, fixed, kinds}`: when it was written and edited (RFC 3339), and its kind: `detected` by its pattern (`core/src/kinds.rs`: link, email, number, date, time, json, hashtag, word, name, phrase, sentence, text), or the one set by hand (`fixed`) |
+| `entries.set_kind` | `{key, kind}` (one of `kinds`; empty goes back to the detected one) | `null`; kept in the save's settings as `kind <key>` |
 | `lists.stats` | | `{lists: [{list, name, members: [hit], count, ordinal_sum, reversed_sum, ordinal_mean, reversed_mean, whole: measure, vector: [26]}], dot: [[cosine]]}` (`dot` is empty past 1000 lists) |
 | `lists.enlist` / `lists.delist` | `{list, member}` (keys) | `null` |
 | `lists.unlist` | `{list}` | `{removed}` |

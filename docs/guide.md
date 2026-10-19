@@ -78,7 +78,10 @@ and the sum buckets.
 On the texts: **click** puts one in the bar, **double-click** its key, **Shift+click**
 makes it the list, **Ctrl+click** the candidate, **Alt+click** selects several (then pick
 a list or type a tag for them all), **right-click** opens a menu (edit, tag, list,
-candidate, key, forget), **Ctrl+right-click** gsearches ⌊√(ordinal·reversed)⌋. Drag the
+candidate, key, forget), **Ctrl+right-click** gsearches ⌊√(ordinal·reversed)⌋. The menu
+also says when the text was written and what kind it is (a link, an email address, a
+number, a date, a name, a phrase, a sentence…), told by its pattern; when the guess is
+wrong, pick the right one there and the save keeps it. Drag the
 field's edges to make it wider or narrower.
 
 **Colouring by a classifier**: the palette picker in the strip colours every text by its

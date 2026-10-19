@@ -9,6 +9,7 @@ pub mod filters;
 pub mod fmath;
 pub mod forge;
 pub mod graph;
+pub mod kinds;
 pub mod lists;
 pub mod markdown;
 pub mod measure;

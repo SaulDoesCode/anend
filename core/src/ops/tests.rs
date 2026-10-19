@@ -72,3 +72,31 @@ fn saves_merge_forge() {
     assert_eq!(im["save"], "two 2");
     std::fs::remove_dir_all(dir).ok();
 }
+
+#[test]
+fn kinds_detected_and_fixed() {
+    let dir = temp("kinds");
+    let sv = Saves::new(&dir, "notes");
+    let c = |op: &str, a: Value| sv.call(op, &a);
+    let k = c("mem.saturate", json!({"text": "https://anend.org"})).unwrap()["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let i = c("entries.info", json!({"key": k})).unwrap();
+    assert_eq!(i["kind"], "link");
+    assert_eq!(i["fixed"], false);
+    assert_eq!(i["mime"], "text/plain");
+    assert!(i["created"].as_str().unwrap().starts_with("20"));
+    c("entries.set_kind", json!({"key": k, "kind": "phrase"})).unwrap();
+    let i = c("entries.info", json!({"key": k})).unwrap();
+    assert_eq!(
+        (i["kind"].as_str(), i["detected"].as_str(), i["fixed"].as_bool()),
+        (Some("phrase"), Some("link"), Some(true))
+    );
+    assert!(c("entries.set_kind", json!({"key": k, "kind": "potato"})).is_err());
+    c("entries.set_kind", json!({"key": k, "kind": ""})).unwrap();
+    assert_eq!(c("entries.info", json!({"key": k})).unwrap()["kind"], "link");
+    assert!(c("entries.info", json!({"key": "9,9,9"})).is_err());
+    drop(sv);
+    let _ = std::fs::remove_dir_all(dir);
+}

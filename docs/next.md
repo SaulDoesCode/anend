@@ -944,7 +944,10 @@ progress is in `core/src/classify/STATUS.md`. The plan:
 
 ## Not started
 
-- **Entries:** timestamps and mime types (detected by pattern, fixed with a right click),
+- **Entries:** ~~timestamps and kinds (detected by pattern, fixed with a right click)~~:
+  done 19 Oct as *kinds* beside the mime (`core/src/kinds.rs`, `entries.info`,
+  `entries.set_kind`, the right-click menu's kind row and written date); the stored mime
+  stays text/plain, since the search, classifiers and backups read texts by it. Left:
   word types shown on hover in the memory view, and a search filter panel that opens from
   a square at the right of the search (mime types, word-type frequency, classifiers,
   feedback, bias metric).

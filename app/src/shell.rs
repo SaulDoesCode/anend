@@ -397,6 +397,7 @@ fn ContextMenu() -> Element {
             onmounted: move |e| async move { let _ = e.set_focus(true).await; },
             tabindex: "-1",
             div { class: "title", "{hit.text}" }
+            MenuKind { key: "{hit.key}", entry: hit.key.clone() }
             button { role: "menuitem", onclick: item(Box::new(move || {
                     ui.set_bar(&h1.text);
                     let mut p = ui.pending; p.set(Pending::Edit(h1.clone()));
@@ -443,6 +444,64 @@ fn ContextMenu() -> Element {
                         });
                     })), Icon { name: "delete" } "forget" kbd { "Delete" } }
             }
+        }
+    }
+}
+
+/// in the right-click menu: when the entry was written, and its kind (told by its
+/// pattern; picked here when the guess is wrong, kept in the save)
+#[component]
+fn MenuKind(entry: String) -> Element {
+    let ui = ui();
+    let api = api();
+    let key = entry;
+    let k0 = key.clone();
+    let api_i = api.clone();
+    let info = use_resource(move || {
+        let (api, k) = (api_i.clone(), k0.clone());
+        async move { api.call("entries.info", serde_json::json!({ "key": k })).await }
+    });
+    let Some(Ok(v)) = info.read().clone() else {
+        return rsx! {};
+    };
+    let kind = v["kind"].as_str().unwrap_or("text").to_string();
+    let detected = v["detected"].as_str().unwrap_or("text").to_string();
+    let fixed = v["fixed"] == true;
+    let kinds: Vec<String> = v["kinds"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|k| k.as_str().map(str::to_string))
+        .collect();
+    let written = v["created"].as_str().unwrap_or("").get(..10).unwrap_or("").to_string();
+    rsx! {
+        div { class: "kindrow small",
+            label { "kind"
+                select {
+                    "aria-label": "its kind",
+                    value: "{kind}",
+                    onchange: move |e| {
+                        let api = api.clone();
+                        let k = key.clone();
+                        let pick = e.value();
+                        let det = detected.clone();
+                        let mut menu = ui.menu;
+                        menu.set(None);
+                        dioxus::dioxus_core::spawn_forever(async move {
+                            let set = if pick == det { String::new() } else { pick.clone() };
+                            match api.call("entries.set_kind", serde_json::json!({ "key": k, "kind": set })).await {
+                                Ok(_) => ui.say(format!("{k} is a {pick} now")),
+                                Err(e) => ui.fail(e),
+                            }
+                        });
+                    },
+                    for k in kinds {
+                        option { key: "{k}", value: "{k}", selected: k == kind, "{k}" }
+                    }
+                }
+            }
+            span { class: "dim", if fixed { "set by hand" } else { "by its pattern" } }
+            if !written.is_empty() { span { class: "dim", "written {written}" } }
         }
     }
 }
