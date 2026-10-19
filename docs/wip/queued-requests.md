@@ -115,12 +115,23 @@ views touched against their previous behaviour before committing.
     codec, and graph/interp.rs is already Turing complete with recursion and `if`. Give it a
     high-level representation people can read and write: a surface syntax that maps one-to-one
     to the packed form, documented in docs/format.md.
-    - **Nodes view:** editable there with code features: syntax highlighting, structure and
+    - **Notes view (the typing view) is its code editor:** written and edited there with code
+      features: syntax highlighting, structure and
       outline, go to definition and references, inline evaluation and results, step
       debugging, errors on the node, completion from the standard library, formatting.
     - **Part of the whole ontology:** programs are entries, they reference entries, lists,
       classifiers, spec models, pictures, blocks and chains, and they can act on them.
     - **A standard library** with headless access to the project's functions: everything the
       app API's ops do (entries, lists, filters, classifiers, specs, pictures, space, blocks,
-      hub), so programs script the project without the UI. Run from the bar, the editor and
+      hub), so programs script the project without the UI. Run from the bar, the notes view and
       a CLI (`anend run`), with the hub's limits on shared hubs.
+
+12. **The notes view is the typing view, for long texts and code.** (Item 11 said "nodes view"
+    by mistake; it means the notes view.)
+    - **Long texts:** it is where large texts are written and read. Virtualised rendering, and
+      highlighting and figures computed for the visible window, so it stays smooth with a 1 MB
+      text (see item 6).
+    - **Code:** it is also the code editor for the 5-bit esolang of item 11, a mode or a note
+      kind with the code features listed there.
+    - **Fix: one notes count.** The notes count shows twice in the notes view; keep one, in the
+      most useful place, and record it in parity.md.
