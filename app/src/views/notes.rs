@@ -94,6 +94,10 @@ struct Pick {
     y: f64,
 }
 
+/// a note longer than this (bytes) is typed without the colour layer and the spelling
+/// check (queued items 6 and 12 bring windowed highlighting for long texts)
+const BIG: usize = 100_000;
+
 fn split_tags(t: &str) -> Vec<String> {
     t.split(',')
         .map(|x| x.trim().to_string())
@@ -290,7 +294,7 @@ pub fn Notes() -> Element {
         use_effect(move || {
             let t = text();
             let on = ui.prefs.read().check_spelling;
-            if !on || t.trim().is_empty() {
+            if !on || t.trim().is_empty() || t.len() > BIG {
                 return;
             }
             let g = *check_gen.peek() + 1;
@@ -367,7 +371,15 @@ pub fn Notes() -> Element {
             vec![]
         }
     };
-    let layer = crate::highlight::to_html(&text(), colour, &shown_flags);
+    // a long note types as plain text: the colour layer (the whole text again, re-laid
+    // out on every key) and the spelling check pause, so each key stays quick
+    let big = text().len() > BIG;
+    let layered = !big && (colour || !shown_flags.is_empty());
+    let layer = if layered {
+        crate::highlight::to_html(&text(), colour, &shown_flags)
+    } else {
+        String::new()
+    };
     let api_d = api.clone();
     let mut class = String::from("notes");
     if hide_list {
@@ -525,7 +537,7 @@ pub fn Notes() -> Element {
                         Replace { text, dirty, seq }
                     }
                     for pad in [format!("{}-{}", cur_key, seq())].into_iter().filter(|_| !reading()) {
-                        div { key: "{pad}", class: if colour { "pad hl-on" } else { "pad" },
+                        div { key: "{pad}", class: if layered { "pad hl-on" } else { "pad" },
                             // the colours, painted under the textarea's transparent glyphs
                             pre { id: "note-hl", class: "hl", "aria-hidden": "true", dangerous_inner_html: "{layer}" }
                             // not bound to the signal while typing (a round trip per key would
@@ -569,7 +581,10 @@ pub fn Notes() -> Element {
                                 on_close: move |_| pick.set(None),
                             }
                         }
-                        if check {
+                        if big {
+                            div { class: "spell-note dim small", {format!("a long note ({} KB): the colours and the spelling check pause above {} KB, so typing stays quick", text().len() / 1000, BIG / 1000)} }
+                        }
+                        if check && !big {
                             if let Some(r) = report() {
                                 div { class: "spell-note dim small",
                                     title: "measured on a fifth of its corpus held out, with errors put in the same way it was trained: real typing errors are harder",

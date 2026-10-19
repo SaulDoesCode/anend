@@ -83,6 +83,8 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | markdown highlighting in the pad | highlight.rs | has |
 | the bar finds notes by words; Enter opens the first; "n of m notes" at the bar's end | bar.rs | has (Enter narrows, Enter again opens the first) |
 | **must keep:** one notes count in the notes view: at the bar's end ("n of m notes" while narrowed); the top line leaves its notes count out there and keeps it in every other view (19 Oct, queued 12) | asked 19 Oct | has |
+| the notes view as the typing view for long texts: smooth with a 1 MB text | asked 19 Oct (queued 12, 6) | partly (19 Oct): above 100 KB the colour layer and the spelling check pause, so a key doesn't re-lay out the whole text twice; measured on the web (headless Chromium): a 526 KB note takes about 100 ms from a key to the second frame after it, a short note 33 ms (two frames); highlighting itself is 6 ms for 526 KB natively (`highlight::timing`). Windowed highlighting and not sending the whole text to Rust on every key come with Stage B's large texts (item 6) |
+| the spelling underlines show with the markdown colours off too | — | has (19 Oct): the layer shows when there are flags, coloured or not |
 | written date and edits count | ui.rs | has |
 | replacements `{{key}}`, `{{filter:name}}`, alternatives from lists | Dioxus only | has |
 | the notes view has no horizontal scrollbar dragging the content off to the left | — | has (19 Oct): the view never scrolls itself; its list and pad do |

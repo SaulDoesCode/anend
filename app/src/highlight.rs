@@ -561,3 +561,24 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod timing {
+    /// `cargo test -p anend-app --release long_text_timing -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn long_text_timing() {
+        let para = "The path went on past the quarry and the orchard, and the **light** fell on [[stones]] and plums. ";
+        let mut t = String::from("# Long\n\n");
+        for i in 0..6000 {
+            if i % 8 == 7 {
+                t.push_str(&format!("\n\n## part {i}\n\n"));
+            } else {
+                t.push_str(para);
+            }
+        }
+        let a = std::time::Instant::now();
+        let h = super::to_html(&t, true, &[]);
+        eprintln!("{} bytes -> {} in {:?}", t.len(), h.len(), a.elapsed());
+    }
+}
