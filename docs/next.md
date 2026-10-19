@@ -10,6 +10,28 @@ user-visible feature, setting, key or panel updates docs/parity.md in the same c
 `app/src/parity.rs`'s expected lists when a setting, key action or view changes). Nothing
 goes away without a line there saying why.
 
+**Parity round (19 Oct, from 08:20 UTC; the user's feedback on the Dioxus app):**
+- **Done (each committed and pushed):** docs/parity.md (the audit and contract) with
+  `app/src/parity.rs` guards; the Bevy frame and one command bar (no view name), Fira
+  bundled, selects centred, the window icon really set; rebindable keys (`app/src/keys.rs`,
+  the settings' keys section); the notes editor (highlighting via `app/src/highlight.rs`,
+  tag chips, Ctrl+N/E/B/I, the note's classifiers `views/judge.rs`, no sideways scroll);
+  the space (free force-directed spread in `app/src/space.js` weighted by `space.features`,
+  smooth labels, the physics window, the movable details window, drag/pin/free texts/maps/
+  history/words/addresses); the memory view's word types (`core/src/kinds.rs` `tag`, labels
+  never touching the gematria underline, guard test), white mode; the reader (dates, tags,
+  edit, classifiers); the lists view's Bevy cards.
+- **Next, in order:** the rest of parity.md's missing/partly rows (classifier view: buckets,
+  near texts, checks/validators, why, channel gains, hub share; filters: classifier and list
+  conditions, all/any groups, write as a list; the forge; settings: fonts, bar sizes, bars
+  swapped, rename, saves folder, bundles, the hub; stats; tags), then a polish pass, then
+  GPU training in the app and hub, spatial saves, the grammar/spelling proof of concept,
+  then the old backlog below.
+- **How to check by hand:** a scratch harness drove the desktop under Xvfb (`Xvfb :97`,
+  xdotool, `import -window root`) and the web build (release wasm + wasm-bindgen into
+  app/web/dist, the debug hub `--mode app --local --addr 127.0.0.1:8090` serves dist live,
+  Playwright with /opt/pw-browsers chromium); a node WebSocket client on `/app/ws` seeds data.
+
 **Spec JSONs and pictures in the save; then the backlog (19 Oct, morning UTC):**
 - **Done:**
   - Spec model definitions live in the save's own tables (`graph spec models`,
