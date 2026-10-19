@@ -147,13 +147,13 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 
 | feature | was in | status |
 |---|---|---|
-| every list with members, figures (members, ordinal, ordinal mean, reversed, reversed mean) | lists_ui.rs | partly: tiles show counts and means only |
-| the list as one text (ordinal, reversed, letters), gsum detail, pf chain | lists_ui.rs | missing |
-| its letters as a vector (bars a–z) on each list | lists_ui.rs | partly: on the list's page only |
-| "how alike": the cosine matrix of every two lists' letter vectors, coloured | lists_ui.rs | missing |
-| members as chips with their s·r and × to delist | lists_ui.rs | partly: editable rows on the list's page |
-| choose a list; the bar's Enter adds to it (saturating new texts); "let go of it"; with none chosen, Enter starts a list | lists_ui.rs `bar_key` | partly: Enter finds or makes a list head, members can't be typed in |
-| unlist from the overview | lists_ui.rs | partly: on the list's page (two clicks) |
+| every list with members, figures (members, ordinal, ordinal mean, reversed, reversed mean) | lists_ui.rs | has (19 Oct): a card per list |
+| the list as one text (ordinal, reversed, letters), gsum detail, pf chain | lists_ui.rs | has |
+| its letters as a vector (bars a–z) on each list | lists_ui.rs | has |
+| "how alike": the cosine matrix of every two lists' letter vectors, coloured | lists_ui.rs | has |
+| members as chips with their s·r and × to delist | lists_ui.rs | has (and editable rows on the list's page) |
+| choose a list; the bar's Enter adds to it (saturating new texts); "let go of it"; with none chosen, Enter starts a list | lists_ui.rs `bar_key` | has (and Enter on a list's name chooses it) |
+| unlist from the overview | lists_ui.rs | has (two clicks, Ctrl+Z brings it back) |
 | rename a list, edit members in place, pages, pictures panel, undo | Dioxus only | has |
 
 ## Tags, stats

@@ -73,7 +73,7 @@ impl View {
         match self {
             View::Memory => "a number, a text, or a key",
             View::Space => "a number, a text, or a key (Esc to fly)",
-            View::Lists => "find a list, or a new list's name (Enter)",
+            View::Lists => "a text for the chosen list, a list's name, or a new list's (Enter)",
             View::Reader | View::Notes => "words to find notes by",
             View::Tags => "a tag (Enter picks the first match)",
             View::Stats => "",

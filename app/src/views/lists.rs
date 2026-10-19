@@ -1,7 +1,10 @@
-//! Lists: every list as a tile; a list's own page has its name at the top (editable), its
-//! members as editable entries a page at a time, and its figures at the bottom. Deleting
-//! a list takes two clicks. The bar finds lists by name, or (Enter, nothing found) makes
-//! one: a new text heading an empty list waits for members from the memory view.
+//! Lists, as the Bevy app had them (lists_ui.rs): every list as a card with its figures,
+//! the list read as one text, its letters as a vector and its members as chips with their
+//! sums (× takes one out); how alike every two lists are (the cosine of their letter
+//! vectors); a chosen list the bar fills (Enter adds what's typed, remembering it when
+//! new), or, with none chosen, Enter chooses a list by its name or starts one. A list's
+//! own page (its name clicked) renames it, edits its members a page at a time, and holds
+//! its pictures. Unlisting takes two clicks, and Ctrl+Z brings a list back.
 
 use dioxus::prelude::*;
 
@@ -17,6 +20,8 @@ pub fn Lists() -> Element {
     let ui = ui();
     let api = api();
     let mut open: Signal<Option<String>> = use_signal(|| None);
+    // the list the bar fills (the Bevy app's "chosen"): Enter adds what's typed to it
+    let mut chosen: Signal<Option<Hit>> = use_signal(|| None);
     let api_r = api.clone();
     let lists = use_resource(move || {
         let api = api_r.clone();
@@ -27,46 +32,88 @@ pub fn Lists() -> Element {
         let api = api.clone();
         use_keys(View::Lists, move |k: KeyPress| {
             if k.bar && k.key == "Enter" {
-                let name = k.text.trim().to_string();
-                let found = lists.peek().as_ref().and_then(|r| r.as_ref().ok()).and_then(|l| {
-                    l.lists
-                        .iter()
-                        .find(|x| x.name.to_lowercase().contains(&name.to_lowercase()))
-                        .cloned()
-                });
-                match found {
-                    Some(l) if !name.is_empty() => open.set(Some(l.list)),
-                    _ if !name.is_empty() => {
-                        let api = api.clone();
-                        dioxus::dioxus_core::spawn_forever(async move {
-                            match api.saturate(&name).await {
-                                Ok((key, _)) => {
-                                    let mut p = ui.picks;
-                                    p.write().list = Some(Hit {
-                                        key,
-                                        text: name.clone(),
-                                        note: false,
+                let typed = k.text.trim().to_string();
+                if typed.is_empty() {
+                    return true;
+                }
+                let api = api.clone();
+                let list = chosen.peek().clone();
+                let exact = lists
+                    .peek()
+                    .as_ref()
+                    .and_then(|r| r.as_ref().ok())
+                    .and_then(|l| l.lists.iter().find(|x| x.name.eq_ignore_ascii_case(&typed)).cloned());
+                dioxus::dioxus_core::spawn_forever(async move {
+                    match (list, exact) {
+                        // a list is chosen: the text joins it (remembered when it's new)
+                        (Some(l), _) => match api.saturate(&typed).await {
+                            Ok((key, _)) if key == l.key => ui.fail("a list can't hold itself"),
+                            Ok((key, _)) => match api.enlist(&l.key, &key).await {
+                                Ok(()) => {
+                                    ui.did(Did::Enlisted {
+                                        list: l.key.clone(),
+                                        member: key,
                                     });
-                                    ui.say(format!("“{name}” is the list now: Ctrl+click texts in the memory view and type Enlist, or Alt+click several and put them in it"));
+                                    ui.say(format!("added “{typed}” to {}", l.text));
+                                    ui.set_bar("");
+                                    ui.touched();
                                 }
                                 Err(e) => ui.fail(e),
+                            },
+                            Err(e) => ui.fail(e),
+                        },
+                        // a list by that name: choose it
+                        (None, Some(l)) => {
+                            chosen.set(Some(Hit {
+                                key: l.list.clone(),
+                                text: l.name.clone(),
+                                note: false,
+                            }));
+                            ui.set_bar("");
+                            ui.say(format!("Enter adds to “{}” now", l.name));
+                        }
+                        // else a new list headed by the text, chosen
+                        (None, None) => match api.saturate(&typed).await {
+                            Ok((key, _)) => {
+                                let h = Hit {
+                                    key,
+                                    text: typed.clone(),
+                                    note: false,
+                                };
+                                chosen.set(Some(h.clone()));
+                                let mut picks = ui.picks;
+                                picks.write().list = Some(h);
+                                ui.set_bar("");
+                                ui.say(format!("a new list “{typed}”: type its members, Enter after each"));
+                                ui.touched();
                             }
-                        });
+                            Err(e) => ui.fail(e),
+                        },
                     }
-                    _ => {}
-                }
+                });
                 return true;
             }
-            if !k.bar && k.key == "Escape" && open.peek().is_some() {
-                open.set(None);
+            if !k.bar && k.key == "Escape" {
+                if open.peek().is_some() {
+                    open.set(None);
+                } else {
+                    chosen.set(None);
+                }
                 return true;
             }
             false
         });
     }
+    use_effect(move || {
+        let note = match chosen() {
+            Some(l) => format!("Enter adds to “{}”", l.text),
+            None => "Enter chooses a list by its name, or starts one".to_string(),
+        };
+        ui.side_note(View::Lists, note);
+    });
     let q = ui.bar.read().trim().to_lowercase();
-    let all: Vec<ListInfo> = match &*lists.read() {
-        Some(Ok(l)) => l.lists.clone(),
+    let (all, dot): (Vec<ListInfo>, Vec<Vec<f64>>) = match &*lists.read() {
+        Some(Ok(l)) => (l.lists.clone(), l.dot.clone()),
         Some(Err(e)) => return rsx! { div { class: "page", div { class: "card bad", "{e}" } } },
         None => return rsx! { div { class: "page", div { class: "card dim", "…" } } },
     };
@@ -76,29 +123,182 @@ pub fn Lists() -> Element {
     {
         return rsx! { ListPage { list: l, back: move |_| open.set(None) } };
     }
+    let finding = chosen().is_none() && !q.is_empty();
     let shown: Vec<ListInfo> = all
-        .into_iter()
-        .filter(|l| q.is_empty() || l.name.to_lowercase().contains(&q))
+        .iter()
+        .filter(|l| !finding || l.name.to_lowercase().contains(&q))
+        .cloned()
         .collect();
+    let cur = chosen();
     rsx! {
-        div { class: "page",
-            div { class: "row", h2 { "lists" } span { class: "dim", "{shown.len()} shown · type to find one, Enter on a new name starts a list" } }
-            if shown.is_empty() {
-                div { class: "card empty", "No lists yet. In the memory view, Shift+click a text to make it a list's head, Ctrl+click another and type Enlist; or Alt+click several and put them in a list." }
+        div { class: "page lists-page",
+            div { class: "card lists-head",
+                div { class: "row",
+                    h2 { "lists" }
+                    span { class: "dim small", "{all.len()} lists" if finding { " · {shown.len()} named like “{q}”" } }
+                }
+                match &cur {
+                    Some(l) => rsx! {
+                        div { class: "row",
+                            span { "Typing in the bar adds to " b { "“{l.text}”" } ". Choose another list below, or let go of it to start a new one." }
+                            button { onclick: move |_| chosen.set(None), Icon { name: "close" } "let go of it" }
+                        }
+                    },
+                    None => rsx! {
+                        div { class: "dim", "Type in the bar to start a new list headed by that text (or a list's name to choose it); choose a list below to add to it. In the memory view, Shift+click a text to head a list and Ctrl+click another, then Enlist." }
+                    },
+                }
             }
-            div { class: "list-grid",
-                for l in shown.iter().cloned() {
-                    button {
-                        key: "{l.list}",
-                        class: "card list-tile",
-                        onclick: { let k = l.list.clone(); move |_| open.set(Some(k.clone())) },
-                        h3 { "{l.name}" }
-                        span { class: "dim small", "{l.count} members · ordinal mean {l.ordinal_mean:.1} · reversed mean {l.reversed_mean:.1}" }
-                        span { class: "small", {l.members.iter().take(6).map(|m| m.text.clone()).collect::<Vec<_>>().join(" · ")} }
-                    }
+            if all.len() > 1 {
+                Alike { all: all.clone(), dot: dot.clone() }
+            }
+            if shown.is_empty() && all.is_empty() {
+                div { class: "card empty", "No lists yet." }
+            }
+            for l in shown {
+                ListCard {
+                    key: "{l.list}",
+                    is_chosen: cur.as_ref().is_some_and(|c| c.key == l.list),
+                    list: l.clone(),
+                    on_choose: move |h: Hit| chosen.set(Some(h)),
+                    on_open: move |k: String| open.set(Some(k)),
                 }
             }
             crate::views::pictures::Pictures { list: None, names: names.clone() }
+        }
+    }
+}
+
+/// how alike the lists are: the cosine of each two lists' letter vectors (1 is the same
+/// letters in the same proportions), as the Bevy app's grid
+#[component]
+fn Alike(all: Vec<ListInfo>, dot: Vec<Vec<f64>>) -> Element {
+    if dot.len() != all.len() {
+        return rsx! {};
+    }
+    let n = all.len();
+    rsx! {
+        div { class: "card",
+            h3 { "how alike" }
+            div { class: "dim small", "the cosine of each two lists' letter vectors: 1 is the same letters in the same proportions" }
+            div { class: "alike", style: "grid-template-columns: 130px repeat({n}, minmax(38px, 52px));",
+                span {}
+                for l in all.iter() {
+                    span { key: "h{l.list}", class: "alike-col", title: "{l.name}", {l.name.chars().take(7).collect::<String>()} }
+                }
+                for (i , l) in all.iter().enumerate() {
+                    span { key: "r{l.list}", class: "alike-row", title: "{l.name}", {l.name.chars().take(18).collect::<String>()} }
+                    for (j , v) in dot[i].iter().enumerate() {
+                        span {
+                            key: "{i}-{j}",
+                            class: "alike-cell",
+                            title: "{all[i].name} · {all[j].name}: {v:.3}",
+                            style: "background: hsl({anend_core::spread::seed_hue((v * 360.0) as i64)} 60% 55% / {0.15 + 0.75 * v.clamp(0.0, 1.0):.2});",
+                            {format!("{v:.2}")}
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// a list as the Bevy app showed it: its name and key, choose and unlist, its figures, the
+/// list read as one text, its letters as bars, and its members as chips with their sums
+#[component]
+fn ListCard(list: ListInfo, is_chosen: bool, on_choose: EventHandler<Hit>, on_open: EventHandler<String>) -> Element {
+    let ui = ui();
+    let api = api();
+    let mut armed = use_signal(|| false);
+    let joined: String = list
+        .members
+        .iter()
+        .map(|m| m.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let m = gem::Measure::of(&joined);
+    let max = list.vector.iter().cloned().fold(0.0f64, f64::max).max(1e-9);
+    let (k1, k2, n1) = (list.list.clone(), list.list.clone(), list.name.clone());
+    let api_u = api.clone();
+    let members_keys: Vec<String> = list.members.iter().map(|h| h.key.clone()).collect();
+    rsx! {
+        div { class: if is_chosen { "card listcard chosen" } else { "card listcard" },
+            div { class: "row",
+                button { class: "plain lname", "data-tip": "its page: rename, edit members, pictures", onclick: move |_| on_open.call(k1.clone()), h3 { "{list.name}" } }
+                span { class: "dim small mono", "{list.list}" }
+                span { class: "grow" }
+                button { class: if is_chosen { "primary" } else { "" }, "data-tip": "the bar's Enter adds to it",
+                    onclick: move |_| on_choose.call(Hit { key: k2.clone(), text: n1.clone(), note: false }),
+                    if is_chosen { "chosen" } else { "choose" } }
+                button {
+                    class: if armed() { "armed" } else { "plain" },
+                    "data-tip": "unlist: the list goes, its members stay (click twice)",
+                    onclick: move |_| {
+                        if !armed() { armed.set(true); return; }
+                        let (api, key, members) = (api_u.clone(), list.list.clone(), members_keys.clone());
+                        dioxus::dioxus_core::spawn_forever(async move {
+                            match api.unlist(&key).await {
+                                Ok(n) => { ui.did(Did::Unlisted { list: key, members }); ui.say(format!("unlisted {n} members · Ctrl+Z brings it back")); ui.touched(); }
+                                Err(e) => ui.fail(e),
+                            }
+                        });
+                    },
+                    Icon { name: "delete" }
+                    if armed() { "unlist?" } else { "unlist" }
+                }
+            }
+            div { class: "figures-row",
+                div { b { "{list.count}" } span { "members" } }
+                div { b { "{list.ordinal_sum}" } span { "ordinal" } }
+                div { b { {format!("{:.1}", list.ordinal_mean)} } span { "ordinal mean" } }
+                div { b { "{list.reversed_sum}" } span { "reversed" } }
+                div { b { {format!("{:.1}", list.reversed_mean)} } span { "reversed mean" } }
+            }
+            div { class: "small", "as one: ordinal {m.ordinal} · reversed {m.reversed} · letters " span { class: "mono", {gem::letters(&m.frequency).chars().take(40).collect::<String>()} } }
+            div { class: "dim small mono", {gem::gsum_line(&joined)} }
+            if m.ordinal > 1 {
+                crate::views::memory::PfLine { n: m.ordinal }
+            }
+            if !list.vector.is_empty() {
+                div { class: "letterbars", title: "its letters as a vector",
+                    for (i , v) in list.vector.iter().enumerate() {
+                        div { key: "{i}", class: "col",
+                            span { class: "bar", style: "height: {(v / max * 34.0).max(1.0):.1}px;" }
+                            span { class: "l", {((b'a' + i as u8) as char).to_string()} }
+                        }
+                    }
+                }
+            }
+            div { class: "memberchips",
+                for h in list.members.iter().cloned() {
+                    MemberChip { key: "{h.key}", list: list.list.clone(), hit: h }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn MemberChip(list: String, hit: Hit) -> Element {
+    let ui = ui();
+    let api = api();
+    let (s, r) = gem::sums(&hit.text);
+    rsx! {
+        span { class: "mchip", title: "{hit.key}",
+            span { class: "mt", onclick: { let t = hit.text.clone(); move |_| ui.set_bar(&t) }, "{hit.text}" }
+            span { class: "ms", "{s}·{r}" }
+            button { class: "plain mx", "aria-label": "take it out of the list", "data-tip": "take it out (it stays a text)",
+                onclick: move |_| {
+                    let (api, l, k) = (api.clone(), list.clone(), hit.key.clone());
+                    dioxus::dioxus_core::spawn_forever(async move {
+                        match api.delist(&l, &k).await {
+                            Ok(()) => { ui.did(Did::Delisted { list: l, member: k }); ui.touched(); }
+                            Err(e) => ui.fail(e),
+                        }
+                    });
+                },
+                "×"
+            }
         }
     }
 }
