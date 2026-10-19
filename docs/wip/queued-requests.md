@@ -2,6 +2,32 @@
 
 The user asked for these to be held until the current round is done, then picked up in order.
 
+## How work proceeds (the user carries no gate)
+
+The user doesn't want to be the gate between stages. Work moves on by itself, and the user's
+part is optional: ideas, answers when asked, and trying things when they feel like it.
+
+- **Stages run back to back.** Each stage ends when its own checks pass:
+  - the four local checks, plus tests for what it adds;
+  - a by-hand check of every visible change on desktop (Xvfb) and web (Playwright), with
+    screenshots in app/docs/shots/;
+  - docs/parity.md updated, with nothing removed without a line saying why.
+
+  The next stage then starts. No stage waits for the user to try the last one.
+- **Milestones are offered, not required.** At the end of each stage, a pull request is
+  opened that summarises what the stage did, so there is a stable point to merge whenever the
+  user wants. Unmerged pull requests don't block anything; work continues on the branch.
+- **Questions go in one file:** docs/wip/questions.md. When a design choice is the user's to
+  make, a sensible default is picked so work isn't blocked. The default is written down there
+  as "chosen for now, change if you like", kept reversible, and built. Ask in conversation
+  only when no default is reasonable.
+- **The user's ideas are recorded as given,** not rephrased into commitments. Where an idea
+  needs interpreting, the interpretation goes into questions.md before it is built on.
+- **Usage limits:** pushes after every piece of work, a check-in after each limit that resumes
+  the work, and the Resuming block in docs/next.md kept current. A cut-off then costs at most
+  the step in progress, and the user doesn't have to restart anything.
+- **Reports are short:** what was done, what's next, and anything waiting in questions.md.
+
 ## Order of work: follow these stages, not the item numbers
 
 The numbers below are kept stable so they can be referred to; the order is set here. The user
