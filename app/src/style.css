@@ -421,6 +421,9 @@ button.plain.on { background: var(--accent); color: var(--on-button); }
 .hl mark.flag { background: none; color: inherit; text-decoration: underline wavy; text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
 .hl mark.flag.spell { text-decoration-color: hsl(2 75% 52%); }
 .hl mark.flag.grammar { text-decoration-color: hsl(215 75% 52%); }
+.spell-pick { position: fixed; z-index: 60; min-width: 160px; display: flex; flex-direction: column; gap: 2px; padding: 6px; background: var(--cards); color: var(--text); border-radius: var(--radius); box-shadow: 0 4px 18px rgb(0 0 0 / .22); }
+.spell-pick button { justify-content: space-between; display: flex; gap: 12px; text-align: left; }
+.spell-note { margin-top: 4px; }
 /* what classifiers say of an entry (views/judge.rs) */
 .judge { display: flex; flex-direction: column; gap: 6px; background: var(--code); border-radius: 5px; padding: 8px 10px; flex: none; max-height: 40%; overflow: auto; }
 .judge-pick { gap: 4px; }

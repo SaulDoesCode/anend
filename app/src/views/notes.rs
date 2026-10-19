@@ -28,8 +28,71 @@ if (!window.__anendPad) {
       if (h) { h.scrollTop = t.scrollTop; h.scrollLeft = t.scrollLeft; }
     }
   }, true);
+  // the pad's own undo: the desktop's web view has none for a text box, and a
+  // replacement put in by a click must come back out with Ctrl+Z too. A pause in typing
+  // ends a step; Ctrl+Z undoes, Ctrl+Shift+Z or Ctrl+Y redoes.
+  const stacks = new WeakMap();
+  const st = (p) => { let s = stacks.get(p); if (!s) { s = { undo: [], redo: [], last: 0 }; stacks.set(p, s); } return s; };
+  window.__anendPadSnap = (p, force) => {
+    const s = st(p);
+    const now = Date.now();
+    if (force || now - s.last > 800 || !s.undo.length) s.undo.push({ v: p.value, a: p.selectionStart, b: p.selectionEnd });
+    if (s.undo.length > 500) s.undo.shift();
+    s.last = force ? 0 : now;
+    s.redo = [];
+  };
+  document.addEventListener('beforeinput', (e) => {
+    const p = e.target;
+    if (p && p.id === 'note-pad' && !window.__anendPadReplaying) window.__anendPadSnap(p, false);
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    const p = e.target;
+    if (!p || p.id !== 'note-pad' || !(e.ctrlKey || e.metaKey) || e.altKey) return;
+    const k = e.key.toLowerCase();
+    const undo = k === 'z' && !e.shiftKey, redo = (k === 'z' && e.shiftKey) || k === 'y';
+    if (!undo && !redo) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const s = st(p);
+    const snap = (undo ? s.undo : s.redo).pop();
+    if (!snap) return;
+    (undo ? s.redo : s.undo).push({ v: p.value, a: p.selectionStart, b: p.selectionEnd });
+    p.value = snap.v;
+    p.setSelectionRange(snap.a, snap.b);
+    s.last = 0;
+    window.__anendPadReplaying = true;
+    p.dispatchEvent(new Event('input', { bubbles: true }));
+    window.__anendPadReplaying = false;
+  }, true);
 }
 "#;
+
+/// puts a replacement in the pad as one undo step of its own (Ctrl+Z takes it back);
+/// `from`..`to` in UTF-16 units
+fn replace_in_pad(from: usize, to: usize, with: &str) {
+    let js = format!(
+        r#"(() => {{
+  const p = document.getElementById('note-pad');
+  if (!p) return;
+  p.focus();
+  if (window.__anendPadSnap) window.__anendPadSnap(p, true);
+  p.setRangeText({with}, {from}, {to}, 'end');
+  window.__anendPadReplaying = true;
+  p.dispatchEvent(new Event('input', {{ bubbles: true }}));
+  window.__anendPadReplaying = false;
+}})();"#,
+        with = serde_json::to_string(with).unwrap_or_default()
+    );
+    document::eval(&js);
+}
+
+/// a flagged word the pointer clicked, and where
+#[derive(Clone, PartialEq)]
+struct Pick {
+    flag: serde_json::Value,
+    x: f64,
+    y: f64,
+}
 
 fn split_tags(t: &str) -> Vec<String> {
     t.split(',')
@@ -53,6 +116,11 @@ pub fn Notes() -> Element {
     let mut judging = use_signal(|| false);
     let mut tag_gen = use_signal(|| 0u64);
     let mut tag_draft = use_signal(String::new);
+    // the spelling check: the flags for the text they were made for
+    let mut flags: Signal<(String, Vec<serde_json::Value>)> = use_signal(|| (String::new(), vec![]));
+    let mut check_gen = use_signal(|| 0u64);
+    let mut report: Signal<Option<serde_json::Value>> = use_signal(|| None);
+    let mut pick: Signal<Option<Pick>> = use_signal(|| None);
     use_hook(|| {
         document::eval(PAD_JS);
     });
@@ -193,6 +261,41 @@ pub fn Notes() -> Element {
             },
         );
     });
+    // checked a beat after typing stops
+    {
+        let api = api.clone();
+        use_effect(move || {
+            let t = text();
+            let on = ui.prefs.read().check_spelling;
+            if !on || t.trim().is_empty() {
+                return;
+            }
+            let g = *check_gen.peek() + 1;
+            check_gen.set(g);
+            let key = open.peek().as_ref().map(|n| n.key.clone()).unwrap_or_default();
+            let api = api.clone();
+            spawn(async move {
+                crate::ui::sleep_ms(700).await;
+                if *check_gen.peek() != g {
+                    return;
+                }
+                match api
+                    .call("grammar.check", serde_json::json!({ "text": t, "exclude": key }))
+                    .await
+                {
+                    Ok(r) => {
+                        if *check_gen.peek() == g {
+                            let fl = r["flags"].as_array().cloned().unwrap_or_default();
+                            flags.set((t, fl));
+                            report.set(Some(r["report"].clone()));
+                        }
+                    }
+                    // a hub from before the check: say nothing, show nothing
+                    Err(_) => flags.set((String::new(), vec![])),
+                }
+            });
+        });
+    }
     let notes: Vec<NoteSummary> = match &*list.read() {
         Some(Ok(v)) => v.clone(),
         _ => vec![],
@@ -211,7 +314,34 @@ pub fn Notes() -> Element {
         let p = ui.prefs.read();
         (p.hide_list, p.list_right, p.highlight)
     };
-    let layer = crate::highlight::to_html(&text(), colour, &[]);
+    let check = ui.prefs.read().check_spelling;
+    let shown_flags: Vec<crate::highlight::Flag> = {
+        let (t, fl) = &*flags.read();
+        if check && *t == text() {
+            fl.iter()
+                .map(|f| {
+                    let sug: Vec<String> = f["suggestions"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(|s| match s["text"].as_str().unwrap_or("") {
+                            "" => "take it out".to_string(),
+                            x => x.to_string(),
+                        })
+                        .collect();
+                    crate::highlight::Flag {
+                        start: f["start"].as_u64().unwrap_or(0) as usize,
+                        end: f["end"].as_u64().unwrap_or(0) as usize,
+                        kind: if f["kind"] == "spelling" { "spell" } else { "grammar" },
+                        title: format!("{} · click: {}", f["kind"].as_str().unwrap_or(""), sug.join(", ")),
+                    }
+                })
+                .collect()
+        } else {
+            vec![]
+        }
+    };
+    let layer = crate::highlight::to_html(&text(), colour, &shown_flags);
     let api_d = api.clone();
     let mut class = String::from("notes");
     if hide_list {
@@ -308,6 +438,14 @@ pub fn Notes() -> Element {
                             }
                         }
                         button {
+                            class: if check { "plain on" } else { "plain" },
+                            "data-tip": if check { "the spelling check is on: click an underlined word for what it may be" } else { "check spelling and word choice" },
+                            "aria-label": "check spelling",
+                            "aria-pressed": "{check}",
+                            onclick: move |_| set_pref(ui, |p| p.check_spelling = !p.check_spelling),
+                            Icon { name: "check" }
+                        }
+                        button {
                             class: if judging() { "plain on" } else { "plain" },
                             "data-tip": "the classifiers this note is measured on · {ui.key_of(Action::NoteClassifiers)}",
                             "aria-label": "the note's classifiers",
@@ -377,7 +515,46 @@ pub fn Notes() -> Element {
                                     );
                                     document::eval(&js);
                                 },
-                                oninput: move |e| { text.set(e.value()); dirty.set(true); },
+                                oninput: move |e| { text.set(e.value()); dirty.set(true); pick.set(None); },
+                                onclick: move |e: MouseEvent| {
+                                    if !ui.prefs.peek().check_spelling || flags.peek().1.is_empty() {
+                                        return;
+                                    }
+                                    let c = e.client_coordinates();
+                                    spawn(async move {
+                                        let mut ev = document::eval("const p = document.getElementById('note-pad'); dioxus.send(p ? p.selectionStart : -1);");
+                                        let Ok(at) = ev.recv::<i64>().await else { return };
+                                        let (t, fl) = flags.peek().clone();
+                                        if t != *text.peek() || at < 0 {
+                                            return;
+                                        }
+                                        let at = at as u64;
+                                        let hit = fl.into_iter().find(|f| {
+                                            f["from"].as_u64().unwrap_or(0) <= at && at <= f["to"].as_u64().unwrap_or(0)
+                                        });
+                                        pick.set(hit.map(|flag| Pick { flag, x: c.x, y: c.y }));
+                                    });
+                                },
+                            }
+                        }
+                        if let Some(pk) = pick() {
+                            SpellPick {
+                                pick: pk,
+                                on_close: move |_| pick.set(None),
+                            }
+                        }
+                        if check {
+                            if let Some(r) = report() {
+                                div { class: "spell-note dim small",
+                                    title: "measured on a fifth of its corpus held out, with errors put in the same way it was trained: real typing errors are harder",
+                                    {format!(
+                                        "spelling check: finds {:.0}% of the errors put into held-out text, {:.0}% of what it flags is one, the first suggestion is right {:.0}% of the time; {:.1} false alarms per 1000 clean words",
+                                        r["recall"].as_f64().unwrap_or(0.0) * 100.0,
+                                        r["precision"].as_f64().unwrap_or(0.0) * 100.0,
+                                        r["top1"].as_f64().unwrap_or(0.0) * 100.0,
+                                        r["false_alarms_per_1000"].as_f64().unwrap_or(0.0),
+                                    )}
+                                }
                             }
                         }
                     }
@@ -387,6 +564,57 @@ pub fn Notes() -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+/// what a flagged word may be: each suggestion (a click puts it in; Ctrl+Z takes it back)
+#[component]
+fn SpellPick(pick: Pick, on_close: EventHandler<()>) -> Element {
+    let f = pick.flag.clone();
+    let from = f["from"].as_u64().unwrap_or(0) as usize;
+    let to = f["to"].as_u64().unwrap_or(0) as usize;
+    let kind = f["kind"].as_str().unwrap_or("").to_string();
+    let p = f["p"].as_f64().unwrap_or(0.0) * 100.0;
+    let sugs: Vec<(String, f64)> = f["suggestions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|s| {
+            (
+                s["text"].as_str().unwrap_or("").to_string(),
+                s["p"].as_f64().unwrap_or(0.0),
+            )
+        })
+        .collect();
+    let what = match kind.as_str() {
+        "repeated" => "a word twice",
+        "confused" => "another word may fit",
+        _ => "not a word it knows",
+    };
+    rsx! {
+        div { class: "spell-pick", style: "left: {pick.x:.0}px; top: {pick.y + 14.0:.0}px;", role: "menu",
+            div { class: "dim small", "{what} · {p:.0}% sure" }
+            if sugs.is_empty() {
+                div { class: "dim small", "no suggestion" }
+            }
+            for (s , sp) in sugs {
+                button {
+                    key: "{s}",
+                    class: "plain",
+                    role: "menuitem",
+                    onclick: {
+                        let s = s.clone();
+                        move |_| {
+                            replace_in_pad(from, to, &s);
+                            on_close.call(());
+                        }
+                    },
+                    if s.is_empty() { i { "take it out" } } else { b { "{s}" } }
+                    span { class: "dim small", " {sp * 100.0:.0}%" }
+                }
+            }
+            button { class: "plain dim small", onclick: move |_| on_close.call(()), "leave it" }
         }
     }
 }

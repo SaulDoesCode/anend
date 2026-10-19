@@ -33,6 +33,7 @@ pub const SETTINGS: &[&str] = &[
     "filter",
     "keymap",
     "highlight",
+    "check_spelling",
     "hide_list",
     "list_right",
     "white",
@@ -215,6 +216,22 @@ mod tests {
             "show_blocks",
         ] {
             assert!(rs.contains(needle), "space.rs lost {needle}");
+        }
+    }
+
+    /// the notes editor's spelling check: asked for as one writes, its flags drawn in the
+    /// highlight layer, a click's suggestion put in as an undo step of its own
+    #[test]
+    fn the_spelling_check_stays() {
+        let rs = include_str!("views/notes.rs");
+        for needle in [
+            "\"grammar.check\"",
+            "highlight::to_html(&text(), colour, &shown_flags)",
+            "fn SpellPick(",
+            "__anendPadSnap(p, true)",
+            "check_spelling",
+        ] {
+            assert!(rs.contains(needle), "notes.rs lost {needle}");
         }
     }
 

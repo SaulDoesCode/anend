@@ -65,6 +65,8 @@ pub struct Prefs {
     pub keymap: BTreeMap<String, String>,
     /// colour the markdown in the note editor
     pub highlight: bool,
+    /// underline likely spelling and word-choice errors in the note editor
+    pub check_spelling: bool,
     /// the note list slid away
     pub hide_list: bool,
     /// the note list at the editor's right
@@ -181,6 +183,7 @@ impl Default for Prefs {
             filter: MemFilter::default(),
             keymap: BTreeMap::new(),
             highlight: true,
+            check_spelling: true,
             hide_list: false,
             list_right: false,
             white: false,

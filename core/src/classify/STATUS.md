@@ -215,6 +215,21 @@ output for exactness, so no split-k); classification-only inference (`Model::run
 `predict`) still on the CPU; pictures/patch paths untouched; the browser (WebGPU) build
 needs an async device request and a wasm feature set.
 
+## Spelling and word choice (a proof of concept, 19 Oct)
+
+`core/src/grammar`: two logistic regressions (not the transformer: a per-word detector over
+hashed features and a ranker over dense ones), trained the first time they're asked for
+(about a second in a release build) on deterministic corruptions of `corpus.txt` (2870
+sentences of the project's own prose), with a fifth held out. Measured on the held-out
+fifth, corrupted the same way: precision 0.958, recall 0.972 (misspellings 574 of 574,
+confused words 178 of 201, repeated words 60 of 60), the first suggestion right for 95.7%
+of the caught errors and among the first three for 99.1%, and 7.3 false alarms per 1000
+words of clean held-out text. These are numbers on errors made the way it was trained;
+the misspellings are non-words by construction, so a lexicon catches them. In real text
+expect more false alarms on names and jargon (the save's own words are exempt) and fewer
+confusables caught ("its" before "more", "quiet" before "big" go unflagged in the test
+sentence). In the notes editor (`grammar.check`), desktop and web.
+
 ## Next (not done)
 
 - ~~the desktop app's classifiers view~~: done for the Bevy app (retired), and again for

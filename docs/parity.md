@@ -82,6 +82,8 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | written date and edits count | ui.rs | has |
 | replacements `{{key}}`, `{{filter:name}}`, alternatives from lists | Dioxus only | has |
 | the notes view has no horizontal scrollbar dragging the content off to the left | — | has (19 Oct): the view never scrolls itself; its list and pad do |
+| spelling and word choice: likely errors underlined as one writes (red: not a word; blue: repeated or confused), a click shows what each may be with its probability, a click on one puts it in, Ctrl+Z takes it out; a toggle (the check button, setting `check_spelling`); its measured precision and recall under the pad | asked 19 Oct | has (19 Oct, desktop and web): `core::grammar`, a detector and a separate suggester trained on deterministic corruptions; guard `parity::tests::the_spelling_check_stays` |
+| Ctrl+Z / Ctrl+Shift+Z in the pad | the browser's own | has (19 Oct): the pad keeps its own undo steps (the desktop web view had none: Ctrl+Z did nothing there) |
 
 ## Reader
 
@@ -224,5 +226,4 @@ replacements and alternatives in the editor, the reader's pages and big reading,
 | feature | status |
 |---|---|
 | WebGPU training in the browser (task #24) | not yet |
-| grammar and spelling proof of concept in the editor | not yet |
 | space search modes (normal, classifier, random), save checkpoints, a real IME test | not yet |
