@@ -692,3 +692,11 @@ a.btn { text-decoration: none; }
 .space-host, .space-host * { user-select: none; -webkit-user-select: none; }
 
 .menu.smenu { max-height: calc(100vh - 16px); overflow-y: auto; }
+.scenes { display: flex; flex-direction: column; gap: 3px; }
+.scene { display: flex; align-items: center; gap: 4px; }
+.scene.on .scene-open b { color: var(--link); }
+.scene-open { flex: 1; justify-content: flex-start; text-align: left; overflow: hidden; }
+.scene-name { flex: 1; min-width: 0; }
+.scene-save { margin-top: 6px; gap: 4px; }
+.scene-save input { flex: 1; min-width: 0; }
+.scenes input { font: 13px var(--font); background: var(--pad, #ddd); color: var(--text); border: 0; border-radius: var(--radius); padding: 3px 6px; }

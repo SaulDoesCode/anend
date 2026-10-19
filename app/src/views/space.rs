@@ -290,6 +290,8 @@ struct Sp {
     block_use: Signal<(u64, u64)>,
     /// the right-click menu on a text
     menu: Signal<Option<SpaceEvent>>,
+    /// bumped when a scene is saved, so the scenes window reads them again
+    scenes_rev: Signal<u64>,
 }
 
 impl Sp {
@@ -880,6 +882,7 @@ pub fn Space() -> Element {
         block: use_signal(|| None),
         block_use: use_signal(|| (0, 0)),
         menu: use_signal(|| None),
+        scenes_rev: use_signal(|| 0),
     };
     // the engine and its channel
     {
@@ -1099,6 +1102,13 @@ pub fn Space() -> Element {
             if let Some(m) = (sp.menu)() {
                 SpaceMenu { ev: m, sp_menu: sp.menu, on_send: move |v: Value| sp.send(v), on_gsearch: { let api = api_b.clone(); move |(n, md): (u64, Mode)| envale(ui, api.clone(), sp, n, md) } }
             }
+            if p.space.show_scenes {
+                Scenes {
+                    rev: sp.scenes_rev,
+                    on_open: { let api = api_b.clone(); move |name: String| { let api = api.clone(); dioxus::dioxus_core::spawn_forever(async move { route(ui, api, sp, &name).await; }); } },
+                    on_save: move |name: String| sp.send(json!({ "cmd": "rows", "why": "save", "name": name })),
+                }
+            }
             if p.space.show_blocks {
                 Blocks {
                     selected: (sp.selected)(),
@@ -1256,6 +1266,8 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
                         .await
                     {
                         Ok(()) => {
+                            let mut r = sp.scenes_rev;
+                            r += 1;
                             set_pref(ui, |p| p.space.address = name.clone());
                             ui.say(format!("saved the map {name} · {n} texts · #{name} opens it"));
                         }
@@ -1650,6 +1662,139 @@ fn SpaceMenu(
                     } },
                     Icon { name: "delete" }
                     if armed() { "forget the entry? click again" } else if copies > 1 { "forget the entry ({copies} placements)…" } else { "forget the entry…" }
+                }
+            }
+        }
+    }
+}
+
+/// the saved scenes (maps): open, rename, delete (two clicks, with an undo), and the room
+/// saved under a name
+#[component]
+fn Scenes(rev: Signal<u64>, on_open: EventHandler<String>, on_save: EventHandler<String>) -> Element {
+    let ui = ui();
+    let api = api();
+    let mut local = use_signal(|| 0u64);
+    let mut renaming: Signal<Option<String>> = use_signal(|| None);
+    let mut armed: Signal<Option<String>> = use_signal(|| None);
+    let mut gone: Signal<Option<(String, Value)>> = use_signal(|| None);
+    let mut name = use_signal(|| default_map_name(ui));
+    let api_r = api.clone();
+    let all = use_resource(move || {
+        let api = api_r.clone();
+        let _ = (rev(), local());
+        async move { maps(&api).await }
+    });
+    let all: BTreeMap<String, Value> = all.read().clone().unwrap_or_default();
+    let here = ui.prefs.read().space.address.clone();
+    // writes the scenes back, then reads them again
+    let store = {
+        let api = api.clone();
+        move |m: BTreeMap<String, Value>, said: String| {
+            let api = api.clone();
+            dioxus::dioxus_core::spawn_forever(async move {
+                match api
+                    .set_setting("space.maps", &serde_json::to_string(&m).unwrap_or_default())
+                    .await
+                {
+                    Ok(()) => {
+                        ui.say(said);
+                        local += 1;
+                    }
+                    Err(e) => ui.fail(e),
+                }
+            });
+        }
+    };
+    let ok_name =
+        |n: &str| (1..=96).contains(&n.len()) && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    rsx! {
+        Win {
+            id: "scenes",
+            at: (8.0, 120.0),
+            on_close: move |_| set_pref(ui, |p| p.space.show_scenes = false),
+            title: rsx! { span { class: "win-title", Icon { name: "folder" } "scenes" span { class: "dim small", style: "font-weight: 400;", "{all.len()} saved" } } },
+            div { class: "scenes",
+                if all.is_empty() {
+                    p { class: "dim small", "No scenes yet: save the room as one below (or Save name in the bar)." }
+                }
+                for (n , rows) in all.clone() {
+                    div { key: "{n}", class: if n == here { "scene on" } else { "scene" },
+                        if renaming().as_deref() == Some(n.as_str()) {
+                            input {
+                                class: "scene-name",
+                                value: "{n}",
+                                "aria-label": "a new name: letters, digits, _ and -",
+                                onmounted: move |e| async move { let _ = e.set_focus(true).await; },
+                                onkeydown: move |e: KeyboardEvent| {
+                                    if e.key() == Key::Escape { renaming.set(None); }
+                                },
+                                onchange: {
+                                    let n = n.clone();
+                                    let all = all.clone();
+                                    let store = store.clone();
+                                    move |e: FormEvent| {
+                                        let to = e.value().trim().to_string();
+                                        renaming.set(None);
+                                        if to == n { return; }
+                                        if !ok_name(&to) { ui.fail("a scene's name: 1 to 96 of letters, digits, _ and -"); return; }
+                                        if all.contains_key(&to) { ui.fail(format!("there's a scene {to} already")); return; }
+                                        let mut m = all.clone();
+                                        if let Some(v) = m.remove(&n) { m.insert(to.clone(), v); }
+                                        if ui.prefs.peek().space.address == n { let t = to.clone(); set_pref(ui, move |p| p.space.address = t); }
+                                        store(m, format!("renamed {n} to {to}"));
+                                    }
+                                },
+                            }
+                        } else {
+                            button { class: "plain scene-open", title: "open it (#{n})", onclick: { let n = n.clone(); move |_| on_open.call(n.clone()) },
+                                b { "{n}" } span { class: "dim small", " {rows.as_array().map(|a| a.len()).unwrap_or(0)} texts" } }
+                        }
+                        button { class: "plain ibtn", "data-tip": "rename it", "aria-label": "rename", onclick: { let n = n.clone(); move |_| renaming.set(Some(n.clone())) }, Icon { name: "rename" } }
+                        button {
+                            class: if armed().as_deref() == Some(n.as_str()) { "armed" } else { "plain ibtn" },
+                            "data-tip": "delete it (click twice; it can be undone)",
+                            "aria-label": "delete",
+                            onclick: {
+                                let n = n.clone();
+                                let all = all.clone();
+                                let store = store.clone();
+                                move |_| {
+                                    if armed().as_deref() != Some(n.as_str()) { armed.set(Some(n.clone())); return; }
+                                    armed.set(None);
+                                    let mut m = all.clone();
+                                    if let Some(v) = m.remove(&n) { gone.set(Some((n.clone(), v))); }
+                                    store(m, format!("deleted the scene {n}"));
+                                }
+                            },
+                            Icon { name: "delete" }
+                            if armed().as_deref() == Some(n.as_str()) { "delete?" }
+                        }
+                    }
+                }
+                if let Some((n, v)) = gone() {
+                    div { class: "scene dim small",
+                        "deleted {n} "
+                        button { class: "plain", onclick: {
+                                let all = all.clone();
+                                let store = store.clone();
+                                move |_| {
+                                    let mut m = all.clone();
+                                    m.insert(n.clone(), v.clone());
+                                    gone.set(None);
+                                    store(m, format!("{n} is back"));
+                                }
+                            },
+                            Icon { name: "undo" } "undo" }
+                    }
+                }
+                div { class: "row scene-save",
+                    input { "aria-label": "the scene's name", value: "{name}", oninput: move |e| name.set(e.value()) }
+                    button { class: "btn small", title: "keeps every text in the room where it is", onclick: move |_| {
+                            let n = name().trim().to_string();
+                            if !ok_name(&n) { ui.fail("a scene's name: 1 to 96 of letters, digits, _ and -"); return; }
+                            on_save.call(n);
+                        }, Icon { name: "save" } "save the room" }
                 }
             }
         }
@@ -2139,6 +2284,12 @@ pub fn SpaceStrip() -> Element {
                 icon: "view",
                 on: p.space.show_details,
                 onclick: move |_| set_pref(ui, |p| p.space.show_details = !p.space.show_details),
+            }
+            TChip {
+                label: "scenes: the saved rooms, to open, rename and delete",
+                icon: "folder",
+                on: p.space.show_scenes,
+                onclick: move |_| set_pref(ui, |p| p.space.show_scenes = !p.space.show_scenes),
             }
             TChip {
                 label: "blocks: spatial saves, boxes showing texts and pictures",

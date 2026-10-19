@@ -271,6 +271,21 @@ mod tests {
         }
     }
 
+    /// the saved scenes: listed, opened, renamed, deleted with an undo
+    #[test]
+    fn scenes_window_stays() {
+        let rs = include_str!("views/space.rs");
+        for needle in [
+            "fn Scenes(",
+            "show_scenes",
+            "renamed {n} to {to}",
+            "deleted the scene {n}",
+            "{n} is back",
+        ] {
+            assert!(rs.contains(needle), "space.rs lost {needle}");
+        }
+    }
+
     /// the command bar's input spans the bar with the same room at both ends, so its
     /// centred text doesn't move when what's beside it changes size
     #[test]

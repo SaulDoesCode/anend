@@ -145,6 +145,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | `#123`, `#r123`, `#name` addresses; the last address reopened | space.rs `route` | has |
 | words: Enlist List Delist Unlist Count Backup Clear ClearAll Settle Maps Save name | space.rs `COMMANDS` | has (and Help) |
 | maps: save (Shift+X / Save name), list (Maps), open (#name); export the texts to a file (X) | space.rs | has: maps in the save's `space.maps` setting; export to the data folder's exports (desktop) or a download (web) |
+| **must keep:** the scenes window (folder chip): every saved scene with its count, a click opens it, rename in place, delete with a second click and an undo, and the room saved under a name (19 Oct, F6; checked under Xvfb: save, rename, delete, undo; guard `parity::tests::scenes_window_stays`) | asked 19 Oct | has |
 | chips: gsearch, reversed (F), saturate, keep | space_ui.rs | has |
 | the search line in the top bar (what, counts with icons, pf chain, the triangle with sides and angles) | space_ui.rs `rebuild_qline` | partly: title, mode, count, triangle |
 | bucket underline colours (seedCLR), class colours from a classifier | space.rs, tint.rs | has |
