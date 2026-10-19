@@ -386,3 +386,45 @@ the instance refers back to the same scale earlier in its chunk.
    good split? Should the memory view show a long text's slug, or its first window?
 8. **Forgetting a placed entry:** keep today's F4 behaviour (confirm, then remove every
    placement, undoable), or refuse while it has placements elsewhere?
+
+### The user's answers to the open questions (19 Oct)
+
+These settle the Stage B design. Where they differ from the draft above, the answers win.
+
+1. **Texts in scenes are entries from memory.** A placed text is a reference to its entry,
+   keyed like block textures: the key is the entry, and the multimap values are the
+   instantiations. Texts are billboards, so an instance is only a position: no rotation and
+   no scale.
+2. **Scenes are saves.** A scene table with hierarchical features, sharing the text
+   entries it places.
+   - Each multimap value is a prefix and a list: the text, then the positions where it is
+     instantiated.
+   - Blocks and their metadata are stored with the scene in the same way.
+3. **Prototype inheritance, like JavaScript.** When a prefab changes, its instances change
+   too.
+   - The exception is a discrete copy, which severs the link to the prototype.
+   - The choice is made up front: **detach** (no inheritance from then on) or **modify**
+     (keep inheriting, with local overrides).
+4. **A chain is a note,** as weum meant it: a text key as the title and a text key as the
+   body, two entries in a trenchcoat.
+   - In the space, a chain is one transform for the head text, and the rest is positioned
+     relative to it deterministically.
+   - The rest never collides with blocks or other texts, using the same physics as the
+     spread.
+   - The texts float together and stay readable left to right. A rotation constraint flips
+     them to face the viewer depending on the viewing angle.
+5. **Merging works on wholes,** CRDT-like with no finer granularity (weights can't be
+   blended), using the forge's set operations: each thing is included or excluded.
+   - Where two scenes overlap in space, placements settle by deterministic physics and
+     collision, like keep semantics but done up front.
+6. **Sizes and positions.**
+   - Texts at about hand size, rendered smallish, is liked; keep it.
+   - Blocks default to about melon size or a little smaller.
+   - Positions are free transforms, not a grid. Blocks scale freely. Any storage
+     quantisation must be lossless or invisible, and must never snap anything.
+7. **Long texts are split visually at word boundaries.** At most 80 characters a line and six
+   lines a piece, spliced into whole pieces. No glass ceilings: these limits, like the hub's
+   limits, are configurable settings, not constants.
+8. **Texts inherit too.** When an entry's text changes, its placements show the new text,
+   unless they are detached. No flag in the metadata: keep two tables, inheriting and
+   detached.
