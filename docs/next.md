@@ -5,7 +5,22 @@ Where the work stands, for picking it up in a new session. Branch:
 
 ## Resuming (read first)
 
-**Classifiers round (18 Oct, evening UTC):**
+**Spec models round (19 Oct, early UTC):**
+- **Done:**
+  - `models.*` ops in core (`core/src/ops/models.rs`, storage `core/src/specs.rs` in the
+    save's `.models` file and bundles): list, get, check, create, update, delete, train
+    (job), job, cancel, run, generate, pretrained. Spec errors carry their path
+    (`ModelSpec::parse`, `check_at`; unknown fields refused). The hub's `--pretrained DIR`
+    allowlist; shared limits (40 M weights, CPU only, 32 candidates, 2000 bytes, the
+    classifiers' job limits). Tests: `ops::models::tests` (3).
+  - The models view's **spec models** tab (`app/src/views/specs.rs`): templates, the JSON
+    editor with inline errors, training, run from the bar, the write card with critic
+    scores. Driven on the desktop (Xvfb) and the web build (Playwright against
+    `anend-hub --mode app --local`); shots `app/docs/shots/desktop-specs-*.png`,
+    `web-specs-training.png`.
+- **Next:** the guide (docs/guide.md) for the current app, then the backlog.
+
+**Classifiers round (18 Oct, evening UTC; history now):**
 - **Done:**
   - `classify.*` lives in core (`ops::classify`), shared by the hub and the desktop (6e04714).
   - The models view is a working classifiers view on desktop and web (926c0db).

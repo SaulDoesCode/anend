@@ -145,8 +145,11 @@ Examples (release, this machine: 4 vCPU, AVX2):
 Left:
 - NUM tokens are in the engine but not fed from `Example` (numbers reach models as text and as
   dense head inputs).
-- The entry store's `Source` implementation (lists, tags, pairs from the save), the UI and the
-  scripting language editing specs, hub ops for specs and generation.
+- ~~The entry store's `Source`, the UI editing specs, hub ops for specs and generation~~:
+  done 19 Oct: `ops::models` (the save's lists by name or key, tags, pairs, snapshotted when
+  training starts; `models.*` in docs/app-api.md, the same on the desktop and the hub),
+  stored by `crate::specs` in the save's `.models` file and bundles, and the models view's
+  spec models tab. Left: the scripting language writing specs; picture data from the save.
 - A patch-embedding (continuous) input for picture classifiers; images now always go through
   the codebook.
 - Guidance is per byte and judges partial text; it helped 4 authors of 6 here. Sentence-level
