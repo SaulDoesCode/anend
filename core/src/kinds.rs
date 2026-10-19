@@ -948,6 +948,14 @@ fn by_form(w: &str) -> Option<&'static str> {
 /// before them (after a determiner or adjective: a noun; after a pronoun, `to` or an
 /// auxiliary: a verb), else a noun. A tagger of rules, not a model: good enough to show
 /// what a text is made of.
+/// whether a (lower case) word is one of the closed classes: pronouns, determiners,
+/// prepositions, conjunctions, auxiliaries (the common little words)
+pub fn closed_class(w: &str) -> bool {
+    [PRONOUNS, DETERMINERS, PREPOSITIONS, CONJUNCTIONS, AUXILIARIES]
+        .iter()
+        .any(|l| l.contains(&w))
+}
+
 pub fn tag(text: &str) -> Vec<Tagged> {
     let mut out: Vec<Tagged> = Vec::new();
     let mut sentence_start = true;

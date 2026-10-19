@@ -340,6 +340,20 @@ a picture, `{colour}` for a colour, and `{gone: true}` when what it showed was d
 - **Limits**: at most 5000 blocks a call; on a shared hub a save holds at most 50 000.
   `blocks.list`, `blocks.stats` and `blocks.delete` work when a member's quota is full.
 
+## Spelling and word choice
+
+A proof of concept of the classifiers (`core/src/grammar`): a detector finds words that
+are probably errors (misspellings, repeated words, a confusable word where another of its
+set fits better: their/there/they're, its/it's, then/than, ...), and a suggester ranks
+replacements. Both are small logistic regressions trained, the first time they're asked
+for, on deterministic corruptions of `core/src/grammar/corpus.txt`; a fifth of it is held
+out to measure them (`report`). Words the save holds elsewhere are never errors.
+
+| op | args | data |
+|---|---|---|
+| `grammar.check` | `{text, threshold?: 0.5, exclude?}` | `{flags: [{start, end (bytes), from, to (UTF-16 units), word, p, kind: "spelling"\|"repeated"\|"confused", suggestions: [{text, p}]}], report}`; an empty suggestion takes the word out with the space before it; `exclude` is the key of the note being checked, whose own words don't count as the save's |
+| `grammar.report` | | `{train_sentences, test_sentences, precision, recall, f1, errors, flagged, caught, top1, top3, false_alarms_per_1000, threshold, by_kind: [[kind, caught, errors]]}` |
+
 ## Saves in and out
 
 | | |

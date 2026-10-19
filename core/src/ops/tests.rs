@@ -127,3 +127,30 @@ fn space_features_name_lists_kinds_and_times() {
     assert_eq!((all[1]["s"].as_i64(), all[1]["r"].as_i64()), (Some(s), Some(r)));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn grammar_check_knows_the_saves_own_words() {
+    let dir = temp("grammar");
+    let sv = Saves::new(&dir, "notes");
+    let c = |op: &str, a: Value| sv.call(op, &a).unwrap();
+    let flagged = |a: Value| -> Vec<String> {
+        c("grammar.check", a)["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["word"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert!(flagged(json!({ "text": "a zorbly widget" })).contains(&"zorbly".to_string()));
+    // a word of the save's own is no error, unless only the note being checked has it
+    let k = c("mem.saturate", json!({ "text": "zorbly" }))["key"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(flagged(json!({ "text": "a zorbly widget" })).is_empty());
+    assert!(flagged(json!({ "text": "a zorbly widget", "exclude": k })).contains(&"zorbly".to_string()));
+    let r = c("grammar.report", json!({}));
+    assert!(r["precision"].as_f64().unwrap() > 0.5 && r["recall"].as_f64().unwrap() > 0.5);
+    drop(sv);
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -352,6 +352,8 @@ pub const READ_ONLY: &[&str] = &[
     "lists.unlist",
     "space.spread",
     "space.features",
+    "grammar.check",
+    "grammar.report",
     "forge.preview",
     "entries.query",
     "settings.get",
@@ -683,6 +685,37 @@ pub fn call(g: &Graph, removed: &Removed, op: &str, args: &Value) -> Res {
         // ---- the space
         "space.spread" => spread_layout(args),
         "space.features" => space_features(&g.view()?, args),
+
+        // ---- spelling and word choice (`crate::grammar`): the flagged words with
+        // suggestions; the save's own words are never errors
+        #[cfg(not(target_arch = "wasm32"))]
+        "grammar.check" => {
+            let text = s(args, "text");
+            if text.len() > 200_000 {
+                return Err("at most 200 000 bytes at once".into());
+            }
+            let threshold = args
+                .get("threshold")
+                .and_then(Value::as_f64)
+                .map(|t| t.clamp(0.05, 0.99) as f32)
+                .unwrap_or(crate::grammar::THRESHOLD);
+            let v = g.view()?;
+            // the note being checked is in the save too: its own words don't count
+            let exclude = record::parse_label(s(args, "exclude").trim_start_matches("note:"));
+            let own = |w: &str| {
+                v.words_with_prefix(w.as_bytes(), 1)
+                    .map(|r| {
+                        r.first().is_some_and(|(x, ids)| {
+                            x.as_slice() == w.as_bytes() && ids.iter().any(|id| Some(*id) != exclude)
+                        })
+                    })
+                    .unwrap_or(false)
+            };
+            let m = crate::grammar::model();
+            Ok(json!({ "flags": m.check(text, &own, threshold), "report": m.report }))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        "grammar.report" => Ok(json!(crate::grammar::model().report)),
 
         // ---- the whole save
         "stats" => {

@@ -8,6 +8,8 @@ pub mod clsmodule;
 pub mod filters;
 pub mod fmath;
 pub mod forge;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod grammar;
 pub mod graph;
 pub mod kinds;
 pub mod lists;
