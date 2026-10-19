@@ -18,7 +18,9 @@ Where the work stands, for picking it up in a new session. Branch:
     scores. Driven on the desktop (Xvfb) and the web build (Playwright against
     `anend-hub --mode app --local`); shots `app/docs/shots/desktop-specs-*.png`,
     `web-specs-training.png`.
-- **Next:** the guide (docs/guide.md) for the current app, then the backlog.
+- **Done too:** the guide (docs/guide.md, its pictures in docs/guide/) describes the
+  current app.
+- **Next:** the backlog below, in its order.
 
 **Classifiers round (18 Oct, evening UTC; history now):**
 - **Done:**

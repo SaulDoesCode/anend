@@ -162,5 +162,5 @@ measured.
 | `docs/` | the formats, the APIs, deployment, security, models, and `next.md` (the plan and status) |
 | `docs/weum-reference/` | weum's own code, the reference for its numbers |
 
-[docs/guide.md](docs/guide.md) still describes the older apps in places, and will be
-updated.
+[docs/guide.md](docs/guide.md) is the guide for people using the app: every view, the
+command bar, lists, classifiers and spec models, settings and the hub.
