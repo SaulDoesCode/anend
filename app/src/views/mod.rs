@@ -6,6 +6,7 @@ pub mod lists;
 pub mod memory;
 pub mod models;
 pub mod notes;
+pub mod pictures;
 pub mod reader;
 pub mod settings;
 pub mod space;

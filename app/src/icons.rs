@@ -27,6 +27,7 @@ pub fn svg(name: &str) -> &'static str {
         "help" => include_str!("../../assets/icons/help.svg"),
         "home" => include_str!("../../assets/icons/home.svg"),
         "hub" => include_str!("../../assets/icons/hub.svg"),
+        "image" => include_str!("../../assets/icons/image.svg"),
         "keys" => include_str!("../../assets/icons/keys.svg"),
         "link" => include_str!("../../assets/icons/link.svg"),
         "list" => include_str!("../../assets/icons/list.svg"),

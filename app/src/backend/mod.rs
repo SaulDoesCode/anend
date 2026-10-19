@@ -632,6 +632,33 @@ pub trait Backend {
         self.call("models.generate", args)
     }
 
+    // ---- pictures (`pictures.*`)
+    /// the save's pictures (or a list's), each with a thumbnail fitting `thumb` pixels
+    fn pictures(&self, list: Option<&str>, thumb: u32) -> Fut<Vec<Value>> {
+        typed(self.call("pictures.list", json!({ "list": list, "thumb": thumb })))
+    }
+    /// the lists that hold pictures: `[{list, count}]`
+    fn picture_lists(&self) -> Fut<Vec<Value>> {
+        typed(self.call("pictures.lists", json!({})))
+    }
+    /// a picture file's bytes into the save (into `list` too, when given)
+    fn add_picture(&self, bytes: &[u8], name: &str, list: Option<&str>) -> Fut<Value> {
+        self.call(
+            "pictures.add",
+            json!({ "data": anend_core::classifiers::base64(bytes), "name": name, "list": list }),
+        )
+    }
+    /// a picture file on this machine (the desktop) into the save
+    fn add_picture_path(&self, path: &str, list: Option<&str>) -> Fut<Value> {
+        self.call("pictures.add", json!({ "path": path, "list": list }))
+    }
+    fn tag_picture(&self, id: &str, list: &str, remove: bool) -> Fut<Value> {
+        self.call("pictures.tag", json!({ "id": id, "list": list, "remove": remove }))
+    }
+    fn delete_picture(&self, id: &str) -> Fut<()> {
+        unit(self.call("pictures.delete", json!({ "id": id })))
+    }
+
     // ---- filters
     fn filters(&self) -> Fut<Vec<FilterPreset>> {
         typed(self.call("filters.list", json!({})))

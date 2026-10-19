@@ -70,6 +70,7 @@ pub fn Lists() -> Element {
         Some(Err(e)) => return rsx! { div { class: "page", div { class: "card bad", "{e}" } } },
         None => return rsx! { div { class: "page", div { class: "card dim", "…" } } },
     };
+    let names: Vec<String> = all.iter().map(|l| l.name.clone()).collect();
     if let Some(key) = open()
         && let Some(l) = all.iter().find(|l| l.list == key).cloned()
     {
@@ -86,7 +87,7 @@ pub fn Lists() -> Element {
                 div { class: "card empty", "No lists yet. In the memory view, Shift+click a text to make it a list's head, Ctrl+click another and type Enlist; or Alt+click several and put them in a list." }
             }
             div { class: "list-grid",
-                for l in shown {
+                for l in shown.iter().cloned() {
                     button {
                         key: "{l.list}",
                         class: "card list-tile",
@@ -97,6 +98,7 @@ pub fn Lists() -> Element {
                     }
                 }
             }
+            crate::views::pictures::Pictures { list: None, names: names.clone() }
         }
     }
 }
@@ -172,6 +174,7 @@ fn ListPage(list: ListInfo, back: EventHandler<()>) -> Element {
                     button { disabled: p + 1 >= pages, onclick: move |_| page.set(p + 1), Icon { name: "chevron-right" } }
                 }
             }
+            crate::views::pictures::Pictures { list: Some(list.name.clone()), names: vec![] }
             Figures { list: list.clone() }
         }
     }

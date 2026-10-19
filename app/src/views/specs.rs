@@ -145,16 +145,23 @@ enum Template {
     Classifier,
     Tagger,
     Generator,
+    Pictures,
 }
 
 impl Template {
-    const ALL: [Template; 3] = [Template::Classifier, Template::Tagger, Template::Generator];
+    const ALL: [Template; 4] = [
+        Template::Classifier,
+        Template::Tagger,
+        Template::Generator,
+        Template::Pictures,
+    ];
 
     fn name(self) -> &'static str {
         match self {
             Template::Classifier => "classifier",
             Template::Tagger => "tagger",
             Template::Generator => "generator",
+            Template::Pictures => "pictures",
         }
     }
 
@@ -163,6 +170,7 @@ impl Template {
             Template::Classifier => "one class of several for a text: each list a class",
             Template::Tagger => "any of several labels for a text, each from a list",
             Template::Generator => "writes texts like a list's, judged by another model",
+            Template::Pictures => "one class of several for a picture: each picture list a class",
         }
     }
 }
@@ -170,8 +178,9 @@ impl Template {
 /// a judge a generator can use: a model's name, its head and a class of it
 pub type Judge = (String, String, String);
 
-/// a template's spec, filled in with the save's lists (by name) and a judge if there is one
-fn template(t: Template, lists: &[ListInfo], judge: Option<&Judge>) -> String {
+/// a template's spec, filled in with the save's lists (by name), its picture lists and a
+/// judge if there is one
+fn template(t: Template, lists: &[ListInfo], judge: Option<&Judge>, plists: &[String]) -> String {
     let names: Vec<String> = lists.iter().filter(|l| l.count > 0).map(|l| l.name.clone()).collect();
     let pick = |n: usize| -> Vec<String> {
         let mut v: Vec<String> = names.iter().take(n).cloned().collect();
@@ -197,6 +206,27 @@ fn template(t: Template, lists: &[ListInfo], judge: Option<&Judge>) -> String {
             .join(",\n")
     };
     match t {
+        Template::Pictures => {
+            let mut c: Vec<String> = plists.iter().take(3).cloned().collect();
+            for i in c.len()..2 {
+                c.push(format!("pictures {}", i + 1));
+            }
+            let d = c
+                .iter()
+                .map(|x| {
+                    format!(
+                        "    {{\"from\": \"pictures\", \"list\": {}, \"head\": \"what\", \"class\": {}}}",
+                        q(x),
+                        q(x)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",\n");
+            format!(
+                "{{\n  \"name\": \"what it shows\",\n  \"input\": {{\"type\": \"image\", \"width\": 32, \"height\": 32, \"patch\": 8, \"codes\": 64}},\n  \"trunk\": {{\"preset\": \"compact\"}},\n  \"heads\": [\n    {{\"name\": \"what\", \"kind\": \"classify\", \"classes\": [{cl}]}}\n  ],\n  \"data\": [\n{d}\n  ],\n  \"train\": {{\"epochs\": 30, \"batch\": 8}}\n}}\n",
+                cl = classes(&c),
+            )
+        }
         Template::Classifier | Template::Tagger => {
             let c = pick(3);
             let (name, kind) = if t == Template::Classifier {
@@ -263,25 +293,32 @@ fn NewSpec(on_made: EventHandler<String>) -> Element {
                     ))
                 });
             }
-            (lists, judge)
+            let plists: Vec<String> = api
+                .picture_lists()
+                .await
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|l| l["list"].as_str().map(str::to_string))
+                .collect();
+            (lists, judge, plists)
         }
     });
-    let Some((lists, judge)) = ctx.read().clone() else {
+    let Some((lists, judge, plists)) = ctx.read().clone() else {
         return rsx! { div { class: "card dim", "…" } };
     };
     let shown = text
         .peek()
         .clone()
-        .unwrap_or_else(|| template(*which.peek(), &lists, judge.as_ref()));
+        .unwrap_or_else(|| template(*which.peek(), &lists, judge.as_ref(), &plists));
     let create = {
         let api = api.clone();
-        let (lists, judge) = (lists.clone(), judge.clone());
+        let (lists, judge, plists) = (lists.clone(), judge.clone(), plists.clone());
         move || {
             let api = api.clone();
             let t = text
                 .peek()
                 .clone()
-                .unwrap_or_else(|| template(*which.peek(), &lists, judge.as_ref()));
+                .unwrap_or_else(|| template(*which.peek(), &lists, judge.as_ref(), &plists));
             busy.set(true);
             dioxus::dioxus_core::spawn_forever(async move {
                 match api.create_spec(&t).await {
@@ -935,7 +972,7 @@ mod tests {
         let judge = ("kind".to_string(), "kind".to_string(), "fruit".to_string());
         for t in Template::ALL {
             for (l, j) in [(&lists[..], Some(&judge)), (&[][..], None)] {
-                let s = template(t, l, j);
+                let s = template(t, l, j, &["cats".to_string(), "dogs".to_string()]);
                 let spec = anend_core::classify::spec::ModelSpec::parse(&s, true)
                     .unwrap_or_else(|e| panic!("{}: {e:?}\n{s}", t.name()));
                 assert!(s.find("\"name\"") < s.find("\"data\""), "{s}");
