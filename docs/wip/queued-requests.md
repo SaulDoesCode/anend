@@ -17,7 +17,8 @@ stays a standing requirement:
 - saves are complete, documented and exportable;
 - the models are stored deterministically, so they stay inspectable.
 
-- **Stage A, everyday use is solid:**
+- **Stage A, everyday use is solid:** done 19 Oct (evening UTC; docs/next.md's Resuming
+  block lists the commits); waiting for the user to try it before Stage B.
   - F1–F8;
   - items 1–3 (the bar);
   - item 12 (one notes count; the notes view as the typing view);

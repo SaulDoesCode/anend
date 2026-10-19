@@ -10,6 +10,38 @@ user-visible feature, setting, key or panel updates docs/parity.md in the same c
 `app/src/parity.rs`'s expected lists when a setting, key action or view changes). Nothing
 goes away without a line there saying why.
 
+**Stage A of docs/wip/queued-requests.md (19 Oct, evening UTC): done; stop for the user.**
+The queue's "Order of work" puts the work in stages A–H; Stage A is finished and the user
+tries it before Stage B begins. Each piece below is its own commit, with the four checks, a
+by-hand check (Xvfb desktop, Playwright web) and a parity.md line:
+- F8 `fa401ce` (Gpu Send/Sync by explicit impl), F7 `ee21ac9` (the note list shows when no
+  note is open), F1 `8a7927b` (space windows clamped by the layout), F3 `0adca2c` (Enter
+  lets go of the space bar), F5 `972dfad` (yaw/pitch camera, eased, sensitivity sliders),
+  F2+F4 `7532807` (the space's right-click menu; copies are placements `entry~2`), F6
+  `3160467` (the scenes window), queued 1–2 `c3fc707` (15.5 cm typing field, items beside it
+  or wrapping above), queued 12 `3b85e80` (one notes count) and `cffc990` (long notes type
+  plain above 100 KB), search modes `38f93ed` (`mem.random`, classifier mode), checkpoints
+  `20e9665` (`graph::checkpoints`; also: a still space stops redrawing, which made WebKitGTK
+  drop fast keys), IME `c8a3f75` (`scripts/ime-check.mjs`, web only).
+- **Left inside Stage A's items:** long notes still send the whole text to Rust per key
+  (~100 ms a key at 526 KB on the web); windowed highlighting belongs with item 6 (Stage B).
+  The desktop IME wasn't tried (no input method in the container). Chains in the space menu
+  come with item 8.
+- **Next: Stage B** (one model for definitions and placed instances: F4's placements,
+  chains 8, blocks 5, prefabs 19, scenes; packed storage; large texts 6; write the design
+  into docs/format.md first). Only after the user has tried Stage A.
+- **Paused before Stage A, not started:** starter examples for classifiers (parity.md's
+  "starter examples (fruit, stones, animals)" row: the Bevy app only had them as a seeding
+  test; the plan was a "start with examples" button in the classifiers view's empty state).
+- **Earlier this round (committed):** GPU training in the app and hub with a device picker
+  (`c7c5dfe`), spatial saves (blocks in a redb multimap `d0c954a`, the gizmo UI `ebbe1c0`),
+  the spelling and word-choice proof of concept (`b2ee841` core, `30a1ac9` the editor and
+  the pad's own undo), closing the window saves the note (`c2d6aa0`).
+- **Harness:** the desktop under Xvfb (`Xvfb :97`, xdotool; `python-xlib` sends
+  WM_DELETE_WINDOW to the visible window), the web build served by the debug hub on 8090,
+  Playwright chromium at /opt/pw-browsers. Build with `CARGO_INCREMENTAL=0`; clear
+  target/*/incremental to keep disk above 4 GB.
+
 **Parity round (19 Oct, from 08:20 UTC; the user's feedback on the Dioxus app):**
 - **Done (each committed and pushed):** docs/parity.md (the audit and contract) with
   `app/src/parity.rs` guards; the Bevy frame and one command bar (no view name), Fira
