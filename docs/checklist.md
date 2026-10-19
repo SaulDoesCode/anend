@@ -35,14 +35,13 @@ docs/architecture.md (the whole).
   - Limits the project sets for itself (piece sizes, render caps, hub quotas) are settings
     with defaults. Real limits remain, and are stated where they bite: the user's hardware,
     what can be built and run there, and what the tools doing the work can manage.
-  - **The desktop app is the primary target.** The web build follows it, not the other way
-    round. Heavy 3D moves off three.js to wgpu (the renderer line).
+  - **The desktop app is the primary target.** The web build follows it. Heavy 3D moves off three.js to wgpu (the renderer line).
   - **Models from scratch come first.** The project's own engine trains and generates from
     the save's data. Pretrained imports (safetensors, llama-style checkpoints, already in
     core/src/classify/pretrained.rs) stay an option, never the default path.
   - **Defaults are explicit.** When a convenient default narrows what the user asked for (a
     framework, a pretrained model, a limit, a schedule), it is named in
-    docs/wip/questions.md, not adopted silently.
+    docs/wip/questions.md.
   - If it builds on the user's machine, that's enough; CI can wait until it matters.
 
 ## The list
@@ -126,5 +125,5 @@ docs/architecture.md (the whole).
       fonts on the desktop, the window frame colour, HSL colour editing, the space's full
       search line, WebGPU training in the browser (#24 of the old task list).
 
-**Alongside the list, not as a line of its own:** the unified asset and ontology browser (#26)
-grows a little with each new kind of data, rather than being built in one go.
+**Alongside the list:** the unified asset and ontology browser (#26) grows a little with each
+new kind of data.
