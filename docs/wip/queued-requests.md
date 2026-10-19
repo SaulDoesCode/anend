@@ -18,3 +18,16 @@ The user asked for these to be held until the current round is done, then picked
 
 Keep everything that exists: record each of these in docs/parity.md as must-keep, and check the
 views touched against their previous behaviour before committing.
+
+4. **A visual builder for spec models, with no JSON typing needed:** every part of a spec
+   that currently has to be typed as JSON gets a UI control. That covers inputs, trunk and
+   preset, heads and their classes, data sources (lists, pictures, inline), critics, `from`
+   (pretrained), `device`, the seed, and the training options.
+   - **Ergonomic and visual:** the spec's ontology becomes forms, pickers from the save's lists,
+     pictures and classifiers, sliders and steppers, add/remove rows for heads, data and
+     critics, and a diagram of how the parts connect. Each control explains itself where it
+     sits, and validation errors show on the control they concern.
+   - **Full coverage:** everything the spec format can express can be built without touching
+     JSON. A test walks the spec schema and checks that each field has a control.
+   - **The JSON editor stays,** as an advanced view kept in sync both ways with the builder.
+   - **Same on desktop and web.**
