@@ -9,6 +9,14 @@ leaves the arrangement to us ("causal ergonomics is your department"). Each stag
 something the user can try, and each round of work stays small enough to finish between usage
 limits. parity.md keeps its rule: nothing is removed without a line saying why.
 
+**The user's priority (19 Oct):** the game, the logic and the language matter most (stages
+C, D, F and G). The everyday gematria features are already in place; after stage A they get
+fixes, not new features, unless the user asks. Local-first resilience comes with stage B and
+stays a standing requirement:
+- everything works offline without a hub;
+- saves are complete, documented and exportable;
+- the models are stored deterministically, so they stay inspectable.
+
 - **Stage A, everyday use is solid:**
   - F1–F8;
   - items 1–3 (the bar);
