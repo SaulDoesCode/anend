@@ -82,6 +82,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | the note's classifiers: pick which classifiers index it, each one's class chip and a yes/no | index_panel.rs, JS notecls.js | has (19 Oct): views/judge.rs, every class's probability too (Ctrl+I) |
 | markdown highlighting in the pad | highlight.rs | has |
 | the bar finds notes by words; Enter opens the first; "n of m notes" at the bar's end | bar.rs | has (Enter narrows, Enter again opens the first) |
+| **must keep:** one notes count in the notes view: at the bar's end ("n of m notes" while narrowed); the top line leaves its notes count out there and keeps it in every other view (19 Oct, queued 12) | asked 19 Oct | has |
 | written date and edits count | ui.rs | has |
 | replacements `{{key}}`, `{{filter:name}}`, alternatives from lists | Dioxus only | has |
 | the notes view has no horizontal scrollbar dragging the content off to the left | — | has (19 Oct): the view never scrolls itself; its list and pad do |

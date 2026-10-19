@@ -368,10 +368,16 @@ fn TopBar() -> Element {
     let hello = (ui.hello)();
     let line = (ui.topline)();
     let show_line = matches!(view, View::Memory | View::Space);
-    let idle = format!(
-        "{} · {} texts · {} notes",
-        hello.save, hello.counts.memories, hello.counts.notes
-    );
+    // the notes view counts its notes at the bar's end ("n of m notes" while narrowed),
+    // so the top line leaves its count out there: one notes count per view
+    let idle = if view == View::Notes {
+        format!("{} · {} texts", hello.save, hello.counts.memories)
+    } else {
+        format!(
+            "{} · {} texts · {} notes",
+            hello.save, hello.counts.memories, hello.counts.notes
+        )
+    };
     let last = ui.actions.read().last().map(|a| a.describe());
     rsx! {
         header { class: "top", role: "banner",
