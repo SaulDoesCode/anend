@@ -148,6 +148,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | terminal: Enter, Ctrl+Enter, Shift+Enter, Delete, ↑ ↓ history (kept) | space.rs | has |
 | **must keep:** Enter in the space's bar does what it did and then lets go of the bar, so W A S D and the arrows fly again; typing starts again with a click on the bar or the focus key (19 Oct, F3 / queued 3; checked under Xvfb: Enter, then W moved the camera 6.2 units; guard `parity::tests::the_space_bar_lets_go_after_enter`) | asked 19 Oct | has |
 | `#123`, `#r123`, `#name` addresses; the last address reopened | space.rs `route` | has |
+| space search modes: normal (sums and words), classifier (a class of the colouring classifier, then words: its members, or the likeliest), random (weum's random hashmap search: texts sharing a word with what's typed, `*` any, filtered on several threads and shuffled; `mem.random`) | weum, next.md backlog | has (19 Oct): the select at the bar's right in the space; checked under Xvfb (random “red” found the red fox); `ops::tests::random_search_samples_texts_sharing_a_word` |
 | words: Enlist List Delist Unlist Count Backup Clear ClearAll Settle Maps Save name | space.rs `COMMANDS` | has (and Help) |
 | maps: save (Shift+X / Save name), list (Maps), open (#name); export the texts to a file (X) | space.rs | has: maps in the save's `space.maps` setting; export to the data folder's exports (desktop) or a download (web) |
 | **must keep:** the scenes window (folder chip): every saved scene with its count, a click opens it, rename in place, delete with a second click and an undo, and the room saved under a name (19 Oct, F6; checked under Xvfb: save, rename, delete, undo; guard `parity::tests::scenes_window_stays`) | asked 19 Oct | has |
@@ -239,4 +240,4 @@ replacements and alternatives in the editor, the reader's pages and big reading,
 | feature | status |
 |---|---|
 | WebGPU training in the browser (task #24) | not yet |
-| space search modes (normal, classifier, random), save checkpoints, a real IME test | not yet |
+| save checkpoints, a real IME test | not yet |

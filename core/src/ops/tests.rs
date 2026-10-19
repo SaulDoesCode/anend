@@ -154,3 +154,30 @@ fn grammar_check_knows_the_saves_own_words() {
     drop(sv);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn random_search_samples_texts_sharing_a_word() {
+    let dir = temp("random");
+    let sv = Saves::new(&dir, "notes");
+    let c = |op: &str, a: Value| sv.call(op, &a).unwrap();
+    for t in ["red fox", "red hen", "blue jay", "red sky", "grey owl"] {
+        c("mem.saturate", json!({ "text": t }));
+    }
+    let texts = |a: Value| -> Vec<String> {
+        c("mem.random", a)
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|h| h["text"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let reds = texts(json!({ "q": "Red", "seed": 7 }));
+    assert_eq!(reds.len(), 3);
+    assert!(reds.iter().all(|t| t.starts_with("red")));
+    // the same seed, the same order; a limit takes the first of them
+    assert_eq!(reds, texts(json!({ "q": "red", "seed": 7 })));
+    assert_eq!(texts(json!({ "seed": 3, "limit": 2 })).len(), 2);
+    assert_eq!(texts(json!({ "seed": 3 })).len(), 5);
+    drop(sv);
+    let _ = std::fs::remove_dir_all(dir);
+}

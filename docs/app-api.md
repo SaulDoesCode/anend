@@ -54,6 +54,7 @@ texts as reversed does), and asking for it answers an error.
 | `mem.measure` | `{text}` | `{ordinal, reversed, frequency, gsum, pf_ordinal, pf_reversed, triangle, s, r}`; `triangle` is ⌊√(s·r)⌋ |
 | `mem.gsearch` | `{bucket: ordinal\|reversed\|frequency, key: number or text}` | `{bucket, hits}` |
 | `mem.search` | `{q, variations?: true}` | `[hit]` |
+| `mem.random` | `{q?, limit?: 60, seed?}` | hits: any `limit` texts sharing a word with `q` (any text when it's empty), shuffled by `seed` (a fresh one when left out); weum's random hashmap search |
 | `mem.saturate` | `{text}` | `{key, new}` (the entry with that text, made when there's none) |
 | `mem.forget` | `{key}` (any entry) | `{text}` |
 | `mem.remember` | `{key}` | hit |

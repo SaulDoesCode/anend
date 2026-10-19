@@ -34,6 +34,7 @@ pub const SETTINGS: &[&str] = &[
     "keymap",
     "highlight",
     "check_spelling",
+    "space_search",
     "hide_list",
     "list_right",
     "white",

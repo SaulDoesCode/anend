@@ -782,6 +782,33 @@ async fn enter(mut ui: Ui, api: Api, sp: Sp, raw: String, ctrl: bool, shift: boo
         }
         return;
     }
+    // the search modes: by the colouring classifier (a class's name, then words), or
+    // weum's random hashmap search (texts sharing a word, in no order)
+    let how = ui.prefs.peek().space_search.clone();
+    if how == "classifier" {
+        classifier_search(ui, api, sp, &t).await;
+        return;
+    }
+    if how == "random" {
+        match api
+            .call(
+                "mem.random",
+                json!({ "q": if t == "*" { "" } else { t.as_str() }, "limit": 60 }),
+            )
+            .await
+        {
+            Ok(v) => {
+                let hits: Vec<Hit> = serde_json::from_value(v).unwrap_or_default();
+                topline(ui, format!("random “{t}”"), mode, None, hits.len());
+                if hits.is_empty() {
+                    ui.say(format!("no text shares a word with {t} (* takes any)"));
+                }
+                show(ui, api, sp, hits);
+            }
+            Err(e) => ui.fail(e),
+        }
+        return;
+    }
     if let Ok(n) = t.parse::<u64>() {
         gsearch(ui, api, sp, n, mode, None).await;
         return;
@@ -815,6 +842,60 @@ async fn enter(mut ui: Ui, api: Api, sp: Sp, raw: String, ctrl: bool, shift: boo
         }
     }
     gsearch(ui, api, sp, gem::sum_in(&t, mode), mode, Some(t)).await;
+}
+
+/// the bar's text as a class of the colouring classifier (and words after it): the texts
+/// it counts in that class, or the likeliest when it counts none
+async fn classifier_search(ui: Ui, api: Api, sp: Sp, t: &str) {
+    let name = ui.prefs.peek().tint.clone();
+    if name.is_empty() {
+        ui.fail("pick a colouring classifier first (the palette in the memory view's strip)");
+        return;
+    }
+    let classes: Vec<String> = match api.call("classify.get", json!({ "name": name })).await {
+        Ok(v) => v["classes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c.as_str().map(str::to_string))
+            .collect(),
+        Err(e) => return ui.fail(e),
+    };
+    let lower = t.to_lowercase();
+    let Some(c) = classes.iter().find(|c| {
+        let c = c.to_lowercase();
+        lower == c || lower.starts_with(&format!("{c} "))
+    }) else {
+        ui.fail(format!(
+            "{name}'s classes: {} (type one, then words if you like)",
+            classes.join(", ")
+        ));
+        return;
+    };
+    let words = t[c.len()..].trim().to_string();
+    match api.model_search(&name, c, &words).await {
+        Ok(found) => {
+            let members = found.iter().filter(|s| s.member).count();
+            if members == 0 {
+                ui.say(format!("{name} counts nothing here as {c}; these are the likeliest"));
+            }
+            let hits: Vec<Hit> = found
+                .into_iter()
+                .filter(|s| s.member || members == 0)
+                .take(if members == 0 { 24 } else { 400 })
+                .filter_map(|s| {
+                    Some(Hit {
+                        key: s.key?,
+                        text: s.text,
+                        note: s.note,
+                    })
+                })
+                .collect();
+            topline(ui, format!("{name}: {c}"), space_mode(ui), None, hits.len());
+            show(ui, api, sp, hits);
+        }
+        Err(e) => ui.fail(e),
+    }
 }
 
 /// the bar's Delete: forget the memory under the key typed
@@ -2245,6 +2326,16 @@ pub fn SpaceStrip() -> Element {
         }
         if !list.is_empty() {
             span { class: "sidenote", "{list}" }
+        }
+        select {
+            class: "search-mode",
+            "aria-label": "how Enter searches",
+            title: "how Enter searches: normal (sums and words), by the colouring classifier (a class's name), or random (texts sharing a word, in no order; * takes any)",
+            value: "{p.space_search}",
+            onchange: move |e| { let v = e.value(); set_pref(ui, move |p| p.space_search = v) },
+            option { value: "normal", selected: p.space_search == "normal", "normal" }
+            option { value: "classifier", selected: p.space_search == "classifier", "classifier" }
+            option { value: "random", selected: p.space_search == "random", "random" }
         }
         span { class: "toggles",
             TChip {

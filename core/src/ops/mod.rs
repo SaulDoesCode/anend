@@ -352,6 +352,7 @@ pub const READ_ONLY: &[&str] = &[
     "lists.unlist",
     "space.spread",
     "space.features",
+    "mem.random",
     "grammar.check",
     "grammar.report",
     "forge.preview",
@@ -598,6 +599,61 @@ pub fn call(g: &Graph, removed: &Removed, op: &str, args: &Value) -> Res {
                 v.search_words(q)?
             };
             Ok(hits(&v, &ids))
+        }
+        // weum's random hashmap search: texts in no order, any `limit` of those that share a
+        // word with `q` (all of them when `q` is empty), filtered on several threads and
+        // shuffled by `seed` (a new one each time when it's left out)
+        "mem.random" => {
+            let v = g.view()?;
+            let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(60).clamp(1, 2000) as usize;
+            let seed = args.get("seed").and_then(Value::as_u64).unwrap_or_else(|| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos() as u64)
+                    .unwrap_or(1)
+            });
+            let ids: Vec<u64> = v
+                .all()?
+                .into_iter()
+                .filter(|e| e.record.mime == mime::TEXT)
+                .map(|e| e.id)
+                .collect();
+            let texts: Vec<String> = v.render_many(&ids).into_iter().map(|t| t.unwrap_or_default()).collect();
+            let words: Vec<String> = s(args, "q").split_whitespace().map(str::to_lowercase).collect();
+            let threads = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(2)
+                .clamp(1, 8);
+            let chunk = texts.len().div_ceil(threads).max(1);
+            let mut kept: Vec<u64> = std::thread::scope(|sc| {
+                let hs: Vec<_> = texts
+                    .chunks(chunk)
+                    .zip(ids.chunks(chunk))
+                    .map(|(ts, is)| {
+                        let words = &words;
+                        sc.spawn(move || {
+                            ts.iter()
+                                .zip(is)
+                                .filter(|(t, _)| {
+                                    words.is_empty() || t.split_whitespace().any(|w| words.contains(&w.to_lowercase()))
+                                })
+                                .map(|(_, id)| *id)
+                                .collect::<Vec<u64>>()
+                        })
+                    })
+                    .collect();
+                hs.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+            });
+            // a seeded shuffle (xorshift), then the first `limit`
+            let mut x = seed | 1;
+            for i in (1..kept.len()).rev() {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                kept.swap(i, (x % (i as u64 + 1)) as usize);
+            }
+            kept.truncate(limit);
+            Ok(hits(&v, &kept))
         }
         "mem.saturate" => {
             let text = s(args, "text").trim();
