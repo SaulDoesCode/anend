@@ -20,7 +20,11 @@ Where the work stands, for picking it up in a new session. Branch:
     `web-specs-training.png`.
 - **Done too:** the guide (docs/guide.md, its pictures in docs/guide/) describes the
   current app.
-- **Next:** the backlog below, in its order.
+- **Backlog, first piece done:** entry kinds by pattern, fixed by hand in the right-click
+  menu, with the written date there (`entries.info`, `entries.set_kind`).
+- **Next:** the rest of the backlog ("Not started" below): word types on hover, the search
+  filter panel, then the editor's replacements, the spatial table, space search modes, save
+  checkpoints.
 
 **Classifiers round (18 Oct, evening UTC; history now):**
 - **Done:**
@@ -335,8 +339,8 @@ libxdo-dev`), web through WebAssembly. Features: `desktop` (default), `web`, `hu
   didn't open under Xvfb; on a desktop it should), the reader's total, the space's labels
   under its overlays. Tried a 50 000-text save: import ~2 s, gsearch, the reader, stats
   and a 209-text spread all quick.
-- **Left:** a real IME session (keys are left to it while composing, untested here); models
-  wait for the spec; the guide (docs/guide) still describes the old apps.
+- **Left:** a real IME session (keys are left to it while composing, untested here). (The
+  models view and the guide were done on 18–19 Oct.)
 - **Checking while core is mid-edit:** `scratchpad/wtcheck.sh cargo clippy -p anend-app`
   builds `app/` against the committed core in a worktree.
 
