@@ -226,6 +226,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | saves: list, open, new, copy, rename, delete, backup, import weum JSON | settings.rs | has |
 | saves folder setting (a folder lists its saves, a .redb path opens one) | settings.rs | missing |
 | save checkpoints: named redb savepoints of the open save, listed under it in the saves settings, gone back to (two clicks; later ones go) and deleted | next.md backlog | has (19 Oct): `graph::checkpoints`, `saves.checkpoint(s)`; checked under Xvfb (a checkpoint, a new text, back: 51 entries to 50, the later checkpoint dropped) |
+| input methods (IME): composing in the bar and the notes pad; Enter while composing picks the candidate and does nothing else | asked (brief) | has on the web (19 Oct): `scripts/ime-check.mjs` drives Chromium's IME path (CDP `imeSetComposition`, Enter with key code 229, `insertText`): にほん → 日本 in the memory bar, the composing Enter searched nothing, a real Enter then remembered it; 漢字 composed into the pad. The desktop (WebKitGTK with IBus/Fcitx) wasn't tried: this container has no input method; the bar's guard (`isComposing` / 229) is the same code |
 | **must keep:** a still space isn't drawn again every frame (nothing flying, turning, easing, dragging or spreading), so typing elsewhere while the space is open keeps every key; it lost keys typed quickly in the desktop's web view before (19 Oct; checked under Xvfb: 25 characters at 40 ms each, all there) | — | has |
 | export / import a bundle (.anend.json) | JS settings.js | has (19 Oct) |
 | the hub: connect with an app token, browse and download shared saves, share this one | hub_ui.rs | has (19 Oct): views/hubui.rs + hubnet.rs (ureq on the desktop, fetch on the web); the web shares saves from the desktop only (no same-origin route for it) |
@@ -242,4 +243,3 @@ replacements and alternatives in the editor, the reader's pages and big reading,
 | feature | status |
 |---|---|
 | WebGPU training in the browser (task #24) | not yet |
-| a real IME test | not yet |
