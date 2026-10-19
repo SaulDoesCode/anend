@@ -190,6 +190,34 @@ mod tests {
         assert!(rs.contains("f[\"under\"] = json!(gem::underline("), "a map's texts too");
     }
 
+    /// spatial saves: blocks keep their tiling UVs, their repeat wrapping and their gizmo,
+    /// and the space keeps the window that makes them
+    #[test]
+    fn blocks_tile_and_have_a_gizmo() {
+        let js = include_str!("space.js");
+        for needle in [
+            "boxGeometry(t)",
+            "RepeatWrapping",
+            "makeGizmo()",
+            "mode: 'scale'",
+            "mode: 'move'",
+            "kind === 'blockadd'",
+            "kind === 'unblock'",
+        ] {
+            assert!(js.contains(needle), "space.js lost {needle}");
+        }
+        let rs = include_str!("views/space.rs");
+        for needle in [
+            "fn Blocks(",
+            "\"blocks.list\"",
+            "\"blocks.set\"",
+            "\"blocks.add\"",
+            "show_blocks",
+        ] {
+            assert!(rs.contains(needle), "space.rs lost {needle}");
+        }
+    }
+
     /// the command bar's input spans the bar with the same room at both ends, so its
     /// centred text doesn't move when what's beside it changes size
     #[test]

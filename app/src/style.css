@@ -488,6 +488,14 @@ button.plain.on { background: var(--accent); color: var(--on-button); }
 .win-head .close { opacity: 0; transition: opacity .15s; height: 20px; width: 22px; }
 .win:hover .win-head .close, .win-head .close:focus-visible { opacity: 1; }
 .win-body { padding: 6px 10px 8px; overflow: auto; min-height: 0; }
+.blocks-add { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.blocks-add .row, .blocks-sel .row { display: inline-flex; gap: 4px; align-items: center; }
+.blocks-add select { max-width: 120px; }
+.blocks-add input[type=color] { width: 30px; height: 24px; padding: 0 2px; border: 0; background: none; cursor: pointer; }
+.blocks-sel { border-top: 1px solid color-mix(in srgb, var(--dim) 18%, transparent); padding-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.bfields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 8px; }
+.bfield { display: flex; align-items: center; gap: 4px; font: 12px var(--mono); color: var(--dim); }
+.bfield input { width: 100%; min-width: 0; font: 12px var(--mono); padding: 2px 4px; }
 .win-drag { position: fixed; inset: 0; z-index: 90; cursor: move; touch-action: none; }
 .metrics-table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .metrics-table th { text-align: left; font-weight: 400; color: var(--dim); padding: 0 6px 0 0; white-space: nowrap; }

@@ -6,6 +6,7 @@
 use serde_json::Value;
 
 /// the biggest save a download may be
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub const MAX_DOWNLOAD: u64 = 256 << 20;
 /// the biggest JSON answer read
 const MAX_JSON: u64 = 4 << 20;
@@ -233,6 +234,7 @@ pub async fn get_json(url: String, token: Option<String>) -> Result<Value, Strin
     serde_json::from_slice(&b).map_err(|e| format!("the hub sent something odd: {e}"))
 }
 
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub async fn get_bytes(url: String, limit: u64) -> Result<Vec<u8>, String> {
     let (s, b) = request("GET", url, None, None, limit).await?;
     if !(200..300).contains(&s) {

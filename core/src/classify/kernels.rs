@@ -359,6 +359,7 @@ const MR: usize = 6;
 
 /// A packed for the register tiles: tile t holds rows t·MR.., p-major, zero padded:
 /// `out[(t·k + p)·MR + i] = A[t·MR + i][p]`
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn pack(a: Strided, n: usize, k: usize) -> Vec<f32> {
     let tiles = n.div_ceil(MR);
     let mut out = vec![0f32; tiles * k * MR];
@@ -466,6 +467,7 @@ unsafe fn gemm_avx2(y: &mut [f32], a: Strided, b: &[f32], n: usize, k: usize, m:
 
 /// columns c0.. of row r, scalar chains
 #[inline(always)]
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn tail_cols(y: &mut [f32], a: Strided, b: &[f32], r: usize, c0: usize, k: usize, m: usize) {
     for c in c0..m {
         let mut v = y[r * m + c];

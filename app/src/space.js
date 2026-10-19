@@ -16,13 +16,16 @@
 // right mouse drag looks, W A S D move, Space / C up and down, Q / E roll, Shift fast,
 // [ ] or the wheel change the speed, R levels, Home goes back; the arrows ease the
 // camera onto the nearest text that way. Drag a text to move it (it stays pinned), the
-// wheel on a text pushes it away or pulls it near.
+// wheel on a text pushes it away or pulls it near. Blocks (spatial saves) are boxes in
+// the webgl room, moved and resized with a gizmo (see "blocks" below).
 
 import * as THREE from '__THREE__';
 
 const LOOK = 0.0026;
 const ROLL = 1.4;
 const BASE_PX = 32;
+// a block's texture repeats once per unit of its sides (core's graph::blocks::TILE)
+const BLOCK_TILE = 1;
 const STEP = 1 / 60;
 // the flying keys by action, as the keymap binds them (Rust sends them: `keys`)
 const DEFAULT_KEYS = { fly_forward: 'KeyW', fly_back: 'KeyS', fly_left: 'KeyA', fly_right: 'KeyD', fly_up: 'Space', fly_down: 'KeyC', roll_left: 'KeyQ', roll_right: 'KeyE', level: 'KeyR', back_to_start: 'Home', slower: 'BracketLeft', faster: 'BracketRight' };
@@ -104,6 +107,12 @@ export class Space {
       m.depthWrite = false;
     }
     this.scene.add(this.grid);
+    this.blocks = new Map(); // id → {b, mesh, key, about}
+    this.mats = new Map(); // texture key → material
+    this.selBlock = null;
+    this.bdrag = null;
+    this.ray = new THREE.Raycaster();
+    this.gizmo = this.makeGizmo();
     this.resize = this.resize.bind(this);
     new ResizeObserver(this.resize).observe(host);
     this.resize();
@@ -440,6 +449,7 @@ export class Space {
     if (this.selected) this.selected.el.classList.remove('selected');
     this.selected = n;
     if (n) n.el.classList.add('selected');
+    if (n && this.selBlock != null) this.pickBlock(null);
     this.send(this.ev('select', n));
   }
 
@@ -464,6 +474,21 @@ export class Space {
       this.drop(u.n);
     } else if (u.kind === 'text') {
       this.setText(u.n, u.from);
+    } else if (u.kind === 'blockadd') {
+      for (const id of u.ids) this.dropBlock(id);
+      this.send({ ...this.ev('blockgone', null), data: u.ids });
+    } else if (u.kind === 'unblock') {
+      const textures = {};
+      for (const i of u.items) textures[i.key] = i.about;
+      this.setBlocks(u.items.map((i) => i.b), textures);
+      this.send({ ...this.ev('blockrestore', null), data: u.items.map((i) => i.b) });
+    } else if (u.kind === 'block') {
+      const o = this.blocks.get(u.id);
+      if (o) {
+        Object.assign(o.b, u.t);
+        this.shapeBlock(o);
+        this.send({ ...this.ev('blockset', null), data: this.blockOut(o) });
+      }
     }
     this.wake(0.5);
     this.render();
@@ -547,6 +572,329 @@ export class Space {
     this.sim = null;
     this.render();
     this.info(true);
+  }
+
+  // ------------------------------------------------------------------ blocks
+  //
+  // Spatial saves: boxes in the room (world coordinates, kept by Rust in the save's
+  // `graph blocks` table) showing a text, a picture or a colour. One texture and one
+  // material per texture key, shared by every block showing it (as the table keeps one
+  // key per texture); each block's geometry has its UVs scaled to its size with repeat
+  // wrapping, so a bigger block shows more tiles, never a stretched one. The selected
+  // block has a gizmo: the arrows move it along an axis, the knobs on its faces resize
+  // it (the opposite face stays put), the ball moves it in the view's plane; Shift snaps
+  // to quarter units.
+
+  textCanvas(text, colour) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 256;
+    const g = c.getContext('2d');
+    g.fillStyle = '#f3ead9';
+    g.fillRect(0, 0, 256, 256);
+    // the text's grouping colour as a band at the bottom, as the labels' underline
+    g.fillStyle = colour || '#8a7350';
+    g.fillRect(0, 244, 256, 12);
+    g.strokeStyle = 'rgba(60, 45, 25, 0.25)';
+    g.lineWidth = 2;
+    g.strokeRect(1, 1, 254, 254);
+    g.fillStyle = '#2b2219';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    const words = String(text || '').split(/\s+/).filter(Boolean);
+    let size = 64;
+    let lines = [];
+    for (; size >= 12; size -= 4) {
+      g.font = `${size}px "Fira Sans", sans-serif`;
+      lines = [];
+      let line = '';
+      for (const w of words) {
+        const t = line ? `${line} ${w}` : w;
+        if (g.measureText(t).width > 224 && line) { lines.push(line); line = w; } else line = t;
+      }
+      if (line) lines.push(line);
+      if (lines.length * size * 1.15 <= 220 && lines.every((l) => g.measureText(l).width <= 232)) break;
+    }
+    const top = 122 - ((lines.length - 1) * size * 1.15) / 2;
+    lines.slice(0, 12).forEach((l, i) => g.fillText(l, 128, top + i * size * 1.15));
+    return c;
+  }
+
+  // a texture key's material, made once
+  material(key, about) {
+    let m = this.mats.get(key);
+    if (m) return m;
+    const [kind, ...rest] = key.split(':');
+    const texture = rest.join(':');
+    let map = null;
+    if (kind === 'text') map = new THREE.CanvasTexture(this.textCanvas(about.gone ? '(gone)' : about.text, about.colour));
+    else if (kind === 'picture' && about.src) {
+      map = new THREE.TextureLoader().load(about.src, () => this.render());
+    }
+    if (map) {
+      map.wrapS = map.wrapT = THREE.RepeatWrapping;
+      map.colorSpace = THREE.SRGBColorSpace;
+      map.anisotropy = 4;
+    }
+    // unlit, so a texture shows its own colours; the faces are shaded by vertex colours
+    m = new THREE.MeshBasicMaterial({ vertexColors: true, ...(map ? { map } : { color: new THREE.Color(kind === 'plain' ? texture : '#b8a07a') }) });
+    this.mats.set(key, m);
+    return m;
+  }
+
+  // a box whose UVs count tiles: each face's u and v run over its sides in units
+  boxGeometry(t) {
+    const g = new THREE.BoxGeometry(t.w, t.h, t.d);
+    const uv = g.attributes.uv;
+    // BoxGeometry's faces: +x, -x, +y, -y, +z, -z, four corners each
+    const spans = [[t.d, t.h], [t.d, t.h], [t.w, t.d], [t.w, t.d], [t.w, t.h], [t.w, t.h]];
+    for (let f = 0; f < 6; f++) {
+      for (let i = 0; i < 4; i++) {
+        const k = f * 4 + i;
+        uv.setXY(k, uv.getX(k) * spans[f][0] / BLOCK_TILE, uv.getY(k) * spans[f][1] / BLOCK_TILE);
+      }
+    }
+    uv.needsUpdate = true;
+    // each face a shade: the top brightest, the bottom darkest, so the box reads
+    const shade = [0.86, 0.86, 1, 0.72, 0.94, 0.94];
+    const col = new Float32Array(24 * 3);
+    for (let f = 0; f < 6; f++) for (let i = 0; i < 4; i++) col.set([shade[f], shade[f], shade[f]], (f * 4 + i) * 3);
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    return g;
+  }
+
+  // blocks from Rust: [{id, kind, texture, x, y, z, w, h, d}] and their textures by key
+  setBlocks(list, textures, replace) {
+    if (replace) {
+      for (const id of [...this.blocks.keys()]) this.dropBlock(id);
+    }
+    for (const b of list || []) {
+      const key = `${b.kind}:${b.texture}`;
+      const about = (textures && textures[key]) || {};
+      const had = this.blocks.get(b.id);
+      if (had) {
+        had.b = b;
+        this.shapeBlock(had);
+        continue;
+      }
+      const mesh = new THREE.Mesh(this.boxGeometry(b), this.material(key, about));
+      mesh.userData.block = b.id;
+      const o = { b, mesh, key, about };
+      this.blocks.set(b.id, o);
+      this.shapeBlock(o);
+      this.scene.add(mesh);
+    }
+    this.render();
+  }
+
+  shapeBlock(o) {
+    const { b, mesh } = o;
+    const p = mesh.geometry.parameters;
+    if (p.width !== b.w || p.height !== b.h || p.depth !== b.d) {
+      mesh.geometry.dispose();
+      mesh.geometry = this.boxGeometry(b);
+    }
+    mesh.position.set(b.x, b.y, b.z);
+    if (this.selBlock === b.id) this.placeGizmo();
+  }
+
+  dropBlock(id) {
+    const o = this.blocks.get(id);
+    if (!o) return;
+    this.scene.remove(o.mesh);
+    o.mesh.geometry.dispose();
+    this.blocks.delete(id);
+    if (this.selBlock === id) this.pickBlock(null);
+  }
+
+  blockOut(o) {
+    const { id, kind, texture, x, y, z, w, h, d } = o.b;
+    return { id, kind, texture, x, y, z, w, h, d };
+  }
+
+  pickBlock(id) {
+    this.selBlock = id;
+    if (id != null) {
+      if (this.selected) this.pick(null);
+      this.placeGizmo();
+      this.gizmo.visible = true;
+    } else {
+      this.gizmo.visible = false;
+      for (const k of this.gizmoKnobs) k.visible = false;
+    }
+    const o = id != null ? this.blocks.get(id) : null;
+    this.send({ ...this.ev('block', null), data: o ? { ...this.blockOut(o), about: o.about } : null });
+    this.render();
+  }
+
+  // where a new block goes: ahead of the camera, or at the selected text
+  blockSpot() {
+    let at;
+    if (this.selected) at = this.world(this.selected);
+    else at = new THREE.Vector3(0, 0, -8).applyQuaternion(this.camera.quaternion).add(this.camera.position);
+    return { x: +at.x.toFixed(2), y: +at.y.toFixed(2), z: +at.z.toFixed(2) };
+  }
+
+  makeGizmo() {
+    const g = new THREE.Group();
+    const axes = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+    const colours = [0xd0453a, 0x3f9b4b, 0x3a6fd0];
+    const mat = (c) => new THREE.MeshBasicMaterial({ color: c, fog: false, depthTest: false, depthWrite: false, transparent: true, opacity: 0.95 });
+    const up = new THREE.Vector3(0, 1, 0);
+    this.gizmoKnobs = [];
+    axes.forEach((a, i) => {
+      const q = new THREE.Quaternion().setFromUnitVectors(up, a);
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.8, 8), mat(colours[i]));
+      shaft.position.copy(a.clone().multiplyScalar(0.4));
+      shaft.quaternion.copy(q);
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.22, 14), mat(colours[i]));
+      tip.position.copy(a.clone().multiplyScalar(0.9));
+      tip.quaternion.copy(q);
+      // a fatter invisible grip, easier to hit
+      const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.05, 8), new THREE.MeshBasicMaterial({ visible: false }));
+      grip.position.copy(a.clone().multiplyScalar(0.52));
+      grip.quaternion.copy(q);
+      for (const m of [shaft, tip, grip]) { m.userData.handle = { mode: 'move', axis: i }; m.renderOrder = 1000; g.add(m); }
+      const knob = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.16), mat(colours[i]));
+      knob.userData.handle = { mode: 'scale', axis: i };
+      knob.renderOrder = 1001;
+      this.gizmoKnobs.push(knob);
+      this.scene.add(knob);
+    });
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 12), mat(0xf0e6d0));
+    ball.userData.handle = { mode: 'plane', axis: -1 };
+    ball.renderOrder = 1002;
+    g.add(ball);
+    g.visible = false;
+    for (const k of this.gizmoKnobs) k.visible = false;
+    this.scene.add(g);
+    return g;
+  }
+
+  // the gizmo at the selected block, the same size on screen wherever it is
+  placeGizmo() {
+    const o = this.blocks.get(this.selBlock);
+    const on = !!o;
+    this.gizmo.visible = on;
+    for (const k of this.gizmoKnobs) k.visible = on;
+    if (!o) return;
+    const b = o.b;
+    const c = new THREE.Vector3(b.x, b.y, b.z);
+    const s = Math.max(0.05, c.distanceTo(this.camera.position) * 0.11);
+    this.gizmo.position.copy(c);
+    this.gizmo.scale.setScalar(s);
+    const half = [b.w / 2, b.h / 2, b.d / 2];
+    this.gizmoKnobs.forEach((k, i) => {
+      k.position.copy(c);
+      k.position.setComponent(i, c.getComponent(i) + half[i]);
+      k.scale.setScalar(s);
+    });
+  }
+
+  rayFrom(e) {
+    const r = this.host.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    this.ray.setFromCamera(ndc, this.camera);
+    return this.ray;
+  }
+
+  // the gizmo handle or block under the pointer
+  blockHit(e) {
+    const ray = this.rayFrom(e);
+    if (this.selBlock != null && this.gizmo.visible) {
+      const h = ray.intersectObjects([...this.gizmo.children, ...this.gizmoKnobs], false)[0];
+      if (h) return { handle: h.object.userData.handle };
+    }
+    const meshes = [...this.blocks.values()].map((o) => o.mesh);
+    const h = ray.intersectObjects(meshes, false)[0];
+    return h ? { block: h.object.userData.block, point: h.point } : null;
+  }
+
+  // pixels on screen per unit along a world axis at a point
+  screenAxis(at, axis) {
+    const toPx = (v) => {
+      const p = v.clone().project(this.camera);
+      return new THREE.Vector2((p.x * 0.5 + 0.5) * this.size.w, (-p.y * 0.5 + 0.5) * this.size.h);
+    };
+    const a = new THREE.Vector3();
+    a.setComponent(axis, 1);
+    return toPx(at.clone().add(a)).sub(toPx(at));
+  }
+
+  startBlockDrag(e, hit) {
+    const o = this.blocks.get(this.selBlock);
+    if (!o) return false;
+    const b = o.b;
+    const at = new THREE.Vector3(b.x, b.y, b.z);
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    const depth = at.clone().sub(this.camera.position).dot(fwd);
+    this.bdrag = {
+      o, mode: hit.handle ? hit.handle.mode : 'plane', axis: hit.handle ? hit.handle.axis : -1,
+      x0: e.clientX, y0: e.clientY, from: { ...b }, depth, moved: false,
+      sdir: hit.handle && hit.handle.axis >= 0 ? this.screenAxis(at, hit.handle.axis) : null,
+      off: at.clone().sub(this.rayAt(e.clientX, e.clientY, depth)),
+    };
+    try { this.host.setPointerCapture(e.pointerId); } catch { /* fine without */ }
+    return true;
+  }
+
+  dragBlock(e) {
+    const d = this.bdrag;
+    if (!d) return;
+    if (!d.moved && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 3) return;
+    d.moved = true;
+    const snap = (v) => (e.shiftKey ? Math.round(v * 4) / 4 : v);
+    const b = d.o.b;
+    const f = d.from;
+    const keys = ['x', 'y', 'z'];
+    const sides = ['w', 'h', 'd'];
+    if (d.mode === 'plane') {
+      const w = this.rayAt(e.clientX, e.clientY, d.depth).add(d.off);
+      b.x = snap(w.x); b.y = snap(w.y); b.z = snap(w.z);
+    } else {
+      const m = new THREE.Vector2(e.clientX - d.x0, e.clientY - d.y0);
+      const len2 = Math.max(1e-6, d.sdir.lengthSq());
+      const units = m.dot(d.sdir) / len2;
+      const k = keys[d.axis];
+      if (d.mode === 'move') b[k] = snap(f[k] + units);
+      else {
+        const s = sides[d.axis];
+        const size = Math.max(0.05, snap(f[s] + units));
+        b[s] = size;
+        // the opposite face stays put
+        b[k] = f[k] + (size - f[s]) / 2;
+      }
+    }
+    this.shapeBlock(d.o);
+    this.render();
+  }
+
+  endBlockDrag() {
+    const d = this.bdrag;
+    this.bdrag = null;
+    if (!d || !d.moved) return;
+    this.record({ kind: 'block', id: d.o.b.id, t: d.from });
+    this.send({ ...this.ev('blockset', null), data: this.blockOut(d.o) });
+    this.pickBlock(d.o.b.id);
+  }
+
+  // blocks Rust deleted: out of the room, kept for an undo
+  unblock(ids) {
+    const items = ids.map((id) => this.blocks.get(id)).filter(Boolean).map((o) => ({ b: this.blockOut(o), key: o.key, about: o.about }));
+    if (!items.length) return;
+    this.record({ kind: 'unblock', items });
+    for (const id of ids) this.dropBlock(id);
+    this.render();
+  }
+
+  // a change from the window's fields
+  setBlockFields(id, t) {
+    const o = this.blocks.get(id);
+    if (!o) return;
+    this.record({ kind: 'block', id, t: { ...o.b } });
+    Object.assign(o.b, t);
+    this.shapeBlock(o);
+    this.send({ ...this.ev('blockset', null), data: this.blockOut(o) });
+    this.render();
   }
 
   // ------------------------------------------------------------------ input
@@ -715,6 +1063,14 @@ export class Space {
     h.addEventListener('pointerdown', (e) => {
       if (e.target.closest('.slabel')) return;
       if (e.button === 0) {
+        // a block's gizmo, or a block: select it (and drag it in the view's plane)
+        const hit = this.blocks.size ? this.blockHit(e) : null;
+        if (hit) {
+          if (hit.block != null && hit.block !== this.selBlock) this.pickBlock(hit.block);
+          this.startBlockDrag(e, hit);
+          return;
+        }
+        if (this.selBlock != null) this.pickBlock(null);
         // a click on empty room lets go of the selection; a double click makes a text
         const now = performance.now();
         if (this.lastEmpty && now - this.lastEmpty < 450) {
@@ -732,11 +1088,13 @@ export class Space {
       try { h.setPointerCapture(e.pointerId); } catch { /* fine without */ }
     });
     h.addEventListener('pointermove', (e) => {
+      if (this.bdrag) { this.dragBlock(e); return; }
       if (!this.looking) return;
       this.camera.rotateY(-(e.movementX || 0) * LOOK);
       this.camera.rotateX(-(e.movementY || 0) * LOOK);
     });
     const up = (e) => {
+      if (this.bdrag && (e.button === 0 || e.type === 'lostpointercapture')) this.endBlockDrag();
       if (e.button === 2 || e.type === 'lostpointercapture') {
         this.looking = false;
         h.classList.remove('looking');
@@ -811,6 +1169,7 @@ export class Space {
   }
 
   render() {
+    if (this.selBlock != null) this.placeGizmo();
     this.gl?.render(this.scene, this.camera);
     const c = this.camera;
     c.updateMatrixWorld();

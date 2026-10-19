@@ -145,6 +145,8 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | list / candidate marks | Dioxus | has |
 | one bar (the space's strip merged into the command bar) | asked 19 Oct | has (19 Oct) |
 | arrows hop to the nearest text | Dioxus only | has |
+| spatial saves: blocks in the room showing a text, a picture or a colour, kept in the save (`graph blocks`, a redb multimap: one key per texture, one 32 byte transform per block), in its backups, bundles and merges | asked 19 Oct | has (19 Oct, desktop and web): the blocks window (cube chip) makes them from the selected text, a picture or a colour; copy, delete, x y z w h d fields; Ctrl+Z undoes moves, resizes, adds and deletes; `blocks.*` in docs/app-api.md |
+| a translate / scale gizmo on the selected block, the texture tiling with its size (UVs per unit, repeat wrapping) rather than stretching | asked 19 Oct | has (19 Oct): arrows move along an axis, the face knobs resize (the far face stays), the ball moves across the view, Shift snaps to quarter units; guard `parity::tests::blocks_tile_and_have_a_gizmo` |
 
 ## Lists
 
@@ -222,6 +224,5 @@ replacements and alternatives in the editor, the reader's pages and big reading,
 | feature | status |
 |---|---|
 | WebGPU training in the browser (task #24) | not yet |
-| spatial saves (blocks textured with pictures and text, gizmo) | not yet |
 | grammar and spelling proof of concept in the editor | not yet |
 | space search modes (normal, classifier, random), save checkpoints, a real IME test | not yet |

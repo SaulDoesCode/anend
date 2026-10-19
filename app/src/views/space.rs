@@ -230,6 +230,15 @@ try {{
     else if (c.cmd === 'rows') dioxus.send({{ kind: 'rows', data: {{ why: c.why, name: c.name || '', rows: sp.rows() }} }});
     else if (c.cmd === 'load') sp.loadRows(c.rows, c.feats || {{}});
     else if (c.cmd === 'colours') sp.colours(c.map || {{}});
+    else if (c.cmd === 'blocks') {{
+      sp.setBlocks(c.blocks, c.textures || {{}}, !!c.replace);
+      if (c.added) sp.record({{ kind: 'blockadd', ids: c.added }});
+      if (c.select != null) sp.pickBlock(c.select);
+    }}
+    else if (c.cmd === 'unblock') sp.unblock(c.ids || []);
+    else if (c.cmd === 'blockspot') dioxus.send({{ kind: 'spot', data: {{ ...sp.blockSpot(), want: c.want }} }});
+    else if (c.cmd === 'blockfields') sp.setBlockFields(c.id, c.t);
+    else if (c.cmd === 'pickblock') sp.pickBlock(c.id);
   }}
 }} catch (e) {{
   dioxus.send({{ kind: 'error', text: String(e && e.message || e) }});
@@ -254,6 +263,10 @@ struct Sp {
     paused: Signal<bool>,
     /// each text's bucket axis Q, for the shared-bucket underlines
     q_bucket: Signal<HashMap<String, u64>>,
+    /// the selected block: `{id, kind, texture, x, y, z, w, h, d, about}`
+    block: Signal<Option<Value>>,
+    /// how many blocks and textures the save has
+    block_use: Signal<(u64, u64)>,
 }
 
 impl Sp {
@@ -841,6 +854,8 @@ pub fn Space() -> Element {
         hist_at: use_signal(|| None),
         paused: use_signal(|| false),
         q_bucket: use_signal(HashMap::new),
+        block: use_signal(|| None),
+        block_use: use_signal(|| (0, 0)),
     };
     // the engine and its channel
     {
@@ -870,6 +885,18 @@ pub fn Space() -> Element {
                         Either::Right(None) => break,
                     }
                 }
+            });
+        });
+    }
+    // the save's blocks, whenever another save opens
+    {
+        let api = api.clone();
+        use_effect(move || {
+            let save = (ui.hello)().save;
+            let api = api.clone();
+            dioxus::dioxus_core::spawn_forever(async move {
+                let _ = save;
+                load_blocks(ui, api, sp).await;
             });
         });
     }
@@ -952,7 +979,10 @@ pub fn Space() -> Element {
                 }
                 Some(Action::Settle) => sp.send(json!({ "cmd": "settle" })),
                 Some(Action::Pin) => sp.send(json!({ "cmd": "pin" })),
-                Some(Action::DeleteText) => sp.send(json!({ "cmd": "remove" })),
+                Some(Action::DeleteText) => match sp.block.peek().as_ref().and_then(|b| b["id"].as_u64()) {
+                    Some(id) => delete_block(ui, api.clone(), sp, id),
+                    None => sp.send(json!({ "cmd": "remove" })),
+                },
                 Some(Action::NewText) => {
                     let t = ui.bar.peek().trim().to_string();
                     sp.send(json!({ "cmd": "free", "text": if t.is_empty() { "text".to_string() } else { t } }));
@@ -1010,6 +1040,7 @@ pub fn Space() -> Element {
     let bg = p.space_bg.clone();
     let ink = crate::theme::ink_on(&bg);
     let api_g = api.clone();
+    let api_b = api.clone();
     rsx! {
         div { class: "space", style: "position: absolute; inset: 0; --room-bg: {bg}; --room-ink: {ink};",
             div { id: "space-host", class: "space-host", tabindex: "0", "aria-label": "the space: right drag looks, W A S D fly, arrows hop between texts" }
@@ -1034,6 +1065,16 @@ pub fn Space() -> Element {
                         ps.set(on);
                         sp.send(json!({ "cmd": "pause", "on": on }));
                     },
+                }
+            }
+            if p.space.show_blocks {
+                Blocks {
+                    selected: (sp.selected)(),
+                    block: (sp.block)(),
+                    counts: (sp.block_use)(),
+                    on_send: move |v: Value| sp.send(v),
+                    on_duplicate: { let api = api_b.clone(); move |b: Value| duplicate_block(ui, api.clone(), sp, b) },
+                    on_delete: { let api = api_b.clone(); move |id: u64| delete_block(ui, api.clone(), sp, id) },
                 }
             }
             if p.space.show_details {
@@ -1074,6 +1115,64 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
         "hover" | "focus" => card.set(Some(e.clone())),
         "select" => selected.set((!e.key.is_empty()).then(|| e.clone())),
         "settled" => ui.say(format!("settled in {} steps", e.data)),
+        "block" => {
+            let mut b = sp.block;
+            b.set((!e.data.is_null()).then(|| e.data.clone()));
+        }
+        "blockset" => {
+            let mut b = sp.block;
+            if b.peek().as_ref().map(|x| &x["id"]) == Some(&e.data["id"]) {
+                let mut v = e.data.clone();
+                if let Some(old) = b.peek().as_ref() {
+                    v["about"] = old["about"].clone();
+                }
+                b.set(Some(v));
+            }
+            let args = e.data.clone();
+            dioxus::dioxus_core::spawn_forever(async move {
+                if let Err(err) = api.call("blocks.set", args).await {
+                    ui.fail(err);
+                }
+            });
+        }
+        "spot" => {
+            let want = e.data["want"].clone();
+            let mut args = want.clone();
+            for k in ["x", "y", "z"] {
+                args[k] = e.data[k].clone();
+            }
+            dioxus::dioxus_core::spawn_forever(async move {
+                match api.call("blocks.add", args).await {
+                    Ok(r) => {
+                        let id = r["ids"][0].as_u64();
+                        let textures = dress(ui, &api, r["textures"].clone()).await;
+                        sp.send(json!({ "cmd": "blocks", "blocks": r["blocks"], "textures": textures, "added": r["ids"], "select": id }));
+                        count_blocks(api, sp).await;
+                        ui.say("a block · drag its arrows to move it, the knobs on its faces to resize it · Ctrl+Z takes it back");
+                    }
+                    Err(err) => ui.fail(err),
+                }
+            });
+        }
+        // an undo took back blocks just added, or put back blocks just deleted
+        "blockgone" => {
+            let ids = e.data.clone();
+            dioxus::dioxus_core::spawn_forever(async move {
+                match api.call("blocks.delete", json!({ "ids": ids })).await {
+                    Ok(_) => count_blocks(api, sp).await,
+                    Err(err) => ui.fail(err),
+                }
+            });
+        }
+        "blockrestore" => {
+            let blocks = e.data.clone();
+            dioxus::dioxus_core::spawn_forever(async move {
+                match api.call("blocks.restore", json!({ "blocks": blocks })).await {
+                    Ok(_) => count_blocks(api, sp).await,
+                    Err(err) => ui.fail(err),
+                }
+            });
+        }
         "undone" => {
             if e.data == "nothing" {
                 undo_last(ui, api);
@@ -1165,6 +1264,234 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
         }
         _ => {}
     }
+}
+
+// ------------------------------------------------------------------ blocks
+
+/// what the engine needs to draw the textures: a text's grouping colour (its labels'
+/// underline), a picture's thumbnail as a data URL
+async fn dress(ui: Ui, api: &Api, textures: Value) -> Value {
+    let mode = space_mode(ui);
+    let mut out = textures;
+    if let Some(o) = out.as_object_mut() {
+        for (k, about) in o.iter_mut() {
+            if let Some(t) = k.strip_prefix("text:").and(about["text"].as_str().map(str::to_string)) {
+                about["colour"] = json!(gem::underline(&t, mode));
+            } else if let Some(id) = k.strip_prefix("picture:")
+                && about.get("gone").is_none()
+                && let Ok(p) = api.call("pictures.get", json!({ "id": id, "thumb": 256 })).await
+                && let Some(t) = p["thumb"].as_str()
+            {
+                about["src"] = json!(format!("data:image/png;base64,{t}"));
+            }
+        }
+    }
+    out
+}
+
+async fn count_blocks(api: Api, sp: Sp) {
+    if let Ok(u) = api.call("blocks.stats", json!({})).await {
+        let mut c = sp.block_use;
+        c.set((u["blocks"].as_u64().unwrap_or(0), u["textures"].as_u64().unwrap_or(0)));
+    }
+}
+
+/// the open save's blocks into the room, in place of what was there
+async fn load_blocks(ui: Ui, api: Api, sp: Sp) {
+    match api.call("blocks.list", json!({})).await {
+        Ok(r) => {
+            let textures = dress(ui, &api, r["textures"].clone()).await;
+            sp.send(json!({ "cmd": "blocks", "blocks": r["blocks"], "textures": textures, "replace": true }));
+            let mut b = sp.block;
+            b.set(None);
+            count_blocks(api, sp).await;
+        }
+        // a hub from before blocks: the room has none
+        Err(_) => sp.send(json!({ "cmd": "blocks", "blocks": [], "replace": true })),
+    }
+}
+
+fn delete_block(ui: Ui, api: Api, sp: Sp, id: u64) {
+    dioxus::dioxus_core::spawn_forever(async move {
+        match api.call("blocks.delete", json!({ "ids": [id] })).await {
+            Ok(_) => {
+                sp.send(json!({ "cmd": "unblock", "ids": [id] }));
+                let mut b = sp.block;
+                b.set(None);
+                count_blocks(api, sp).await;
+                ui.say("block deleted · Ctrl+Z puts it back");
+            }
+            Err(e) => ui.fail(e),
+        }
+    });
+}
+
+fn duplicate_block(ui: Ui, api: Api, sp: Sp, b: Value) {
+    let id = b["id"].as_u64().unwrap_or(0);
+    // side by side, along its width
+    let by = b["w"].as_f64().unwrap_or(1.0) + 0.1;
+    dioxus::dioxus_core::spawn_forever(async move {
+        match api
+            .call("blocks.duplicate", json!({ "ids": [id], "by": [by, 0, 0] }))
+            .await
+        {
+            Ok(r) => {
+                let textures = dress(ui, &api, r["textures"].clone()).await;
+                sp.send(json!({ "cmd": "blocks", "blocks": r["blocks"], "textures": textures, "added": r["ids"], "select": r["ids"][0] }));
+                count_blocks(api, sp).await;
+                ui.say("a copy: the same texture, stored once");
+            }
+            Err(e) => ui.fail(e),
+        }
+    });
+}
+
+/// the blocks window: make blocks from the selected text, a picture or a colour; the
+/// selected block's place and size; copy, delete
+#[component]
+fn Blocks(
+    selected: Option<SpaceEvent>,
+    block: Option<Value>,
+    counts: (u64, u64),
+    on_send: EventHandler<Value>,
+    on_duplicate: EventHandler<Value>,
+    on_delete: EventHandler<u64>,
+) -> Element {
+    let ui = ui();
+    let api = api();
+    let mut pictures: Signal<Vec<(String, String)>> = use_signal(Vec::new);
+    let mut picture = use_signal(String::new);
+    let mut colour = use_signal(|| "#b49a6c".to_string());
+    use_hook(move || {
+        let api = api.clone();
+        spawn(async move {
+            if let Ok(v) = api.call("pictures.list", json!({})).await {
+                let all: Vec<(String, String)> = v
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|p| {
+                        let id = p["id"].as_str().unwrap_or("").to_string();
+                        let name = p["name"]
+                            .as_str()
+                            .filter(|n| !n.is_empty())
+                            .unwrap_or(&id[..id.len().min(8)])
+                            .to_string();
+                        (id, name)
+                    })
+                    .collect();
+                if let Some((id, _)) = all.first() {
+                    picture.set(id.clone());
+                }
+                pictures.set(all);
+            }
+        });
+    });
+    let text = selected.clone().filter(|s| !s.free && !s.key.is_empty());
+    let w = window_width();
+    let field = move |b: Value, k: &'static str| {
+        let v = b[k].as_f64().unwrap_or(0.0);
+        let id = b["id"].as_u64().unwrap_or(0);
+        rsx! {
+            label { class: "bfield", title: if "whd".contains(k) { "a side, in units (the texture tiles once per unit)" } else { "its centre, in units" },
+                span { "{k}" }
+                input {
+                    r#type: "number",
+                    step: "0.25",
+                    value: "{v:.2}",
+                    onchange: move |e| {
+                        if let Ok(x) = e.value().parse::<f64>() {
+                            on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { k: x } }));
+                        }
+                    },
+                }
+            }
+        }
+    };
+    rsx! {
+        Win {
+            id: "blocks",
+            at: ((w - 330.0).max(8.0), 420.0),
+            on_close: move |_| set_pref(ui, |p| p.space.show_blocks = false),
+            title: rsx! {
+                span { class: "win-title",
+                    Icon { name: "cube" }
+                    "blocks"
+                    span { class: "dim small", style: "font-weight: 400;", "{counts.0} in this save · {counts.1} textures" }
+                }
+            },
+            div { class: "blocks-add",
+                button {
+                    class: "btn small",
+                    disabled: text.is_none(),
+                    title: "a block showing the selected text, where it is",
+                    onclick: move |_| {
+                        if let Some(t) = &text {
+                            add_block_from(on_send, "text", &t.key)
+                        }
+                    },
+                    Icon { name: "text" }
+                    "the selected text"
+                }
+                if pictures.read().is_empty() {
+                    span { class: "dim small", title: "add pictures in the models view (spec models, pictures)", "no pictures yet" }
+                } else {
+                    span { class: "row",
+                        select {
+                            "aria-label": "a picture",
+                            value: "{picture}",
+                            onchange: move |e| picture.set(e.value()),
+                            for (id , name) in pictures.read().iter() {
+                                option { key: "{id}", value: "{id}", selected: *id == picture(), "{name}" }
+                            }
+                        }
+                        button { class: "btn small", onclick: move |_| add_block_from(on_send, "picture", &picture()), Icon { name: "image" } "picture" }
+                    }
+                }
+                span { class: "row",
+                    input { r#type: "color", "aria-label": "a colour", value: "{colour}", oninput: move |e| colour.set(e.value()) }
+                    button { class: "btn small", onclick: move |_| add_block_from(on_send, "plain", &colour()), Icon { name: "palette" } "colour" }
+                }
+            }
+            if let Some(b) = block {
+                div { class: "blocks-sel",
+                    div { class: "small",
+                        b {
+                            {
+                                match b["kind"].as_str().unwrap_or("") {
+                                    "text" => format!("“{}”", b["about"]["text"].as_str().unwrap_or("a text")),
+                                    "picture" => format!("picture {}", b["about"]["name"].as_str().unwrap_or("")),
+                                    _ => format!("colour {}", b["texture"].as_str().unwrap_or("")),
+                                }
+                            }
+                        }
+                        span { class: "dim", " · block {b[\"id\"]}" }
+                    }
+                    div { class: "bfields",
+                        {field(b.clone(), "x")}
+                        {field(b.clone(), "y")}
+                        {field(b.clone(), "z")}
+                        {field(b.clone(), "w")}
+                        {field(b.clone(), "h")}
+                        {field(b.clone(), "d")}
+                    }
+                    div { class: "row",
+                        button { class: "btn small", title: "a copy beside it (the texture is stored once)", onclick: { let b = b.clone(); move |_| on_duplicate.call(b.clone()) }, Icon { name: "copy" } "copy" }
+                        button { class: "btn small", title: "{ui.key_of(Action::DeleteText)}", onclick: { let id = b["id"].as_u64().unwrap_or(0); move |_| on_delete.call(id) }, Icon { name: "delete" } "delete" }
+                    }
+                }
+            } else {
+                p { class: "dim small", "Click a block to select it: its arrows move it, the knobs on its faces resize it (the texture tiles, it doesn't stretch), the ball moves it across the view. Shift snaps to quarter units." }
+            }
+        }
+    }
+}
+
+fn add_block_from(on_send: EventHandler<Value>, kind: &str, texture: &str) {
+    if texture.is_empty() {
+        return;
+    }
+    on_send.call(json!({ "cmd": "blockspot", "want": { "kind": kind, "texture": texture } }));
 }
 
 /// a window over the room that moves by its title bar and remembers where it was left;
@@ -1480,6 +1807,24 @@ fn Help() -> Element {
             ],
         ),
         (
+            "blocks",
+            vec![
+                (
+                    "the cube chip".into(),
+                    "the blocks window: a block of the selected text, a picture or a colour",
+                ),
+                ("click a block".into(), "select it; drag it across the view"),
+                ("drag an arrow".into(), "move it along that axis"),
+                (
+                    "drag a face's knob".into(),
+                    "resize it: the texture tiles, the far face stays",
+                ),
+                ("Shift while dragging".into(), "snap to quarter units"),
+                (k(Action::DeleteText), "delete the selected block"),
+                (k(Action::Undo), "undo a move, a resize, an add or a delete"),
+            ],
+        ),
+        (
             "the bar",
             vec![
                 ("Enter".into(), "a number: its bucket; a text: its sum (or its words)"),
@@ -1616,6 +1961,12 @@ pub fn SpaceStrip() -> Element {
                 icon: "view",
                 on: p.space.show_details,
                 onclick: move |_| set_pref(ui, |p| p.space.show_details = !p.space.show_details),
+            }
+            TChip {
+                label: "blocks: spatial saves, boxes showing texts and pictures",
+                icon: "cube",
+                on: p.space.show_blocks,
+                onclick: move |_| set_pref(ui, |p| p.space.show_blocks = !p.space.show_blocks),
             }
             TChip {
                 label: format!("help · {}", ui.key_of(Action::Help)),

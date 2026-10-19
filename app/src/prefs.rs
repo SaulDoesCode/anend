@@ -104,6 +104,8 @@ pub struct SpaceUi {
     pub show_hud: bool,
     pub show_help: bool,
     pub show_details: bool,
+    /// the blocks window (spatial saves)
+    pub show_blocks: bool,
     /// where each movable window was left (`details`, `physics`): its left and top
     pub wins: BTreeMap<String, (f64, f64)>,
 }
@@ -119,6 +121,7 @@ impl Default for SpaceUi {
             show_hud: true,
             show_help: false,
             show_details: true,
+            show_blocks: false,
             wins: BTreeMap::new(),
         }
     }

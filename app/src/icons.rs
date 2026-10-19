@@ -13,6 +13,7 @@ pub fn svg(name: &str) -> &'static str {
         "classifier" => include_str!("../../assets/icons/classifier.svg"),
         "close" => include_str!("../../assets/icons/close.svg"),
         "copy" => include_str!("../../assets/icons/copy.svg"),
+        "cube" => include_str!("../../assets/icons/cube.svg"),
         "delete" => include_str!("../../assets/icons/delete.svg"),
         "download" => include_str!("../../assets/icons/download.svg"),
         "edit" => include_str!("../../assets/icons/edit.svg"),
