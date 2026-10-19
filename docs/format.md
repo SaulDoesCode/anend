@@ -428,3 +428,12 @@ These settle the Stage B design. Where they differ from the draft above, the ans
 8. **Texts inherit too.** When an entry's text changes, its placements show the new text,
    unless they are detached. No flag in the metadata: keep two tables, inheriting and
    detached.
+9. **No limit on how long a text can be.** The user doesn't want texts foreclosed early.
+   - Splitting a long text into pieces is only a storage detail. A text of any length is
+     stored as however many pieces it needs, so not even redb's per-value limit (3 GiB per
+     value, 3.75 GiB per pair in redb 4.3) caps a text.
+   - The piece size is a setting, 64 KiB by default.
+   - The 4 MiB cap on rendered output in `core/src/graph/interp.rs:115` becomes a setting
+     too (default: no cap). A program that loops forever is stopped by its step budget, not
+     by the size of a text.
+   - The other limits in the list above become settings as well.
