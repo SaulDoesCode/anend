@@ -103,8 +103,8 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | buckets O / R / F (R and F toggle back) | memory_ui.rs | has |
 | the atbash bucket (A, ↑) | memory_ui.rs | dropped: an atbash sum equals the reversed sum letter for letter; the entry graph files ordinal and reversed only (`graph::gematria`) |
 | sidecar (sums, letters), each clickable; ← → | memory_ui.rs | has |
-| ↓ gsearches the letters (frequency) | memory_ui.rs `SideFrequency` | missing |
-| toggles: gsearch text (G), saturate (S), white mode (W) | memory_ui.rs | partly: no white mode |
+| ↓ gsearches the letters (frequency) | memory_ui.rs `SideFrequency` | has |
+| toggles: gsearch text (G), saturate (S), white mode (W) | memory_ui.rs | has (white mode back 19 Oct) |
 | list commands Enlist / List / Delist / Unlist; Shift+click list, Ctrl+click candidate | memory_ui.rs | has |
 | click: into the bar; double click: key; hover line (key + gsum) | memory_ui.rs | has |
 | middle click opens a note in the editor | memory_ui.rs | missing |
@@ -112,7 +112,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | underlines by shared reversed sum | memory_ui.rs | has |
 | colouring by a classifier (bar at the left, legend) | tint.rs | has |
 | empty-state hint | memory_ui.rs | has |
-| word types on hover: which types, not only how many (noun, verb, name, number, link…, coloured) | asked 19 Oct | partly: counts per type, the non-plain words named |
+| word types on hover: which types, not only how many (noun, verb, name, number, link…, coloured) | asked 19 Oct | has (19 Oct): core `kinds::tag`, a rule tagger (noun, verb, adjective, adverb, pronoun, determiner, preposition, conjunction, interjection, name, number, date, time, link, email, hashtag); the hover line labels each word in its type's colour; T labels every text, with a legend |
 | search filter panel, buckets strip at the left edge, field width, selection | Dioxus only | has |
 
 ## Space

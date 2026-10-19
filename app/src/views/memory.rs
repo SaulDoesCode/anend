@@ -34,6 +34,8 @@ struct Mem {
     results: Signal<Vec<Hit>>,
     header: Signal<Option<Header>>,
     hover: Signal<String>,
+    /// the text under the pointer, for its words' types under the hover line
+    hover_text: Signal<String>,
     picking: Signal<bool>,
 }
 
@@ -440,6 +442,7 @@ pub fn Memory() -> Element {
         results: use_signal(Vec::new),
         header: use_signal(|| None),
         hover: use_signal(String::new),
+        hover_text: use_signal(String::new),
         picking: use_signal(|| false),
     };
     use_context_provider(|| m);
@@ -539,8 +542,12 @@ pub fn Memory() -> Element {
         String::new()
     };
     let nsel = picks.selected.len();
+    let (word_types_on, white) = {
+        let p = ui.prefs.read();
+        (p.word_types, p.white)
+    };
     rsx! {
-        div { class: "memory", style: "position: absolute; inset: 0;",
+        div { class: if white { "memory white" } else { "memory" }, style: "position: absolute; inset: 0;",
             div { class: "edge" }
             Buckets {}
             div { class: "mem-main",
@@ -559,6 +566,88 @@ pub fn Memory() -> Element {
                 SelBar { n: nsel }
             }
             div { class: "mem-hover", "{m.hover}" }
+            if !(m.hover_text)().is_empty() && !word_types_on {
+                div { class: "mem-types", "aria-label": "its words' types", TaggedText { text: (m.hover_text)(), labels: true } }
+            }
+        }
+    }
+}
+
+/// each word type's short label
+pub(crate) fn type_label(t: &str) -> &'static str {
+    match t {
+        "noun" => "n",
+        "verb" => "v",
+        "adjective" => "adj",
+        "adverb" => "adv",
+        "pronoun" => "pron",
+        "determiner" => "det",
+        "preposition" => "prep",
+        "conjunction" => "conj",
+        "interjection" => "intj",
+        "name" => "name",
+        "number" => "num",
+        "date" => "date",
+        "time" => "time",
+        "link" => "link",
+        "email" => "email",
+        "hashtag" => "tag",
+        _ => "",
+    }
+}
+
+/// a text with each word labelled by its type (core's `kinds::tag`), in that type's colour;
+/// the spaces and punctuation between words kept as they are
+#[component]
+pub(crate) fn TaggedText(text: String, #[props(default = true)] labels: bool) -> Element {
+    let tags = anend_core::kinds::tag(&text);
+    let mut parts: Vec<(String, Option<&'static str>)> = Vec::new();
+    let mut at = 0;
+    for t in &tags {
+        if t.start > at {
+            parts.push((text[at..t.start].to_string(), None));
+        }
+        parts.push((text[t.start..t.end].to_string(), Some(t.ty)));
+        at = t.end;
+    }
+    if at < text.len() {
+        parts.push((text[at..].to_string(), None));
+    }
+    rsx! {
+        span { class: "tagged",
+            for (i , (piece , ty)) in parts.into_iter().enumerate() {
+                match ty {
+                    Some(ty) => rsx! {
+                        span { key: "{i}", class: "tw t-{ty}", title: "{ty}",
+                            span { class: "w", "{piece}" }
+                            if labels { span { class: "l", "{type_label(ty)}" } }
+                        }
+                    },
+                    None => rsx! { span { key: "{i}", "{piece}" } },
+                }
+            }
+        }
+    }
+}
+
+/// the word types shown, each in its colour, with how many of each
+#[component]
+fn TypesLegend(texts: Vec<String>) -> Element {
+    let mut counts: std::collections::BTreeMap<usize, (&'static str, usize)> = Default::default();
+    for t in &texts {
+        for w in anend_core::kinds::tag(t) {
+            let i = anend_core::kinds::WORD_TYPES
+                .iter()
+                .position(|x| *x == w.ty)
+                .unwrap_or(99);
+            counts.entry(i).or_insert((w.ty, 0)).1 += 1;
+        }
+    }
+    rsx! {
+        div { class: "types-legend", "aria-label": "word types",
+            for (_ , (ty , n)) in counts {
+                span { key: "{ty}", class: "tw t-{ty}", b { "{type_label(ty)}" } span { "{ty} {n}" } }
+            }
         }
     }
 }
@@ -767,6 +856,9 @@ fn Field(style: String, header: Option<Header>, results: Vec<Hit>, mode: Mode, p
             }
             if hidden > 0 {
                 div { class: "filter-note", "the filter hides {hidden} of {all_results.len()} · the square at the right of the strip changes it" }
+            }
+            if ui.prefs.read().word_types && !results.is_empty() {
+                TypesLegend { texts: results.iter().map(|h| h.text.clone()).collect::<Vec<_>>() }
             }
             div { class: "arts", role: "list",
                 if results.is_empty() && hidden == 0 {
@@ -1012,6 +1104,9 @@ fn Art(hit: Hit, under: Option<String>, is_list: bool, is_cand: bool, selected: 
         format!("{title} · {} · {words}", anend_core::kinds::detect(&hit.text))
     };
     let mut hover = m.hover;
+    let mut hover_text = m.hover_text;
+    let ht = hit.text.clone();
+    let tagged = ui.prefs.read().word_types;
     // the tooltip has the word types on a line of their own
     let tip = if words.is_empty() {
         title.clone()
@@ -1025,7 +1120,10 @@ fn Art(hit: Hit, under: Option<String>, is_list: bool, is_cand: bool, selected: 
             role: "listitem",
             tabindex: "0",
             title: "{tip}",
-            onmouseenter: move |_| hover.set(t2.clone()),
+            onmouseenter: move |_| {
+                hover.set(t2.clone());
+                hover_text.set(ht.clone());
+            },
             onclick: move |e: MouseEvent| {
                 let md = e.modifiers();
                 if md.ctrl() || md.meta() {
@@ -1067,7 +1165,7 @@ fn Art(hit: Hit, under: Option<String>, is_list: bool, is_cand: bool, selected: 
                     ui.menu.set(Some(Menu { hit: h3.clone(), x: p.x, y: p.y }));
                 }
             },
-            "{hit.text}"
+            if tagged { TaggedText { text: hit.text.clone(), labels: true } } else { "{hit.text}" }
         }
     }
 }
@@ -1257,6 +1355,8 @@ pub fn MemoryStrip() -> Element {
             TChip { label: "gsearch text: by its sum, not its words · G", icon: "search", on: p.gsearch_text, onclick: move |_| set_pref(ui, |p| p.gsearch_text = !p.gsearch_text) }
             TChip { label: "saturate: remember what's searched · S", icon: "bolt", on: p.saturate, onclick: move |_| set_pref(ui, |p| p.saturate = !p.saturate) }
             TChip { label: "letters in the sidecar · L", letter: "abc", on: p.letters, onclick: move |_| set_pref(ui, |p| p.letters = !p.letters) }
+            TChip { label: format!("word types: label every word (noun, verb, name, number…) · {}", ui.key_of(Action::WordTypes)), letter: "n·v", on: p.word_types, onclick: move |_| set_pref(ui, |p| p.word_types = !p.word_types) }
+            TChip { label: format!("white: dark texts on white · {}", ui.key_of(Action::WhiteMode)), icon: "sun", on: p.white, onclick: move |_| set_pref(ui, |p| p.white = !p.white) }
         }
         TintPick {}
         span { class: "toggles filter-square",

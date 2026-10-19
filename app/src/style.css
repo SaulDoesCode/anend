@@ -196,6 +196,37 @@ button.tchip.on { color: var(--bar-text); opacity: 1; }
 .art.selected { background: #2f4a5a; box-shadow: inset 0 0 0 2px #7fb0cf; }
 .art.note::before { content: "✎ "; color: #c9ab99; }
 .art .meta { display: none; }
+/* word types (kinds::tag): each type a colour, its label under the word */
+.memory, .types-legend { --t-noun: #6aa6f0; --t-verb: #f07a6a; --t-adjective: #f0b34d; --t-adverb: #d38af0; --t-pronoun: #5fd0c0; --t-determiner: #a5acb8; --t-preposition: #9ccf6c; --t-conjunction: #c9b48e; --t-interjection: #f58cc0; --t-name: #f5d65a; --t-number: #6ee08a; --t-date: #7fd8f0; --t-time: #7fd8f0; --t-link: #9aa6ff; --t-email: #9aa6ff; --t-hashtag: #f0a060; }
+.memory.white, .memory.white .types-legend { --t-noun: #1f62b8; --t-verb: #c0392b; --t-adjective: #a86a00; --t-adverb: #8e3fae; --t-pronoun: #138a7a; --t-determiner: #5f6672; --t-preposition: #4f7d22; --t-conjunction: #7d6440; --t-interjection: #b5306e; --t-name: #8a6d00; --t-number: #1d8a3c; --t-date: #1b7d9a; --t-time: #1b7d9a; --t-link: #3d4bc7; --t-email: #3d4bc7; --t-hashtag: #b05a10; }
+/* a labelled word: the word over its type's short name, a bar of its colour between */
+.tw { display: inline-flex; flex-direction: column; align-items: center; vertical-align: top; line-height: 1.1; }
+.tw .w { border-bottom: 2px solid var(--tc, currentColor); padding-bottom: 1px; }
+.tw .l { font: 700 max(10px, .5em)/1.15 var(--font); color: var(--tc); letter-spacing: .02em; margin-top: 1px; }
+.tw.t-noun { --tc: var(--t-noun); } .tw.t-verb { --tc: var(--t-verb); } .tw.t-adjective { --tc: var(--t-adjective); }
+.tw.t-adverb { --tc: var(--t-adverb); } .tw.t-pronoun { --tc: var(--t-pronoun); } .tw.t-determiner { --tc: var(--t-determiner); }
+.tw.t-preposition { --tc: var(--t-preposition); } .tw.t-conjunction { --tc: var(--t-conjunction); } .tw.t-interjection { --tc: var(--t-interjection); }
+.tw.t-name { --tc: var(--t-name); } .tw.t-number { --tc: var(--t-number); } .tw.t-date, .tw.t-time { --tc: var(--t-date); }
+.tw.t-link, .tw.t-email { --tc: var(--t-link); } .tw.t-hashtag { --tc: var(--t-hashtag); }
+.art .tagged { text-decoration: none; display: inline; }
+.art:has(.tagged) { text-decoration: none !important; padding-bottom: 4px; max-height: none; }
+.types-legend .tw { flex-direction: row; gap: 4px; color: var(--tc); align-items: baseline; }
+.mem-types { text-align: center; font: 17px/2 var(--serif); padding: 0 10px 4px; flex: none; color: #ddd; }
+.mem-types .tw .w { color: #fff; }
+.memory.white .mem-types .tw .w { color: #111; }
+.types-legend { display: flex; flex-wrap: wrap; gap: 3px 12px; justify-content: center; padding: 4px 6px 0; font: 12.5px var(--font); }
+.types-legend b { font-weight: 700; margin-right: 2px; }
+/* white mode (W): dark texts on white, as weum's */
+.memory.white { background: #fff; color: #111; }
+.app.v-memory:has(.memory.white) .views, .app.v-memory:has(.memory.white) .dock { background: #fff; }
+.app.v-memory:has(.memory.white) .dock { --bars: #fff; --bar-text: #111; --bar-dim: #6b5d55; }
+.app.v-memory:has(.memory.white) #bar { border-bottom-color: #111; }
+.memory.white .art { background: #fff; color: #111; box-shadow: inset 0 0 0 1px #ddd; }
+.memory.white .art:hover { background: #f2ece8; }
+
+.memory.white .results-head { background: #fff; }
+.memory.white .results-head h3 { color: #111; }
+.memory.white .results-head .pf, .memory.white .mem-hover, .memory.white .mem-types, .memory.white .mem-intro { color: #333; }
 .mem-intro { max-width: 520px; margin: auto; text-align: center; color: #c9ab99; font-size: 17px; }
 .mem-intro p { margin: .4em 0; }
 .mem-hover { min-height: 1.5em; text-align: center; font: 12.5px var(--mono); color: #bbb; padding: 4px; flex: none; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
