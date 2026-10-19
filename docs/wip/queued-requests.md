@@ -31,3 +31,20 @@ views touched against their previous behaviour before committing.
      JSON. A test walks the spec schema and checks that each field has a control.
    - **The JSON editor stays,** as an advanced view kept in sync both ways with the builder.
    - **Same on desktop and web.**
+
+5. **Spatial blocks: rotation, compact defaults, packed storage** (folded into the spatial-saves
+   work):
+   - **Rotation:** blocks can be rotated as well as moved and scaled. Add a rotation ring to the
+     gimbal. Textures still tile correctly on rotated, scaled faces.
+   - **Defaults cost nothing:** an instance's transform stores its rotation and scale as
+     `Option`s. `None` means the default orientation (identity) and the default scale (1), and
+     takes no bytes beyond a flag bit, so most instances are only a position.
+   - **Packed storage for block and text entries:** reuse the project's existing bit-packing and
+     self-reference encodings. Find them in core before writing new ones.
+     - Per instance: a flags byte or bits for which optional parts are present; positions as
+       varints or quantised deltas, sorted within a key so neighbours delta well; a
+       self-reference for an instance that repeats an earlier one's rotation or scale.
+     - Text entries packed the same way where it pays off.
+     - Old records still read correctly: version the format and migrate on open.
+     - Tests: round-trips (including edge values) and size measurements in the commit message,
+       e.g. bytes per instance before and after for 10k copies of one text.
