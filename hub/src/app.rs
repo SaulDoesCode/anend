@@ -110,6 +110,10 @@ const CLASSIFY_READ_ONLY: &[&str] = &[
     "models.cancel",
     "models.run",
     "models.generate",
+    "pictures.list",
+    "pictures.lists",
+    "pictures.get",
+    "pictures.delete",
 ];
 
 fn makes_no_room(op: &str) -> bool {
@@ -447,6 +451,8 @@ mod tests {
             "models.create",
             "models.update",
             "models.train",
+            "pictures.add",
+            "pictures.tag",
         ] {
             assert!(!makes_no_room(op), "{op}");
         }

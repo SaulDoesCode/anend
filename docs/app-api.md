@@ -214,13 +214,15 @@ this keeps its definitions in the models file; opening it moves them into the sa
 | `models.pretrained` | | `{any, folders}`: whether any folder may be named (one's own machine), or the folders a shared hub offers |
 
 - `input` is a value of the model's input type: `{"text": ".."}`, `{"numbers": [..]}`,
-  `{"bytes": [..]}`; `text` is short for the first. `prompt` is text for the generator
+  `{"bytes": [..]}`, `{"picture": id}` (a picture of the save, scaled to the model's
+  size); `text` is short for the first. `prompt` is text for the generator
   to continue (empty: from nothing).
 - **Data** comes from the save when training starts: a `list` query names a list by its
   name (the text of its head entry) or its key; `tagged` an entry tag; `pairs` two lists
   side by side; each member's text (a note: its title and markdown) is one example. For a
-  `numbers` input a member's text is the numbers, separated by spaces or commas. Picture
-  data comes inline.
+  `numbers` input a member's text is the numbers, separated by spaces or commas. A
+  picture model's data is the save's [pictures](#pictures) (`pictures`, a list of them
+  or all), or inline.
 - **Training** runs as the classifiers' does: on a thread of its own, continuing from the
   trained weights unless `fresh`, written when it finishes unless the spec changed
   meanwhile. `epochs` and `max_steps` override the spec's `train` for this run. On a
@@ -249,6 +251,39 @@ this keeps its definitions in the models file; opening it moves them into the sa
   and otherwise comes in beside it as `<name> 2` (3, ...; its spec's `name` too), so the
   open save's own models, and the critics that name them, answer as before. The merge's
   answer counts them in `models` (and pictures in `pictures`).
+
+## Pictures
+
+Pictures live in the save itself (tables `graph pictures`, `graph picture bytes`,
+`graph picture lists`; [format](format.md#other-tables)), so they go wherever the save
+goes: copies, renames, backups (`other.json`'s `pictures`, the bytes in base64), bundles,
+the hub's share and take, and merges (a picture is known by the hash of its bytes, so
+the same picture in both saves stays one, and its lists are joined). A picture is a PNG
+or JPEG, decoded when it comes in so only ones that read are kept. Its `id` is a 128-bit
+FNV-1a hash of its bytes (32 hex digits). Lists hold pictures by name: the pictures of
+list `"cats"` sit beside the texts of the list whose head is `cats` (or on their own).
+Spec models train on them ([models](models.md): `{"from": "pictures", "list": "cats",
+"head": .., "class": ..}`) and read one by id (`models.run` with `input: {picture: id}`).
+One implementation answers them on the desktop and the hub (`core/src/ops/pictures.rs`).
+
+A picture's details: `{id, mime: "image/png"|"image/jpeg", width, height, name, added (ms
+since the Unix epoch), size (bytes), lists: [names]}`.
+
+| op | args | data |
+|---|---|---|
+| `pictures.add` | `{data (base64, or a data: URL) or path (one's own machine only), name?, list?, thumb?}` | the details and `new` (false when the save had those bytes already: nothing changes) and, with `thumb`, a thumbnail; `name` defaults to the file's name for a path; `list` puts it into that list |
+| `pictures.list` | `{list?, thumb?}` | `[details]`, oldest first: the save's pictures or a list's; `thumb` (16 to 512) adds each one's thumbnail, a PNG in base64 fitting `thumb` × `thumb` |
+| `pictures.lists` | | `[{list, count}]`: the lists that hold pictures |
+| `pictures.get` | `{id, thumb?}` | the details and `data`, the file in base64, or with `thumb` only the thumbnail |
+| `pictures.name` | `{id, name}` | the details |
+| `pictures.tag` | `{id, list, remove?: false}` | `{id, lists, changed}`: the picture put into a list, or with `remove` taken out |
+| `pictures.delete` | `{id}` | `null`; it leaves its lists too |
+
+- **Limits**: on a shared hub (not `--local`) a picture is at most 4 MB and 8192 pixels a
+  side, a save holds at most 2000 of them, they come as data (not paths), and they count
+  in the member's quota (they're in the save's file); `pictures.add` and `pictures.tag`
+  need room under it, the rest work when it's full. On one's own machine a picture is at
+  most 64 MB and 32768 pixels a side, with no count limit.
 
 ## Saves in and out
 

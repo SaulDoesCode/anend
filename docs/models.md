@@ -74,7 +74,13 @@ writes text, bytes, pictures or numbers; at most one; makes the trunk causal).
 - `tagged` — the same for entries with a tag;
 - `pairs` — `input` list → `output` list, side by side, for a generate head: it learns to
   write the output after the input (sequence to sequence; `run` then continues an input);
-- `inline` — `items: [{input, head, class | value}]` written into the spec.
+- `pictures` — the save's pictures (`list`: those of a picture list; left out: all of
+  them) as a class of a head (`class`), as values (`value`), or for a generate head as
+  pictures to learn to draw; only for an `image` input. Each is scaled to the input's
+  `width` × `height` (stretched to fill, a triangle filter) when training starts:
+  `{"from": "pictures", "list": "cats", "head": "kind", "class": "cat"}`;
+- `inline` — `items: [{input, head, class | value}]` written into the spec (pictures as
+  `{"image": {"width", "height", "rgb": [bytes]}}`).
 
 **Critics** `want`: `{"class": c}` (the probability of c), `{"not": c}`,
 `{"near": {"value": v, "target": t, "scale": s}}`,
@@ -142,6 +148,21 @@ A number regressor (two inputs, one output), learning the sum:
 }
 ```
 
+A picture classifier trained on the save's pictures, by list:
+
+```json
+{
+  "name": "cat or dog",
+  "input": {"type": "image", "width": 32, "height": 32, "patch": 8, "codes": 64},
+  "trunk": {"preset": "small"},
+  "heads": [{"name": "animal", "kind": "classify", "classes": ["cat", "dog"]}],
+  "data": [
+    {"from": "pictures", "list": "cats", "head": "animal", "class": "cat"},
+    {"from": "pictures", "list": "dogs", "head": "animal", "class": "dog"}
+  ]
+}
+```
+
 A small picture generator (see `core/examples/pictures.rs`):
 
 ```json
@@ -150,7 +171,7 @@ A small picture generator (see `core/examples/pictures.rs`):
   "input": {"type": "image", "width": 64, "height": 64, "patch": 8, "codes": 128},
   "trunk": {"preset": "small"},
   "heads": [{"name": "draw", "kind": "generate"}],
-  "data": [{"from": "list", "list": "toys", "head": "draw"}],
+  "data": [{"from": "pictures", "list": "toys", "head": "draw"}],
   "sampling": {"temperature": 0.9, "top_p": 0.95, "max_len": 72}
 }
 ```

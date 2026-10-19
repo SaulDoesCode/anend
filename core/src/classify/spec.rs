@@ -168,6 +168,17 @@ pub enum DataQuery {
         output: String,
         head: String,
     },
+    /// the save's pictures (of list `list`, or all of them) for a picture model, likewise:
+    /// each scaled to the input's width and height
+    Pictures {
+        #[serde(default)]
+        list: Option<String>,
+        head: String,
+        #[serde(default)]
+        class: Option<String>,
+        #[serde(default)]
+        value: Option<Vec<f32>>,
+    },
     /// examples written into the spec
     Inline { items: Vec<InlineItem> },
 }
@@ -278,6 +289,11 @@ pub enum Origin {
 pub trait Source {
     fn list(&self, name: &str) -> Result<Vec<Value>, String>;
     fn tagged(&self, tag: &str) -> Result<Vec<Value>, String>;
+    /// the source's pictures: those of list `list`, or all of them
+    fn pictures(&self, list: Option<&str>) -> Result<Vec<Value>, String> {
+        let _ = list;
+        Err("this source holds no pictures".into())
+    }
     /// by default the two lists side by side, in order
     fn pairs(&self, input: &str, output: &str) -> Result<Vec<(Value, Value)>, String> {
         Ok(self.list(input)?.into_iter().zip(self.list(output)?).collect())
@@ -289,6 +305,8 @@ pub trait Source {
 pub struct MemSource {
     pub lists: BTreeMap<String, Vec<Value>>,
     pub tags: BTreeMap<String, Vec<Value>>,
+    /// pictures by list name ("" for all of them)
+    pub pictures: BTreeMap<String, Vec<Value>>,
 }
 
 impl MemSource {
@@ -309,6 +327,15 @@ impl Source for MemSource {
 
     fn tagged(&self, tag: &str) -> Result<Vec<Value>, String> {
         Ok(self.tags.get(tag).cloned().unwrap_or_default())
+    }
+
+    fn pictures(&self, list: Option<&str>) -> Result<Vec<Value>, String> {
+        let k = list.unwrap_or("");
+        self.pictures.get(k).cloned().ok_or(if k.is_empty() {
+            "no pictures".to_string()
+        } else {
+            format!("no pictures in list {k:?}")
+        })
     }
 }
 
@@ -497,6 +524,13 @@ impl ModelSpec {
             let r = match q {
                 DataQuery::List { head, class, value, .. } | DataQuery::Tagged { head, class, value, .. } => {
                     check_target(head, class, value).map_err(|(f, e)| (format!("data[{i}].{f}"), e))
+                }
+                DataQuery::Pictures { head, class, value, .. } => {
+                    if matches!(self.input, InputSpec::Image { .. }) {
+                        check_target(head, class, value).map_err(|(f, e)| (format!("data[{i}].{f}"), e))
+                    } else {
+                        Err((format!("data[{i}].from"), "pictures are data for an image input".into()))
+                    }
                 }
                 DataQuery::Pairs { head, .. } => match self.decl(head) {
                     Err(e) => Err((format!("data[{i}].head"), e)),
@@ -1050,6 +1084,16 @@ impl Model {
                 DataQuery::Pairs { input, output, head } => {
                     pairs.extend(src.pairs(input, output)?.into_iter().map(|(a, b)| (a, b, head.clone())))
                 }
+                DataQuery::Pictures {
+                    list,
+                    head,
+                    class,
+                    value,
+                } => items.extend(
+                    src.pictures(list.as_deref())?
+                        .into_iter()
+                        .map(|v| (v, head.clone(), class.clone(), value.clone())),
+                ),
                 DataQuery::Inline { items: its } => items.extend(
                     its.iter()
                         .map(|i| (i.input.clone(), i.head.clone(), i.class.clone(), i.value.clone())),

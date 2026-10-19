@@ -296,9 +296,10 @@ fn value_of(input: &InputSpec, text: String) -> Result<In, String> {
             }
             Ok(In::Numbers(x))
         }
-        InputSpec::Image { .. } => {
-            Err("a picture model's data comes inline in its spec for now (the save holds texts)".into())
-        }
+        InputSpec::Image { .. } => Err(
+            "a picture model learns from the save's pictures ({\"from\": \"pictures\", \"list\": ..}) or inline ones, not texts"
+                .into(),
+        ),
     }
 }
 
@@ -333,6 +334,26 @@ fn snapshot(g: &Arc<Graph>, spec: &ModelSpec) -> Result<MemSource, String> {
                     let v = read(list_ids(g, l).map_err(at)?).map_err(at)?;
                     src.lists.insert(l.clone(), v);
                 }
+            }
+            DataQuery::Pictures { list, .. } => {
+                let InputSpec::Image { width, height, .. } = spec.input else {
+                    return Err(at("pictures are data for an image input".into()));
+                };
+                let ids = match list {
+                    Some(l) => g.list_pictures(l.trim())?,
+                    None => g.pictures()?.into_iter().map(|p| p.id).collect(),
+                };
+                if ids.is_empty() {
+                    return Err(at(match list {
+                        Some(l) => format!("the save has no pictures in list {l:?}"),
+                        None => "the save has no pictures".into(),
+                    }));
+                }
+                let mut v = Vec::new();
+                for id in ids {
+                    v.push(In::Image(super::pictures::as_image(g, &id, width, height).map_err(at)?));
+                }
+                src.pictures.insert(list.clone().unwrap_or_default(), v);
             }
             DataQuery::Inline { .. } => {}
         }
@@ -497,10 +518,20 @@ fn answer_json(a: &Answer) -> Value {
 
 /// the input of a run or generate call: `input` (a value: {text}, {numbers}, {bytes}) or
 /// `text` (or `prompt`)
-fn input_arg(args: &Value, key: &str, empty: bool) -> Result<In, String> {
+fn input_arg(g: &Graph, spec: &ModelSpec, args: &Value, key: &str, empty: bool) -> Result<In, String> {
+    // a picture of the save, by id, scaled to a picture model's size
+    if let Some(id) = args.get("input").and_then(|v| v.get("picture")).and_then(Value::as_str) {
+        let InputSpec::Image { width, height, .. } = spec.input else {
+            return Err(format!("{:?} doesn't read pictures", spec.name));
+        };
+        return Ok(In::Image(super::pictures::as_image(g, id, width, height)?));
+    }
     if let Some(v) = args.get("input").filter(|v| !v.is_null()) {
-        return serde_json::from_value(v.clone())
-            .map_err(|e| format!("an input is {{\"text\": ..}}, {{\"numbers\": [..]}} or {{\"bytes\": [..]}}: {e}"));
+        return serde_json::from_value(v.clone()).map_err(|e| {
+            format!(
+                "an input is {{\"text\": ..}}, {{\"numbers\": [..]}}, {{\"bytes\": [..]}} or {{\"picture\": id}}: {e}"
+            )
+        });
     }
     let t = s(args, key);
     if t.is_empty() && !empty {
@@ -573,7 +604,13 @@ fn start(store: Arc<Store>, g: &Arc<Graph>, args: &Value, limits: &Limits) -> Re
     let fresh = base.is_none();
     let run_spec = resolved(&sp, limits)?;
     // about how many examples: the queries' finds (pairs count once)
-    let found = src.lists.values().chain(src.tags.values()).map(Vec::len).sum::<usize>()
+    let found = src
+        .lists
+        .values()
+        .chain(src.tags.values())
+        .chain(src.pictures.values())
+        .map(Vec::len)
+        .sum::<usize>()
         + sp.data
             .iter()
             .map(|q| match q {
@@ -756,7 +793,7 @@ fn generate(store: &Store, g: &Graph, args: &Value, limits: &Limits) -> Res {
         .and_then(Value::as_bool)
         .unwrap_or(false)
         .then(crate::classify::generate::Guidance::default);
-    let prompt = input_arg(args, "prompt", true)?;
+    let prompt = input_arg(g, &m.spec, args, "prompt", true)?;
     let held = critics_of(store, g, &m.spec, limits)?;
     let critiques: BTreeMap<String, Critique> = held
         .iter()
@@ -908,7 +945,7 @@ pub fn call(store: Arc<Store>, g: &Arc<Graph>, op: &str, args: &Value, limits: &
         "models.run" => {
             let r = record(g, name_arg(args)?)?;
             let m = load(st, &r, limits)?;
-            let input = input_arg(args, "text", false)?;
+            let input = input_arg(g, &m.spec, args, "text", false)?;
             let sampling = sampling_arg(&m.spec.sampling, args, limits)?;
             let started = std::time::Instant::now();
             let out = m.run_sampled(&input, None, &sampling)?;

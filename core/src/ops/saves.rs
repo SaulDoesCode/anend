@@ -401,6 +401,11 @@ impl Saves {
     /// one op of the app API: the saves' own here, the models' in `super::classify`,
     /// the rest on the open save
     pub fn call(&self, op: &str, args: &Value) -> Res {
+        if super::pictures::routed(op) {
+            let (_, g) = self.current()?;
+            let limits = self.models.unwrap_or(super::classify::Limits::NONE);
+            return super::pictures::call(&g, op, args, &limits);
+        }
         match &self.models {
             Some(limits) if super::models::routed(op) => super::models::saves_call(self, op, args, limits),
             Some(limits) if super::classify::routed(op) => super::classify::saves_call(self, op, args, limits),

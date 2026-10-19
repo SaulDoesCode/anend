@@ -469,3 +469,67 @@ fn specs_travel_with_the_save() {
     drop(ws);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// a picture model learns from the save's pictures by list, and reads one by id
+#[test]
+fn picture_models_learn_from_the_save() {
+    use crate::classifiers::base64;
+    let dir = temp("pictures");
+    let ws = Saves::new(&dir, "notes").with_models(Limits::NONE);
+    let c = |op: &str, a: Value| ws.call(op, &a).unwrap_or_else(|e| panic!("{op}: {e}"));
+    let png = |seed: u32, warm: bool| {
+        let im = image::RgbImage::from_fn(24, 24, |x, y| {
+            let n = ((x * 7 + y * 13 + seed * 31) % 40) as u8;
+            if warm {
+                image::Rgb([200 + n / 2, 40 + n, 20])
+            } else {
+                image::Rgb([20, 40 + n, 200 + n / 2])
+            }
+        });
+        let mut out = Vec::new();
+        im.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+            .unwrap();
+        out
+    };
+    let mut ids = vec![];
+    for i in 0..12 {
+        for (warm, list) in [(true, "warm"), (false, "cold")] {
+            let p = c("pictures.add", json!({ "data": base64(&png(i, warm)), "list": list }));
+            ids.push((warm, p["id"].as_str().unwrap().to_string()));
+        }
+    }
+    let spec = json!({
+        "name": "tone",
+        "input": {"type": "image", "width": 16, "height": 16, "patch": 8, "codes": 8},
+        "trunk": {"preset": "test"},
+        "heads": [{"name": "tone", "kind": "classify", "classes": ["warm", "cold"]}],
+        "data": [
+            {"from": "pictures", "list": "warm", "head": "tone", "class": "warm"},
+            {"from": "pictures", "list": "cold", "head": "tone", "class": "cold"}
+        ],
+        "train": {"epochs": 40, "batch": 8, "lr": 0.003, "val_fraction": 0.0, "threads": 2}
+    });
+    c("models.create", json!({ "spec": spec }));
+    let j = train(&ws, "tone");
+    assert_eq!(j["examples"], 24, "{j}");
+    let top = |id: &str| {
+        c("models.run", json!({ "name": "tone", "input": {"picture": id} }))["outputs"]["tone"]["top"].clone()
+    };
+    assert_eq!(top(&ids[0].1), "warm");
+    assert_eq!(top(&ids[1].1), "cold");
+    // pictures data needs a picture input, and a list that has pictures
+    let mut bad = kind_spec();
+    bad["data"][0] = json!({"from": "pictures", "list": "warm", "head": "kind", "class": "fruit"});
+    let e = c("models.check", json!({ "spec": bad }));
+    assert_eq!(e["path"], "data[0].from", "{e}");
+    let mut empty = spec.clone();
+    empty["name"] = json!("tone2");
+    empty["data"][0]["list"] = json!("nothing");
+    c("models.create", json!({ "spec": empty }));
+    let e = ws
+        .call("models.train", &json!({ "name": "tone2", "wait": true }))
+        .unwrap_err();
+    assert!(e.contains("no pictures in list \"nothing\""), "{e}");
+    drop(ws);
+    let _ = std::fs::remove_dir_all(dir);
+}
