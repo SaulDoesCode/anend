@@ -5,6 +5,11 @@ Where the work stands, for picking it up in a new session. Branch:
 
 ## Resuming (read first)
 
+**Rule: docs/parity.md is the feature contract.** Any change that adds, moves or drops a
+user-visible feature, setting, key or panel updates docs/parity.md in the same commit (and
+`app/src/parity.rs`'s expected lists when a setting, key action or view changes). Nothing
+goes away without a line there saying why.
+
 **Spec JSONs and pictures in the save; then the backlog (19 Oct, morning UTC):**
 - **Done:**
   - Spec model definitions live in the save's own tables (`graph spec models`,

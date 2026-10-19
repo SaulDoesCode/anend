@@ -5,6 +5,7 @@ mod backend;
 mod gem;
 mod icons;
 mod md;
+mod parity;
 mod prefs;
 mod shell;
 mod theme;
