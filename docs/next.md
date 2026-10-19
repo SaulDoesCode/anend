@@ -26,8 +26,8 @@ Where the work stands, for picking it up in a new session. Branch:
     the web build against `anend-hub --mode app --local` in Playwright (picker, a
     synthetic drop, tagging, the template trained to 100% on 8 pictures, delete). Shots
     `app/docs/shots/desktop-pictures.png`, `web-pictures.png`.
-- **Next, in order** (each committed and pushed): word types on hover; the search filter
-  panel; replacements in the editor; the spatial table; space search modes; save
+- **Done too:** word types on hover (tooltip and hover line in the memory view).
+- **Next, in order** (each committed and pushed): the search filter panel; replacements in the editor; the spatial table; space search modes; save
   checkpoints; a real IME test.
 - **Disk:** build with `CARGO_INCREMENTAL=0` (target/debug/incremental grew to 5 GB and
   filled the disk once); `rm -f target/debug/deps/*anend*` drops stale test binaries.
@@ -978,8 +978,12 @@ progress is in `core/src/classify/STATUS.md`. The plan:
 - **Entries:** ~~timestamps and kinds (detected by pattern, fixed with a right click)~~:
   done 19 Oct as *kinds* beside the mime (`core/src/kinds.rs`, `entries.info`,
   `entries.set_kind`, the right-click menu's kind row and written date); the stored mime
-  stays text/plain, since the search, classifiers and backups read texts by it. Left:
-  word types shown on hover in the memory view, and a search filter panel that opens from
+  stays text/plain, since the search, classifiers and backups read texts by it. ~~Word
+  types shown on hover in the memory view~~: done 19 Oct (`kinds::word_types`,
+  `describe_words`: each word read on its own as word, name (a capital), number, date,
+  time, link, email or hashtag; the text's kind and the counts with examples go on the
+  hover line and as the tooltip's second line; the kind there is the detected one, not a
+  hand-fixed one). Left: a search filter panel that opens from
   a square at the right of the search (mime types, word-type frequency, classifiers,
   feedback, bias metric).
 - **Editor:** entry ids as replacements (recursive, with references to saved filter

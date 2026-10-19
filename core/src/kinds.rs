@@ -116,9 +116,92 @@ pub fn detect(text: &str) -> &'static str {
     if words.len() <= 12 { "phrase" } else { "text" }
 }
 
+/// each word of a text and its kind (a word read on its own: `word`, `name` when it has a
+/// capital, `number`, `date`, `time`, `link`, `email`, `hashtag`); punctuation around a
+/// word is left out
+pub fn word_types(text: &str) -> Vec<(String, &'static str)> {
+    let mut out = Vec::new();
+    for raw in text.split_whitespace().take(400) {
+        let keep = is_link(raw) || is_email(raw);
+        let w = if keep {
+            raw.trim_end_matches(['.', ',', ';', ')', '!', '?'])
+        } else {
+            raw.trim_matches(|c: char| !c.is_alphanumeric() && c != '#' && c != '-' && c != '+' && c != '\'')
+                .trim_end_matches(['.', '-', '\''])
+        };
+        if w.is_empty() {
+            continue;
+        }
+        let k = match detect(w) {
+            "phrase" | "sentence" | "text" | "json" => "word",
+            k => k,
+        };
+        out.push((w.to_string(), k));
+    }
+    out
+}
+
+/// a text's word types in a line, for the hover line: how many words of each type, with
+/// a few of each type other than plain words
+/// (`4 words: 2 word · 1 name (Paris) · 1 number (12)`)
+pub fn describe_words(text: &str) -> String {
+    let ws = word_types(text);
+    if ws.is_empty() {
+        return String::new();
+    }
+    let mut by: Vec<(&'static str, Vec<&str>)> = Vec::new();
+    for (w, k) in &ws {
+        match by.iter_mut().find(|(t, _)| t == k) {
+            Some((_, v)) => v.push(w),
+            None => by.push((k, vec![w])),
+        }
+    }
+    by.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(b.0)));
+    let parts: Vec<String> = by
+        .iter()
+        .map(|(k, v)| {
+            if *k == "word" {
+                format!("{} {k}", v.len())
+            } else {
+                let mut shown: Vec<&str> = Vec::new();
+                for w in v {
+                    if !shown.contains(w) && shown.len() < 3 {
+                        shown.push(w);
+                    }
+                }
+                format!("{} {k} ({})", v.len(), shown.join(", "))
+            }
+        })
+        .collect();
+    format!(
+        "{} word{}: {}",
+        ws.len(),
+        if ws.len() == 1 { "" } else { "s" },
+        parts.join(" · ")
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn words_have_types() {
+        let t = word_types("Met Ann in Paris at 10:30 on 2026-10-19, paid 12.50 (see https://x.org). #trip");
+        let k = |w: &str| t.iter().find(|(x, _)| x == w).map(|x| x.1);
+        assert_eq!(k("Met"), Some("name"));
+        assert_eq!(k("in"), Some("word"));
+        assert_eq!(k("10:30"), Some("time"));
+        assert_eq!(k("2026-10-19"), Some("date"));
+        assert_eq!(k("12.50"), Some("number"));
+        assert_eq!(k("https://x.org"), Some("link"));
+        assert_eq!(k("#trip"), Some("hashtag"));
+        assert_eq!(
+            describe_words("apples and 3 Pears"),
+            "4 words: 2 word · 1 name (Pears) · 1 number (3)"
+        );
+        assert_eq!(describe_words("  "), "");
+    }
 
     #[test]
     fn kinds_by_pattern() {

@@ -769,15 +769,27 @@ fn Art(hit: Hit, under: Option<String>, is_list: bool, is_cand: bool, selected: 
         style.push_str(&format!(" border-left: 5px solid {t};"));
     }
     let (h1, h2, h3, h4) = (hit.clone(), hit.clone(), hit.clone(), hit.clone());
-    let t2 = title.clone();
+    // the hover line: the title, the text's kind and its words' types (kinds.rs)
+    let words = anend_core::kinds::describe_words(&hit.text);
+    let t2 = if words.is_empty() {
+        title.clone()
+    } else {
+        format!("{title} · {} · {words}", anend_core::kinds::detect(&hit.text))
+    };
     let mut hover = m.hover;
+    // the tooltip has the word types on a line of their own
+    let tip = if words.is_empty() {
+        title.clone()
+    } else {
+        format!("{title}\n{} · {words}", anend_core::kinds::detect(&hit.text))
+    };
     rsx! {
         div {
             class: "{class}",
             style: "{style}",
             role: "listitem",
             tabindex: "0",
-            title: "{title}",
+            title: "{tip}",
             onmouseenter: move |_| hover.set(t2.clone()),
             onclick: move |e: MouseEvent| {
                 let md = e.modifiers();
