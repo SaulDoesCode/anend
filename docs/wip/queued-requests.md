@@ -102,6 +102,10 @@ stays a standing requirement:
 - **Stage C, the language:** the 5-bit esolang with a readable syntax, the notes view as its
   code editor, and a headless standard library (11, 12). Then models as language
   primitives (18). Everything scripted later is built on this.
+- **Stage C2, the whole (docs/architecture.md):** taxonomies (classifiers in hierarchies),
+  typed pipes from sources through filters to effects, effects computed rather than stored,
+  and views as programs, with today's views rebuilt as presets guarded by parity.md. Stage H
+  builds on it.
 - **Stage D, the renderer:** move the desktop's 3D view to wgpu, with WebGPU on the web
   sharing the code (25), before more scene features are built in three.js. Then culling
   (24) and far billboards with deterministic fall-off (22).
