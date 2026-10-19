@@ -80,6 +80,7 @@ pub fn App() -> Element {
         changed: Signal::new(0),
         bar_texts: Signal::new(Default::default()),
         seq: Signal::new(0),
+        side: Signal::new(Default::default()),
     });
 
     // the save's name and counts, and again whenever something changed
@@ -134,6 +135,7 @@ pub fn App() -> Element {
     );
     drop(p);
     rsx! {
+        style { {crate::fonts::css()} }
         style { {CSS} }
         div {
             class: "app v-{view.name()}",
@@ -248,9 +250,6 @@ fn TopBar() -> Element {
     let last = ui.actions.read().last().map(|a| a.describe());
     rsx! {
         header { class: "top", role: "banner",
-            span { class: "mark", title: "anend",
-                span { class: "logo", dangerous_inner_html: crate::icons::MARK }
-            }
             nav { class: "tabs", "aria-label": "views",
                 for (i , v) in View::ALL.into_iter().enumerate() {
                     button {
@@ -307,27 +306,26 @@ fn Dock() -> Element {
     let ui = ui();
     let view = (ui.view)();
     let pending = (ui.pending)();
-    let name = match &pending {
-        Pending::Edit(h) => format!("editing {}", h.key),
-        Pending::Tag(hs) => format!(
+    // the bar names what Enter will do only while it does something else than search; it
+    // never names the view (the tabs say which one is open)
+    let badge = match &pending {
+        Pending::Edit(h) => Some(format!("editing {}", h.key)),
+        Pending::Tag(hs) => Some(format!(
             "tag {} with…",
             if hs.len() == 1 {
                 hs[0].text.clone()
             } else {
                 format!("{} texts", hs.len())
             }
-        ),
-        Pending::None => view.name().to_string(),
+        )),
+        Pending::None => None,
     };
     rsx! {
         footer { class: "dock",
-            if view.has_strip() {
-                div { class: "strip", role: "toolbar", "aria-label": "{view.name()} toggles",
-                    views::Strip { view }
-                }
-            }
             div { class: "cmdbar",
-                label { class: if pending == Pending::None { "name" } else { "name pending" }, r#for: "bar", "{name}" }
+                if let Some(b) = badge {
+                    label { class: "pending", r#for: "bar", "{b}" }
+                }
                 input {
                     id: "bar",
                     r#type: "text",
@@ -336,6 +334,9 @@ fn Dock() -> Element {
                     "aria-label": "command bar",
                     placeholder: view.placeholder(),
                     oninput: move |e| ui.typed(e.value()),
+                }
+                div { class: "side", role: "toolbar", "aria-label": "{view.name()} controls",
+                    views::Side { view }
                 }
             }
         }

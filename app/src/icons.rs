@@ -1,4 +1,4 @@
-//! The shared line icons (assets/icons), drawn in the text colour, and the app mark.
+//! The shared line icons (assets/icons), drawn in the text colour. The app's own icon is the window's and the web tab's, not the views'.
 
 /// an icon's svg by name; unknown names draw nothing
 pub fn svg(name: &str) -> &'static str {
@@ -68,6 +68,3 @@ pub fn svg(name: &str) -> &'static str {
         _ => "",
     }
 }
-
-/// the app's mark (assets/icon.svg)
-pub const MARK: &str = include_str!("../../assets/icon.svg");

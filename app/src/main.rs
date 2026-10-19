@@ -2,6 +2,7 @@
 //! the web app (WebAssembly). See docs/next.md, "The Dioxus app".
 
 mod backend;
+mod fonts;
 mod gem;
 mod icons;
 mod md;
@@ -79,18 +80,20 @@ fn main() {
         }
     }
     let _ = LOCAL.set(local);
+    // the icon goes on the window itself: `Config::with_icon` sets it on the config's own
+    // window, which `with_window` then replaces (so it never showed in the title bar)
     let window = WindowBuilder::new()
         .with_title("anend")
+        .with_window_icon(window_icon())
         .with_inner_size(LogicalSize::new(1200.0, 820.0));
-    let mut cfg = Config::new();
-    if let Some(icon) = window_icon() {
-        cfg = cfg.with_icon(icon);
-    }
-    let cfg = cfg
+    #[cfg(target_os = "linux")]
+    desktop_entry();
+    let cfg = Config::new()
         .with_window(window)
         .with_menu(None)
         .with_disable_context_menu(true)
-        .with_background_color((0x40, 0x40, 0x40, 0xff));
+        // the sand window's colour, so the first frame isn't a different shade
+        .with_background_color((0x92, 0x7a, 0x4f, 0xff));
     dioxus::LaunchBuilder::desktop().with_cfg(cfg).launch(shell::App);
 }
 
@@ -110,6 +113,37 @@ fn window_icon() -> Option<dioxus::desktop::tao::window::Icon> {
         _ => return None,
     };
     dioxus::desktop::tao::window::Icon::from_rgba(rgba, info.width, info.height).ok()
+}
+
+/// Wayland desktops (GNOME, KDE) draw a window's icon from the desktop entry matching its
+/// app id, not from the window: a user-level entry and icon are put in place once (never
+/// overwriting one the person changed)
+#[cfg(target_os = "linux")]
+fn desktop_entry() {
+    let Some(data) = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")))
+    else {
+        return;
+    };
+    let icon = data.join("icons/hicolor/256x256/apps/anend.png");
+    if !icon.exists() {
+        let _ = std::fs::create_dir_all(icon.parent().unwrap_or(&data));
+        let _ = std::fs::write(&icon, include_bytes!("../../assets/icon.png"));
+    }
+    let entry = data.join("applications/anend-app.desktop");
+    if !entry.exists()
+        && let Ok(exe) = std::env::current_exe()
+    {
+        let _ = std::fs::create_dir_all(entry.parent().unwrap_or(&data));
+        let _ = std::fs::write(
+            &entry,
+            format!(
+                "[Desktop Entry]\nType=Application\nName=anend\nComment=notes, memory and the space\nExec=\"{}\" %F\nIcon=anend\nStartupWMClass=anend-app\nCategories=Office;Utility;\n",
+                exe.display()
+            ),
+        );
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

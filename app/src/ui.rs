@@ -81,11 +81,6 @@ impl View {
             View::Filters => "words, or a sum like 79 or 70-90",
         }
     }
-
-    /// the views with the thin strip of toggles over the bar
-    pub fn has_strip(self) -> bool {
-        matches!(self, View::Memory | View::Space)
-    }
 }
 
 /// a key press the shell hands to the open view: from the bar (`bar`), or anywhere else
@@ -219,6 +214,8 @@ pub struct Ui {
     /// what the bar held in each view, put back when you return to it
     pub bar_texts: Signal<std::collections::HashMap<View, String>>,
     pub seq: Signal<u64>,
+    /// what each view says at the command bar's right end (its counts, what Enter does)
+    pub side: Signal<std::collections::HashMap<View, String>>,
 }
 
 pub fn ui() -> Ui {
@@ -260,6 +257,14 @@ pub async fn sleep_ms(ms: u64) {
 }
 
 impl Ui {
+    /// what the view says at the command bar's right end
+    pub fn side_note(mut self, view: View, text: impl Into<String>) {
+        let t = text.into();
+        if self.side.peek().get(&view) != Some(&t) {
+            self.side.write().insert(view, t);
+        }
+    }
+
     fn next(mut self) -> u64 {
         let n = *self.seq.peek() + 1;
         self.seq.set(n);

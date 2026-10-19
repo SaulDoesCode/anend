@@ -23,11 +23,11 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | top bar: the app's mark at its left | ui.rs `AppMark` | dropped: the icon is the window's and the tab's (title bar, favicon), as the user asked 19 Oct |
 | top bar: status text, settings button | ui.rs | has |
 | top bar: undo button (latest action) | Dioxus only | has |
-| the window frame: bars and panels as inset rounded cards on the sand window colour (6px margin and gaps) | ui.rs `root` padding 6 / row_gap 6, theme.rs | missing (the Dioxus bars run edge to edge; the colour reads as a different shade) |
+| the window frame: bars and panels as inset rounded cards on the sand window colour (6px margin and gaps) | ui.rs `root` padding 6 / row_gap 6, theme.rs | has (19 Oct); the memory view's black field joins its black bar, the space fills the window behind the bars, as in Bevy |
 | one command bar shared by every view, each view keeping its own text | bar.rs | has |
 | command bar: the view's name at its left | bar.rs `BarMode` | dropped: the user asked 19 Oct for the bar's left side not to name the view |
-| command bar: the view's additions (counts, hints) at its right end | bar.rs `BarSide`, `notes_side` | partly: memory/space put theirs in a second strip |
-| the memory view's and the space's sums and toggles in the bar | bar.rs `BarStrip` | partly: a separate strip over the bar (two bars); the user asked for one bar |
+| command bar: the view's additions (counts, hints) at its right end | bar.rs `BarSide`, `notes_side` | has (19 Oct): one bar; the notes' count is there |
+| the memory view's and the space's sums and toggles in the bar | bar.rs `BarStrip` | has (19 Oct): in the one bar's right end, not a strip over it (the user asked for one bar) |
 | the bar's undo / redo (Ctrl+Z / Ctrl+Shift+Z in the bar) | Dioxus only | has |
 | toasts | memory_ui.rs, space_ui.rs | has |
 | right-click menu on a text (edit, tag, select, list, candidate, key, forget, kind) | Dioxus only | has |
@@ -36,8 +36,8 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | bars swapped (top bar at the bottom, command bar at the top) | config `bars_swapped` | missing |
 | sizes: interface scale, top bar height, command bar height, "default sizes" | sizing.rs | partly: zoom and text size; no bar heights |
 | fonts: interface font and memory view font pickers (system fonts listed) | typeface.rs, settings.rs | missing |
-| window icon (desktop title bar) | main.rs | has |
-| web tab favicon and title | hub/web/index.html | partly: title only |
+| window icon (desktop title bar) | main.rs | has (19 Oct: it never reached the window before, `Config::with_icon` was undone by `with_window`; now on the window, checked as `_NET_WM_ICON` under Xvfb; a desktop entry is put in place for Wayland desktops) |
+| web tab favicon and title | hub/web/index.html | has |
 | saves the open note when the window closes | ui.rs `on_close` | partly: the Dioxus editor saves on Ctrl+S / button only |
 | the guide button (opens docs/guide.md) | settings.rs | missing |
 
@@ -59,7 +59,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | colour roles (13) with presets sand, night, paper, sea; per-role colour; reset | palette.rs, settings.rs | has |
 | the sand preset's exact colours (window hsl(39 30% 44%), bars hsl(0 0% 25%), cards white, pad hsl(39 19% 82%), buttons hsl(39 30% 66%), accent hsl(39 42% 56%), text 18%, dim 42%, link hsl(30 55% 34%), code hsl(39 19% 90%), room #e4d4be, bar text 92%, bar labels 62%) | theme.rs, bar.rs, space.rs | partly: the hex values match, but the window colour only shows as a thin gap, not the frame around inset cards |
 | colour editing with hue / saturation / lightness sliders and a hex box | settings.rs | partly: a colour input per role |
-| Fira Sans / Fira Mono, bundled | typeface.rs (Bevy feathers fonts) | partly: named first in the CSS, not bundled (system fallback) |
+| Fira Sans / Fira Mono, bundled | typeface.rs (Bevy feathers fonts) | has (19 Oct): subset woff2 in assets/fonts, embedded as @font-face |
 | buttons: sand fill, accent when selected, dark/light text chosen by contrast | theme.rs | has |
 | the editor's markdown highlighting (headings, marks, emphasis, strike, code, links, urls, lists, quotes, tables, tags, rules, composing), colours derived from the palette for contrast | highlight.rs | missing |
 | setting: highlight on/off | config `highlight` | missing |
@@ -190,7 +190,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | "all of" / "any of" groups, nested | filters_ui.rs | missing |
 | presets that include each other | filters_ui.rs | partly: saved filters by name |
 | write the results out as a list | filters_ui.rs, `filters.enlist` | missing |
-| select dropdowns sized so the text sits inside them | — | missing (bug reported 19 Oct) |
+| select dropdowns sized so the text sits inside them | — | has (19 Oct): every select draws its own arrow, text centred (style.css) |
 
 ## Forge
 

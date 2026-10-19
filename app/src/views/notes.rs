@@ -70,6 +70,24 @@ pub fn Notes() -> Element {
         }
         false
     });
+    // the bar's right end: how many notes there are, or match
+    use_effect(move || {
+        let n = list
+            .read()
+            .as_ref()
+            .and_then(|r| r.as_ref().ok())
+            .map(|v| v.len())
+            .unwrap_or(0);
+        let words = q();
+        ui.side_note(
+            View::Notes,
+            if words.is_empty() {
+                format!("{n} note{}", if n == 1 { "" } else { "s" })
+            } else {
+                format!("{n} with “{words}”")
+            },
+        );
+    });
     let notes: Vec<NoteSummary> = match &*list.read() {
         Some(Ok(v)) => v.clone(),
         _ => vec![],

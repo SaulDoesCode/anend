@@ -50,13 +50,18 @@ pub fn ViewHost(view: View) -> Element {
     }
 }
 
-/// the thin strip over the bar, in the memory view and the space
+/// what a view adds at the command bar's right end: the memory view's and the space's sums
+/// and toggles, the other views' counts and hints
 #[component]
-pub fn Strip(view: View) -> Element {
+pub fn Side(view: View) -> Element {
+    let ui = ui();
     match view {
         View::Memory => rsx! { memory::MemoryStrip {} },
         View::Space => rsx! { space::SpaceStrip {} },
-        _ => rsx! {},
+        _ => {
+            let note = ui.side.read().get(&view).cloned().unwrap_or_default();
+            rsx! { span { class: "sidenote", "{note}" } }
+        }
     }
 }
 

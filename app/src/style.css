@@ -1,7 +1,8 @@
 /* anend's app: the sand look of the web and Bevy apps, written once for the desktop and the web */
 :root {
   --radius: 4px;
-  --gap: 4px;
+  --gap: 6px;
+  --frame: 6px;
   --top: 32px;
   --barh: 32px;
   --font: "Fira Sans", "FiraGO", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
@@ -12,9 +13,10 @@
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; overflow: hidden; }
 #main { height: 100%; }
+/* the Bevy app's frame: the bars and the views are inset cards on the window's colour */
 .app {
-  height: 100vh; display: grid; grid-template-rows: var(--top) minmax(0, 1fr) auto; gap: var(--gap);
-  background: var(--window); color: var(--text);
+  height: 100vh; display: grid; grid-template-rows: var(--top) minmax(0, 1fr) auto; gap: var(--frame);
+  padding: var(--frame); background: var(--window); color: var(--text);
   font: var(--fs, 14px)/1.45 var(--font);
   text-rendering: optimizeLegibility; -webkit-font-smoothing: subpixel-antialiased;
 }
@@ -48,6 +50,15 @@ input[type=text], input[type=search], input[type=number], select, textarea {
   padding: 3px 8px; min-width: 0; height: 26px;
 }
 textarea { height: auto; }
+/* every select draws its own arrow, so its text sits centred and clear of it whatever the
+   engine (WebKitGTK clipped the text of a native select at 26px with this line height) */
+select {
+  appearance: none; -webkit-appearance: none; line-height: 1.2; padding: 0 26px 0 9px; cursor: pointer;
+  text-overflow: ellipsis; white-space: nowrap; overflow: hidden; vertical-align: middle;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23777' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 9px center; background-size: 10px 6px;
+}
+select option { color: var(--text); background: var(--cards); }
 input[type=color] { width: 30px; height: 22px; border: 0; padding: 0; background: none; cursor: pointer; }
 input[type=range] { accent-color: var(--accent); }
 input::placeholder, textarea::placeholder { color: var(--dim); opacity: .8; }
@@ -69,12 +80,9 @@ input::placeholder, textarea::placeholder { color: var(--dim); opacity: .8; }
 
 /* ---------------------------------------------------------------- the top bar */
 .top {
-  position: relative; display: flex; align-items: center; gap: 2px; padding: 0 4px; min-width: 0;
-  background: var(--bars); color: var(--bar-text);
+  position: relative; z-index: 3; display: flex; align-items: center; gap: 2px; padding: 0 4px; min-width: 0;
+  background: var(--bars); color: var(--bar-text); border-radius: var(--radius);
 }
-.mark { display: flex; align-items: center; padding: 0 6px 0 2px; flex: none; }
-.mark .logo { width: 22px; height: 22px; display: block; }
-.mark .logo svg { width: 22px; height: 22px; display: block; }
 .tabs { display: flex; gap: 2px; flex: none; }
 .top button.tab, .top button.side { height: 26px; width: 32px; padding: 0; background: none; color: var(--bar-dim); }
 .top button.tab .icon, .top button.side .icon { width: 17px; height: 17px; }
@@ -95,13 +103,27 @@ svg.triangle { flex: none; overflow: visible; display: block; }
 svg.triangle polygon { fill: color-mix(in srgb, var(--accent) 55%, transparent); stroke: var(--bar-text); stroke-width: 1; stroke-linejoin: round; }
 svg.triangle.flat polygon { stroke: hsl(8 85% 72%); fill: none; }
 
-/* ---------------------------------------------------------------- the dock: the strip and the command bar */
-.dock { display: flex; flex-direction: column; min-width: 0; }
-.strip {
-  display: flex; align-items: center; justify-content: flex-end; gap: 2px 12px; flex-wrap: wrap;
-  min-height: 22px; padding: 1px 8px; background: var(--bars); color: var(--bar-dim); font-size: 12px;
-  border-bottom: 1px solid color-mix(in srgb, var(--bar-text) 10%, transparent);
+/* ---------------------------------------------------------------- the command bar: one bar, the view's
+   controls (sums, toggles, counts) at its right end */
+.dock { position: relative; z-index: 3; min-width: 0; }
+.cmdbar {
+  position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 0 10px; min-height: var(--barh);
+  padding: 0 8px; background: var(--bars); color: var(--bar-text); border-radius: var(--radius);
 }
+.cmdbar:focus-within { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 70%, transparent); }
+.cmdbar .pending { flex: none; font-size: 11.5px; color: var(--accent); white-space: nowrap; max-width: 30%; overflow: hidden; text-overflow: ellipsis; }
+#bar {
+  flex: 1 1 220px; min-width: 160px; height: var(--barh); background: transparent; color: var(--bar-text); text-align: center;
+  border: 0; outline: 0; font: inherit; font-size: 15px; padding: 0 8px; border-radius: 0;
+}
+#bar::placeholder { color: var(--bar-dim); opacity: .55; }
+.app.v-memory #bar { font-family: var(--serif); font-size: 17px; }
+.cmdbar .side {
+  flex: 0 1 auto; display: flex; align-items: center; justify-content: flex-end; gap: 2px 12px; flex-wrap: wrap;
+  min-width: 0; color: var(--bar-dim); font-size: 12px;
+}
+.cmdbar .side:empty { display: none; }
+.sidenote { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .toggles { display: flex; gap: 1px; align-items: center; }
 button.tchip {
   min-width: 20px; height: 20px; padding: 0 3px; background: none; border: 0; color: var(--bar-dim); opacity: .55;
@@ -117,24 +139,9 @@ button.tchip.on { color: var(--bar-text); opacity: 1; }
 .sidecar .num.on { text-decoration: underline; text-underline-offset: 3px; }
 .sidecar .extra { color: var(--bar-dim); font-size: 12.5px; }
 .sidecar .letters { font-size: 11px; color: var(--bar-dim); display: inline-block; vertical-align: bottom; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cmdbar { position: relative; height: var(--barh); background: var(--bars); color: var(--bar-text); }
-.cmdbar:focus-within { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 70%, transparent); }
-.cmdbar .name, .cmdbar .count {
-  position: absolute; top: 0; bottom: 0; display: flex; align-items: center; gap: 6px; pointer-events: none;
-  font-size: 11.5px; color: var(--bar-dim); white-space: nowrap; max-width: 30%; overflow: hidden;
-}
-.cmdbar .name { left: 10px; }
-.cmdbar .count { right: 10px; }
-.cmdbar .pending { color: var(--accent); }
-#bar {
-  width: 100%; height: 100%; background: transparent; color: var(--bar-text); text-align: center;
-  border: 0; outline: 0; font: inherit; font-size: 15px; padding: 0 180px; border-radius: 0;
-}
-#bar::placeholder { color: var(--bar-dim); opacity: .55; }
-.app.v-memory #bar { font-family: var(--serif); font-size: 17px; }
 
 /* toasts (weum's): bottom right, above the bar */
-.toasts { position: fixed; right: 8px; bottom: calc(var(--barh) + 30px); z-index: 50; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+.toasts { position: fixed; right: 12px; bottom: calc(var(--barh) + 20px); z-index: 50; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
 .toast { background: var(--bars); color: var(--bar-text); padding: 4px 10px; border-radius: var(--radius); font: 13px var(--mono); cursor: pointer; box-shadow: 0 3px 12px rgb(0 0 0 / .3); max-width: 60vw; overflow-wrap: anywhere; }
 
 /* ---------------------------------------------------------------- views */
@@ -151,12 +158,12 @@ button.tchip.on { color: var(--bar-text); opacity: 1; }
 .pager { display: flex; gap: 6px; align-items: center; justify-content: center; padding: 4px; }
 
 /* ---------------------------------------------------------------- the memory view (weum's black field) */
-.app.v-memory { background: #000; }
-.app.v-memory .top, .app.v-memory .dock, .app.v-memory .toasts { --bars: #000; --bar-text: #fff; --bar-dim: #b9a59a; }
-.app.v-memory .top { --accent: #c9ab99; --on-button: #000; border-bottom: 1px solid #1d1b1b; }
-.app.v-memory .cmdbar { border-top: 1px solid #262323; }
-.app.v-memory .strip { border-bottom: 0; }
-.memory { background: #000; color: #fff; font-family: var(--serif); display: flex; flex-direction: column; overflow: hidden; }
+/* the memory view: weum's black field in the frame, joined to a black command bar (Bevy's bar_look) */
+.app.v-memory .views { background: #000; border-radius: var(--radius) var(--radius) 0 0; }
+.app.v-memory .dock { margin-top: calc(-1 * var(--frame)); padding-top: var(--frame); background: #000; border-radius: 0 0 var(--radius) var(--radius); }
+.app.v-memory .dock, .app.v-memory .toasts { --bars: #000; --bar-text: #fff; --bar-dim: #b9a59a; }
+.app.v-memory #bar { border-bottom: 1px solid #fff; height: calc(var(--barh) - 4px); margin-bottom: 4px; }
+.memory { border-radius: var(--radius); background: #000; color: #fff; font-family: var(--serif); display: flex; flex-direction: column; overflow: hidden; }
 .mem-head { display: flex; align-items: center; gap: 10px; padding: 3px 10px; font-size: 12.5px; color: #c9ab99; flex: none; }
 .mem-head b { color: #fff; font-weight: 600; }
 .mem-main { position: relative; flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; padding: 10px 26px; }
@@ -318,7 +325,11 @@ kbd { font: 12px var(--mono); border: 1px solid color-mix(in srgb, var(--dim) 50
 .cond { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; padding: 3px 0; }
 
 /* ---------------------------------------------------------------- the space */
-.space { overflow: hidden; background: var(--room-bg, #e4d4be); }
+/* the space fills the window behind the bars, as the Bevy app's 3D view did; its panels sit
+   between the bars */
+.app.v-space { background: transparent; }
+.view.space { position: fixed; inset: 0; z-index: 0; overflow: hidden; }
+.space { overflow: hidden; background: var(--room-bg, #e4d4be); --over-top: calc(var(--top) + 2 * var(--frame)); --over-bottom: calc(var(--barh) + 2 * var(--frame)); }
 .space-host { position: absolute; inset: 0; overflow: hidden; outline: 0; }
 .space-host.looking { cursor: none; }
 .space-gl, .space-css { position: absolute !important; inset: 0; }
@@ -331,7 +342,7 @@ kbd { font: 12px var(--mono); border: 1px solid color-mix(in srgb, var(--dim) 50
 }
 .slabel:hover { color: var(--link); }
 .slabel.picked { background: color-mix(in srgb, var(--accent) 40%, transparent); }
-.poscard { position: absolute; top: 4px; left: 4px; z-index: 2; pointer-events: none; white-space: pre; background: color-mix(in srgb, var(--cards) 92%, transparent); color: var(--text); font: 12px var(--mono); padding: 2px 8px; border-radius: var(--radius); }
+.poscard { position: absolute; top: calc(var(--over-top) + 2px); left: calc(var(--frame) + 2px); z-index: 2; pointer-events: none; white-space: pre; background: color-mix(in srgb, var(--cards) 92%, transparent); color: var(--text); font: 12px var(--mono); padding: 2px 8px; border-radius: var(--radius); }
 .metrics {
   position: absolute; right: 6px; top: 6px; z-index: 3; width: min(320px, 46%);
   background: var(--cards); color: var(--text); border-radius: var(--radius); padding: 8px 10px; font: 13px/1.4 var(--font);
@@ -345,7 +356,7 @@ kbd { font: 12px var(--mono); border: 1px solid color-mix(in srgb, var(--dim) 50
 .metrics .num { cursor: pointer; color: var(--link); }
 .metrics .gsum { font: 11.5px var(--mono); margin: 4px 0; overflow-wrap: anywhere; }
 .space-empty { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); z-index: 1; pointer-events: none; width: min(440px, calc(100% - 32px)); text-align: center; color: var(--room-ink); font-size: 15px; }
-.space-help { position: absolute; left: 4px; bottom: 4px; right: 4px; z-index: 2; font-size: 12.5px; background: color-mix(in srgb, var(--cards) 94%, transparent); color: var(--text); padding: 6px 10px; border-radius: var(--radius); }
+.space-help { position: absolute; left: var(--frame); bottom: calc(var(--over-bottom) + 2px); right: var(--frame); z-index: 2; font-size: 12.5px; background: color-mix(in srgb, var(--cards) 94%, transparent); color: var(--text); padding: 6px 10px; border-radius: var(--radius); }
 
 /* zen: the bars fade while you rest (the views keep their room); the top bar can slide away
    and come back when the pointer nears the top */
@@ -408,8 +419,8 @@ table.confusion td.miss { color: var(--bad); }
 .tint-legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
 .tintpick { gap: 4px; margin-left: 6px; }
 .tintpick .icon-l { display: inline-flex; color: var(--bar-dim); }
-.tintpick select { appearance: none; -webkit-appearance: none; border-radius: var(--radius); height: 20px; padding: 0 4px; font-size: 12px; background: transparent; color: var(--bar-text); border: 1px solid color-mix(in srgb, var(--bar-dim) 45%, transparent); }
-.tintpick select option { color: #000; }
+.tintpick select { border-radius: var(--radius); height: 20px; padding: 0 18px 0 6px; background-position: right 5px center; font-size: 12px; background: transparent; color: var(--bar-text); border: 1px solid color-mix(in srgb, var(--bar-dim) 45%, transparent); }
+.tintpick select option { color: #000; background: #fff; }
 
 /* ---------------------------------------------------------------- spec models */
 .mtabs { display: flex; gap: 0; flex: none; border-radius: var(--radius); overflow: hidden; margin-right: 6px; }
@@ -432,7 +443,7 @@ table.confusion td.miss { color: var(--bad); }
 .cand .chip { font-size: 11.5px; }
 .menu .kindrow { display: flex; gap: 8px; align-items: center; padding: 2px 10px 6px; flex-wrap: wrap; }
 .menu .kindrow label { display: flex; gap: 6px; align-items: center; }
-.menu .kindrow select { height: 24px; padding: 0 4px; }
+.menu .kindrow select { height: 24px; }
 
 /* the pictures panel (views/pictures.rs) */
 .pictures { flex: none; display: flex; flex-direction: column; gap: 8px; }
