@@ -1195,6 +1195,8 @@ pub fn models_at(path: &Path, graph: Arc<Graph>) -> Result<Arc<Store>, String> {
         }
         match Store::open_over(path, Arc::new(GraphTexts(graph.clone()))) {
             Ok(s) => {
+                // spec model records kept here by older saves move into the save
+                crate::specs::migrate(&graph, &s)?;
                 let s = Arc::new(s);
                 all.insert(path.to_path_buf(), Arc::downgrade(&s));
                 return Ok(s);
@@ -1239,11 +1241,12 @@ pub fn saves_call(saves: &Saves, op: &str, args: &Value, limits: &Limits) -> Res
         "saves.export" => {
             let mut b = saves.call_plain(op, args)?;
             let (_, models) = saves.models_of(s(args, "name"))?;
+            let (_, g) = saves.graph(s(args, "name"))?;
             let cls = models.export_classifiers()?;
             if !cls.is_empty() {
                 b["classifiers"] = serde_json::to_value(cls).map_err(|e| e.to_string())?;
             }
-            let specs = models.export_spec_models()?;
+            let specs = crate::specs::export(&g, &models)?;
             if !specs.is_empty() {
                 b["models"] = serde_json::to_value(specs).map_err(|e| e.to_string())?;
             }
@@ -1261,8 +1264,8 @@ pub fn saves_call(saves: &Saves, op: &str, args: &Value, limits: &Limits) -> Res
                 None => Vec::new(),
             };
             let mut got = saves.call_plain(op, args)?;
-            // merged: the classifiers and spec models stay out (their lists would point
-            // elsewhere)
+            // merged: the classifiers stay out (their lists would point elsewhere); the
+            // spec models came in with the save's tables (`merge::assets`), untrained
             if let Some(name) = got.get("save").and_then(Value::as_str).map(str::to_string)
                 && !(cls.is_empty() && specs.is_empty())
             {
@@ -1271,7 +1274,8 @@ pub fn saves_call(saves: &Saves, op: &str, args: &Value, limits: &Limits) -> Res
                     got["classifiers"] = json!(models.import_classifiers(&cls)?);
                 }
                 if !specs.is_empty() {
-                    got["models"] = json!(models.import_spec_models(&specs)?);
+                    let (_, g) = saves.graph(&name)?;
+                    got["models"] = json!(crate::specs::import(&g, &models, &specs)?);
                 }
             }
             Ok(got)

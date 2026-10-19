@@ -552,22 +552,28 @@ impl Saves {
                 }
                 let (texts, other) = super::bundle_parts(&b)?;
                 if args.get("merge").and_then(Value::as_bool).unwrap_or(false) {
-                    let w = match other {
+                    let (w, a) = match other {
                         Some(o) => {
                             let tmp = Graph::in_memory()?;
                             tmp.restore(&texts, &o)?;
                             let v = tmp.view()?;
-                            g.write(|tx| merge::merge(tx, &v))?
+                            let w = g.write(|tx| merge::merge(tx, &v))?;
+                            drop(v);
+                            (w, merge::assets(&g, &tmp)?)
                         }
                         None => {
                             let im = g.import_texts(&texts)?;
-                            merge::Written {
+                            let w = merge::Written {
                                 memories: im.entries,
                                 ..Default::default()
-                            }
+                            };
+                            (w, Default::default())
                         }
                     };
-                    return Ok(json!({ "merged": true, "memories": w.memories, "notes": w.notes, "lists": w.lists }));
+                    return Ok(
+                        json!({ "merged": true, "memories": w.memories, "notes": w.notes, "lists": w.lists,
+                                      "models": a.models, "pictures": a.pictures }),
+                    );
                 }
                 let want = match s(args, "name") {
                     "" => match s(&b, "name") {

@@ -1,6 +1,6 @@
 //! The app's spec model operations (`models.*`, listed in docs/app-api.md): models made
-//! from a declarative spec (docs/models.md, `classify::spec`), kept in the save's models
-//! file (`crate::specs`) beside its classifiers. Training runs as a background job with
+//! from a declarative spec (docs/models.md, `classify::spec`), their definitions in the
+//! save's own tables and their weights in its models file (`crate::specs`). Training runs as a background job with
 //! the classifiers' job machinery and limits (`super::classify`): `models.train`
 //! snapshots the data the spec's queries find in the save, answers at once, and the
 //! thread writes the model when it's done; `models.job` reports how it goes and
@@ -31,7 +31,7 @@ use crate::classify::spec::{
 use crate::graph::record::{self, mime};
 use crate::graph::store::rel;
 use crate::graph::{Graph, Reader};
-use crate::specs::{Record, Trained, Weights, shape_of};
+use crate::specs::{self as specs, Record, Trained, Weights, shape_of};
 use crate::store::Store;
 use crate::texts::Texts;
 
@@ -368,8 +368,8 @@ fn resolved(spec: &ModelSpec, limits: &Limits) -> Result<ModelSpec, String> {
     Ok(s)
 }
 
-fn record(store: &Store, name: &str) -> Result<Record, String> {
-    store.spec_model(name)?.ok_or_else(|| format!("no model {name:?}"))
+fn record(g: &Graph, name: &str) -> Result<Record, String> {
+    specs::record(g, name)?.ok_or_else(|| format!("no model {name:?}"))
 }
 
 /// the model as stored (its current spec over its trained weights), or a fresh one
@@ -382,7 +382,7 @@ fn load(store: &Store, r: &Record, limits: &Limits) -> Result<Arc<Model>, String
         return Ok(m.clone());
     }
     let spec = r.spec()?;
-    let mut m = match store.spec_weights(&r.name)? {
+    let mut m = match specs::weights_of(store, r)? {
         Some(b) => Model::from_bytes(&b)?,
         None => {
             within(&spec, limits).map_err(spec_err)?;
@@ -431,7 +431,7 @@ fn summary(store: &Store, r: &Record) -> Value {
     let last = r.history.last();
     json!({
         "name": r.name,
-        "trained": r.trained(),
+        "trained": r.trained() && specs::has_weights(store, r),
         "version": r.version,
         "created": r.created,
         "modified": r.modified,
@@ -544,7 +544,7 @@ fn sampling_arg(base: &Sampling, args: &Value, limits: &Limits) -> Result<Sampli
 
 fn start(store: Arc<Store>, g: &Arc<Graph>, args: &Value, limits: &Limits) -> Res {
     let name = name_arg(args)?;
-    let r = record(&store, name)?;
+    let r = record(g, name)?;
     let mut sp = r.spec()?;
     within(&sp, limits).map_err(spec_err)?;
     let u = |k: &str| args.get(k).and_then(Value::as_u64).map(|x| x as usize);
@@ -562,7 +562,7 @@ fn start(store: Arc<Store>, g: &Arc<Graph>, args: &Value, limits: &Limits) -> Re
     let wait = args.get("wait").and_then(Value::as_bool).unwrap_or(false);
     cl::room_for_a_job(&store, limits)?;
     let src = snapshot(g, &sp)?;
-    let base = match store.spec_weights(name)? {
+    let base = match specs::weights_of(&store, &r)? {
         Some(b) if !fresh => {
             let mut m = Model::from_bytes(&b)?;
             m.spec = sp.clone();
@@ -605,6 +605,7 @@ fn start(store: Arc<Store>, g: &Arc<Graph>, args: &Value, limits: &Limits) -> Re
     let limit = limits.train;
     let name = name.to_string();
     let version = r.version;
+    let g = g.clone();
     let work = move || {
         let mut too_long = false;
         let res = spec::train(base, &run_spec, &src, None, |p| {
@@ -627,7 +628,7 @@ fn start(store: Arc<Store>, g: &Arc<Graph>, args: &Value, limits: &Limits) -> Re
             if rep.cancelled {
                 return Ok((Value::Null, "cancelled"));
             }
-            let mut r = record(&store, &name)?;
+            let mut r = record(&g, &name)?;
             if r.version != version {
                 return Err("the spec changed while it trained; train it again".into());
             }
@@ -661,7 +662,7 @@ fn start(store: Arc<Store>, g: &Arc<Graph>, args: &Value, limits: &Limits) -> Re
             });
             r.version += 1;
             r.modified = now();
-            store.put_spec_model(None, &r, Weights::Set(m.to_bytes()))?;
+            specs::put(&g, &store, None, &r, Weights::Set(m.to_bytes()))?;
             forget(&store, &name);
             Ok((summary(&store, &r), "done"))
         });
@@ -698,7 +699,7 @@ enum Critic {
     Classifier(Stack, Vec<HeadDecl>),
 }
 
-fn critics_of(store: &Store, spec: &ModelSpec, limits: &Limits) -> Result<BTreeMap<String, Critic>, String> {
+fn critics_of(store: &Store, g: &Graph, spec: &ModelSpec, limits: &Limits) -> Result<BTreeMap<String, Critic>, String> {
     let mut out = BTreeMap::new();
     for c in &spec.critics {
         if out.contains_key(&c.model) {
@@ -706,7 +707,7 @@ fn critics_of(store: &Store, spec: &ModelSpec, limits: &Limits) -> Result<BTreeM
         }
         let got = if c.model == spec.name {
             return Err(format!("{:?} can't be its own critic", spec.name));
-        } else if let Some(r) = store.spec_model(&c.model)? {
+        } else if let Some(r) = specs::record(g, &c.model)? {
             Critic::Model(load(store, &r, limits)?)
         } else if let Ok(d) = store.classifier(&c.model) {
             if !d.trained() {
@@ -734,8 +735,8 @@ fn critics_of(store: &Store, spec: &ModelSpec, limits: &Limits) -> Result<BTreeM
     Ok(out)
 }
 
-fn generate(store: &Store, args: &Value, limits: &Limits) -> Res {
-    let r = record(store, name_arg(args)?)?;
+fn generate(store: &Store, g: &Graph, args: &Value, limits: &Limits) -> Res {
+    let r = record(g, name_arg(args)?)?;
     let m = load(store, &r, limits)?;
     if !m.spec.heads.iter().any(|h| h.kind == OutKind::Generate) {
         return Err(format!("{:?} has no generate head", r.name));
@@ -756,7 +757,7 @@ fn generate(store: &Store, args: &Value, limits: &Limits) -> Res {
         .unwrap_or(false)
         .then(crate::classify::generate::Guidance::default);
     let prompt = input_arg(args, "prompt", true)?;
-    let held = critics_of(store, &m.spec, limits)?;
+    let held = critics_of(store, g, &m.spec, limits)?;
     let critiques: BTreeMap<String, Critique> = held
         .iter()
         .map(|(n, c)| {
@@ -780,7 +781,7 @@ fn generate(store: &Store, args: &Value, limits: &Limits) -> Res {
         .collect();
     Ok(json!({
         "name": r.name,
-        "trained": r.trained(),
+        "trained": r.trained() && specs::has_weights(store, &r),
         "seed": sampling.seed,
         "critics": critics,
         "seconds": started.elapsed().as_secs_f64(),
@@ -815,8 +816,10 @@ pub fn saves_call(saves: &Saves, op: &str, args: &Value, limits: &Limits) -> Res
 pub fn call(store: Arc<Store>, g: &Arc<Graph>, op: &str, args: &Value, limits: &Limits) -> Res {
     let st: &Store = &store;
     match op {
-        "models.list" => Ok(Value::Array(st.spec_models()?.iter().map(|r| summary(st, r)).collect())),
-        "models.get" => details(st, &record(st, name_arg(args)?)?),
+        "models.list" => Ok(Value::Array(
+            specs::records(g)?.iter().map(|r| summary(st, r)).collect(),
+        )),
+        "models.get" => details(st, &record(g, name_arg(args)?)?),
         "models.check" => Ok(match checked(st, args, limits) {
             Ok((_, spec)) => json!({ "ok": true, "name": spec.name }),
             Err(e) => json!({ "ok": false, "path": e.path, "message": e.message }),
@@ -827,7 +830,7 @@ pub fn call(store: Arc<Store>, g: &Arc<Graph>, op: &str, args: &Value, limits: &
         })),
         "models.create" => {
             let (text, spec) = checked(st, args, limits).map_err(spec_err)?;
-            if st.spec_model(&spec.name)?.is_some() {
+            if specs::record(g, &spec.name)?.is_some() {
                 return Err(spec_err(at(
                     &spec,
                     "name",
@@ -843,15 +846,15 @@ pub fn call(store: Arc<Store>, g: &Arc<Graph>, op: &str, args: &Value, limits: &
                 version: 1,
                 history: vec![],
             };
-            st.put_spec_model(None, &r, Weights::Drop)?;
+            specs::put(g, st, None, &r, Weights::Drop)?;
             details(st, &r)
         }
         "models.update" => {
             let name = name_arg(args)?;
             not_training(st, name)?;
-            let old = record(st, name)?;
+            let old = record(g, name)?;
             let (text, spec) = checked(st, args, limits).map_err(spec_err)?;
-            if spec.name != name && st.spec_model(&spec.name)?.is_some() {
+            if spec.name != name && specs::record(g, &spec.name)?.is_some() {
                 return Err(spec_err(at(
                     &spec,
                     "name",
@@ -870,17 +873,17 @@ pub fn call(store: Arc<Store>, g: &Arc<Graph>, op: &str, args: &Value, limits: &
                 history: if keeps { old.history.clone() } else { vec![] },
                 ..old
             };
-            st.put_spec_model(Some(name), &r, if keeps { Weights::Keep } else { Weights::Drop })?;
+            specs::put(g, st, Some(name), &r, if keeps { Weights::Keep } else { Weights::Drop })?;
             forget(st, name);
             forget(st, &r.name);
             let mut v = details(st, &r)?;
-            v["weights_kept"] = json!(keeps && r.trained());
+            v["weights_kept"] = json!(keeps && r.trained() && specs::has_weights(st, &r));
             Ok(v)
         }
         "models.delete" => {
             let name = name_arg(args)?;
             not_training(st, name)?;
-            st.delete_spec_model(name)?;
+            specs::delete(g, st, name)?;
             forget(st, name);
             cl::jobs()
                 .lock()
@@ -903,7 +906,7 @@ pub fn call(store: Arc<Store>, g: &Arc<Graph>, op: &str, args: &Value, limits: &
             Ok(json!(j.snapshot()))
         }
         "models.run" => {
-            let r = record(st, name_arg(args)?)?;
+            let r = record(g, name_arg(args)?)?;
             let m = load(st, &r, limits)?;
             let input = input_arg(args, "text", false)?;
             let sampling = sampling_arg(&m.spec.sampling, args, limits)?;
@@ -911,12 +914,12 @@ pub fn call(store: Arc<Store>, g: &Arc<Graph>, op: &str, args: &Value, limits: &
             let out = m.run_sampled(&input, None, &sampling)?;
             Ok(json!({
                 "name": r.name,
-                "trained": r.trained(),
+                "trained": r.trained() && specs::has_weights(st, &r),
                 "seconds": started.elapsed().as_secs_f64(),
                 "outputs": out.iter().map(|(k, a)| (k.clone(), answer_json(a))).collect::<serde_json::Map<_, _>>(),
             }))
         }
-        "models.generate" => generate(st, args, limits),
+        "models.generate" => generate(st, g, args, limits),
         _ => Err(format!("unknown op {op:?}")),
     }
 }

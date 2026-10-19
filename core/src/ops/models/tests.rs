@@ -382,3 +382,90 @@ fn pretrained_folders_and_shared_limits() {
     drop((mine, shared));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// a save from before records lived in it: its models file holds records and weights;
+/// opening it moves the records into the save, and the trained model answers as before
+#[test]
+fn old_saves_move_their_specs_into_the_save() {
+    let dir = temp("migrate");
+    let ws = Saves::new(&dir, "notes").with_models(Limits::NONE);
+    save(&ws);
+    ws.call("models.create", &json!({ "spec": kind_spec() })).unwrap();
+    train(&ws, "kind");
+    let before = ws
+        .call("models.run", &json!({ "name": "kind", "text": "banana plum cherry" }))
+        .unwrap();
+    let rec = ws.call("models.get", &json!({ "name": "kind" })).unwrap();
+    drop(ws);
+    // put the layout back as it was: the record in the models file, no fit row
+    {
+        let g = crate::graph::Graph::open(&dir.join("notes.redb")).unwrap();
+        let bytes = g.spec_record("kind").unwrap().unwrap();
+        g.delete_spec_record("kind").unwrap();
+        let st = Store::open(&dir.join("notes.models")).unwrap();
+        let txn = st.db.begin_write().unwrap();
+        {
+            use redb::ReadableTable;
+            txn.open_table(crate::specs::SPECS)
+                .unwrap()
+                .insert("kind", bytes.as_slice())
+                .unwrap();
+            let mut f = txn.open_table(crate::specs::SPEC_FIT).unwrap();
+            f.remove("kind").unwrap();
+            assert!(f.get("kind").unwrap().is_none());
+        }
+        txn.commit().unwrap();
+    }
+    let ws = Saves::new(&dir, "notes").with_models(Limits::NONE);
+    let got = ws.call("models.get", &json!({ "name": "kind" })).unwrap();
+    for k in ["source", "created", "modified", "version", "history", "trained"] {
+        assert_eq!(got[k], rec[k], "{k}");
+    }
+    let after = ws
+        .call("models.run", &json!({ "name": "kind", "text": "banana plum cherry" }))
+        .unwrap();
+    assert_eq!(after["outputs"], before["outputs"]);
+    let (_, g) = ws.current().unwrap();
+    assert!(g.spec_record("kind").unwrap().is_some(), "in the save now");
+    drop((g, ws));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// the records travel in the save: backups, copies, and merges (a clash comes in as
+/// "<name> 2"; the same spec is the same model)
+#[test]
+fn specs_travel_with_the_save() {
+    let dir = temp("travel");
+    let ws = Saves::new(&dir, "notes").with_models(Limits::NONE);
+    save(&ws);
+    let c = |op: &str, a: Value| ws.call(op, &a).unwrap_or_else(|e| panic!("{op}: {e}"));
+    c("models.create", json!({ "spec": kind_spec() }));
+    c("models.create", json!({ "spec": writer_spec() }));
+    // a backup's other.json carries them
+    let b = c("saves.backup", json!({}));
+    let saved = b["paths"][1].as_str().unwrap();
+    let other: Value = serde_json::from_str(&std::fs::read_to_string(saved).unwrap()).unwrap();
+    assert_eq!(other["specs"].as_array().unwrap().len(), 2);
+    c("saves.copy", json!({ "name": "notes", "to": "twin" }));
+    c("saves.open", json!({ "name": "twin" }));
+    assert_eq!(c("models.list", json!({})).as_array().unwrap().len(), 2);
+    // a different "kind" in the twin, then the twin merged into notes
+    let mut k = kind_spec();
+    k["seed"] = json!(5);
+    c("models.update", json!({ "name": "kind", "spec": k }));
+    let bundle = c("saves.export", json!({}));
+    c("saves.open", json!({ "name": "notes" }));
+    let m = c("saves.import", json!({ "bundle": bundle, "merge": true }));
+    assert_eq!(m["models"], 1, "{m}");
+    let names: Vec<String> = c("models.list", json!({}))
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["name"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(names, ["kind", "kind 2", "writer"]);
+    let k2 = c("models.get", json!({ "name": "kind 2" }));
+    assert!(k2["source"].as_str().unwrap().contains("\"kind 2\""));
+    drop(ws);
+    let _ = std::fs::remove_dir_all(dir);
+}

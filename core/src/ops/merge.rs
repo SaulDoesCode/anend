@@ -297,3 +297,50 @@ pub fn merge(tx: &mut Tx, src: &View) -> GResult<Written> {
     let c = read(0, src)?;
     write(tx, &[src], &c)
 }
+
+/// what [`assets`] brought in
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AssetsWritten {
+    pub models: usize,
+    pub pictures: usize,
+}
+
+/// a save's spec models and pictures into another (a merge's second half; the entries
+/// go through [`merge`]). Pictures are known by their content hash, so one in both saves
+/// stays one; their lists are joined. A spec model whose name the target has already:
+/// the same spec (its JSON as written) is the same model and nothing changes; a
+/// different one comes in beside it as `<name> 2` (or 3, ...), its spec renamed too, so
+/// the target's own models (and the critics naming them) keep answering as before.
+/// Spec models arrive untrained (their weights live in the source's models file).
+pub fn assets(target: &crate::graph::Graph, src: &crate::graph::Graph) -> GResult<AssetsWritten> {
+    let mut w = AssetsWritten::default();
+    for (name, bytes) in src.spec_records()? {
+        let r = crate::specs::Record::from_json(&bytes)?;
+        let r = match target.spec_record(&name)? {
+            None => r,
+            Some(have) if crate::specs::Record::from_json(&have)?.source == r.source => continue,
+            Some(_) => {
+                let mut i = 2;
+                while target.spec_record(&format!("{name} {i}"))?.is_some() {
+                    i += 1;
+                }
+                r.renamed(&format!("{name} {i}"))?
+            }
+        };
+        target.put_spec_record(None, &r.name, &r.to_json()?)?;
+        w.models += 1;
+    }
+    for p in src.pictures()? {
+        if let Some(b) = src.picture_bytes(&p.id)?
+            && target.put_picture(&p, &b)?
+        {
+            w.pictures += 1;
+        }
+    }
+    for (list, id) in src.picture_list_rows()? {
+        if target.picture(&id)?.is_some() {
+            target.tag_picture(&id, &list, true)?;
+        }
+    }
+    Ok(w)
+}

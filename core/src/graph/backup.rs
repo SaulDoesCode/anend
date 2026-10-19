@@ -17,7 +17,11 @@
 //! - `edges`: `[[from key, relation, to key, payload hex], ...]` (relation by name for the
 //!   known ones, else its number);
 //! - `history`: `[[key, at, mime, text], ...]`, past versions, newest first per entry;
-//! - `settings`: `{name: text}`, or `{name: {"hex": ...}}` for one that isn't UTF-8.
+//! - `settings`: `{name: text}`, or `{name: {"hex": ...}}` for one that isn't UTF-8;
+//! - `specs`: the spec models' records (`crate::specs::Record` as JSON: name, the spec's
+//!   source, created, modified, version, history), without their trained weights;
+//! - `pictures`: `[{id, mime, width, height, name, added, size, data}, ...]`, `data` the
+//!   file's bytes in base64; `picture_lists`: `[[list name, picture id], ...]`.
 
 use serde_json::{Value, json};
 
@@ -237,6 +241,16 @@ impl Graph {
             "edges": edges,
             "history": history,
             "settings": settings,
+            "specs": self.spec_records()?.iter()
+                .filter_map(|(_, b)| serde_json::from_slice::<Value>(b).ok())
+                .collect::<Vec<_>>(),
+            "pictures": self.pictures()?.into_iter().map(|p| {
+                let data = self.picture_bytes(&p.id).ok().flatten().unwrap_or_default();
+                let mut v = json!(p);
+                v["data"] = json!(crate::classifiers::base64(&data));
+                v
+            }).collect::<Vec<_>>(),
+            "picture_lists": self.picture_list_rows()?,
         });
         Ok((
             serde_json::to_string(&Value::Array(rows)).map_err(err)?,
@@ -341,6 +355,39 @@ impl Graph {
             }
             Ok(())
         })?;
+        self.restore_assets(&o)?;
         Ok(report)
+    }
+
+    /// a backup's spec model records and pictures (rows that don't read are skipped)
+    pub fn restore_assets(&self, o: &Value) -> GResult<()> {
+        for r in o.get("specs").and_then(Value::as_array).into_iter().flatten() {
+            if let Some(name) = r.get("name").and_then(Value::as_str) {
+                self.put_spec_record(None, name, r.to_string().as_bytes())?;
+            }
+        }
+        for p in o.get("pictures").and_then(Value::as_array).into_iter().flatten() {
+            let Some(data) = p
+                .get("data")
+                .and_then(Value::as_str)
+                .and_then(crate::classifiers::unbase64)
+            else {
+                continue;
+            };
+            let Ok(mut pic) = serde_json::from_value::<super::assets::Picture>(p.clone()) else {
+                continue;
+            };
+            pic.id = super::assets::picture_id(&data);
+            pic.size = data.len() as u64;
+            self.put_picture(&pic, &data)?;
+        }
+        for row in o.get("picture_lists").and_then(Value::as_array).into_iter().flatten() {
+            if let (Some(l), Some(id)) = (row.get(0).and_then(Value::as_str), row.get(1).and_then(Value::as_str))
+                && self.picture(id)?.is_some()
+            {
+                self.tag_picture(id, l, true)?;
+            }
+        }
+        Ok(())
     }
 }

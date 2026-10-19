@@ -131,9 +131,18 @@ only entries, edges and history on disk and rebuilds the indexes into memory at 
 `graph free ids` (weum-ordered keys of forgotten ids), `graph meta` (`format`,
 `allocated`, `index`), `graph settings` (name → bytes), `graph mimes` (name → id).
 
+What a save holds besides entries (`core/src/graph/assets.rs`): `graph spec models`
+(model name → its record as JSON: the spec as written, created, modified, version,
+trainings; [models](models.md#where-a-save-keeps-its-spec-models)), `graph pictures`
+(picture id, a 128-bit FNV-1a hash of its bytes as 32 hex digits → `{id, mime, width,
+height, name, added, size}` JSON), `graph picture bytes` (id → the PNG or JPEG file) and
+`graph picture lists` (list name → picture ids, a multimap).
+
 ## Backup
 
 Two files. `texts.json`: `[[text, [key bytes], created, edited, mime?], ...]` (the first
 two elements are weum's `all-of-it.json` rows, which import the same way). `other.json`:
 `format`, `version`, `allocated`, `free`, `mimes`, `sources` (structured bodies as JSON
-runs), `edges`, `history` (past versions as text) and `settings`.
+runs), `edges`, `history` (past versions as text), `settings`, `specs` (spec model
+records), `pictures` (`[{id, mime, width, height, name, added, size, data: base64}]`)
+and `picture_lists` (`[[list, id]]`).

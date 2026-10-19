@@ -221,7 +221,12 @@ pub fn take_hub_save(ws: &Workspace, hub_file: &Path, name: &str, merge: bool) -
         let src = ops::graph_at(hub_file)?;
         let v = src.view()?;
         let w = g.write(|tx| ops::merge::merge(tx, &v))?;
-        return Ok(json!({ "merged": true, "memories": w.memories, "notes": w.notes, "lists": w.lists }));
+        drop(v);
+        let a = ops::merge::assets(&g, &src)?;
+        return Ok(
+            json!({ "merged": true, "memories": w.memories, "notes": w.notes, "lists": w.lists,
+                          "models": a.models, "pictures": a.pictures }),
+        );
     }
     let n = ws.saves.free_name(name)?;
     std::fs::create_dir_all(&ws.dir).map_err(|e| e.to_string())?;

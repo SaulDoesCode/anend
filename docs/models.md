@@ -155,6 +155,35 @@ A small picture generator (see `core/examples/pictures.rs`):
 }
 ```
 
+## Where a save keeps its spec models
+
+- **The definition** (the spec's JSON as written, when it was created and last changed,
+  a version, the history of its trainings) is a row of the save's own database, table
+  `graph spec models` (name → record JSON, `core/src/graph/assets.rs`,
+  `core/src/specs.rs`). It goes wherever the save file goes: copies, renames, the two
+  backup files (`other.json`'s `specs`), bundles, the hub's share and take, merges.
+- **The trained weights** stay in the save's models file (`<save>.models`, table `spec
+  model weights`, keyed by the model's name), with table `spec model weights fit`
+  recording the shape (`specs::shape_of`: input, trunk, heads, `from`, seed) they were
+  trained for. They are kept apart because of their size: the engine's own trunks are
+  0.1–20 MB of f32 (`small` ~3.6 MB, `base` ~20 MB) and a pretrained model hundreds of
+  MB (SmolLM2-135M is ~540 MB), against a few KB for a definition; in the save they
+  would make every backup, bundle and hub share carry them, and a shared save would
+  count them in its author's quota whether anyone wanted them or not. The models file
+  is copied, renamed, deleted and bundled (base64) with its save.
+- **Stale weights**: an edit that changes the shape drops them (as before); a definition
+  that changes some other way (a merge, a restored backup) and no longer matches the
+  recorded shape leaves them unused, and the model answers as untrained until it trains
+  again.
+- **Older saves** kept their definitions in the models file (`spec models`). When the
+  models file opens they move into the save as they are (`specs::migrate`), the weights
+  marked as fitting them; if the save already has a newer definition of that name, the
+  older one comes in beside it as `<name> (moved)` with its weights.
+- **Merging** a save into another brings its definitions in untrained: the same spec
+  JSON under the same name is the same model; a different spec under a taken name comes
+  in as `<name> 2` (3, ...), renamed in its JSON too, so the target's own models and the
+  critics naming them don't change.
+
 ## Below the spec
 
 The same machinery is open in Rust: `Classifier::with_gen` (any heads plus a generative

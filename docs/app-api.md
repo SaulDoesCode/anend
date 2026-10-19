@@ -187,9 +187,15 @@ texts it doesn't pass; in `weigh` mode multiplies them by its own.
 Models made from a declarative spec ([models](models.md)): JSON saying what a model
 reads, how big its trunk is, its heads (classify, multi, regress, generate), the data it
 learns from (queries over the save's lists and tags, or inline), and, for a generator,
-the critics that judge what it writes. They live in the save's models file
-(`<name>.models`, beside its classifiers), so they go along when a save is copied,
-renamed, deleted or bundled. One implementation answers them on the desktop and the hub
+the critics that judge what it writes. Each one's definition (its spec's JSON, created,
+modified, its trainings) lives in the save itself (table `graph spec models`), so it goes
+along wherever the save file goes: copies, renames, backups, bundles, the hub's share and
+take, and merges. The trained weights (megabytes; hundreds of them for a pretrained
+model) stay in the save's models file (`<name>.models`, beside its classifiers), which is
+copied, renamed, deleted and bundled with it; weights that no longer fit their
+definition's shape are unused, and the model answers as untrained. A save from before
+this keeps its definitions in the models file; opening it moves them into the save
+(nothing is lost). One implementation answers them on the desktop and the hub
 (`core/src/ops/models.rs`). `name` picks the model; a spec's `name` is its model's name
 (no classifier of the save may have it, since critics find models by name).
 
@@ -233,9 +239,16 @@ renamed, deleted or bundled. One implementation answers them on the desktop and 
   about 40 M weights at most, `"device"` must be the CPU, a call writes at most 2000 bytes
   and draws at most 32 candidates. On one's own machine (the desktop, `--local`) any
   folder and device work.
+- `trained` is true when the model has trained and its weights fit its spec.
 - In a [bundle](#bundles), `models` carries each as `{record, weights?}` (the record is
   `{name, source, created, modified, version, history}`, the weights the model file in
-  base64); merging leaves them out.
+  base64); the records are in its `other.specs` too.
+- **Merging** a save into the open one (`saves.import` with `merge`, `POST
+  /app/hub/{id}?merge=1`) brings its spec models in untrained: one with a name the open
+  save has already is the same model when its spec is the same JSON (nothing changes),
+  and otherwise comes in beside it as `<name> 2` (3, ...; its spec's `name` too), so the
+  open save's own models, and the critics that name them, answer as before. The merge's
+  answer counts them in `models` (and pictures in `pictures`).
 
 ## Saves in and out
 
@@ -262,7 +275,8 @@ A save as plain JSON: its [backup](format.md#backup) in one document,
 `{"anend": 2, "name", "memories": texts.json's rows, "other": other.json}`, plus
 `classifiers` (`{definition, weights?, feedback?}` each, the weights base64) and `models`
 (spec models, `{record, weights?}` each) when it has any. Importing it restores the save
-keys and all; merging it leaves the classifiers and spec models out.
+keys and all; merging it leaves the classifiers out and brings the spec models (untrained)
+and pictures in as described under [spec models](#spec-models).
 A bundle of weum rows alone (`{"memories": [[text, [key bytes]], ...]}`) imports as weum's
 `all-of-it.json` does. Old bundles (`anend: 1` with notes as records) aren't read.
 
