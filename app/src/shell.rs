@@ -99,7 +99,36 @@ pub fn App() -> Element {
         listening: Signal::new(None),
         open_note: Signal::new(None),
         pick_tag: Signal::new(None),
+        closing: Signal::new(0),
     });
+    // closing the window (desktop): the notes view saves the open note first; the window
+    // only hides when asked to close (main.rs), and the app ends here
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use dioxus::desktop::tao::event::{Event, WindowEvent};
+        dioxus::desktop::use_wry_event_handler(move |ev, _| {
+            if let Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } = ev
+            {
+                let mut c = ui.closing;
+                if *c.peek() != 0 {
+                    return;
+                }
+                c.set(1);
+                dioxus::dioxus_core::spawn_forever(async move {
+                    // a view that has something to keep takes it (2) and ends the app when
+                    // it's kept; give up waiting after a few seconds
+                    crate::ui::sleep_ms(200).await;
+                    if *ui.closing.peek() == 2 {
+                        crate::ui::sleep_ms(5000).await;
+                    }
+                    std::process::exit(0);
+                });
+            }
+        });
+    }
 
     // the save's name and counts, and again whenever something changed
     {

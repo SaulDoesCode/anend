@@ -216,6 +216,29 @@ pub fn Notes() -> Element {
             }
         });
     }
+    // closing the window keeps a titled note's changes too (desktop)
+    {
+        let api = api.clone();
+        use_effect(move || {
+            if (ui.closing)() != 1 {
+                return;
+            }
+            let t = text.peek().clone();
+            if !*dirty.peek() || open.peek().is_none() || anend_core::note::split(&t).0.trim().is_empty() {
+                return;
+            }
+            let mut c = ui.closing;
+            c.set(2);
+            let mut note = open.peek().clone().unwrap_or_default();
+            note.tags = tags.peek().clone();
+            let api = api.clone();
+            dioxus::dioxus_core::spawn_forever(async move {
+                let _ = api.save_note(&note, &t).await;
+                #[cfg(not(target_arch = "wasm32"))]
+                std::process::exit(0);
+            });
+        });
+    }
     // a note another view asked to open (the reader's edit)
     {
         let api = api.clone();

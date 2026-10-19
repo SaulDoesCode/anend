@@ -94,6 +94,8 @@ fn main() {
     let cfg = Config::new()
         .with_window(window)
         .with_menu(None)
+        // closing hides the window; the shell saves what's open, then ends the app
+        .with_close_behaviour(dioxus::desktop::WindowCloseBehaviour::WindowHides)
         .with_disable_context_menu(true)
         // the sand window's colour, so the first frame isn't a different shade
         .with_background_color((0x92, 0x7a, 0x4f, 0xff));

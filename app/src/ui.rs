@@ -228,6 +228,8 @@ pub struct Ui {
     pub open_note: Signal<Option<String>>,
     /// a tag another view asked the tags view to show
     pub pick_tag: Signal<Option<String>>,
+    /// the window is closing (desktop): 1 asked, 2 a view is saving and closes it after
+    pub closing: Signal<u8>,
 }
 
 pub fn ui() -> Ui {

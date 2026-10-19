@@ -39,7 +39,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | fonts: interface font and memory view font pickers (system fonts listed) | typeface.rs, settings.rs | partly (19 Oct): a family name for each, with common ones offered; a webview can't list the system's fonts |
 | window icon (desktop title bar) | main.rs | has (19 Oct: it never reached the window before, `Config::with_icon` was undone by `with_window`; now on the window, checked as `_NET_WM_ICON` under Xvfb; a desktop entry is put in place for Wayland desktops) |
 | web tab favicon and title | hub/web/index.html | has |
-| saves the open note when the window closes | ui.rs `on_close` | partly: a titled note is saved when you leave the notes view (as Bevy's view switch did); closing the window itself doesn't save |
+| saves the open note when the window closes | ui.rs `on_close` | has (19 Oct): closing the desktop window saves a titled note with changes, then the app ends (tested under Xvfb with a WM_DELETE_WINDOW message: the note was there on the next start); leaving the notes view saves it too |
 | the guide button (opens docs/guide.md) | settings.rs | has |
 
 ## Keys
