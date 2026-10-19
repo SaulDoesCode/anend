@@ -104,7 +104,21 @@ pub fn Notes() -> Element {
     let save_k = save.clone();
     use_keys(View::Notes, move |k: KeyPress| {
         if k.bar && k.key == "Enter" {
-            q.set(k.text.trim().to_string());
+            let t = k.text.trim().to_string();
+            // Enter again on the same words opens the first note found
+            if t == *q.peek()
+                && let Some(first) = list
+                    .peek()
+                    .as_ref()
+                    .and_then(|r| r.as_ref().ok())
+                    .and_then(|v| v.first().cloned())
+            {
+                let mut o = ui.open_note;
+                o.set(Some(first.key));
+                document::eval("document.activeElement && document.activeElement.blur()");
+                return true;
+            }
+            q.set(t);
             return true;
         }
         match k.action {
@@ -120,6 +134,20 @@ pub fn Notes() -> Element {
         }
         true
     });
+    // leaving the view keeps a titled note's changes, as the Bevy app did
+    {
+        let save = save.clone();
+        use_effect(move || {
+            let v = (ui.view)();
+            if v != View::Notes
+                && *dirty.peek()
+                && open.peek().is_some()
+                && !anend_core::note::split(&text.peek()).0.trim().is_empty()
+            {
+                save();
+            }
+        });
+    }
     // a note another view asked to open (the reader's edit)
     {
         let api = api.clone();

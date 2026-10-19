@@ -13,6 +13,14 @@ pub fn Tags() -> Element {
     let api = api();
     let mut picked: Signal<Vec<String>> = use_signal(Vec::new);
     let mut any = use_signal(|| false);
+    // a tag another view asked for (the stats' tags)
+    use_effect(move || {
+        if let Some(t) = (ui.pick_tag)() {
+            let mut pt = ui.pick_tag;
+            pt.set(None);
+            picked.set(vec![t]);
+        }
+    });
     let api_t = api.clone();
     let tags = use_resource(move || {
         let api = api_t.clone();
@@ -99,7 +107,9 @@ pub fn Tags() -> Element {
                         for h in hits {
                             div { key: "{h.key}", class: "result",
                                 span { class: "p", "{h.key}" }
-                                span { class: "t", title: "{h.text}", if h.note { "✎ " } "{h.text}" }
+                                span { class: "t", title: if h.note { "open it in the editor" } else { "into the bar" },
+                                    onclick: { let h = h.clone(); move |_| if h.note { let mut o = ui.open_note; o.set(Some(h.key.clone())); crate::shell::go(ui, View::Notes); } else { ui.set_bar(&h.text) } },
+                                    if h.note { "✎ " } "{h.text}" }
                                 button { class: "plain", "data-tip": "into the bar", "aria-label": "into the bar",
                                     onclick: { let t = h.text.clone(); move |_| ui.set_bar(&t) }, Icon { name: "text" } }
                             }

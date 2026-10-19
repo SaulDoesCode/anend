@@ -38,7 +38,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | fonts: interface font and memory view font pickers (system fonts listed) | typeface.rs, settings.rs | partly (19 Oct): a family name for each, with common ones offered; a webview can't list the system's fonts |
 | window icon (desktop title bar) | main.rs | has (19 Oct: it never reached the window before, `Config::with_icon` was undone by `with_window`; now on the window, checked as `_NET_WM_ICON` under Xvfb; a desktop entry is put in place for Wayland desktops) |
 | web tab favicon and title | hub/web/index.html | has |
-| saves the open note when the window closes | ui.rs `on_close` | partly: the Dioxus editor saves on Ctrl+S / button only |
+| saves the open note when the window closes | ui.rs `on_close` | partly: a titled note is saved when you leave the notes view (as Bevy's view switch did); closing the window itself doesn't save |
 | the guide button (opens docs/guide.md) | settings.rs | has |
 
 ## Keys
@@ -77,7 +77,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | slide the note list away / back (Ctrl+B), list on the right, hide until the pointer nears the edge | ui.rs, config `hide_list`, `list_right` | partly: Ctrl+B and the button; the list on the right (settings); no pointer reveal |
 | the note's classifiers: pick which classifiers index it, each one's class chip and a yes/no | index_panel.rs, JS notecls.js | has (19 Oct): views/judge.rs, every class's probability too (Ctrl+I) |
 | markdown highlighting in the pad | highlight.rs | has |
-| the bar finds notes by words; Enter opens the first; "n of m notes" at the bar's end | bar.rs | partly: Enter filters, the count is there; Enter doesn't open the first |
+| the bar finds notes by words; Enter opens the first; "n of m notes" at the bar's end | bar.rs | has (Enter narrows, Enter again opens the first) |
 | written date and edits count | ui.rs | has |
 | replacements `{{key}}`, `{{filter:name}}`, alternatives from lists | Dioxus only | has |
 | the notes view has no horizontal scrollbar dragging the content off to the left | — | has (19 Oct): the view never scrolls itself; its list and pad do |
@@ -107,7 +107,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | toggles: gsearch text (G), saturate (S), white mode (W) | memory_ui.rs | has (white mode back 19 Oct) |
 | list commands Enlist / List / Delist / Unlist; Shift+click list, Ctrl+click candidate | memory_ui.rs | has |
 | click: into the bar; double click: key; hover line (key + gsum) | memory_ui.rs | has |
-| middle click opens a note in the editor | memory_ui.rs | missing |
+| middle click opens a note in the editor | memory_ui.rs | has |
 | Ctrl+right click: forget and re-saturate under a new key | memory_ui.rs | dropped for weum's Ctrl+right click (gsearch ⌊√(s·r)⌋), which the space had too; re-keying is not offered |
 | underlines by shared reversed sum (the gematria colour of a text's reversed-ordinal match group) | memory_ui.rs | has; **must stay**: word-type labels (T) are a separate channel (a coloured label under each word) and never take, replace or recolour the underline (guard: `parity::tests::word_types_keep_the_gematria_underline`) |
 | colouring by a classifier (bar at the left, legend) | tint.rs | has |
@@ -160,8 +160,8 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 
 | feature | was in | status |
 |---|---|---|
-| tags with counts, Ctrl/Shift+click multi-pick, all/any, the notes carrying them, open in the editor | tags_ui.rs | has (the open-in-editor link: partly) |
-| stats: notes, words, saves/edits, first and latest note, tags with counts opening the tags view | ui.rs `rebuild_stats` | partly: entry-graph counts, no words written, tag chips don't open the tags view |
+| tags with counts, Ctrl/Shift+click multi-pick, all/any, the notes carrying them, open in the editor | tags_ui.rs | has |
+| stats: notes, words, saves/edits, first and latest note, tags with counts opening the tags view | ui.rs `rebuild_stats` | has (19 Oct: a tag opens the tags view with it picked) |
 
 ## Classifiers (the models view)
 

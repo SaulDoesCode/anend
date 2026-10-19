@@ -98,6 +98,7 @@ pub fn App() -> Element {
         side: Signal::new(Default::default()),
         listening: Signal::new(None),
         open_note: Signal::new(None),
+        pick_tag: Signal::new(None),
     });
 
     // the save's name and counts, and again whenever something changed

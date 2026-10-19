@@ -91,7 +91,7 @@ pub fn Stats() -> Element {
                     h3 { "tags" }
                     div { class: "bars",
                         for (t , c) in tags.into_iter().take(30) {
-                            div { key: "{t}", class: "hbar", span { "{t}" } span { class: "track", span { class: "fill", style: "width: {c as f64 / tmax as f64 * 100.0:.1}%;" } } span { class: "n", "{c}" } }
+                            div { key: "{t}", class: "hbar", button { class: "plain tag-open", "data-tip": "see the entries tagged #{t}", onclick: { let t = t.clone(); move |_| { let mut pt = ui.pick_tag; pt.set(Some(t.clone())); crate::shell::go(ui, View::Tags); } }, "#{t}" } span { class: "track", span { class: "fill", style: "width: {c as f64 / tmax as f64 * 100.0:.1}%;" } } span { class: "n", "{c}" } }
                         }
                     }
                 }

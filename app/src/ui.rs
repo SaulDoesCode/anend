@@ -226,6 +226,8 @@ pub struct Ui {
     pub listening: Signal<Option<crate::keys::Action>>,
     /// a note another view asked the notes view to open
     pub open_note: Signal<Option<String>>,
+    /// a tag another view asked the tags view to show
+    pub pick_tag: Signal<Option<String>>,
 }
 
 pub fn ui() -> Ui {

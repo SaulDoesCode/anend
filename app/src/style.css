@@ -663,3 +663,4 @@ h3 .dim.small, h3 .small { font-weight: 400; }
 a.btn { text-decoration: none; }
 .top .side, .top .status { z-index: 1; }
 @media (max-width: 800px) { .forge-cols { grid-template-columns: 1fr; } }
+.hbar button.tag-open { justify-content: flex-start; height: 20px; padding: 0 4px; color: var(--link); }

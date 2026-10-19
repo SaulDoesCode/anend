@@ -1162,6 +1162,17 @@ fn Art(hit: Hit, under: Option<String>, is_list: bool, is_cand: bool, selected: 
                 }
             },
             ondoubleclick: move |_| ui.set_bar(&h2.key),
+            onauxclick: {
+                let h = hit.clone();
+                move |e: PointerEvent| {
+                    // the middle button opens a note in the editor
+                    if e.trigger_button() == Some(dioxus::html::input_data::MouseButton::Auxiliary) && h.note {
+                        let mut o = ui.open_note;
+                        o.set(Some(h.key.clone()));
+                        crate::shell::go(ui, View::Notes);
+                    }
+                }
+            },
             onkeydown: move |e: KeyboardEvent| {
                 if e.key() == Key::Enter {
                     ui.set_bar(&h4.text);
