@@ -33,13 +33,13 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | right-click menu on a text (edit, tag, select, list, candidate, key, forget, kind) | Dioxus only | has |
 | zen: chrome fades while the mouse rests, delay setting | zen.rs | has |
 | hide the top bar until the pointer nears the top | zen.rs | has |
-| bars swapped (top bar at the bottom, command bar at the top) | config `bars_swapped` | missing |
-| sizes: interface scale, top bar height, command bar height, "default sizes" | sizing.rs | partly: zoom and text size; no bar heights |
-| fonts: interface font and memory view font pickers (system fonts listed) | typeface.rs, settings.rs | missing |
+| bars swapped (top bar at the bottom, command bar at the top) | config `bars_swapped` | has (19 Oct) |
+| sizes: interface scale, top bar height, command bar height, "default sizes" | sizing.rs | has (zoom, text size, both bars' heights) |
+| fonts: interface font and memory view font pickers (system fonts listed) | typeface.rs, settings.rs | partly (19 Oct): a family name for each, with common ones offered; a webview can't list the system's fonts |
 | window icon (desktop title bar) | main.rs | has (19 Oct: it never reached the window before, `Config::with_icon` was undone by `with_window`; now on the window, checked as `_NET_WM_ICON` under Xvfb; a desktop entry is put in place for Wayland desktops) |
 | web tab favicon and title | hub/web/index.html | has |
 | saves the open note when the window closes | ui.rs `on_close` | partly: the Dioxus editor saves on Ctrl+S / button only |
-| the guide button (opens docs/guide.md) | settings.rs | missing |
+| the guide button (opens docs/guide.md) | settings.rs | has |
 
 ## Keys
 
@@ -74,7 +74,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | view / edit toggle (Ctrl+E) rendering the note | ui.rs | has |
 | save (Ctrl+S), new note (Ctrl+N) | keys.rs | has; a note without a # title isn't saved, as before |
 | delete with a confirmation | ui.rs `confirm_delete` | has (two clicks) |
-| slide the note list away / back (Ctrl+B), list on the right, hide until the pointer nears the edge | ui.rs, config `hide_list`, `list_right` | partly: Ctrl+B and the button slide it away; `list_right` is kept but has no switch yet; no pointer reveal |
+| slide the note list away / back (Ctrl+B), list on the right, hide until the pointer nears the edge | ui.rs, config `hide_list`, `list_right` | partly: Ctrl+B and the button; the list on the right (settings); no pointer reveal |
 | the note's classifiers: pick which classifiers index it, each one's class chip and a yes/no | index_panel.rs, JS notecls.js | has (19 Oct): views/judge.rs, every class's probability too (Ctrl+I) |
 | markdown highlighting in the pad | highlight.rs | has |
 | the bar finds notes by words; Enter opens the first; "n of m notes" at the bar's end | bar.rs | partly: Enter filters, the count is there; Enter doesn't open the first |
@@ -196,15 +196,15 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 
 | feature | was in | status |
 |---|---|---|
-| the forge: saves in, ingredients (+ − ∩), result preview, filters (words, ordinal, reversed), name, forge / pour into the open save | forge_ui.rs, JS forge.js, `forge.*` | missing |
+| the forge: saves in, ingredients (+ − ∩), result preview, filters (words, ordinal, reversed), name, forge / pour into the open save | forge_ui.rs, JS forge.js, `forge.*` | has (19 Oct): views/forge.rs, from the settings' head |
 
 ## Saves, the hub (settings)
 
 | feature | was in | status |
 |---|---|---|
-| saves: list, open, new, copy, rename, delete, backup, import weum JSON | settings.rs | partly: no rename |
+| saves: list, open, new, copy, rename, delete, backup, import weum JSON | settings.rs | has |
 | saves folder setting (a folder lists its saves, a .redb path opens one) | settings.rs | missing |
-| export / import a bundle (.anend.json) | JS settings.js | missing in the app UI (`saves.export` / `saves.import` exist) |
+| export / import a bundle (.anend.json) | JS settings.js | has (19 Oct) |
 | the hub: connect with an app token, browse and download shared saves, share this one | hub_ui.rs | missing (the address box only) |
 | local-only browser saves (IndexedDB) | JS local/ | dropped: the web app runs against the hub's app mode (`anend-hub --mode app --local` for one person) |
 

@@ -161,10 +161,32 @@ pub fn App() -> Element {
     } else {
         String::new()
     };
+    // a family the person named goes before the built-in ones
+    let fam = |f: &str, rest: &str| {
+        let f = f.trim().replace(['"', ';', '{', '}'], "");
+        if f.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "--{rest}: \"{f}\", {};",
+                if rest == "font" {
+                    "\"Fira Sans\", system-ui, sans-serif"
+                } else {
+                    "\"Times New Roman\", serif"
+                }
+            )
+        }
+    };
     let style = format!(
-        "{vars} --fs: {fs}px; --mfs: {}px; --mspace: {}px; {zoomed}",
-        p.memory_font, p.spacing
+        "{vars} --fs: {fs}px; --mfs: {}px; --mspace: {}px; --top: {}px; --barh: {}px; {}{}{zoomed}",
+        p.memory_font,
+        p.spacing,
+        p.top_bar.clamp(20.0, 80.0),
+        p.bottom_bar.clamp(20.0, 80.0),
+        fam(&p.font, "font"),
+        fam(&p.memory_family, "serif"),
     );
+    let swapped = p.bars_swapped;
     drop(p);
     rsx! {
         style { {crate::fonts::css()} }
@@ -173,6 +195,7 @@ pub fn App() -> Element {
             class: "app v-{view.name()}",
             class: if zen { "zen" } else { "" },
             class: if hide_bar { "hide-bar" } else { "" },
+            class: if swapped { "swapped" } else { "" },
             "data-zen": if zen { "1" } else { "0" },
             "data-zen-delay": "{zen_delay}",
             style: "{style}",

@@ -646,3 +646,20 @@ h3 .dim.small, h3 .small { font-weight: 400; }
 .fgroup .cond { gap: 6px; padding: 2px 0; }
 .fgroup select { height: 24px; }
 .kept { padding: 3px 0; border-top: 1px solid color-mix(in srgb, var(--dim) 15%, transparent); }
+
+/* the bars swapped: the command bar at the top, the top bar at the bottom */
+.app.swapped { grid-template-rows: auto minmax(0, 1fr) var(--top); }
+.app.swapped .dock { order: -1; }
+.app.swapped .views { order: 0; }
+.app.swapped .top { order: 1; }
+.app.swapped [data-tip].tip-up::after { bottom: auto; top: calc(100% + 6px); }
+/* the forge (views/forge.rs) */
+.dialog.forge { width: min(1100px, calc(100vw - 16px)); }
+.forge-cols { display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: 12px; }
+.fcol { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.fcol h3 { margin: 4px 0; }
+.fsave button { width: 26px; padding: 0; font-weight: 700; }
+.fsample { max-height: 180px; overflow: auto; background: var(--pad); border-radius: var(--radius); padding: 4px 8px; }
+a.btn { text-decoration: none; }
+.top .side, .top .status { z-index: 1; }
+@media (max-width: 800px) { .forge-cols { grid-template-columns: 1fr; } }

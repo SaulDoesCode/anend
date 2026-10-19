@@ -38,6 +38,11 @@ pub const SETTINGS: &[&str] = &[
     "white",
     "word_types",
     "space",
+    "font",
+    "memory_family",
+    "top_bar",
+    "bottom_bar",
+    "bars_swapped",
 ];
 
 /// the views, in their tab order

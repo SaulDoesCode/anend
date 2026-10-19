@@ -75,6 +75,15 @@ pub struct Prefs {
     pub word_types: bool,
     /// the space's panels, physics, history and last address
     pub space: SpaceUi,
+    /// the interface's font family (empty: the built-in Fira Sans)
+    pub font: String,
+    /// the memory view's font family (empty: the system serif)
+    pub memory_family: String,
+    /// the top bar's and the command bar's heights in pixels
+    pub top_bar: f32,
+    pub bottom_bar: f32,
+    /// the top bar at the bottom, the command bar at the top
+    pub bars_swapped: bool,
 }
 
 /// the space's own settings
@@ -172,6 +181,11 @@ impl Default for Prefs {
             white: false,
             word_types: false,
             space: SpaceUi::default(),
+            font: String::new(),
+            memory_family: String::new(),
+            top_bar: 32.0,
+            bottom_bar: 32.0,
+            bars_swapped: false,
         }
     }
 }

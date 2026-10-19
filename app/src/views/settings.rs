@@ -15,6 +15,10 @@ use crate::views::Fold;
 #[component]
 pub fn Settings() -> Element {
     let mut ui = ui();
+    let mut forge = use_signal(|| false);
+    if forge() {
+        return rsx! { crate::views::forge::Forge { on_close: move |_| forge.set(false) } };
+    }
     rsx! {
         div {
             class: "overlay",
@@ -28,6 +32,8 @@ pub fn Settings() -> Element {
                 div { class: "head",
                     h2 { "settings" }
                     span { class: "grow" }
+                    button { class: "plain", "data-tip": "the forge: a save from other saves", onclick: move |_| forge.set(true), Icon { name: "forge" } "forge" }
+                    a { class: "btn plain", href: "https://github.com/SaulDoesCode/anend/blob/main/docs/guide.md", target: "_blank", rel: "noopener", "data-tip": "the guide (opens in a browser)", Icon { name: "help" } "guide" }
                     button { class: "plain ibtn close tip-left", "data-tip": "close · Esc", "aria-label": "close",
                         onclick: move |_| ui.settings.set(false), Icon { name: "close" } }
                 }
@@ -96,6 +102,28 @@ fn Looks() -> Element {
             }
             label { "the top bar" }
             label { class: "row", input { r#type: "checkbox", checked: p.hide_bar, onchange: move |e| set_pref(ui, |p| p.hide_bar = e.checked()) } "slide it away until the pointer comes near the top" }
+            label { "the bars" }
+            label { class: "row", input { r#type: "checkbox", checked: p.bars_swapped, onchange: move |e| set_pref(ui, |p| p.bars_swapped = e.checked()) } "the top bar at the bottom, and the command bar at the top" }
+            label { r#for: "tbh", "sizes" }
+            div { class: "row",
+                "top bar" input { id: "tbh", r#type: "range", min: "24", max: "64", step: "1", value: "{p.top_bar}", oninput: move |e| set_pref(ui, |p| p.top_bar = e.value().parse().unwrap_or(32.0)) } span { "{p.top_bar}px" }
+                "command bar" input { r#type: "range", min: "24", max: "64", step: "1", value: "{p.bottom_bar}", "aria-label": "the command bar's height", oninput: move |e| set_pref(ui, |p| p.bottom_bar = e.value().parse().unwrap_or(32.0)) } span { "{p.bottom_bar}px" }
+                button { class: "plain", onclick: move |_| set_pref(ui, |p| { p.top_bar = 32.0; p.bottom_bar = 32.0; p.font_size = 14.0; p.zoom = 1.0; }), "default sizes" }
+            }
+            label { r#for: "font", "fonts" }
+            div { class: "row",
+                input { id: "font", r#type: "text", list: "fontlist", placeholder: "Fira Sans (built in)", initial_value: "{p.font}", "aria-label": "the interface's font", oninput: move |e| set_pref(ui, |p| p.font = e.value()) }
+                input { r#type: "text", list: "fontlist", placeholder: "the memory view: system serif", initial_value: "{p.memory_family}", "aria-label": "the memory view's font", oninput: move |e| set_pref(ui, |p| p.memory_family = e.value()) }
+                datalist { id: "fontlist",
+                    for f in ["Fira Sans", "Inter", "Noto Sans", "DejaVu Sans", "Liberation Sans", "Ubuntu", "Cantarell", "Georgia", "Times New Roman", "Liberation Serif", "DejaVu Serif", "Noto Serif", "Fira Mono", "DejaVu Sans Mono"] { option { key: "{f}", value: "{f}" } }
+                }
+                span { class: "dim small", "a font's name as the system knows it; empty for the built-in" }
+            }
+            label { "the editor" }
+            div { class: "row",
+                label { class: "row", input { r#type: "checkbox", checked: p.highlight, onchange: move |e| set_pref(ui, |p| p.highlight = e.checked()) } "colour the markdown (headings, emphasis, code, links, tags…)" }
+                label { class: "row", input { r#type: "checkbox", checked: p.list_right, onchange: move |e| set_pref(ui, |p| p.list_right = e.checked()) } "the note list on the right" }
+            }
             label { r#for: "zoom", "zoom" }
             div { class: "row",
                 input { id: "zoom", r#type: "range", min: "0.5", max: "3", step: "0.05", value: "{p.zoom}",
@@ -173,6 +201,7 @@ fn Saves() -> Element {
     let mut made = use_signal(|| 0u64);
     let mut step = use_signal(|| Step::Closed);
     let mut armed = use_signal(|| None::<String>);
+    let mut renaming: Signal<Option<(String, String)>> = use_signal(|| None);
     let list: Vec<SaveInfo> = match &*saves.read() {
         Some(Ok(v)) => v.clone(),
         _ => vec![],
@@ -226,6 +255,20 @@ fn Saves() -> Element {
                                     button { class: "plain", "data-tip": "import weum's all-of-it.json into this save", "aria-label": "import",
                                         onclick: { let n = s.name.clone(); move |_| step.set(Step::Read { target: n.clone(), data: String::new(), rows: 0, sample: vec![] }) },
                                         Icon { name: "upload" } }
+                                    button { class: "plain", "data-tip": "rename it", "aria-label": "rename",
+                                        onclick: { let n = s.name.clone(); move |_| renaming.set(Some((n.clone(), n.clone()))) },
+                                        Icon { name: "rename" } }
+                                    button { class: "plain", "data-tip": "export a bundle (.anend.json): keys, lists, notes, classifiers and all", "aria-label": "export a bundle",
+                                        onclick: { let api = api.clone(); let n = s.name.clone(); move |_| {
+                                            let (api, n) = (api.clone(), n.clone());
+                                            dioxus::dioxus_core::spawn_forever(async move {
+                                                match api.call("saves.export", serde_json::json!({ "name": n })).await {
+                                                    Ok(b) => { download(&format!("{n}.anend.json"), &b.to_string()); ui.say(format!("{n}.anend.json: a download")); }
+                                                    Err(e) => ui.fail(e),
+                                                }
+                                            });
+                                        } },
+                                        Icon { name: "export" } }
                                     button { class: "plain", "data-tip": "copy", "aria-label": "copy",
                                         onclick: { let api = api.clone(); let n = s.name.clone(); move |_| act(api.copy_save(&n, ""), format!("copied {n}")) },
                                         Icon { name: "copy" } }
@@ -261,6 +304,37 @@ fn Saves() -> Element {
                     Icon { name: "new" } "make it" }
                 button { class: "plain", onclick: move |_| step.set(Step::Read { target: String::new(), data: String::new(), rows: 0, sample: vec![] }),
                     Icon { name: "upload" } "a new save from all-of-it.json" }
+            }
+            if let Some((from, to)) = renaming() {
+                label { "rename “{from}”" }
+                div { class: "row",
+                    input { r#type: "text", initial_value: "{to}", "aria-label": "its new name", oninput: move |e| { let f = from.clone(); renaming.set(Some((f, e.value()))) } }
+                    button { class: "primary", onclick: { let api = api.clone(); move |_| {
+                            if let Some((f, t)) = renaming() { act(api.rename_save(&f, &t), format!("renamed {f} to {t}")); }
+                            renaming.set(None);
+                        } }, "rename" }
+                    button { class: "plain", onclick: move |_| renaming.set(None), "cancel" }
+                }
+            }
+            label { "a bundle" }
+            div { class: "row",
+                label { class: "button btn", Icon { name: "upload" } "import a bundle (.anend.json) as a new save"
+                    input { r#type: "file", accept: ".json,.anend.json", style: "display: none;",
+                        onchange: { let api = api.clone(); move |e: FormEvent| {
+                            let api = api.clone();
+                            let files = e.files();
+                            spawn(async move {
+                                let Some(f) = files.into_iter().next() else { return };
+                                let text = match f.read_string().await { Ok(t) => t, Err(e) => return ui.fail(e.to_string()) };
+                                let Ok(b) = serde_json::from_str::<serde_json::Value>(&text) else { return ui.fail("that isn't a bundle (JSON)") };
+                                match api.import_bundle(b, "", false).await {
+                                    Ok(im) => { ui.say(format!("imported {} texts{}", im.memories, im.save.map(|s| format!(" into “{s}”")).unwrap_or_default())); reload += 1; ui.touched(); }
+                                    Err(e) => ui.fail(e),
+                                }
+                            });
+                        } },
+                    }
+                }
             }
             if step() != Step::Closed {
                 div { class: "wide import",
