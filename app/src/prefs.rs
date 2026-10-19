@@ -57,6 +57,34 @@ pub struct Prefs {
     pub save: Option<String>,
     /// the hub (when built with it)
     pub hub_url: String,
+    /// the memory view's search filter panel is open
+    pub filter_open: bool,
+    /// what the memory view's search filter keeps
+    pub filter: MemFilter,
+}
+
+/// the memory view's search filter: what of the shown texts it keeps (every part empty or
+/// off keeps everything)
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MemFilter {
+    /// leave out notes / texts that aren't notes
+    pub no_notes: bool,
+    pub no_texts: bool,
+    /// kinds of text (core's kinds::detect) to keep; empty: all
+    pub kinds: BTreeSet<String>,
+    /// word types a text must have (each of them at least once)
+    pub words: BTreeSet<String>,
+    /// classes of the colouring classifier to keep ("unsure" for none); empty: all
+    pub classes: BTreeSet<String>,
+    /// only texts the colouring classifier was given a yes or no on
+    pub feedback: bool,
+}
+
+impl MemFilter {
+    pub fn active(&self) -> bool {
+        *self != MemFilter::default()
+    }
 }
 
 impl Default for Prefs {
@@ -85,6 +113,8 @@ impl Default for Prefs {
             view: "memory".into(),
             save: None,
             hub_url: String::new(),
+            filter_open: false,
+            filter: MemFilter::default(),
         }
     }
 }

@@ -26,8 +26,9 @@ Where the work stands, for picking it up in a new session. Branch:
     the web build against `anend-hub --mode app --local` in Playwright (picker, a
     synthetic drop, tagging, the template trained to 100% on 8 pictures, delete). Shots
     `app/docs/shots/desktop-pictures.png`, `web-pictures.png`.
-- **Done too:** word types on hover (tooltip and hover line in the memory view).
-- **Next, in order** (each committed and pushed): the search filter panel; replacements in the editor; the spatial table; space search modes; save
+- **Done too:** word types on hover (tooltip and hover line in the memory view); the
+  search filter panel (the memory view's strip, a filter square).
+- **Next, in order** (each committed and pushed): replacements in the editor; the spatial table; space search modes; save
   checkpoints; a real IME test.
 - **Disk:** build with `CARGO_INCREMENTAL=0` (target/debug/incremental grew to 5 GB and
   filled the disk once); `rm -f target/debug/deps/*anend*` drops stale test binaries.
@@ -983,9 +984,13 @@ progress is in `core/src/classify/STATUS.md`. The plan:
   `describe_words`: each word read on its own as word, name (a capital), number, date,
   time, link, email or hashtag; the text's kind and the counts with examples go on the
   hover line and as the tooltip's second line; the kind there is the detected one, not a
-  hand-fixed one). Left: a search filter panel that opens from
-  a square at the right of the search (mime types, word-type frequency, classifiers,
-  feedback, bias metric).
+  hand-fixed one). ~~A search filter panel that opens from a square at the right of the
+  search~~: done 19 Oct (the memory view's strip ends in a filter square; the panel
+  narrows what's shown, client side, by entry type (texts, notes), kind, word types
+  (with their frequency among the shown texts), the colouring classifier's classes, its
+  verdicts (the texts given a yes or no, its latest 50), and shows its bias metric (KL,
+  flipped, imbalance, prior skew); kept in the app's prefs, a line says how many it
+  hides). Shot `app/docs/shots/desktop-filter.png`.
 - **Editor:** entry ids as replacements (recursive, with references to saved filter
   views; sums stay unchanged), and synonym/register lists chosen from a dropdown, with
   their own management view.

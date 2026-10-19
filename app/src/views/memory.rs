@@ -653,6 +653,59 @@ fn Field(style: String, header: Option<Header>, results: Vec<Hit>, mode: Mode, p
     });
     let tinted = tints.read().clone().flatten();
     let (tint_of, legend) = tint_map(tinted.as_ref());
+    // the search filter (the square at the strip's right): what it keeps of the results
+    let filter = ui.prefs.read().filter.clone();
+    let filter_open = ui.prefs.read().filter_open;
+    let class_of = class_map(tinted.as_ref());
+    let api_f = use_context::<Api>();
+    let judged = use_resource(move || {
+        let api = api_f.clone();
+        let name = ui.prefs.read().tint.clone();
+        let want = ui.prefs.read().filter.feedback || ui.prefs.read().filter_open;
+        let _ = (ui.changed)();
+        async move {
+            if name.is_empty() || !want {
+                return None;
+            }
+            let d = api
+                .call("classify.get", serde_json::json!({ "name": name }))
+                .await
+                .ok()?;
+            let bias = api
+                .call(
+                    "classify.steer",
+                    serde_json::json!({ "name": name, "steer": {}, "save": false }),
+                )
+                .await
+                .ok()
+                .map(|v| v["bias"].clone());
+            let keys: std::collections::HashSet<String> = d["feedback"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|f| f["key"].as_str().map(str::to_string))
+                .collect();
+            Some((
+                keys,
+                bias.unwrap_or_default(),
+                d["feedback_count"].as_u64().unwrap_or(0),
+            ))
+        }
+    });
+    let judged = judged.read().clone().flatten();
+    let all_results = results.clone();
+    let results: Vec<Hit> = results
+        .into_iter()
+        .filter(|h| {
+            keeps(
+                &filter,
+                h,
+                class_of.get(&h.key).map(String::as_str),
+                judged.as_ref().map(|j| &j.0),
+            )
+        })
+        .collect();
+    let hidden = all_results.len() - results.len();
     let mut drag: Signal<Option<(f64, f64, f64)>> = use_signal(|| None);
     let mut rect: Signal<Option<std::rc::Rc<MountedData>>> = use_signal(|| None);
     let start = move |e: MouseEvent, side: f64| {
@@ -687,13 +740,16 @@ fn Field(style: String, header: Option<Header>, results: Vec<Hit>, mode: Mode, p
             }
             if !legend.is_empty() {
                 div { class: "tint-legend", "aria-label": "colours",
-                    for (c , colour , n) in legend {
+                    for (c , colour , n) in legend.clone() {
                         span { key: "{c}", span { class: "dot", style: "background: {colour};" } "{c} {n}" }
                     }
                 }
             }
+            if hidden > 0 {
+                div { class: "filter-note", "the filter hides {hidden} of {all_results.len()} · the square at the right of the strip changes it" }
+            }
             div { class: "arts", role: "list",
-                if results.is_empty() {
+                if results.is_empty() && hidden == 0 {
                     span { class: "dim", style: "color: #bbb; padding: 6px;", "nothing filed here yet" }
                 }
                 for h in results {
@@ -709,6 +765,9 @@ fn Field(style: String, header: Option<Header>, results: Vec<Hit>, mode: Mode, p
                 }
             }
         }
+        if filter_open {
+            FilterPanel { shown: all_results.clone(), class_of: class_of.clone(), legend: legend.clone(), judged: judged.clone() }
+        }
         if let Some((x0, w0, side)) = drag() {
             div {
                 style: "position: fixed; inset: 0; z-index: 90; cursor: ew-resize;",
@@ -718,6 +777,162 @@ fn Field(style: String, header: Option<Header>, results: Vec<Hit>, mode: Mode, p
                     set_pref(ui, |p| p.field_width = w as f32);
                 },
                 onmouseup: move |_| drag.set(None),
+            }
+        }
+    }
+}
+
+/// each key's class name under the colouring classifier ("unsure" when in none)
+fn class_map(v: Option<&serde_json::Value>) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    let Some(v) = v else { return out };
+    let names: Vec<String> = crate::views::classifiers::strs(&v["classes"]);
+    for t in v["tints"].as_array().into_iter().flatten() {
+        let Some(key) = t["key"].as_str() else { continue };
+        let c = t["class"]
+            .as_u64()
+            .and_then(|c| names.get(c as usize).cloned())
+            .unwrap_or_else(|| "unsure".into());
+        out.insert(key.to_string(), c);
+    }
+    out
+}
+
+/// whether the search filter keeps a text
+fn keeps(
+    f: &crate::prefs::MemFilter,
+    h: &Hit,
+    class: Option<&str>,
+    judged: Option<&std::collections::HashSet<String>>,
+) -> bool {
+    if (h.note && f.no_notes) || (!h.note && f.no_texts) {
+        return false;
+    }
+    if !f.kinds.is_empty() && !f.kinds.contains(anend_core::kinds::detect(&h.text)) {
+        return false;
+    }
+    if !f.words.is_empty() {
+        let types = anend_core::kinds::word_types(&h.text);
+        if !f.words.iter().all(|w| types.iter().any(|(_, k)| k == w)) {
+            return false;
+        }
+    }
+    if !f.classes.is_empty() && class.is_some_and(|c| !f.classes.contains(c)) {
+        return false;
+    }
+    if f.feedback && judged.is_some_and(|j| !j.contains(&h.key)) {
+        return false;
+    }
+    true
+}
+
+/// counts of a thing among the shown texts, most first
+fn tally<'a>(items: impl Iterator<Item = &'a str>) -> Vec<(String, usize)> {
+    let mut m: std::collections::BTreeMap<&str, usize> = Default::default();
+    for i in items {
+        *m.entry(i).or_default() += 1;
+    }
+    let mut v: Vec<(String, usize)> = m.into_iter().map(|(k, n)| (k.to_string(), n)).collect();
+    v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    v
+}
+
+/// the search filter panel: what the shown texts are (their kinds, their words' types,
+/// their classes under the colouring classifier, which were given a verdict, the
+/// classifier's bias), each a chip that keeps only those
+#[component]
+fn FilterPanel(
+    shown: Vec<Hit>,
+    class_of: std::collections::HashMap<String, String>,
+    legend: Legend,
+    judged: Option<(std::collections::HashSet<String>, serde_json::Value, u64)>,
+) -> Element {
+    let ui = ui();
+    let f = ui.prefs.read().filter.clone();
+    let tint = ui.prefs.read().tint.clone();
+    let kinds = tally(shown.iter().map(|h| anend_core::kinds::detect(&h.text)));
+    let words = tally(
+        shown
+            .iter()
+            .flat_map(|h| anend_core::kinds::word_types(&h.text))
+            .map(|(_, k)| k)
+            .collect::<Vec<_>>()
+            .into_iter(),
+    );
+    let notes = shown.iter().filter(|h| h.note).count();
+    let classes: Vec<(String, usize)> = legend.iter().map(|(c, _, n)| (c.clone(), *n)).collect();
+    let flip = move |set: fn(&mut crate::prefs::MemFilter) -> &mut std::collections::BTreeSet<String>, v: String| {
+        set_pref(ui, move |p| {
+            let s = set(&mut p.filter);
+            if !s.remove(&v) {
+                s.insert(v.clone());
+            }
+        })
+    };
+    let _ = &class_of;
+    rsx! {
+        div { class: "filter-panel", role: "dialog", "aria-label": "search filter",
+            div { class: "row",
+                b { "filter what's shown" }
+                span { class: "grow" }
+                if f.active() {
+                    button { class: "plain", onclick: move |_| set_pref(ui, |p| p.filter = Default::default()), "clear" }
+                }
+                button { class: "plain", "aria-label": "close the filter", onclick: move |_| set_pref(ui, |p| p.filter_open = false), Icon { name: "close" } }
+            }
+            div { class: "fgroup",
+                span { class: "dim small", "entries" }
+                button { class: if !f.no_texts { "chip on" } else { "chip" }, onclick: move |_| set_pref(ui, |p| p.filter.no_texts = !p.filter.no_texts),
+                    "texts " span { class: "dim", "{shown.len() - notes}" } }
+                button { class: if !f.no_notes { "chip on" } else { "chip" }, onclick: move |_| set_pref(ui, |p| p.filter.no_notes = !p.filter.no_notes),
+                    "notes " span { class: "dim", "{notes}" } }
+            }
+            div { class: "fgroup",
+                span { class: "dim small", "kind" }
+                for (k , n) in kinds {
+                    button { key: "{k}", class: if f.kinds.contains(&k) { "chip on" } else { "chip" },
+                        onclick: { let k = k.clone(); move |_| flip(|f| &mut f.kinds, k.clone()) },
+                        "{k} " span { class: "dim", "{n}" } }
+                }
+            }
+            div { class: "fgroup",
+                span { class: "dim small", "has words of type" }
+                for (k , n) in words {
+                    button { key: "{k}", class: if f.words.contains(&k) { "chip on" } else { "chip" },
+                        title: "{n} words of this type among the texts shown",
+                        onclick: { let k = k.clone(); move |_| flip(|f| &mut f.words, k.clone()) },
+                        "{k} " span { class: "dim", "{n}" } }
+                }
+            }
+            if tint.is_empty() {
+                div { class: "fgroup dim small", "pick a classifier in the strip (the palette) to filter by its classes, its verdicts and see its bias" }
+            } else {
+                div { class: "fgroup",
+                    span { class: "dim small", "{tint}" }
+                    for (c , n) in classes {
+                        button { key: "{c}", class: if f.classes.contains(&c) { "chip on" } else { "chip" },
+                            onclick: { let c = c.clone(); move |_| flip(|f| &mut f.classes, c.clone()) },
+                            "{c} " span { class: "dim", "{n}" } }
+                    }
+                }
+                div { class: "fgroup",
+                    span { class: "dim small", "feedback" }
+                    button { class: if f.feedback { "chip on" } else { "chip" },
+                        title: "only texts this classifier was given a yes or no on (its latest 50)",
+                        onclick: move |_| set_pref(ui, |p| p.filter.feedback = !p.filter.feedback),
+                        "given a verdict "
+                        span { class: "dim", {judged.as_ref().map(|j| format!("{} of {}", shown.iter().filter(|h| j.0.contains(&h.key)).count(), j.2)).unwrap_or_default()} }
+                    }
+                }
+                if let Some((_, bias, _)) = &judged && bias.is_object() {
+                    div { class: "fgroup small",
+                        span { class: "dim", "bias" }
+                        span { title: "mean KL of the steered from the trained outputs", {format!("KL {:.3}", bias["mean_kl"].as_f64().unwrap_or(0.0))} }
+                        span { title: "share of texts whose top class the steering flips", {format!("flipped {:.0}%", 100.0 * bias["flipped"].as_f64().unwrap_or(0.0))} }
+                        span { title: "how uneven the classes' shares are", {format!("imbalance {:.2}", bias["imbalance"].as_f64().unwrap_or(0.0))} }
+                        span { title: "how far the predicted shares are from the training lists'", {format!("prior skew {:.2}", bias["prior_skew"].as_f64().unwrap_or(0.0))} }
+                    }
+                }
             }
         }
     }
@@ -1024,5 +1239,13 @@ pub fn MemoryStrip() -> Element {
             TChip { label: "letters in the sidecar · L", letter: "abc", on: p.letters, onclick: move |_| set_pref(ui, |p| p.letters = !p.letters) }
         }
         TintPick {}
+        span { class: "toggles filter-square",
+            TChip {
+                label: if p.filter.active() { "the search filter (on): kinds, word types, classes, verdicts, bias".to_string() } else { "the search filter: kinds, word types, classes, verdicts, bias".to_string() },
+                icon: "filter",
+                on: p.filter_open || p.filter.active(),
+                onclick: move |_| set_pref(ui, |p| p.filter_open = !p.filter_open),
+            }
+        }
     }
 }

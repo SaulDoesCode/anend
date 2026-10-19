@@ -447,3 +447,11 @@ table.confusion td.miss { color: var(--bad); }
 .pic-lists { display: flex; flex-wrap: wrap; gap: 3px; min-height: 0; }
 .pic-lists .chip button.plain { height: 16px; width: 16px; padding: 0; }
 .pic-tools input { flex: 1; height: 24px; }
+
+/* the memory view's search filter (views/memory.rs) */
+.filter-panel { position: fixed; right: 12px; bottom: 84px; font-family: var(--font); z-index: 40; width: min(420px, calc(100vw - 24px)); max-height: 60vh; overflow: auto; background: var(--cards); color: var(--text); border-radius: var(--radius); padding: 8px 10px; box-shadow: 0 4px 18px rgba(0,0,0,.35); display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.filter-panel .fgroup { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.filter-panel .fgroup > span:first-child { min-width: 64px; }
+.filter-panel .chip:not(.on) { background: color-mix(in srgb, var(--buttons) 35%, transparent); color: var(--text); }
+.filter-note { text-align: center; color: #bbb; font-size: 12px; padding: 2px; }
+.filter-square { margin-left: 6px; }
