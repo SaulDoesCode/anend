@@ -784,7 +784,11 @@ async fn enter(mut ui: Ui, api: Api, sp: Sp, raw: String, ctrl: bool, shift: boo
     }
     // the search modes: by the colouring classifier (a class's name, then words), or
     // weum's random hashmap search (texts sharing a word, in no order)
-    let how = ui.prefs.peek().space_search.clone();
+    let how = if ctrl {
+        "normal".to_string()
+    } else {
+        ui.prefs.peek().space_search.clone()
+    };
     if how == "classifier" {
         classifier_search(ui, api, sp, &t).await;
         return;
@@ -1158,7 +1162,7 @@ pub fn Space() -> Element {
         div { class: "space", style: "position: absolute; inset: 0; --room-bg: {bg}; --room-ink: {ink};",
             div { id: "space-host", class: "space-host", tabindex: "0", "aria-label": "the space: right drag looks, W A S D fly, arrows hop between texts" }
             if p.space.show_hud {
-                div { class: "poscard", "{sp.pos}" }
+                PosCard { pos: sp.pos }
             }
             if n == 0 {
                 div { class: "space-empty",
@@ -1804,7 +1808,7 @@ fn Scenes(rev: Signal<u64>, on_open: EventHandler<String>, on_save: EventHandler
                         if renaming().as_deref() == Some(n.as_str()) {
                             input {
                                 class: "scene-name",
-                                value: "{n}",
+                                initial_value: "{n}",
                                 "aria-label": "a new name: letters, digits, _ and -",
                                 onmounted: move |e| async move { let _ = e.set_focus(true).await; },
                                 onkeydown: move |e: KeyboardEvent| {
@@ -1870,7 +1874,7 @@ fn Scenes(rev: Signal<u64>, on_open: EventHandler<String>, on_save: EventHandler
                     }
                 }
                 div { class: "row scene-save",
-                    input { "aria-label": "the scene's name", value: "{name}", oninput: move |e| name.set(e.value()) }
+                    input { "aria-label": "the scene's name", initial_value: "{name}", oninput: move |e| name.set(e.value()) }
                     button { class: "btn small", title: "keeps every text in the room where it is", onclick: move |_| {
                             let n = name().trim().to_string();
                             if !ok_name(&n) { ui.fail("a scene's name: 1 to 96 of letters, digits, _ and -"); return; }
@@ -1880,6 +1884,13 @@ fn Scenes(rev: Signal<u64>, on_open: EventHandler<String>, on_save: EventHandler
             }
         }
     }
+}
+
+/// the position card: its own component, so its many updates (every 120 ms while the
+/// spread moves) re-render only it, not the whole room and its windows
+#[component]
+fn PosCard(pos: Signal<String>) -> Element {
+    rsx! { div { class: "poscard", "{pos}" } }
 }
 
 /// a window over the room that moves by its title bar and remembers where it was left;

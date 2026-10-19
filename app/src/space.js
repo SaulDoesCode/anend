@@ -297,6 +297,7 @@ export class Space {
   // ------------------------------------------------------------------ the spread
 
   wake(a) {
+    this.dirty = true;
     this.alpha = Math.max(this.alpha, a);
   }
 
@@ -1232,15 +1233,23 @@ export class Space {
       this.applyTurn();
     }
     // the physics in fixed steps, however long the frame was
-    if (!this.paused && this.order.length && !this.asleep()) {
+    const moving = !this.paused && this.order.length && !this.asleep();
+    if (moving) {
       this.acc = Math.min(this.acc + dt * this.p.substeps, 0.25);
       while (this.acc >= STEP) {
         this.step(STEP);
         this.acc -= STEP;
       }
     }
-    this.render();
-    this.info(false);
+    // a still room isn't drawn again: nothing flies, turns, eases, drags or spreads, and
+    // the turn has caught up with the mouse (it keeps the page light while one types
+    // elsewhere)
+    const turning = Math.abs(this.tyaw - this.yaw) > 1e-5 || Math.abs(this.tpitch - this.pitch) > 1e-5;
+    if (moving || turning || this.keys.size || this.ease || this.looking || this.drag || this.bdrag || this.dirty) {
+      this.dirty = false;
+      this.render();
+      this.info(false);
+    }
     requestAnimationFrame(this.loop);
   }
 

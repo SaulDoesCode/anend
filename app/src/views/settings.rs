@@ -185,6 +185,97 @@ enum Step {
     Done(Imported),
 }
 
+/// the open save's checkpoints (redb savepoints): made by hand with a name, gone back to
+/// (dropping what changed since, and the checkpoints after it), deleted
+#[component]
+fn Checkpoints(on_back: EventHandler<()>) -> Element {
+    let ui = ui();
+    let api = api();
+    let mut rev = use_signal(|| 0u64);
+    let mut made = use_signal(|| 0u64);
+    let mut armed: Signal<Option<u64>> = use_signal(|| None);
+    let api_r = api.clone();
+    let list = use_resource(move || {
+        let api = api_r.clone();
+        let _ = (rev(), (ui.changed)());
+        async move { api.call("saves.checkpoints", serde_json::json!({})).await }
+    });
+    let cps: Vec<serde_json::Value> = match &*list.read() {
+        Some(Ok(v)) => v.as_array().cloned().unwrap_or_default(),
+        _ => vec![],
+    };
+    let call = move |op: &'static str, args: serde_json::Value, said: String, back: bool| {
+        let api = api.clone();
+        dioxus::dioxus_core::spawn_forever(async move {
+            match api.call(op, args).await {
+                Ok(_) => {
+                    ui.say(said);
+                    rev += 1;
+                    if back {
+                        on_back.call(());
+                    }
+                }
+                Err(e) => ui.fail(e),
+            }
+        });
+    };
+    let when = |ms: u64| {
+        chrono::DateTime::from_timestamp_millis(ms as i64)
+            .map(|t| t.with_timezone(&chrono::Local).format("%d %b %Y, %H:%M").to_string())
+            .unwrap_or_default()
+    };
+    let call2 = call.clone();
+    rsx! {
+        div { class: "checkpoints",
+            span { class: "dim small", "checkpoints of this save" }
+            if cps.is_empty() {
+                span { class: "dim small", " · none yet" }
+            }
+            for c in cps {
+                div { key: "{c[\"id\"]}", class: "row checkpoint",
+                    Icon { name: "save" }
+                    b { {c["name"].as_str().unwrap_or("").to_string()} }
+                    span { class: "dim small", {when(c["at"].as_u64().unwrap_or(0))} }
+                    span { class: "grow" }
+                    button {
+                        class: if armed() == c["id"].as_u64() { "armed" } else { "plain" },
+                        "data-tip": "go back to it: what changed since goes, and the checkpoints made after it (click twice)",
+                        onclick: { let call = call.clone(); let id = c["id"].as_u64().unwrap_or(0); let n = c["name"].as_str().unwrap_or("").to_string(); move |_| {
+                            if armed() != Some(id) { armed.set(Some(id)); return; }
+                            armed.set(None);
+                            call("saves.restore_checkpoint", serde_json::json!({ "id": id }), format!("back to the checkpoint {n}"), true);
+                        } },
+                        Icon { name: "undo" }
+                        if armed() == c["id"].as_u64() { "go back?" } else { "go back" }
+                    }
+                    button { class: "plain", "data-tip": "delete the checkpoint (the save stays as it is)", "aria-label": "delete the checkpoint",
+                        onclick: { let call = call.clone(); let id = c["id"].as_u64().unwrap_or(0); move |_| call("saves.delete_checkpoint", serde_json::json!({ "id": id }), "checkpoint deleted".into(), false) },
+                        Icon { name: "delete" } }
+                }
+            }
+            div { class: "row",
+                // not bound while typing (a round trip per key drops fast letters); a new
+                // one after each checkpoint
+                // read when the button is pressed: re-rendering on every key dropped letters
+                // in the desktop's web view
+                for g in [made()] {
+                    input { key: "{g}", id: "cp-name", r#type: "text", placeholder: "a name (or the time)", "aria-label": "the checkpoint's name" }
+                }
+                button { onclick: move |_| {
+                        let call2 = call2.clone();
+                        spawn(async move {
+                            let mut ev = document::eval("const i = document.getElementById('cp-name'); dioxus.send(i ? i.value : '');");
+                            let n: String = ev.recv().await.unwrap_or_default();
+                            call2("saves.checkpoint", serde_json::json!({ "name": n }), "checkpoint made".into(), false);
+                            made += 1;
+                        });
+                    },
+                    Icon { name: "save" } "a checkpoint now" }
+            }
+        }
+    }
+}
+
 #[component]
 fn Saves() -> Element {
     let ui = ui();
@@ -289,6 +380,11 @@ fn Saves() -> Element {
                                             if armed() == Some(s.name.clone()) { "delete?" }
                                         }
                                     }
+                                }
+                            }
+                            if s.open {
+                                tr { key: "{s.name} checkpoints", class: "checkpoints-row",
+                                    td { colspan: "4", Checkpoints { on_back: move |_| { reload += 1; ui.touched(); } } }
                                 }
                             }
                         }

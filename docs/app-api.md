@@ -38,6 +38,10 @@ texts as reversed does), and asking for it answers an error.
 | `saves.copy` | `{name, to?}` | `{save}` (through a backup and restore, classifiers copied along) |
 | `saves.rename` | `{name, to}` (the open one too) | `{save}` |
 | `saves.delete` | `{name}` (not the open one) | `null` |
+| `saves.checkpoint` | `{name?}` | `{id, checkpoints}`: a checkpoint of the open save (a redb persistent savepoint; the name defaults to the time). At most 20 a save on a shared hub. A checkpoint keeps the pages it needs, so the file grows until it's deleted |
+| `saves.checkpoints` | | `[{id, name, at}]`, oldest first |
+| `saves.restore_checkpoint` | `{id}` | the checkpoints left: the open save as it was at that checkpoint; what changed since goes, and so do the checkpoints made after it |
+| `saves.delete_checkpoint` | `{id}` | the checkpoints left |
 | `saves.export` | `{name?}` (the open save if left out) | the save as a [bundle](#bundles) |
 | `saves.import` | `{bundle, name?, merge?}`: a new save keeping the bundle's keys (named after it, or `name`, with a number when taken); with `merge: true` into the open save: a whole bundle's entries are merged (the same text is one entry; new ones get fresh keys, their lists, tags and notes-on come along), weum rows alone keep their keys | `{save, memories, notes, lists, ...}` or `{merged: true, memories, notes, lists}` (what was new) |
 | `saves.backup` | `{name?}` | the desktop writes `texts.json` and `other.json` into `backups/` and answers `{paths}`; the hub answers `{paths: [], texts, other}` |

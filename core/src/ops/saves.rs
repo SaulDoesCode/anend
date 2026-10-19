@@ -549,6 +549,37 @@ impl Saves {
                 }
                 Ok(self.restore_into(want, data, other.as_deref())?.1)
             }
+            // checkpoints of the open save (redb savepoints; `graph::checkpoints`)
+            "saves.checkpoint" => {
+                let (_, g) = self.current()?;
+                if self.models.is_some_and(|l| l.shared) && g.checkpoints()?.len() >= 20 {
+                    return Err("a save keeps at most 20 checkpoints on a shared hub: delete one first".into());
+                }
+                let name = match s(args, "name").trim() {
+                    "" => chrono::Local::now().format("%d %b %Y, %H:%M").to_string(),
+                    n => n.to_string(),
+                };
+                let id = g.checkpoint(&name)?;
+                Ok(json!({ "id": id, "checkpoints": g.checkpoints()? }))
+            }
+            "saves.checkpoints" => {
+                let (_, g) = self.current()?;
+                Ok(json!(g.checkpoints()?))
+            }
+            "saves.restore_checkpoint" => {
+                let (_, g) = self.current()?;
+                let id = args.get("id").and_then(Value::as_u64).ok_or("which checkpoint? (id)")?;
+                g.restore_checkpoint(id)?;
+                Ok(json!(g.checkpoints()?))
+            }
+            "saves.delete_checkpoint" => {
+                let (_, g) = self.current()?;
+                let id = args.get("id").and_then(Value::as_u64).ok_or("which checkpoint? (id)")?;
+                if !g.delete_checkpoint(id)? {
+                    return Err(format!("no checkpoint {id}"));
+                }
+                Ok(json!(g.checkpoints()?))
+            }
             "saves.export" => {
                 let (name, graph) = self.graph(s(args, "name"))?;
                 super::bundle(&name, &graph)

@@ -331,6 +331,8 @@ pub const READ_ONLY: &[&str] = &[
     "saves.rename",
     "saves.export",
     "saves.backup",
+    "saves.checkpoints",
+    "saves.delete_checkpoint",
     "notes.list",
     "notes.tags",
     "notes.get",
