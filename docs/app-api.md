@@ -180,6 +180,60 @@ from?, to?}`, `list` `{list}`, `tags` `{tags, any?}`, `kind` `{kind: memories|no
 `preset` `{name}`. A validator in `gate` mode zeroes a classifier's probabilities on
 texts it doesn't pass; in `weigh` mode multiplies them by its own.
 
+## Spec models
+
+Models made from a declarative spec ([models](models.md)): JSON saying what a model
+reads, how big its trunk is, its heads (classify, multi, regress, generate), the data it
+learns from (queries over the save's lists and tags, or inline), and, for a generator,
+the critics that judge what it writes. They live in the save's models file
+(`<name>.models`, beside its classifiers), so they go along when a save is copied,
+renamed, deleted or bundled. One implementation answers them on the desktop and the hub
+(`core/src/ops/models.rs`). `name` picks the model; a spec's `name` is its model's name
+(no classifier of the save may have it, since critics find models by name).
+
+| op | args | data |
+|---|---|---|
+| `models.list` | | `[summary]`: `{name, trained, version, created, modified, input: text\|bytes\|image\|numbers, heads: [{name, kind, classes}], generates, critics: [model names], pretrained, device, loss, accuracy, macro_f1, bits_per_byte, steps, training}` (the metrics from the latest training) |
+| `models.get` | `{name}` | the summary and `{source, history: [training], job}`; `source` is the spec as written |
+| `models.check` | `{spec}` (an object, or its JSON text) | `{ok: true, name}` or `{ok: false, path, message}`: what `models.create` would say, without storing |
+| `models.create` | `{spec}` | details; a spec that doesn't pass answers an error naming where: `model spec "x" at heads[0].classes: head "a": classify needs at least two classes` |
+| `models.update` | `{name, spec}` (not while it trains; a new `name` in the spec renames it) | details and `weights_kept`: edits to the data, critics, constraints, sampling, training options or device keep the trained weights; a change to the input, trunk, heads, `from` or `seed` drops them |
+| `models.delete` | `{name}` (not while it trains) | `null` |
+| `models.train` | `{name, epochs?, max_steps?, fresh?, wait?}` | the job: `{name, state: running\|done\|failed\|cancelled, epoch, step, steps, loss, lr, tokens_per_sec, losses: [[step, loss]], evals: [{step, loss, accuracy, macro_f1, bits_per_byte?}], seconds, examples, error?, model?: summary}` |
+| `models.job` / `models.cancel` | `{name}` | the job (or `{name, state: "idle"}`); a cancelled run writes nothing |
+| `models.run` | `{name, text or input, temperature?, top_k?, top_p?, max_len?, seed?}` | `{name, trained, seconds, outputs: {head: answer}}`; an answer is `{kind: "classes", probs: {class: p}, top, members}`, `{kind: "values", values: {name: v}}` or `{kind: "generated", text}` (what a generate head writes after the input; `bytes`, `numbers` or `image: {width, height, png}` for other inputs) |
+| `models.generate` | `{name, prompt?, candidates?: 8, temperature?, top_k?, top_p?, max_len?, seed?, guided?: false}` | `{name, trained, seed, seconds, critics: [{model, head, want, weight}], candidates: [{text, index, score, scores: [per critic, 0 to 1], logp, kept, broken: [rules]}]}`: kept candidates first, best score first |
+| `models.pretrained` | | `{any, folders}`: whether any folder may be named (one's own machine), or the folders a shared hub offers |
+
+- `input` is a value of the model's input type: `{"text": ".."}`, `{"numbers": [..]}`,
+  `{"bytes": [..]}`; `text` is short for the first. `prompt` is text for the generator
+  to continue (empty: from nothing).
+- **Data** comes from the save when training starts: a `list` query names a list by its
+  name (the text of its head entry) or its key; `tagged` an entry tag; `pairs` two lists
+  side by side; each member's text (a note: its title and markdown) is one example. For a
+  `numbers` input a member's text is the numbers, separated by spaces or commas. Picture
+  data comes inline.
+- **Training** runs as the classifiers' does: on a thread of its own, continuing from the
+  trained weights unless `fresh`, written when it finishes unless the spec changed
+  meanwhile. `epochs` and `max_steps` override the spec's `train` for this run. On a
+  shared hub it counts toward the member's two trainings and indexings at once, stops
+  after two hours, and its `threads` are at most the hub's cores.
+- **Critics** are other spec models of the save, or its trained classifiers (a
+  classifier's head is its own name). The same seed gives the same candidates; `guided`
+  steers each byte toward what the critics want (slower).
+- **Untrained**, a model answers with its starting weights: random for a new trunk, the
+  checkpoint's for a pretrained one (`"from": {"pretrained": dir}`), so a pretrained
+  generator writes before any tuning.
+- **On a shared hub** (not `--local`), a pretrained folder must be one under a folder the
+  hub was started with (`--pretrained DIR`, repeatable), named relative to it
+  (`models.pretrained` lists them); without any the hub loads none. A trunk may have
+  about 40 M weights at most, `"device"` must be the CPU, a call writes at most 2000 bytes
+  and draws at most 32 candidates. On one's own machine (the desktop, `--local`) any
+  folder and device work.
+- In a [bundle](#bundles), `models` carries each as `{record, weights?}` (the record is
+  `{name, source, created, modified, version, history}`, the weights the model file in
+  base64); merging leaves them out.
+
 ## Saves in and out
 
 | | |
@@ -203,8 +257,9 @@ hub's own pages (`Origin` must match), answers in the usual envelope.
 
 A save as plain JSON: its [backup](format.md#backup) in one document,
 `{"anend": 2, "name", "memories": texts.json's rows, "other": other.json}`, plus
-`classifiers` (`{definition, weights?, feedback?}` each, the weights base64) when it has
-any. Importing it restores the save keys and all; merging it leaves the classifiers out.
+`classifiers` (`{definition, weights?, feedback?}` each, the weights base64) and `models`
+(spec models, `{record, weights?}` each) when it has any. Importing it restores the save
+keys and all; merging it leaves the classifiers and spec models out.
 A bundle of weum rows alone (`{"memories": [[text, [key bytes]], ...]}`) imports as weum's
 `all-of-it.json` does. Old bundles (`anend: 1` with notes as records) aren't read.
 

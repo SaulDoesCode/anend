@@ -101,6 +101,15 @@ const CLASSIFY_READ_ONLY: &[&str] = &[
     "filters.list",
     "filters.delete",
     "filters.run",
+    "models.list",
+    "models.get",
+    "models.check",
+    "models.pretrained",
+    "models.delete",
+    "models.job",
+    "models.cancel",
+    "models.run",
+    "models.generate",
 ];
 
 fn makes_no_room(op: &str) -> bool {
@@ -430,6 +439,9 @@ mod tests {
             "forge.pour",
             "classify.train",
             "filters.save",
+            "models.create",
+            "models.update",
+            "models.train",
         ] {
             assert!(!makes_no_room(op), "{op}");
         }

@@ -307,6 +307,21 @@ impl Source for MemSource {
 /// one resolved data item: the value, its head, its class or values
 type Item = (Value, String, Option<String>, Option<Vec<f32>>);
 
+/// a broken rule in a spec, and where: `path` is the field (`heads[1].classes`,
+/// `data[0].class`; empty for the whole spec)
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpecError {
+    pub model: String,
+    pub path: String,
+    pub message: String,
+}
+
+impl std::fmt::Display for SpecError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "model spec {:?}: {}", self.model, self.message)
+    }
+}
+
 /// a head by name
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Slot {
@@ -356,45 +371,74 @@ impl ModelSpec {
 
     /// every rule a spec must keep, with the first broken one in words
     pub fn check(&self) -> Result<(), String> {
-        let at = |m: String| Err(format!("model spec {:?}: {m}", self.name));
+        self.check_at().map_err(|e| e.to_string())
+    }
+
+    /// [`ModelSpec::check`] with where in the spec the broken rule is (`heads[1].classes`)
+    pub fn check_at(&self) -> Result<(), SpecError> {
+        let name = self.name.clone();
+        let at = |path: String, m: String| {
+            Err(SpecError {
+                model: name.clone(),
+                path,
+                message: m,
+            })
+        };
         if self.version == 0 || self.version > SPEC_VERSION {
-            return at(format!(
-                "version {} (this build reads 1 to {SPEC_VERSION})",
-                self.version
-            ));
+            return at(
+                "version".into(),
+                format!("version {} (this build reads 1 to {SPEC_VERSION})", self.version),
+            );
         }
         if self.name.trim().is_empty() {
-            return at("a model needs a name".into());
+            return at("name".into(), "a model needs a name".into());
         }
         if self.heads.is_empty() {
-            return at("a model needs at least one head".into());
+            return at("heads".into(), "a model needs at least one head".into());
         }
         let mut names = std::collections::BTreeSet::new();
-        for h in &self.heads {
+        for (i, h) in self.heads.iter().enumerate() {
             if !names.insert(&h.name) {
-                return at(format!("two heads are called {:?}", h.name));
+                return at(format!("heads[{i}].name"), format!("two heads are called {:?}", h.name));
             }
             if !(h.weight >= 0.0 && h.weight.is_finite()) {
-                return at(format!("head {:?}: weight must be finite and not negative", h.name));
+                return at(
+                    format!("heads[{i}].weight"),
+                    format!("head {:?}: weight must be finite and not negative", h.name),
+                );
             }
+            let classes = format!("heads[{i}].classes");
             match h.kind {
                 OutKind::Generate if !h.classes.is_empty() => {
-                    return at(format!("head {:?}: a generate head has no classes", h.name));
+                    return at(classes, format!("head {:?}: a generate head has no classes", h.name));
                 }
                 OutKind::Classify if h.classes.len() < 2 => {
-                    return at(format!("head {:?}: classify needs at least two classes", h.name));
+                    return at(
+                        classes,
+                        format!("head {:?}: classify needs at least two classes", h.name),
+                    );
                 }
                 OutKind::Multi | OutKind::Regress if h.classes.is_empty() => {
-                    return at(format!("head {:?}: needs at least one label or value name", h.name));
+                    return at(
+                        classes,
+                        format!("head {:?}: needs at least one label or value name", h.name),
+                    );
                 }
                 _ => {}
             }
         }
-        if self.heads.iter().filter(|h| h.kind == OutKind::Generate).count() > 1 {
-            return at("at most one generate head".into());
+        if let Some(i) = self
+            .heads
+            .iter()
+            .enumerate()
+            .filter(|(_, h)| h.kind == OutKind::Generate)
+            .nth(1)
+            .map(|(i, _)| i)
+        {
+            return at(format!("heads[{i}].kind"), "at most one generate head".into());
         }
         if self.generates() && self.trunk.causal == Some(false) {
-            return at("a generate head needs a causal trunk".into());
+            return at("trunk.causal".into(), "a generate head needs a causal trunk".into());
         }
         if let InputSpec::Image {
             width,
@@ -404,71 +448,100 @@ impl ModelSpec {
         } = self.input
         {
             if patch == 0 || width == 0 || height == 0 || width % patch != 0 || height % patch != 0 {
-                return at(format!(
-                    "image {width}×{height} must be a positive multiple of the {patch} pixel patch"
-                ));
+                return at(
+                    "input".into(),
+                    format!("image {width}×{height} must be a positive multiple of the {patch} pixel patch"),
+                );
             }
             if codes == 0 || codes > super::codec::MAX_CODES {
-                return at(format!(
-                    "an image codebook holds 1 to {} codes",
-                    super::codec::MAX_CODES
-                ));
+                return at(
+                    "input.codes".into(),
+                    format!("an image codebook holds 1 to {} codes", super::codec::MAX_CODES),
+                );
             }
         }
         if let InputSpec::Numbers { names, .. } = &self.input
             && names.is_empty()
         {
-            return at("a numbers input names at least one number".into());
+            return at("input.names".into(), "a numbers input names at least one number".into());
         }
-        for q in &self.data {
-            let check_target = |head: &str, class: &Option<String>, value: &Option<Vec<f32>>| -> Result<(), String> {
-                let h = self.decl(head)?;
+        // a data item's head and target, the path's field that is wrong and why
+        let check_target =
+            |head: &str, class: &Option<String>, value: &Option<Vec<f32>>| -> Result<(), (&'static str, String)> {
+                let h = self.decl(head).map_err(|e| ("head", e))?;
                 match h.kind {
                     OutKind::Classify | OutKind::Multi => match class {
                         Some(c) if h.classes.contains(c) => Ok(()),
-                        Some(c) => Err(format!("head {head:?} has no class {c:?}")),
-                        None => Err(format!("data for head {head:?} names a class")),
+                        Some(c) => Err(("class", format!("head {head:?} has no class {c:?}"))),
+                        None => Err(("class", format!("data for head {head:?} names a class"))),
                     },
                     OutKind::Regress => match value {
                         Some(v) if v.len() == h.classes.len() => Ok(()),
-                        _ => Err(format!("data for head {head:?} gives {} values", h.classes.len())),
+                        _ => Err((
+                            "value",
+                            format!("data for head {head:?} gives {} values", h.classes.len()),
+                        )),
                     },
                     OutKind::Generate => Ok(()),
                 }
             };
+        for (i, q) in self.data.iter().enumerate() {
             let r = match q {
                 DataQuery::List { head, class, value, .. } | DataQuery::Tagged { head, class, value, .. } => {
-                    check_target(head, class, value)
+                    check_target(head, class, value).map_err(|(f, e)| (format!("data[{i}].{f}"), e))
                 }
-                DataQuery::Pairs { head, .. } => match self.decl(head)?.kind {
-                    OutKind::Generate => Ok(()),
-                    _ => Err(format!("pairs train a generate head; {head:?} is not one")),
+                DataQuery::Pairs { head, .. } => match self.decl(head) {
+                    Err(e) => Err((format!("data[{i}].head"), e)),
+                    Ok(d) if d.kind == OutKind::Generate => Ok(()),
+                    Ok(_) => Err((
+                        format!("data[{i}].head"),
+                        format!("pairs train a generate head; {head:?} is not one"),
+                    )),
                 },
-                DataQuery::Inline { items } => items.iter().try_for_each(|i| check_target(&i.head, &i.class, &i.value)),
+                DataQuery::Inline { items } => items.iter().enumerate().try_for_each(|(j, it)| {
+                    check_target(&it.head, &it.class, &it.value)
+                        .map_err(|(f, e)| (format!("data[{i}].items[{j}].{f}"), e))
+                }),
             };
-            if let Err(e) = r {
-                return at(e);
+            if let Err((path, e)) = r {
+                return at(path, e);
             }
         }
         if !self.critics.is_empty() && !self.generates() {
-            return at("critics judge what a generate head writes; this model has none".into());
+            return at(
+                "critics".into(),
+                "critics judge what a generate head writes; this model has none".into(),
+            );
         }
-        for c in &self.critics {
+        for (i, c) in self.critics.iter().enumerate() {
+            if c.model.trim().is_empty() {
+                return at(format!("critics[{i}].model"), "a critic names a model".into());
+            }
             if !(c.weight >= 0.0 && c.weight.is_finite()) {
-                return at(format!("critic {:?}: weight must be finite and not negative", c.model));
+                return at(
+                    format!("critics[{i}].weight"),
+                    format!("critic {:?}: weight must be finite and not negative", c.model),
+                );
             }
         }
-        self.sampling.check().or_else(at)?;
+        if let Err(e) = self.sampling.check() {
+            let field = if e.contains("top_p") { "top_p" } else { "temperature" };
+            return at(format!("sampling.{field}"), e);
+        }
         if let Some(Origin::Pretrained(dir)) = &self.from {
             if !matches!(self.input, InputSpec::Text { ref features } if features.is_empty())
                 && self.input != InputSpec::Bytes
             {
-                return at(format!(
-                    "a pretrained model ({dir}) reads plain text, without feature channels"
-                ));
+                return at(
+                    "input".into(),
+                    format!("a pretrained model ({dir}) reads plain text, without feature channels"),
+                );
             }
             if !self.generates() {
-                return at("a pretrained model's language-model head is its generate head; declare one".into());
+                return at(
+                    "heads".into(),
+                    "a pretrained model's language-model head is its generate head; declare one".into(),
+                );
             }
             let t = &self.trunk;
             if t.preset.is_some()
@@ -481,11 +554,54 @@ impl ModelSpec {
                 || t.pooling.is_some()
             {
                 return at(
+                    "trunk".into(),
                     "a pretrained trunk's sizes come from its checkpoint (only max_len and dropout apply)".into(),
                 );
             }
         }
         Ok(())
+    }
+
+    /// parses a spec's JSON and checks it, saying where a problem is: a field that doesn't
+    /// read (`heads[0].kind: unknown variant ...`), the first broken rule, or (with
+    /// `sizes`) a trunk the engine can't make (an unknown preset, sizes that don't fit)
+    pub fn parse(text: &str, sizes: bool) -> Result<ModelSpec, SpecError> {
+        let model = || {
+            serde_json::from_str::<serde_json::Value>(text)
+                .ok()
+                .and_then(|v| v.get("name").and_then(|n| n.as_str()).map(str::to_string))
+                .unwrap_or_default()
+        };
+        let de = &mut serde_json::Deserializer::from_str(text);
+        let spec: ModelSpec = serde_path_to_error::deserialize(de).map_err(|e| {
+            let path = e.path().to_string();
+            let inner = e.into_inner();
+            SpecError {
+                model: model(),
+                path: if path == "." { String::new() } else { path },
+                message: if inner.is_syntax() || inner.is_eof() {
+                    format!("the JSON doesn't read: {inner}")
+                } else {
+                    inner.to_string()
+                },
+            }
+        })?;
+        spec.check_at()?;
+        if sizes && spec.from.is_none() {
+            spec.config(None, 0).map_err(|e| SpecError {
+                model: spec.name.clone(),
+                path: if e.contains("preset") {
+                    "trunk.preset".into()
+                } else {
+                    "trunk".into()
+                },
+                message: e
+                    .strip_prefix(&format!("model spec {:?}: ", spec.name))
+                    .unwrap_or(&e)
+                    .to_string(),
+            })?;
+        }
+        Ok(spec)
     }
 
     /// the engine configuration this spec asks for
@@ -843,6 +959,16 @@ impl Model {
 
     /// `run` with the trunk (and decoding) on the runner's device, the CPU without one
     pub fn run_on(&self, input: &Value, runner: Option<&Runner>) -> Result<BTreeMap<String, Answer>, String> {
+        self.run_sampled(input, runner, &self.spec.sampling)
+    }
+
+    /// `run_on` with the generate head writing by `sampling` instead of the spec's
+    pub fn run_sampled(
+        &self,
+        input: &Value,
+        runner: Option<&Runner>,
+        sampling: &Sampling,
+    ) -> Result<BTreeMap<String, Answer>, String> {
         let (bytes, extra) = self.encode(input)?;
         let extra = if extra.is_empty() {
             vec![0.0; self.clf.net.cfg.extra]
@@ -869,7 +995,8 @@ impl Model {
         }
         if let Some(g) = &self.clf.net.generator {
             let prompt = self.prompt(&bytes);
-            let (out, _) = generate::sample_on(&self.clf, &prompt, &self.spec.sampling, 0, runner);
+            sampling.check()?;
+            let (out, _) = generate::sample_on(&self.clf, &prompt, sampling, 0, runner);
             m.insert(g.name.clone(), Answer::Generated(self.decode(&out)));
         }
         Ok(m)
@@ -1023,6 +1150,29 @@ impl Judge for Model {
     }
 }
 
+/// a critic's model as a generator's critics see it: what judges, and its heads (in the
+/// order its outputs come; generate heads left out)
+pub struct Critique<'a> {
+    pub judge: &'a dyn Judge,
+    pub heads: Vec<HeadDecl>,
+}
+
+impl Model {
+    /// this model as a critic
+    pub fn critique(&self) -> Critique<'_> {
+        Critique {
+            judge: self,
+            heads: self
+                .spec
+                .heads
+                .iter()
+                .filter(|h| h.kind != OutKind::Generate)
+                .cloned()
+                .collect(),
+        }
+    }
+}
+
 /// the spec's critics, resolved by model name, judge `opts.candidates` candidates;
 /// the kept ones come best first
 pub fn generate(
@@ -1032,16 +1182,38 @@ pub fn generate(
     candidates: usize,
     guidance: Option<generate::Guidance>,
 ) -> Result<Vec<Candidate>, String> {
+    let critics: BTreeMap<String, Critique> = models.iter().map(|(n, m)| (n.clone(), m.critique())).collect();
+    Ok(
+        generate_by(model, &critics, prompt, &model.spec.sampling, candidates, guidance)?
+            .into_iter()
+            .filter(Candidate::passed)
+            .collect(),
+    )
+}
+
+/// [`generate`] with the critics' models given as [`Critique`]s (any judge: a model, a
+/// stored classifier stack) and the sampling given; every candidate drawn comes back,
+/// the ones that keep the constraints first, each part best score first (ties: lower index)
+pub fn generate_by(
+    model: &Model,
+    models: &BTreeMap<String, Critique>,
+    prompt: &Value,
+    sampling: &Sampling,
+    candidates: usize,
+    guidance: Option<generate::Guidance>,
+) -> Result<Vec<Candidate>, String> {
     let mut critics = Vec::new();
     for c in &model.spec.critics {
         let m = models
             .get(&c.model)
             .ok_or(format!("critic {:?} is not loaded", c.model))?;
-        let slot = m.spec.slot(&c.head)?;
-        let Slot::Pooled(h) = slot else {
-            return Err(format!("critic {:?}: {:?} is a generate head", c.model, c.head));
+        let Some(h) = m.heads.iter().position(|d| d.name == c.head) else {
+            return Err(format!(
+                "critic {:?}: no head {:?} (a generate head can't judge)",
+                c.model, c.head
+            ));
         };
-        let d = m.spec.decl(&c.head)?;
+        let d = &m.heads[h];
         let pos = |n: &str| {
             d.classes
                 .iter()
@@ -1063,7 +1235,7 @@ pub fn generate(
                 scale: *scale,
             },
         };
-        critics.push(Critic::new(*m as &dyn Judge, h, want, c.weight));
+        critics.push(Critic::new(m.judge, h, want, c.weight));
     }
     let (bytes, _) = match prompt {
         Value::Bytes(b) if b.is_empty() => (Vec::new(), Vec::new()),
@@ -1071,13 +1243,20 @@ pub fn generate(
     };
     let opts = GenOpts {
         prompt: model.prompt(&bytes),
-        sampling: model.spec.sampling.clone(),
+        sampling: sampling.clone(),
         candidates,
         guidance,
         device: model.spec.device,
         ..GenOpts::default()
     };
-    generate::generate(&model.clf, &critics, &model.spec.constraints, &opts)
+    let mut v = generate::draw(&model.clf, &critics, &model.spec.constraints, &opts)?;
+    v.sort_by(|a, b| {
+        b.passed()
+            .cmp(&a.passed())
+            .then(b.score.total_cmp(&a.score))
+            .then(a.index.cmp(&b.index))
+    });
+    Ok(v)
 }
 
 #[cfg(test)]

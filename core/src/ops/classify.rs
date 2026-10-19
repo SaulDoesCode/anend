@@ -23,7 +23,7 @@ use crate::graph::Graph;
 /// how many memories and notes a search, a list or a neighbour search looks through
 const SCAN: usize = 20_000;
 
-fn pool() -> &'static Pool {
+pub(super) fn pool() -> &'static Pool {
     static POOL: OnceLock<Pool> = OnceLock::new();
     POOL.get_or_init(|| Pool::new(crate::classify::pool::available()))
 }
@@ -37,6 +37,9 @@ pub struct Eval {
     pub loss: f64,
     pub accuracy: f64,
     pub macro_f1: f64,
+    /// a generate head's held-out bits per byte (spec models)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bits_per_byte: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -61,16 +64,19 @@ pub struct JobState {
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<Summary>,
+    /// a spec model's summary when its training is done (`ops::models`)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<Value>,
 }
 
 pub struct Job {
-    cancel: AtomicBool,
-    state: Mutex<JobState>,
-    started: std::time::Instant,
+    pub(super) cancel: AtomicBool,
+    pub(super) state: Mutex<JobState>,
+    pub(super) started: std::time::Instant,
 }
 
 impl Job {
-    fn snapshot(&self) -> JobState {
+    pub(super) fn snapshot(&self) -> JobState {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner()).clone();
         if s.state == "running" {
             s.seconds = self.started.elapsed().as_secs_f64();
@@ -78,7 +84,7 @@ impl Job {
         s
     }
 
-    fn running(&self) -> bool {
+    pub(super) fn running(&self) -> bool {
         self.state.lock().unwrap_or_else(|e| e.into_inner()).state == "running"
     }
 
@@ -99,6 +105,7 @@ impl Job {
                 loss,
                 accuracy,
                 macro_f1,
+                bits_per_byte: None,
             });
         } else {
             s.losses.push((t.step, t.loss));
@@ -111,12 +118,12 @@ impl Job {
 }
 
 /// jobs by save file and classifier
-fn jobs() -> &'static Mutex<HashMap<String, Arc<Job>>> {
+pub(super) fn jobs() -> &'static Mutex<HashMap<String, Arc<Job>>> {
     static JOBS: OnceLock<Mutex<HashMap<String, Arc<Job>>>> = OnceLock::new();
     JOBS.get_or_init(Default::default)
 }
 
-fn job_key(store: &Store, name: &str) -> String {
+pub(super) fn job_key(store: &Store, name: &str) -> String {
     format!("{}\u{0}{name}", store.path().display())
 }
 
@@ -180,7 +187,7 @@ fn key_folder(key: &str) -> &str {
 }
 
 /// whether another job may start for `store`'s folder
-fn room_for_a_job(store: &Store, limits: &Limits) -> Result<(), String> {
+pub(super) fn room_for_a_job(store: &Store, limits: &Limits) -> Result<(), String> {
     if !limits.shared {
         return Ok(());
     }
@@ -1236,6 +1243,10 @@ pub fn saves_call(saves: &Saves, op: &str, args: &Value, limits: &Limits) -> Res
             if !cls.is_empty() {
                 b["classifiers"] = serde_json::to_value(cls).map_err(|e| e.to_string())?;
             }
+            let specs = models.export_spec_models()?;
+            if !specs.is_empty() {
+                b["models"] = serde_json::to_value(specs).map_err(|e| e.to_string())?;
+            }
             Ok(b)
         }
         "saves.import" => {
@@ -1244,13 +1255,24 @@ pub fn saves_call(saves: &Saves, op: &str, args: &Value, limits: &Limits) -> Res
                     .map_err(|e| format!("that bundle's classifiers don't read: {e}"))?,
                 None => Vec::new(),
             };
+            let specs: Vec<crate::specs::BundledSpec> = match args.get("bundle").and_then(|b| b.get("models")) {
+                Some(c) => serde_json::from_value(c.clone())
+                    .map_err(|e| format!("that bundle's spec models don't read: {e}"))?,
+                None => Vec::new(),
+            };
             let mut got = saves.call_plain(op, args)?;
-            // merged: the classifiers stay out (their lists would point elsewhere)
+            // merged: the classifiers and spec models stay out (their lists would point
+            // elsewhere)
             if let Some(name) = got.get("save").and_then(Value::as_str).map(str::to_string)
-                && !cls.is_empty()
+                && !(cls.is_empty() && specs.is_empty())
             {
                 let (_, models) = saves.models_of(&name)?;
-                got["classifiers"] = json!(models.import_classifiers(&cls)?);
+                if !cls.is_empty() {
+                    got["classifiers"] = json!(models.import_classifiers(&cls)?);
+                }
+                if !specs.is_empty() {
+                    got["models"] = json!(models.import_spec_models(&specs)?);
+                }
             }
             Ok(got)
         }

@@ -40,6 +40,7 @@ impl Store {
         crate::classifiers::create_tables(&txn)?;
         crate::memo::create_tables(&txn)?;
         crate::filters::create_tables(&txn)?;
+        crate::specs::create_tables(&txn)?;
         txn.commit().map_err(err)?;
         let store = Store {
             db,

@@ -79,6 +79,9 @@ limits
                        included (default 512; 0 for no limit)
   --quota MB           how much disk each member's saves in the web app may fill
                        (default 1024; 0 for no limit; --local has none)
+  --pretrained DIR     a folder of pretrained models (each a HuggingFace folder) that spec
+                       models in the web app may start from; repeatable. Without one a
+                       shared hub loads none (--local loads any folder)
 
 the pages
   --name NAME          what the server calls itself (default \"anend hub\")
@@ -105,6 +108,8 @@ struct Args {
     share_quota: u64,
     #[cfg_attr(not(feature = "app"), allow(dead_code))]
     quota: u64,
+    #[cfg_attr(not(feature = "app"), allow(dead_code))]
+    pretrained: Vec<PathBuf>,
     behind_proxy: bool,
     admin: Option<String>,
     no_ratelimit: bool,
@@ -129,6 +134,7 @@ fn parse_args() -> Result<Args, String> {
         max_upload: 64,
         share_quota: 512,
         quota: 1024,
+        pretrained: Vec::new(),
         behind_proxy: false,
         admin: None,
         no_ratelimit: false,
@@ -164,6 +170,7 @@ fn parse_args() -> Result<Args, String> {
             "--max-upload" => a.max_upload = mb(value("--max-upload")?, "--max-upload")?,
             "--share-quota" => a.share_quota = mb(value("--share-quota")?, "--share-quota")?,
             "--quota" => a.quota = mb(value("--quota")?, "--quota")?,
+            "--pretrained" => a.pretrained.push(PathBuf::from(value("--pretrained")?)),
             "--behind-proxy" => a.behind_proxy = true,
             "--admin" => a.admin = Some(value("--admin")?),
             "--no-ratelimit" => a.no_ratelimit = true,
@@ -379,6 +386,7 @@ async fn main() {
     #[cfg(feature = "app")]
     {
         app::QUOTA.set(args.quota.saturating_mul(1024 * 1024)).ok();
+        anend_core::ops::models::allow_pretrained(args.pretrained.clone());
         app::WORKSPACES.set(app::Workspaces::new(args.data.join("users"))).ok();
     }
     server::DATA.set(args.data.clone()).ok();

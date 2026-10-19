@@ -11,6 +11,8 @@
 pub mod classify;
 pub mod merge;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod models;
+#[cfg(not(target_arch = "wasm32"))]
 mod saves;
 pub mod texts;
 

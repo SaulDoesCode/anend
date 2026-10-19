@@ -369,6 +369,12 @@ pub fn load(dir: &Path, o: &Options) -> Result<Classifier, String> {
     Folder::open(dir)?.model(o)
 }
 
+/// writes a tiny synthetic llama checkpoint into `dir` (tests elsewhere in the crate)
+#[cfg(test)]
+pub(crate) fn synthetic_checkpoint(dir: &Path, seed: u64) {
+    tests::synth(dir, &tests::Shape::llama(), seed);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -384,7 +390,7 @@ mod tests {
     /// a synthetic checkpoint's shapes (tests only: tiny so the suite stays fast; the
     /// loader itself has no size limits)
     #[derive(Clone)]
-    struct Shape {
+    pub(super) struct Shape {
         model_type: &'static str,
         d: usize,
         layers: usize,
@@ -403,7 +409,7 @@ mod tests {
     }
 
     impl Shape {
-        fn llama() -> Shape {
+        pub(super) fn llama() -> Shape {
             Shape {
                 model_type: "llama",
                 d: 24,
@@ -424,7 +430,7 @@ mod tests {
         }
     }
 
-    type Tensors = BTreeMap<String, (Vec<usize>, Vec<f32>)>;
+    pub(super) type Tensors = BTreeMap<String, (Vec<usize>, Vec<f32>)>;
 
     fn dir(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("anend-pre-{}-{name}", std::process::id()));
@@ -434,7 +440,7 @@ mod tests {
     }
 
     /// writes config.json, tokenizer.json and random weights; returns the weights
-    fn synth(dir: &Path, s: &Shape, seed: u64) -> Tensors {
+    pub(super) fn synth(dir: &Path, s: &Shape, seed: u64) -> Tensors {
         let mut r = Rng::new(seed);
         let mut t: Tensors = BTreeMap::new();
         let mut put = |name: String, shape: Vec<usize>, scale: f32, base: f32| {

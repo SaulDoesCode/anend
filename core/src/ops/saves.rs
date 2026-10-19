@@ -402,8 +402,9 @@ impl Saves {
     /// the rest on the open save
     pub fn call(&self, op: &str, args: &Value) -> Res {
         match &self.models {
+            Some(limits) if super::models::routed(op) => super::models::saves_call(self, op, args, limits),
             Some(limits) if super::classify::routed(op) => super::classify::saves_call(self, op, args, limits),
-            None if op.starts_with("classify.") || op.starts_with("filters.") => {
+            None if op.starts_with("classify.") || op.starts_with("filters.") || op.starts_with("models.") => {
                 Err("these saves keep no models".into())
             }
             _ => self.call_plain(op, args),

@@ -17,6 +17,7 @@ pub mod memory;
 pub mod note;
 pub mod ops;
 pub mod simd;
+pub mod specs;
 pub mod spread;
 pub mod store;
 pub mod texts;
