@@ -176,7 +176,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | near texts by meaning (embedding) or verdict | classify_ui.rs, `classify.near` | has |
 | outputs as a list (write the list) | classify_ui.rs, `classify.enlist` | has |
 | checks: validators, disagreements | cls_more.rs | has |
-| share / take classifiers on the hub | cls_more.rs, JS clsmore.js | missing |
+| share / take classifiers on the hub | cls_more.rs, JS clsmore.js | has (in the settings' hub section) |
 | export / import `.anendcls` | classify_ui.rs | has |
 | colour views by a classifier | classify_ui.rs | has (picked in the memory strip) |
 | device: CPU / GPU / GPU fast, and which device a job ran on | asked 19 Oct | missing |
@@ -205,7 +205,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | saves: list, open, new, copy, rename, delete, backup, import weum JSON | settings.rs | has |
 | saves folder setting (a folder lists its saves, a .redb path opens one) | settings.rs | missing |
 | export / import a bundle (.anend.json) | JS settings.js | has (19 Oct) |
-| the hub: connect with an app token, browse and download shared saves, share this one | hub_ui.rs | missing (the address box only) |
+| the hub: connect with an app token, browse and download shared saves, share this one | hub_ui.rs | has (19 Oct): views/hubui.rs + hubnet.rs (ureq on the desktop, fetch on the web); the web shares saves from the desktop only (no same-origin route for it) |
 | local-only browser saves (IndexedDB) | JS local/ | dropped: the web app runs against the hub's app mode (`anend-hub --mode app --local` for one person) |
 
 ## New since the Bevy app (keep)

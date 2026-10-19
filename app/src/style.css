@@ -45,7 +45,7 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 button.ibtn { width: 26px; padding: 0; }
 button.plain { background: none; color: var(--dim); }
 button.plain:hover { background: color-mix(in srgb, var(--buttons) 40%, transparent); color: var(--text); filter: none; }
-input[type=text], input[type=search], input[type=number], select, textarea {
+input[type=text], input[type=search], input[type=number], input[type=password], input[type=date], select, textarea {
   font: inherit; color: var(--text); background: var(--pad); border: 0; border-radius: var(--radius);
   padding: 3px 8px; min-width: 0; height: 26px;
 }
@@ -273,12 +273,12 @@ ruby.rw.t-link, ruby.rw.t-email { --tc: var(--t-link); } ruby.rw.t-hashtag { --t
 /* ---------------------------------------------------------------- settings: a dialog, closed by a click outside */
 .overlay { position: fixed; inset: 0; z-index: 40; background: rgb(0 0 0 / .35); display: flex; justify-content: center; align-items: flex-start; padding-top: calc(var(--top) + 8px); }
 .dialog {
-  position: relative; width: min(760px, calc(100vw - 16px)); max-height: calc(100vh - var(--top) - 24px); overflow: auto;
+  position: relative; width: min(760px, calc(100vw - 16px)); max-height: calc(100vh - var(--top) - 24px); overflow-y: auto; overflow-x: hidden;
   background: var(--cards); color: var(--text); border-radius: var(--radius); box-shadow: 0 10px 40px rgb(0 0 0 / .4); padding: 8px 14px 12px;
 }
 .dialog .head { display: flex; align-items: center; gap: 8px; position: sticky; top: -8px; background: var(--cards); padding: 4px 0; z-index: 2; }
 .dialog .head h2 { margin: 0; }
-.dialog .close { position: absolute; right: 0; top: 4px; }
+.dialog .close { flex: none; }
 .dialog hr { border: 0; border-top: 1px solid color-mix(in srgb, var(--dim) 35%, transparent); margin: 6px 0; }
 .section > .shead { display: flex; align-items: center; gap: 6px; width: 100%; background: none; color: var(--text); justify-content: flex-start; height: 28px; padding: 0 2px; font-weight: 600; font-size: 1.05em; }
 .section > .shead .icon { transition: transform .15s; transform: rotate(90deg); }
@@ -664,3 +664,7 @@ a.btn { text-decoration: none; }
 .top .side, .top .status { z-index: 1; }
 @media (max-width: 800px) { .forge-cols { grid-template-columns: 1fr; } }
 .hbar button.tag-open { justify-content: flex-start; height: 20px; padding: 0 4px; color: var(--link); }
+
+/* the hub section (views/hubui.rs) */
+.hub-list { display: flex; flex-direction: column; gap: 4px; max-height: 340px; overflow: auto; background: var(--pad); border-radius: var(--radius); padding: 6px 8px; }
+.hub-item { padding: 3px 0; border-bottom: 1px solid color-mix(in srgb, var(--dim) 18%, transparent); }

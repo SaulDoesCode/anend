@@ -46,7 +46,7 @@ pub fn Settings() -> Element {
                 Keys {}
                 if cfg!(feature = "hub") {
                     hr {}
-                    Hub {}
+                    crate::views::hubui::Hub {}
                 }
             }
         }
@@ -592,20 +592,6 @@ fn Keys() -> Element {
                     }
                 }
             }
-        }
-    }
-}
-
-#[component]
-fn Hub() -> Element {
-    let ui = ui();
-    let p = ui.prefs.read().clone();
-    rsx! {
-        Fold { name: "hub", title: "the hub",
-            label { r#for: "hub", "its address" }
-            input { id: "hub", r#type: "text", placeholder: "http://localhost:8080", initial_value: "{p.hub_url}",
-                oninput: move |e| set_pref(ui, |p| p.hub_url = e.value()) }
-            div { class: "wide dim small", "Sharing saves and models on the hub comes back here when the hub moves to the entry graph." }
         }
     }
 }

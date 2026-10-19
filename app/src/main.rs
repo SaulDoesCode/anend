@@ -5,6 +5,7 @@ mod backend;
 mod fonts;
 mod gem;
 mod highlight;
+mod hubnet;
 mod icons;
 mod keys;
 mod md;

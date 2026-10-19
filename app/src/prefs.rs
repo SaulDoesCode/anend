@@ -84,6 +84,8 @@ pub struct Prefs {
     pub bottom_bar: f32,
     /// the top bar at the bottom, the command bar at the top
     pub bars_swapped: bool,
+    /// an app token from the hub's profile page (sharing needs one)
+    pub hub_token: String,
 }
 
 /// the space's own settings
@@ -186,6 +188,7 @@ impl Default for Prefs {
             top_bar: 32.0,
             bottom_bar: 32.0,
             bars_swapped: false,
+            hub_token: String::new(),
         }
     }
 }

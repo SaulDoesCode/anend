@@ -32,7 +32,7 @@ const FACES: [(&str, &str, &str, &[u8]); 4] = [
     ),
 ];
 
-fn base64(data: &[u8]) -> String {
+pub fn base64(data: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for c in data.chunks(3) {
@@ -47,6 +47,32 @@ fn base64(data: &[u8]) -> String {
         out.push(if c.len() > 2 { T[n as usize & 63] as char } else { '=' });
     }
     out
+}
+
+/// base64 back to bytes (standard alphabet, padding optional); None when it doesn't read
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub fn unbase64(s: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(s.len() / 4 * 3);
+    let (mut acc, mut bits) = (0u32, 0u32);
+    for c in s.bytes() {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' | b'\n' | b'\r' => continue,
+            _ => return None,
+        };
+        acc = acc << 6 | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
 }
 
 /// the `@font-face` rules, made once
@@ -75,5 +101,9 @@ mod tests {
         assert_eq!(base64(b"Ma"), "TWE=");
         assert_eq!(base64(b"M"), "TQ==");
         assert!(css().matches("@font-face").count() == 4);
+        for t in [&b""[..], b"M", b"Ma", b"Man", b"hello world \xff\x00"] {
+            assert_eq!(unbase64(&base64(t)).unwrap(), t);
+        }
+        assert!(unbase64("a$b").is_none());
     }
 }

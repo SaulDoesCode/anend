@@ -13,7 +13,7 @@ path = "src/main.rs"
 [features]
 default = ["desktop", "hub"]
 # the desktop app: the system webview (wry), the saves on disk through anend-core's Store
-desktop = ["dioxus/desktop", "dep:tokio", "dep:png"]
+desktop = ["dioxus/desktop", "dep:tokio", "dep:png", "dep:ureq"]
 # the web app: WebAssembly in the browser, talking to the hub's app API over a WebSocket
 web = ["dioxus/web", "dep:wasm-bindgen", "dep:web-sys", "dep:js-sys", "dep:wasm-bindgen-futures"]
 # the hub's settings (its address, the app token); leave out for a hub-free build
@@ -32,6 +32,7 @@ redb = "4.3"
 
 tokio = { version = "1", features = ["rt", "time"], optional = true }
 png = { version = "0.17", optional = true }
+ureq = { version = "3", default-features = false, features = ["rustls"], optional = true }
 
 wasm-bindgen = { version = "=0.2.129", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }

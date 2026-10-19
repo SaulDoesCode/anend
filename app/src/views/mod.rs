@@ -5,6 +5,7 @@ pub mod classifiers;
 pub mod clsmore;
 pub mod flt;
 pub mod forge;
+pub mod hubui;
 pub mod judge;
 pub mod lists;
 pub mod memory;
