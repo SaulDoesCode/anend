@@ -253,7 +253,8 @@ fn on_key(mut ui: Ui, api: Api, mut k: KeyPress) {
         Some(Action::ZoomIn) => return set_zoom(ui, z + 0.05),
         Some(Action::ZoomOut) => return set_zoom(ui, z - 0.05),
         Some(Action::ZoomReset) => return set_zoom(ui, 1.0),
-        Some(Action::Undo) if !k.typing => return undo_last(ui, api),
+        // the space keeps its own undo (moves, pins, removals) and falls back on this
+        Some(Action::Undo) if !k.typing && view != View::Space => return undo_last(ui, api),
         Some(Action::FocusBar) if !*ui.settings.peek() => {
             ui.focus_bar();
             return;

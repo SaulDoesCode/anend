@@ -37,6 +37,7 @@ pub const SETTINGS: &[&str] = &[
     "list_right",
     "white",
     "word_types",
+    "space",
 ];
 
 /// the views, in their tab order

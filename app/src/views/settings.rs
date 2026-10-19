@@ -417,7 +417,7 @@ fn read_path(ui: Ui, step: Signal<Step>, target: String, path: String) {
 }
 
 /// a file handed to the viewer (the web build's backups)
-fn download(name: &str, text: &str) {
+pub fn download(name: &str, text: &str) {
     let js = format!(
         "const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([{}], {{type: 'application/json'}})); a.download = {}; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);",
         serde_json::to_string(text).unwrap_or_default(),

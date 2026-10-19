@@ -66,7 +66,8 @@ texts as reversed does), and asking for it answers an error.
 | `lists.stats` | | `{lists: [{list, name, members: [hit], count, ordinal_sum, reversed_sum, ordinal_mean, reversed_mean, whole: measure, vector: [26]}], dot: [[cosine]]}` (`dot` is empty past 1000 lists) |
 | `lists.enlist` / `lists.delist` | `{list, member}` (keys) | `null` |
 | `lists.unlist` | `{list}` | `{removed}` |
-| `space.spread` | `{texts: [{id, text}], reversed?}` | `{d, buckets, nodes: [{id, x, y, z, s, r, q, hue}]}` |
+| `space.spread` | `{texts: [{id, text}], reversed?}` | `{d, buckets, nodes: [{id, x, y, z, s, r, q, hue}]}` (the old spiral layout; the app's space no longer uses it) |
+| `space.features` | `{keys: [key]}` (at most 2000) | `{features: [{key, s, r, chars, words, kind, types: {type: n}, created (ms), lists: [list key], frequency}]}`: what the space's free spread weighs texts by; unknown keys are left out |
 | `forge.preview` | `{ingredients: [{save, effect: add\|take away\|keep shared}] (at most 32), filter?}` | `{memories, notes, lists, sample, titles}` |
 | `forge.make` | the same and `{name}` | `{save, memories, notes, lists}` |
 | `forge.pour` | the same | what went into the open save |

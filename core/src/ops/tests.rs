@@ -100,3 +100,30 @@ fn kinds_detected_and_fixed() {
     drop(sv);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn space_features_name_lists_kinds_and_times() {
+    let dir = temp("features");
+    let sv = Saves::new(&dir, "notes");
+    let c = |op: &str, a: Value| sv.call(op, &a).unwrap();
+    let key = |t: &str| {
+        c("mem.saturate", json!({ "text": t }))["key"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let (fruit, plum, paris) = (key("fruit"), key("ripe plum 12"), key("Paris"));
+    c("lists.enlist", json!({"list": fruit, "member": plum}));
+    let f = c("space.features", json!({ "keys": [plum, paris, "9,9"] }));
+    let all = f["features"].as_array().unwrap();
+    assert_eq!(all.len(), 2, "an unknown key is left out: {f}");
+    assert_eq!(all[0]["lists"], json!([fruit]));
+    assert_eq!(all[0]["types"]["number"], 1);
+    assert_eq!(all[0]["words"], 3);
+    assert_eq!(all[1]["kind"], "name");
+    assert!(all[1]["lists"].as_array().unwrap().is_empty());
+    assert!(all[0]["created"].as_u64().unwrap() > 1_700_000_000_000);
+    let (s, r) = crate::spread::sums("Paris");
+    assert_eq!((all[1]["s"].as_i64(), all[1]["r"].as_i64()), (Some(s), Some(r)));
+    let _ = std::fs::remove_dir_all(dir);
+}

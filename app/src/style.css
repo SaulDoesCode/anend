@@ -393,29 +393,55 @@ button.plain.on { background: var(--accent); color: var(--on-button); }
 .space-host.looking { cursor: none; }
 .space-gl, .space-css { position: absolute !important; inset: 0; }
 .space-css { pointer-events: none; overflow: hidden; z-index: 1; }
-.space-css .slabel { position: absolute; left: 0; top: 0; will-change: transform; }
+.space-css .slabel { position: absolute; left: 0; top: 0; transform-origin: 50% 50%; }
 .slabel {
-  pointer-events: auto; cursor: pointer; white-space: nowrap; line-height: 1.15; padding: 0 3px;
+  pointer-events: auto; cursor: grab; line-height: 1.15; padding: 0 3px; text-align: center; white-space: pre-wrap; width: max-content;
   color: var(--room-ink); font-family: var(--font); border-bottom: .09em solid transparent; user-select: none;
-  text-shadow: 0 0 2px var(--room-bg);
+  text-shadow: 0 0 2px var(--room-bg); backface-visibility: hidden;
 }
-.slabel:hover { color: var(--link); }
+.slabel.dragging { cursor: grabbing; }
+/* hovered and selected texts take the Bevy space's accent */
+.slabel.hover, .slabel.selected { color: #e811a0 !important; }
+.slabel.selected { text-decoration: underline dotted; text-decoration-thickness: .06em; }
 .slabel.picked { background: color-mix(in srgb, var(--accent) 40%, transparent); }
+.slabel.pinned::after { content: "•"; font-size: .5em; vertical-align: super; color: var(--accent); margin-left: 2px; }
+.slabel.free { font-style: italic; }
 .poscard { position: absolute; top: calc(var(--over-top) + 2px); left: calc(var(--frame) + 2px); z-index: 2; pointer-events: none; white-space: pre; background: color-mix(in srgb, var(--cards) 92%, transparent); color: var(--text); font: 12px var(--mono); padding: 2px 8px; border-radius: var(--radius); }
-.metrics {
-  position: absolute; right: 6px; top: 6px; z-index: 3; width: min(320px, 46%);
-  background: var(--cards); color: var(--text); border-radius: var(--radius); padding: 8px 10px; font: 13px/1.4 var(--font);
-  box-shadow: 0 4px 16px rgb(0 0 0 / .22);
+/* the space's windows: moved by their title bar, their close button showing on hover */
+.win {
+  position: absolute; z-index: 4; width: min(320px, calc(100vw - 16px)); max-height: calc(100vh - var(--over-top) - var(--over-bottom) - 8px);
+  display: flex; flex-direction: column; background: color-mix(in srgb, var(--cards) 94%, transparent); color: var(--text);
+  border-radius: var(--radius); box-shadow: 0 4px 18px rgb(0 0 0 / .22); font: 13px/1.4 var(--font);
 }
-.metrics .title { font-weight: 700; font-size: 15px; margin: 0 22px 4px 0; overflow-wrap: anywhere; }
-.metrics .close { position: absolute; right: 4px; top: 4px; }
-.metrics table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
-.metrics th { text-align: left; font-weight: 400; color: var(--dim); padding: 0 6px 0 0; }
-.metrics td { padding: 0 12px 0 0; }
-.metrics .num { cursor: pointer; color: var(--link); }
-.metrics .gsum { font: 11.5px var(--mono); margin: 4px 0; overflow-wrap: anywhere; }
+.win-head { display: flex; align-items: center; gap: 6px; padding: 5px 6px 4px 10px; cursor: move; user-select: none; touch-action: none; border-bottom: 1px solid color-mix(in srgb, var(--dim) 18%, transparent); }
+.win-title { flex: 1; font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 4px; }
+.win-head .close { opacity: 0; transition: opacity .15s; height: 20px; width: 22px; }
+.win:hover .win-head .close, .win-head .close:focus-visible { opacity: 1; }
+.win-body { padding: 6px 10px 8px; overflow: auto; min-height: 0; }
+.win-drag { position: fixed; inset: 0; z-index: 90; cursor: move; touch-action: none; }
+.metrics-table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.metrics-table th { text-align: left; font-weight: 400; color: var(--dim); padding: 0 6px 0 0; white-space: nowrap; }
+.metrics-table td { padding: 0 12px 0 0; }
+.win .num { cursor: pointer; color: var(--link); }
+.win .num:hover { text-decoration: underline; }
+.win .gsum { font: 11.5px var(--mono); margin: 4px 0; overflow-wrap: anywhere; }
+.win .pf { font-size: 11.5px; color: var(--dim); overflow-wrap: anywhere; }
+.win .pf i { cursor: pointer; color: var(--link); }
+.win svg.triangle polygon { stroke: var(--text); }
+/* the physics panel */
+.win .physics { display: flex; flex-direction: column; gap: 6px; }
+.pgroup h4 { margin: 2px 0 2px; font-size: 12px; color: var(--dim); font-weight: 600; }
+.pslider { display: grid; grid-template-columns: 1fr 92px 38px; gap: 6px; align-items: center; font-size: 12px; }
+.pslider .pname { cursor: default; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pslider input[type=range] { width: 100%; }
+.pslider .pval { text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
+.pslider select { height: 22px; font-size: 12px; }
 .space-empty { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); z-index: 1; pointer-events: none; width: min(440px, calc(100% - 32px)); text-align: center; color: var(--room-ink); font-size: 15px; }
-.space-help { position: absolute; left: var(--frame); bottom: calc(var(--over-bottom) + 2px); right: var(--frame); z-index: 2; font-size: 12.5px; background: color-mix(in srgb, var(--cards) 94%, transparent); color: var(--text); padding: 6px 10px; border-radius: var(--radius); }
+.space-help { position: absolute; left: 50%; transform: translateX(-50%); top: calc(var(--over-top) + 4px); width: min(980px, calc(100vw - 24px)); max-height: calc(100vh - var(--over-top) - var(--over-bottom) - 12px); overflow: auto; z-index: 5; font-size: 12.5px; background: color-mix(in srgb, var(--cards) 96%, transparent); color: var(--text); padding: 8px 14px; border-radius: var(--radius); box-shadow: 0 4px 18px rgb(0 0 0 / .22); }
+.space-help .close { position: absolute; right: 6px; top: 6px; }
+.help-cols { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 4px 20px; }
+.help-cols h4 { margin: 4px 0 2px; font-size: 12.5px; color: var(--dim); }
+.help-cols td { padding: 1px 8px 1px 0; vertical-align: top; }
 
 /* zen: the bars fade while you rest (the views keep their room); the top bar can slide away
    and come back when the pointer nears the top */

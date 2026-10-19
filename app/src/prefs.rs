@@ -73,6 +73,44 @@ pub struct Prefs {
     pub white: bool,
     /// the memory view labels every text's words with their types
     pub word_types: bool,
+    /// the space's panels, physics, history and last address
+    pub space: SpaceUi,
+}
+
+/// the space's own settings
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SpaceUi {
+    /// the physics panel's sliders changed from their defaults (views/space.rs `SLIDERS`)
+    pub physics: BTreeMap<String, f64>,
+    /// what the depth follows: none, ordinal, length or time
+    pub depth_by: String,
+    /// what was typed in the space's bar (↑ ↓), newest last
+    pub history: Vec<String>,
+    /// the last address (`123`, `r123` or a map's name), opened again next time
+    pub address: String,
+    pub show_physics: bool,
+    pub show_hud: bool,
+    pub show_help: bool,
+    pub show_details: bool,
+    /// where each movable window was left (`details`, `physics`): its left and top
+    pub wins: BTreeMap<String, (f64, f64)>,
+}
+
+impl Default for SpaceUi {
+    fn default() -> SpaceUi {
+        SpaceUi {
+            physics: BTreeMap::new(),
+            depth_by: "none".into(),
+            history: Vec::new(),
+            address: String::new(),
+            show_physics: false,
+            show_hud: true,
+            show_help: false,
+            show_details: true,
+            wins: BTreeMap::new(),
+        }
+    }
 }
 
 /// the memory view's search filter: what of the shown texts it keeps (every part empty or
@@ -133,6 +171,7 @@ impl Default for Prefs {
             list_right: false,
             white: false,
             word_types: false,
+            space: SpaceUi::default(),
         }
     }
 }

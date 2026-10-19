@@ -1,38 +1,84 @@
 // the space: memory texts float as camera-facing labels (html laid over a webgl room at
-// each text's projected place, its font sized by distance, so the text stays crisp and
-// no css 3d is needed) and you fly through it. Adapted from hub/web/space.js for the
-// Dioxus app: it talks to Rust through `send` (events) and the commands Rust sends in.
+// each text's projected place) and you fly through it. Rust sends the texts with what
+// they are (their sums, length, kind, word types, lists, time, class) and the physics'
+// settings; this file runs the free spread and draws, and tells Rust what happens.
+//
+// The spread is a free force-directed layout (no spiral, no anchors): every two texts
+// repel, and attract each other as much as they are alike, where "alike" is a weighted
+// sum of what the physics panel weighs (sums, bucket, length, word types, lists, class,
+// time, letters), each weight from −1 (alike texts push apart) to +1 (pull together). A
+// weak gravity keeps the cloud together, labels never overlap, and the integration runs
+// in fixed steps with damping and cooling, so it settles whatever the frame rate.
+//
+// Smooth labels: each label keeps one font size and is placed and scaled with a
+// sub-pixel transform every frame (no font-size steps, no whole-pixel snapping).
 //
 // right mouse drag looks, W A S D move, Space / C up and down, Q / E roll, Shift fast,
-// [ ] or the wheel change the speed, R levels, Home goes back; the arrow keys ease the
-// camera onto the nearest text in that direction. Texts shrink as the camera nears them.
+// [ ] or the wheel change the speed, R levels, Home goes back; the arrows ease the
+// camera onto the nearest text that way. Drag a text to move it (it stays pinned), the
+// wheel on a text pushes it away or pulls it near.
 
 import * as THREE from '__THREE__';
 
-const FONT = 40;
-const PX = 0.014;
 const LOOK = 0.0026;
 const ROLL = 1.4;
+const BASE_PX = 32;
+const STEP = 1 / 60;
 // the flying keys by action, as the keymap binds them (Rust sends them: `keys`)
 const DEFAULT_KEYS = { fly_forward: 'KeyW', fly_back: 'KeyS', fly_left: 'KeyA', fly_right: 'KeyD', fly_up: 'Space', fly_down: 'KeyC', roll_left: 'KeyQ', roll_right: 'KeyE', level: 'KeyR', back_to_start: 'Home', slower: 'BracketLeft', faster: 'BracketRight' };
+const FLYING = ['fly_forward', 'fly_back', 'fly_left', 'fly_right', 'fly_up', 'fly_down', 'roll_left', 'roll_right'];
+// the physics' settings (the panel's sliders); Rust sends changes as `physics`
+export const PHYSICS = {
+  damping: 2.2, gravity: 0.06, repel: 9, link: 4, attract: 0.9, pad: 0.3, cool: 0.012, substeps: 2,
+  size: 0.5, wrap: 60, minPx: 1.2, depth: 0, flat: 1.5, qscale: 12, distance: 26,
+  w_ordinal: 0.6, w_reversed: 0.3, w_bucket: 0.8, w_length: 0.2, w_types: 0.3, w_lists: 0.7, w_class: 0.5, w_time: 0.2, w_letters: 0.4,
+  depth_by: 'none', reversed: 0,
+};
 
 const typing = (e) => {
   const t = e.target || {};
   return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable;
 };
 
+const hash01 = (s, salt) => {
+  let h = 2166136261 ^ salt;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return ((h >>> 0) % 100000) / 100000;
+};
+
+const cosine = (a, b) => {
+  let d = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) { d += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  return na && nb ? d / Math.sqrt(na * nb) : 0;
+};
+
+const TYPES = ['word', 'name', 'number', 'date', 'time', 'link', 'email', 'hashtag', 'noun', 'verb', 'adjective', 'adverb', 'pronoun', 'determiner', 'preposition', 'conjunction', 'interjection'];
+
 export class Space {
   constructor(host, send) {
     this.host = host;
     this.send = send;
-    this.items = new Map(); // id → {obj, el, hit, node}
+    this.nodes = new Map(); // key → node
+    this.order = []; // nodes, in a stable order for the pair loops
+    this.sim = null; // the pair weights, row-major over `order`
     this.keys = new Set();
     this.bind = { ...DEFAULT_KEYS };
+    this.p = { ...PHYSICS };
     this.speed = 6;
     this.running = false;
     this.looking = false;
-    this.ease = null; // {fromPos, toPos, fromQuat, toQuat, t}
-    this.frame = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
+    this.paused = false;
+    this.alpha = 0;
+    this.acc = 0;
+    this.ease = null;
+    this.selected = null;
+    this.hover = null;
+    this.drag = null;
+    this.undo = [];
+    this.freeN = 0;
+    this.infoAt = 0;
+    this.origin = new THREE.Vector3();
+    this.quat = new THREE.Quaternion();
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.05, 4000);
     this.room = new THREE.Color('#e4d4be');
@@ -63,7 +109,10 @@ export class Space {
     this.resize();
     this.listen();
     this.loop = this.loop.bind(this);
+    this.setFrame();
   }
+
+  // ------------------------------------------------------------------ settings
 
   setKeys(map) {
     this.bind = { ...DEFAULT_KEYS, ...map };
@@ -72,6 +121,15 @@ export class Space {
 
   held(action) {
     return this.keys.has(this.bind[action]);
+  }
+
+  setPhysics(p) {
+    const old = this.p;
+    this.p = { ...PHYSICS, ...p };
+    const weights = Object.keys(PHYSICS).filter((k) => k.startsWith('w_') || k === 'qscale' || k === 'reversed');
+    if (weights.some((k) => old[k] !== this.p[k])) this.sim = null;
+    if (old.wrap !== this.p.wrap) for (const n of this.order) this.measure(n);
+    this.wake(0.6);
   }
 
   setRoom(color, ink) {
@@ -112,67 +170,482 @@ export class Space {
     this.looking = false;
   }
 
-  place(texts, spread, again) {
+  // the cloud's centre: ahead of where the camera is when a search lays texts out
+  setFrame() {
+    this.quat.copy(this.camera.quaternion);
+    this.origin.set(0, 0, -this.p.distance).applyQuaternion(this.quat).add(this.camera.position);
+  }
+
+  world(n, out = new THREE.Vector3()) {
+    return out.set(n.x, n.y, n.z).applyQuaternion(this.quat).add(this.origin);
+  }
+
+  local(w, n) {
+    const v = w.clone().sub(this.origin).applyQuaternion(this.quat.clone().invert());
+    n.x = v.x; n.y = v.y; n.z = v.z;
+  }
+
+  // ------------------------------------------------------------------ texts
+
+  // texts: [{key, text, note, s, r, q, hue, chars, words, kind, types, created, lists, freq, cls, strength, colour}]
+  place(texts, again) {
     if (!again) {
-      this.frame.pos.copy(this.camera.position);
-      this.frame.quat.copy(this.camera.quaternion);
+      this.setFrame();
+      for (const n of [...this.order]) if (!n.pinned && !n.free) this.drop(n);
     }
-    const byId = new Map(spread.nodes.map((n) => [String(n.id), n]));
-    const keep = new Set();
+    const before = this.order.length;
     for (const t of texts) {
-      const n = byId.get(String(t.key));
-      if (!n) continue;
-      keep.add(String(t.key));
-      let it = this.items.get(String(t.key));
-      if (!it) {
-        const el = document.createElement('div');
-        el.className = 'slabel';
-        el.textContent = t.note ? `✎ ${t.text}` : t.text;
-        el.tabIndex = -1;
-        const obj = new THREE.Object3D();
-        it = { obj, el, hit: t };
-        this.wire(it);
-        this.overlay.append(el);
-        this.items.set(String(t.key), it);
+      let n = this.nodes.get(String(t.key));
+      if (n) {
+        Object.assign(n.f, t);
+        n.el.style.borderBottomColor = t.shared ? `hsl(${t.hue} 70% 45%)` : 'transparent';
+        continue;
       }
-      it.node = n;
-      it.el.style.borderBottomColor = `hsl(${n.hue} 70% 45%)`;
-      const d = spread.d;
-      const k = (d + n.z) / d;
-      const local = new THREE.Vector3(n.x * k, n.y * k, -(d + n.z));
-      it.obj.position.copy(local.applyQuaternion(this.frame.quat).add(this.frame.pos));
+      n = this.make(t, false);
+      this.seed(n);
     }
-    for (const [id, it] of this.items) if (!keep.has(id)) this.drop(id, it);
+    this.sim = null;
+    this.wake(1);
     this.render();
-    this.info();
+    this.info(true);
+    return this.order.length - before;
   }
 
-  clear() {
-    for (const [id, it] of this.items) this.drop(id, it);
-    this.render();
-    this.info();
+  make(t, free) {
+    const el = document.createElement('div');
+    el.className = 'slabel' + (free ? ' free' : '') + (t.note ? ' note' : '');
+    el.textContent = t.note ? `✎ ${t.text}` : t.text;
+    el.style.borderBottomColor = t.shared ? `hsl(${t.hue} 70% 45%)` : 'transparent';
+    if (t.colour) el.style.color = t.colour;
+    el.tabIndex = -1;
+    const n = { key: String(t.key), f: t, el, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, hw: 1, hh: 0.4, pinned: false, free };
+    this.overlay.append(el);
+    this.nodes.set(n.key, n);
+    this.order.push(n);
+    this.wire(n);
+    this.measure(n);
+    return n;
   }
 
-  drop(id, it) {
-    it.el.remove();
-    this.items.delete(id);
+  // a new text starts beside the texts most like it, or at a spot of its own
+  seed(n) {
+    const R = 2 + Math.sqrt(this.order.length) * 1.4;
+    const a = hash01(n.key, 1) * Math.PI * 2;
+    const r = R * Math.sqrt(hash01(n.key, 2));
+    n.x = Math.cos(a) * r;
+    n.y = Math.sin(a) * r;
+    n.z = (hash01(n.key, 3) - 0.5) * 0.5;
+  }
+
+  measure(n) {
+    const free = n.free;
+    const hidden = n.el.style.display === 'none';
+    if (hidden) n.el.style.display = '';
+    n.el.style.fontSize = `${BASE_PX}px`;
+    n.el.style.maxWidth = free ? '80ch' : `${this.p.wrap}ch`;
+    const w = n.el.offsetWidth || BASE_PX * 0.55 * n.f.text.length;
+    const h = n.el.offsetHeight || BASE_PX * 1.2;
+    const size = n.size || this.p.size;
+    n.hw = (w / BASE_PX / 2) * size;
+    n.hh = (h / BASE_PX / 2) * size;
+    if (hidden) n.el.style.display = 'none';
+  }
+
+  drop(n) {
+    n.el.remove();
+    this.nodes.delete(n.key);
+    this.order = this.order.filter((x) => x !== n);
+    if (this.selected === n) this.selected = null;
+    if (this.hover === n) this.hover = null;
+    this.sim = null;
+  }
+
+  clear(all) {
+    for (const n of [...this.order]) if (all || (!n.pinned && !n.free)) this.drop(n);
+    this.undo = [];
+    this.render();
+    this.info(true);
   }
 
   mark(list, candidate) {
-    for (const it of this.items.values()) it.el.classList.toggle('picked', it.hit.key === list || it.hit.key === candidate);
+    for (const n of this.order) n.el.classList.toggle('picked', n.key === list || n.key === candidate);
   }
 
-  wire(it) {
-    const { el } = it;
-    const ev = (kind, e) =>
-      this.send({ kind, key: it.hit.key, text: it.hit.text, note: !!it.hit.note, x: e.clientX, y: e.clientY, ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey, alt: e.altKey, q: it.node?.q ?? 0, hue: it.node?.hue ?? 0 });
-    el.addEventListener('pointerenter', (e) => !this.looking && ev('hover', e));
-    el.addEventListener('click', (e) => e.button === 0 && ev('click', e));
+  colours(map) {
+    for (const n of this.order) {
+      const c = map[n.key];
+      n.el.style.color = c || '';
+    }
+  }
+
+  // ------------------------------------------------------------------ the spread
+
+  wake(a) {
+    this.alpha = Math.max(this.alpha, a);
+  }
+
+  // how alike two texts are, from −1 to 1, by the weighted measures
+  alike(a, b) {
+    const p = this.p, A = a.f, B = b.f;
+    let sum = 0, w = 0;
+    const add = (weight, m) => {
+      if (!weight || m === null || m === undefined || Number.isNaN(m)) return;
+      sum += weight * m;
+      w += Math.abs(weight);
+    };
+    add(p.w_ordinal, Math.exp(-Math.abs((A.s || 0) - (B.s || 0)) / p.qscale));
+    add(p.w_reversed, Math.exp(-Math.abs((A.r || 0) - (B.r || 0)) / p.qscale));
+    add(p.w_bucket, A.q === B.q ? 1 : 0);
+    add(p.w_length, Math.exp(-Math.abs(Math.log1p(A.chars || 1) - Math.log1p(B.chars || 1)) * 1.5));
+    if (A.types && B.types) {
+      const va = TYPES.map((t) => A.types[t] || 0), vb = TYPES.map((t) => B.types[t] || 0);
+      add(p.w_types, 0.5 * cosine(va, vb) + 0.5 * (A.kind === B.kind ? 1 : 0));
+    }
+    const la = A.lists || [], lb = B.lists || [];
+    if (la.length || lb.length) {
+      const shared = la.filter((x) => lb.includes(x)).length;
+      add(p.w_lists, shared / (la.length + lb.length - shared));
+    } else add(p.w_lists, 0);
+    if (A.cls !== undefined && A.cls !== null && B.cls !== undefined && B.cls !== null) {
+      add(p.w_class, A.cls === B.cls ? Math.min(A.strength ?? 1, B.strength ?? 1) : 0);
+    }
+    if (A.created && B.created) add(p.w_time, Math.exp(-Math.abs(A.created - B.created) / (7 * 864e5)));
+    if (A.freq && B.freq) add(p.w_letters, cosine(A.freq, B.freq));
+    return w ? sum / w : 0;
+  }
+
+  weights() {
+    const n = this.order.length;
+    this.sim = new Float32Array(n * n);
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const s = this.order[i].free || this.order[j].free ? 0 : this.alike(this.order[i], this.order[j]);
+        this.sim[i * n + j] = s;
+        this.sim[j * n + i] = s;
+      }
+    }
+  }
+
+  // the depth a text is drawn toward: a measure, or none
+  depthOf(n) {
+    const p = this.p, f = n.f;
+    switch (p.depth_by) {
+      case 'ordinal': return ((f.s || 0) - this.mean.s) / Math.max(1, this.mean.ss);
+      case 'length': return Math.log1p(f.chars || 1) - this.mean.l;
+      case 'time': return f.created ? (f.created - this.mean.t) / Math.max(864e5, this.mean.tt) : 0;
+      default: return 0;
+    }
+  }
+
+  step(h) {
+    const p = this.p, N = this.order;
+    const n = N.length;
+    if (!n) return;
+    if (!this.sim || this.sim.length !== n * n) this.weights();
+    if (p.depth_by !== 'none') {
+      let s = 0, l = 0, t = 0, k = 0;
+      for (const x of N) { s += x.f.s || 0; l += Math.log1p(x.f.chars || 1); if (x.f.created) { t += x.f.created; k++; } }
+      const ms = s / n, ml = l / n, mt = k ? t / k : 0;
+      let ss = 0, tt = 0;
+      for (const x of N) { ss += ((x.f.s || 0) - ms) ** 2; if (x.f.created) tt += (x.f.created - mt) ** 2; }
+      this.mean = { s: ms, ss: Math.sqrt(ss / n), l: ml, t: mt, tt: Math.sqrt(tt / Math.max(1, k)) };
+    }
+    const a = this.alpha;
+    const fx = new Float64Array(n), fy = new Float64Array(n), fz = new Float64Array(n);
+    const L = p.link;
+    for (let i = 0; i < n; i++) {
+      const A = N[i];
+      for (let j = i + 1; j < n; j++) {
+        const B = N[j];
+        let dx = B.x - A.x, dy = B.y - A.y, dz = B.z - A.z;
+        let d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < 1e-6) { dx = (hash01(A.key + B.key, 7) - 0.5) * 0.01; dy = (hash01(B.key + A.key, 9) - 0.5) * 0.01; d2 = dx * dx + dy * dy + 1e-6; }
+        const d = Math.sqrt(d2);
+        const s = this.sim[i * n + j];
+        // every two repel (more when the weights say alike texts should part), softened near
+        let f = -p.repel * (1 + Math.max(0, -s) * 2) / (d2 + 0.5);
+        // alike texts pull toward a rest length that shrinks the more alike they are
+        if (s > 0) f += p.attract * s * (d - L * (1.15 - s));
+        const ux = dx / d, uy = dy / d, uz = dz / d;
+        fx[i] += f * ux; fy[i] += f * uy; fz[i] += f * uz;
+        fx[j] -= f * ux; fy[j] -= f * uy; fz[j] -= f * uz;
+      }
+      // gravity to the centre, and toward the depth the measure gives
+      fx[i] -= p.gravity * A.x;
+      fy[i] -= p.gravity * A.y;
+      const zt = p.depth_by === 'none' ? 0 : this.depthOf(A) * p.depth;
+      fz[i] -= p.flat * (A.z - zt);
+    }
+    const drag = Math.exp(-p.damping * h);
+    let ke = 0;
+    for (let i = 0; i < n; i++) {
+      const A = N[i];
+      if (A.pinned || A === this.drag?.n) { A.vx = A.vy = A.vz = 0; continue; }
+      A.vx = (A.vx + a * fx[i] * h) * drag;
+      A.vy = (A.vy + a * fy[i] * h) * drag;
+      A.vz = (A.vz + a * fz[i] * h) * drag;
+      const v2 = A.vx * A.vx + A.vy * A.vy + A.vz * A.vz;
+      if (v2 > 900) { const k = 30 / Math.sqrt(v2); A.vx *= k; A.vy *= k; A.vz *= k; }
+      A.x += A.vx * h; A.y += A.vy * h; A.z += A.vz * h;
+      ke += v2;
+    }
+    // labels never overlap: separate rectangles in the facing plane, along the shorter way
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < n; i++) {
+        const A = N[i];
+        for (let j = i + 1; j < n; j++) {
+          const B = N[j];
+          if (Math.abs(A.z - B.z) > 1.5) continue;
+          const ox = A.hw + B.hw + p.pad - Math.abs(B.x - A.x);
+          const oy = A.hh + B.hh + p.pad * 0.5 - Math.abs(B.y - A.y);
+          if (ox <= 0 || oy <= 0) continue;
+          const am = A.pinned || A === this.drag?.n ? 0 : 1, bm = B.pinned || B === this.drag?.n ? 0 : 1;
+          if (!am && !bm) continue;
+          const share = am && bm ? 0.5 : 1;
+          if (ox / (A.hw + B.hw) < oy / (A.hh + B.hh)) {
+            const sgn = B.x >= A.x ? 1 : -1;
+            A.x -= sgn * ox * share * am; B.x += sgn * ox * share * bm;
+          } else {
+            const sgn = B.y >= A.y ? 1 : -1;
+            A.y -= sgn * oy * share * am; B.y += sgn * oy * share * bm;
+          }
+        }
+      }
+    }
+    this.alpha = Math.max(0, a - a * p.cool);
+    this.energy = ke / n;
+  }
+
+  asleep() {
+    return this.alpha < 0.01 && (this.energy ?? 0) < 0.0005;
+  }
+
+  settle() {
+    this.wake(1);
+    const t0 = performance.now();
+    let i = 0;
+    while (i < 6000 && performance.now() - t0 < 400) {
+      this.step(STEP);
+      i++;
+      if (this.asleep()) break;
+    }
+    this.render();
+    return i;
+  }
+
+  // ------------------------------------------------------------------ editing
+
+  pick(n) {
+    if (this.selected) this.selected.el.classList.remove('selected');
+    this.selected = n;
+    if (n) n.el.classList.add('selected');
+    this.send(this.ev('select', n));
+  }
+
+  record(u) {
+    this.undo.push(u);
+    if (this.undo.length > 300) this.undo.shift();
+  }
+
+  undoLast() {
+    const u = this.undo.pop();
+    if (!u) return 'nothing';
+    if (u.kind === 'move') {
+      Object.assign(u.n, { x: u.x, y: u.y, z: u.z, pinned: u.pinned });
+    } else if (u.kind === 'pin') {
+      u.n.pinned = u.was;
+    } else if (u.kind === 'remove') {
+      this.overlay.append(u.n.el);
+      this.nodes.set(u.n.key, u.n);
+      this.order.push(u.n);
+      this.sim = null;
+    } else if (u.kind === 'add') {
+      this.drop(u.n);
+    } else if (u.kind === 'text') {
+      this.setText(u.n, u.from);
+    }
+    this.wake(0.5);
+    this.render();
+    return u.kind;
+  }
+
+  pinSelected() {
+    const n = this.selected;
+    if (!n) return null;
+    this.record({ kind: 'pin', n, was: n.pinned });
+    n.pinned = !n.pinned;
+    n.el.classList.toggle('pinned', n.pinned);
+    this.wake(0.5);
+    return n.pinned ? 'pinned' : 'unpinned';
+  }
+
+  removeSelected() {
+    const n = this.selected;
+    if (!n) return null;
+    this.record({ kind: 'remove', n });
+    this.drop(n);
+    this.render();
+    this.info(true);
+    return n.key;
+  }
+
+  // a free text (not a memory) ahead of the camera
+  addFree(text) {
+    const key = `t:${Date.now().toString(36)}${this.freeN++}`;
+    const n = this.make({ key, text: text || 'text', note: false }, true);
+    const ahead = new THREE.Vector3(0, 0, -6).applyQuaternion(this.camera.quaternion).add(this.camera.position);
+    this.local(ahead, n);
+    n.pinned = true;
+    this.record({ kind: 'add', n });
+    this.pick(n);
+    this.render();
+    return key;
+  }
+
+  setText(n, text) {
+    n.f.text = text;
+    n.el.textContent = n.f.note ? `✎ ${text}` : text;
+    this.measure(n);
+    this.wake(0.3);
+  }
+
+  editFree(key, text) {
+    const n = this.nodes.get(key);
+    if (!n) return;
+    this.record({ kind: 'text', n, from: n.f.text });
+    this.setText(n, text);
+    this.render();
+  }
+
+  // a map: every text with its place, as the Bevy app kept them: [text, x, y, z, {size, key}]
+  rows() {
+    const w = new THREE.Vector3();
+    return this.order.map((n) => {
+      this.world(n, w);
+      const o = {};
+      if (!n.free) o.key = n.key;
+      if (n.size) o.size = n.size;
+      return [n.f.text, +w.x.toFixed(2), +w.y.toFixed(2), +w.z.toFixed(2), o];
+    });
+  }
+
+  loadRows(rows, feats) {
+    this.clear(true);
+    this.setFrame();
+    const w = new THREE.Vector3();
+    for (const [text, x, y, z, o] of rows) {
+      const key = o && o.key ? String(o.key) : `t:${Date.now().toString(36)}${this.freeN++}`;
+      const f = (o && o.key && feats[o.key]) || { key, text, note: false };
+      f.text = text;
+      const n = this.make(f, !(o && o.key));
+      if (o && o.size) { n.size = o.size; this.measure(n); }
+      this.local(w.set(x, y, z), n);
+      n.pinned = true;
+      n.el.classList.add('pinned');
+    }
+    this.sim = null;
+    this.render();
+    this.info(true);
+  }
+
+  // ------------------------------------------------------------------ input
+
+  ev(kind, n, e, extra) {
+    return {
+      kind, key: n ? n.key : '', text: n ? n.f.text : '', note: !!(n && n.f.note), free: !!(n && n.free),
+      x: e ? e.clientX : 0, y: e ? e.clientY : 0, ctrl: !!(e && (e.ctrlKey || e.metaKey)), shift: !!(e && e.shiftKey), alt: !!(e && e.altKey),
+      q: n ? n.f.q || 0 : 0, hue: n ? n.f.hue || 0 : 0, pinned: !!(n && n.pinned), data: extra || '',
+    };
+  }
+
+  wire(n) {
+    const { el } = n;
+    el.addEventListener('pointerenter', (e) => {
+      if (this.looking || this.drag) return;
+      this.hover = n;
+      el.classList.add('hover');
+      this.send(this.ev('hover', n, e));
+    });
+    el.addEventListener('pointerleave', () => {
+      el.classList.remove('hover');
+      if (this.hover === n) this.hover = null;
+    });
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      try { el.setPointerCapture(e.pointerId); } catch { /* fine without */ }
+      const w = this.world(n);
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+      this.drag = { n, x0: e.clientX, y0: e.clientY, moved: false, depth: w.clone().sub(this.camera.position).dot(fwd), from: { x: n.x, y: n.y, z: n.z, pinned: n.pinned }, off: null };
+      // where the pointer is on the text, so it doesn't jump to its centre
+      const hit = this.rayAt(e.clientX, e.clientY, this.drag.depth);
+      this.drag.off = w.clone().sub(hit);
+    });
+    el.addEventListener('pointermove', (e) => {
+      const d = this.drag;
+      if (!d || d.n !== n) return;
+      if (!d.moved && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 4) return;
+      d.moved = true;
+      n.pinned = true;
+      n.el.classList.add('pinned', 'dragging');
+      const w = this.rayAt(e.clientX, e.clientY, d.depth).add(d.off);
+      this.local(w, n);
+      this.wake(0.3);
+    });
+    const up = (e) => {
+      const d = this.drag;
+      if (!d || d.n !== n) return;
+      this.drag = null;
+      n.el.classList.remove('dragging');
+      if (d.moved) {
+        this.record({ kind: 'move', n, ...d.from });
+        this.send(this.ev('moved', n, e));
+      } else {
+        this.pick(n);
+        const now = performance.now();
+        if (this.lastClick && this.lastClick.n === n && now - this.lastClick.t < 450) {
+          this.lastClick = null;
+          this.send(this.ev('dblclick', n, e));
+        } else {
+          this.lastClick = { n, t: now };
+          this.send(this.ev('click', n, e));
+        }
+      }
+    };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('lostpointercapture', up);
     el.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      ev('menu', e);
+      this.send(this.ev('menu', n, e));
     });
+    el.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // push away or pull near, along the line from the eye
+      const k = Math.exp(-(e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY) * 0.0015);
+      const w = this.world(n);
+      const from = w.clone().sub(this.camera.position);
+      const len = Math.min(2000, Math.max(0.3, from.length() * k));
+      const now = performance.now();
+      if (!(this.wheelUndo && this.wheelUndo.n === n && now - this.wheelUndo.t < 800)) this.record({ kind: 'move', n, x: n.x, y: n.y, z: n.z, pinned: n.pinned });
+      this.wheelUndo = { n, t: now };
+      this.local(this.camera.position.clone().add(from.setLength(len)), n);
+      n.pinned = true;
+      n.el.classList.add('pinned');
+      this.wake(0.3);
+    }, { passive: false });
+  }
+
+  // the point under the pointer at a depth in front of the camera
+  rayAt(cx, cy, depth) {
+    const r = this.host.getBoundingClientRect();
+    const ndc = new THREE.Vector3(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1, 0.5);
+    const dir = ndc.unproject(this.camera).sub(this.camera.position).normalize();
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    const t = depth / Math.max(1e-4, dir.dot(fwd));
+    return this.camera.position.clone().add(dir.multiplyScalar(t));
   }
 
   home() {
@@ -203,11 +676,11 @@ export class Space {
     let best = null;
     let bestScore = Infinity;
     const want = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[dir];
-    for (const it of this.items.values()) {
-      const local = it.obj.position.clone().applyMatrix4(cam.matrixWorldInverse);
+    const w = new THREE.Vector3();
+    for (const n of this.order) {
+      const local = this.world(n, w).applyMatrix4(cam.matrixWorldInverse);
       const dist = local.length();
       if (dist < 0.5) continue;
-      // its direction from where the camera looks, in the view's plane
       const sx = local.x / dist;
       const sy = local.y / dist;
       const along = sx * want[0] + sy * want[1];
@@ -216,13 +689,13 @@ export class Space {
       const score = (Math.acos(Math.min(1, along)) + across * 2) * 10 + dist * 0.05 + (local.z > 0 ? 50 : 0);
       if (score < bestScore) {
         bestScore = score;
-        best = it;
+        best = n;
       }
     }
     if (!best) return;
-    const target = best.obj.position.clone();
+    const target = this.world(best);
     const fwd = target.clone().sub(cam.position).normalize();
-    const stand = Math.max(4, Math.min(14, best.hit.text.length * 0.35));
+    const stand = Math.max(4, Math.min(14, best.f.text.length * 0.35));
     const toPos = target.clone().sub(fwd.clone().multiplyScalar(stand));
     const look = new THREE.Object3D();
     look.position.copy(toPos);
@@ -231,29 +704,36 @@ export class Space {
     // a camera looks down -z, an Object3D's lookAt points +z: turn it round
     look.rotateY(Math.PI);
     this.ease = { fromPos: cam.position.clone(), toPos, fromQuat: cam.quaternion.clone(), toQuat: look.quaternion.clone(), t: 0 };
-    this.send({ kind: 'focus', key: best.hit.key, text: best.hit.text, note: !!best.hit.note, x: 0, y: 0, ctrl: false, shift: false, alt: false, q: best.node?.q ?? 0, hue: best.node?.hue ?? 0 });
+    this.pick(best);
+    this.send(this.ev('focus', best));
   }
 
   listen() {
     const h = this.host;
     h.addEventListener('contextmenu', (e) => e.preventDefault());
     h.addEventListener('pointerdown', (e) => {
-      if (e.button !== 2 || e.target.closest('.slabel')) return;
+      if (e.target.closest('.slabel')) return;
+      if (e.button === 0) {
+        // a click on empty room lets go of the selection; a double click makes a text
+        const now = performance.now();
+        if (this.lastEmpty && now - this.lastEmpty < 450) {
+          this.lastEmpty = 0;
+          this.send(this.ev('newtext', null, e));
+        } else this.lastEmpty = now;
+        if (this.selected) this.pick(null);
+        return;
+      }
+      if (e.button !== 2) return;
       e.preventDefault();
       this.looking = true;
       this.ease = null;
       h.classList.add('looking');
-      try {
-        h.setPointerCapture(e.pointerId);
-      } catch {
-        /* fine without */
-      }
+      try { h.setPointerCapture(e.pointerId); } catch { /* fine without */ }
     });
     h.addEventListener('pointermove', (e) => {
       if (!this.looking) return;
       this.camera.rotateY(-(e.movementX || 0) * LOOK);
       this.camera.rotateX(-(e.movementY || 0) * LOOK);
-      this.render();
     });
     const up = (e) => {
       if (e.button === 2 || e.type === 'lostpointercapture') {
@@ -263,22 +743,17 @@ export class Space {
     };
     h.addEventListener('pointerup', up);
     h.addEventListener('lostpointercapture', up);
-    h.addEventListener(
-      'wheel',
-      (e) => {
-        if (e.target.closest('.slabel')) return;
-        e.preventDefault();
-        this.speed = Math.min(200, Math.max(0.5, this.speed * (e.deltaY > 0 ? 0.9 : 1.1)));
-        this.info();
-      },
-      { passive: false },
-    );
+    h.addEventListener('wheel', (e) => {
+      if (e.target.closest('.slabel')) return;
+      e.preventDefault();
+      this.speed = Math.min(200, Math.max(0.5, this.speed * (e.deltaY > 0 ? 0.9 : 1.1)));
+      this.info(true);
+    }, { passive: false });
     window.addEventListener('keydown', (e) => {
       if (!this.running || typing(e) || e.ctrlKey || e.metaKey || e.altKey) return;
       const k = e.code;
       const b = this.bind;
-      const flying = ['fly_forward', 'fly_back', 'fly_left', 'fly_right', 'fly_up', 'fly_down', 'roll_left', 'roll_right'];
-      if (flying.some((a) => b[a] === k) || k === 'ShiftLeft' || k === 'ShiftRight') {
+      if (FLYING.some((a) => b[a] === k) || k === 'ShiftLeft' || k === 'ShiftRight') {
         this.keys.add(k);
         this.ease = null;
         e.preventDefault();
@@ -289,20 +764,20 @@ export class Space {
       else if (k === b.back_to_start) this.home();
       else if (k === b.slower) this.speed = Math.max(0.5, this.speed / 1.25);
       else if (k === b.faster) this.speed = Math.min(200, this.speed * 1.25);
-      else return;
-      this.info();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
   }
 
+  // ------------------------------------------------------------------ the frame
+
   loop(now) {
     if (!this.running) return;
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
-    const k = this.keys;
     const c = this.camera;
-    if (k.size) {
+    if (this.keys.size) {
+      const k = this.keys;
       const v = this.speed * (k.has('ShiftLeft') || k.has('ShiftRight') ? 4 : 1) * dt;
       if (this.held('fly_forward')) c.translateZ(-v);
       if (this.held('fly_back')) c.translateZ(v);
@@ -312,7 +787,6 @@ export class Space {
       if (this.held('fly_down')) c.translateY(-v);
       if (this.held('roll_left')) c.rotateZ(ROLL * dt);
       if (this.held('roll_right')) c.rotateZ(-ROLL * dt);
-      this.info();
     }
     if (this.ease) {
       const e = this.ease;
@@ -321,46 +795,61 @@ export class Space {
       c.position.lerpVectors(e.fromPos, e.toPos, s);
       c.quaternion.slerpQuaternions(e.fromQuat, e.toQuat, s);
       if (e.t >= 1) this.ease = null;
-      this.info();
+    }
+    // the physics in fixed steps, however long the frame was
+    if (!this.paused && this.order.length && !this.asleep()) {
+      this.acc = Math.min(this.acc + dt * this.p.substeps, 0.25);
+      while (this.acc >= STEP) {
+        this.step(STEP);
+        this.acc -= STEP;
+      }
     }
     this.render();
+    this.info(false);
     requestAnimationFrame(this.loop);
   }
 
   render() {
     this.gl?.render(this.scene, this.camera);
-    // each label at its projected place, sized by distance; texts shrink as the camera
-    // nears them (up to a fifth), so a close one stays readable rather than filling the room
     const c = this.camera;
     c.updateMatrixWorld();
     const { w, h } = this.size;
     const focal = h / 2 / Math.tan((c.fov * Math.PI) / 360);
     const v = new THREE.Vector3();
-    for (const it of this.items.values()) {
-      v.copy(it.obj.position).applyMatrix4(c.matrixWorldInverse);
+    for (const n of this.order) {
+      this.world(n, v).applyMatrix4(c.matrixWorldInverse);
       const dist = -v.z;
+      const el = n.el;
       if (dist < 0.3) {
-        it.el.style.display = 'none';
+        if (el.style.display !== 'none') el.style.display = 'none';
         continue;
       }
-      const shrink = Math.max(0.22, Math.min(1, dist / 14));
-      const px = (FONT * PX * focal * shrink) / dist;
+      const size = n.size || this.p.size;
+      // a text's em on screen, in pixels
+      const px = (size * focal) / dist;
       const x = w / 2 + (v.x / dist) * focal;
       const y = h / 2 - (v.y / dist) * focal;
-      if (px < 2 || x < -w || x > 2 * w || y < -h || y > 2 * h) {
-        it.el.style.display = 'none';
+      if (px < this.p.minPx || x < -w || x > 2 * w || y < -h || y > 2 * h) {
+        if (el.style.display !== 'none') el.style.display = 'none';
         continue;
       }
-      it.el.style.display = '';
-      it.el.style.fontSize = `${Math.min(px, 160).toFixed(1)}px`;
-      it.el.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px) translate(-50%, -50%)`;
-      it.el.style.zIndex = String(100000 - Math.round(dist * 10));
-      it.el.style.opacity = String(Math.max(0.15, Math.min(1, 1.4 - dist / 220)));
+      if (el.style.display === 'none') el.style.display = '';
+      const s = Math.min(px, 220) / BASE_PX;
+      el.style.transform = `translate3d(${x.toFixed(2)}px, ${y.toFixed(2)}px, 0) translate(-50%, -50%) scale(${s.toFixed(4)})`;
+      el.style.zIndex = String(100000 - Math.round(dist * 10));
+      el.style.opacity = String(Math.max(0.15, Math.min(1, 1.4 - dist / 220)).toFixed(3));
     }
   }
 
-  info() {
+  info(now) {
+    const t = performance.now();
+    if (!now && t - this.infoAt < 120) return;
+    this.infoAt = t;
     const p = this.camera.position;
-    this.send({ kind: 'info', key: '', text: `${p.x.toFixed(1)} ${p.y.toFixed(1)} ${(-p.z).toFixed(1)}   speed ${this.speed.toFixed(1)}   roll ${Math.round(this.roll())}°   ${this.items.size} texts`, note: false, x: 0, y: 0, ctrl: false, shift: false, alt: false, q: 0, hue: 0 });
+    const state = this.paused ? 'paused' : this.asleep() ? 'still' : 'moving';
+    const text = `${p.x.toFixed(1)} ${p.y.toFixed(1)} ${(-p.z).toFixed(1)}   speed ${this.speed.toFixed(1)}   roll ${Math.round(this.roll())}°   ${this.order.length} texts   spread ${state}`;
+    if (text === this.lastInfo) return;
+    this.lastInfo = text;
+    this.send({ ...this.ev('info', null), text });
   }
 }

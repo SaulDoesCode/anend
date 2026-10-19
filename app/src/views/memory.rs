@@ -960,7 +960,7 @@ fn FilterPanel(
 
 /// weum's pfR line; its numbers go into the bar when clicked
 #[component]
-fn PfLine(n: u64) -> Element {
+pub(crate) fn PfLine(n: u64) -> Element {
     let ui = ui();
     let segs = gem::pf_line(n);
     rsx! {

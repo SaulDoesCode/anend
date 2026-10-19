@@ -120,27 +120,27 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | feature | was in | status |
 |---|---|---|
 | fly: right drag looks, WASD, Space/C, Q/E roll, Shift fast, [ ] / wheel speed, R level, Home | space.rs | has (space.js) |
-| texts as camera-facing labels, sized by distance | space.rs (slug text) | partly: they jitter (whole-pixel snapping, font-size steps each frame) |
-| the spread: physics with damping, gravity, repulsion, ranges, buckets attract/repel/align, anchor, depth, distance, cooling, steps per frame, text size, wrap, hide under px | space.rs `SLIDERS` | missing (a one-shot layout from `space.spread`, no live physics) |
-| the sliders panel (O), reset all, double-click a name resets it, settle (K), pause (P) | space_ui.rs `build_opts` | missing |
-| a proper free force-directed spread whose attraction and repulsion are weighted by the texts' metrics | asked 19 Oct (not the Archimedean spiral) | missing |
-| drag a text to move it (pinned after), wheel on a text pushes/pulls it, pin / unpin (U) | space.rs | missing |
-| new text (N, double click empty), edit (Enter), delete, copy (Ctrl+C), undo (Ctrl+Z) | space.rs | missing |
-| the metrics card (s, r, s+r, s·r, √, ⌊√⌋, s−r, wide, lean, gap, v, c, w, letters; key, bucket colour ×n, pinned; pf line), numbers gsearch | space_ui.rs | partly: fewer numbers; it is a fixed panel, not movable, its × always shown |
-| the details panel movable, its close button hidden until hover | asked 19 Oct | missing |
-| position card (I): x y z, speed, roll, texts, spread state | space_ui.rs | partly (no spread state, no toggle) |
-| help card (H) with the keys as bound | space_ui.rs | partly: a fixed line of help |
-| first-time hint | space_ui.rs | partly: empty-room text |
-| terminal: Enter, Ctrl+Enter, Shift+Enter, Delete, ↑ ↓ history (kept) | space.rs | partly: no Delete, no history |
-| `#123`, `#r123`, `#name` addresses; the last address reopened | space.rs `route` | missing |
-| words: Enlist List Delist Unlist Count Backup Clear ClearAll Settle Maps Save name | space.rs `COMMANDS` | partly: Clear only |
-| maps: save (Shift+X / Save name), list (Maps), open (#name); export the texts to a file (X) | space.rs | missing |
+| texts as camera-facing labels, sized by distance | space.rs (slug text) | has (19 Oct): one font size, placed and scaled by a sub-pixel transform each frame, so they move smoothly |
+| the spread: physics with damping, gravity, repulsion, ranges, buckets attract/repel/align, anchor, depth, distance, cooling, steps per frame, text size, wrap, hide under px | space.rs `SLIDERS` | has, as a free spread (19 Oct): live physics in space.js; damping, gravity, repulsion, attraction, link length, gap, cooling, speed, depth (by a measure) and flatness, distance, text size, wrap, hide under px. The bucket attract/repel/align and the spiral anchor are gone on purpose: the user asked for no spiral; bucket-ness is the "same bucket" weight |
+| the sliders panel (O), reset all, double-click a name resets it, settle (K), pause (P) | space_ui.rs `build_opts` | has (19 Oct): the physics window, movable; settings kept in `Prefs::space` |
+| a proper free force-directed spread whose attraction and repulsion are weighted by the texts' metrics | asked 19 Oct (not the Archimedean spiral) | has (19 Oct): weights −1..1 for ordinal, reversed, the same bucket, length, kind and word types, shared lists, the colouring classifier's class, time, letters (`space.features` in core) |
+| drag a text to move it (pinned after), wheel on a text pushes/pulls it, pin / unpin (U) | space.rs | has |
+| new text (N, double click empty), edit (Enter), delete, copy (Ctrl+C), undo (Ctrl+Z) | space.rs | has (edits go through the bar; undo covers moves, pins, removals, new texts and edits, then the app's undo) |
+| the metrics card (s, r, s+r, s·r, √, ⌊√⌋, s−r, wide, lean, gap, v, c, w, letters; key, bucket colour ×n, pinned; pf line), numbers gsearch | space_ui.rs | has (19 Oct): every number; the bucket's count ×n is not shown |
+| the details panel movable, its close button hidden until hover | asked 19 Oct | has (19 Oct): dragged by its title, where it was left kept; M shows / hides it |
+| position card (I): x y z, speed, roll, texts, spread state | space_ui.rs | has |
+| help card (H) with the keys as bound | space_ui.rs | has |
+| first-time hint | space_ui.rs | has: the empty room says how to start |
+| terminal: Enter, Ctrl+Enter, Shift+Enter, Delete, ↑ ↓ history (kept) | space.rs | has |
+| `#123`, `#r123`, `#name` addresses; the last address reopened | space.rs `route` | has |
+| words: Enlist List Delist Unlist Count Backup Clear ClearAll Settle Maps Save name | space.rs `COMMANDS` | has (and Help) |
+| maps: save (Shift+X / Save name), list (Maps), open (#name); export the texts to a file (X) | space.rs | has: maps in the save's `space.maps` setting; export to the data folder's exports (desktop) or a download (web) |
 | chips: gsearch, reversed (F), saturate, keep | space_ui.rs | has |
 | the search line in the top bar (what, counts with icons, pf chain, the triangle with sides and angles) | space_ui.rs `rebuild_qline` | partly: title, mode, count, triangle |
-| bucket underline colours (seedCLR), class colours from a classifier | space.rs, tint.rs | partly: underline colours |
+| bucket underline colours (seedCLR), class colours from a classifier | space.rs, tint.rs | has |
 | the solid box in the room | space.rs `SOLIDS` | dropped: a test fixture of remem's, never used for anything |
 | list / candidate marks | Dioxus | has |
-| one bar (the space's strip merged into the command bar) | asked 19 Oct | missing |
+| one bar (the space's strip merged into the command bar) | asked 19 Oct | has (19 Oct) |
 | arrows hop to the nearest text | Dioxus only | has |
 
 ## Lists

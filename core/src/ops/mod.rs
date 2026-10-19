@@ -203,6 +203,47 @@ fn tag_counts(v: &View) -> Result<Vec<(String, u64)>, String> {
     Ok(out)
 }
 
+/// what the space's free spread weighs texts by (`space.features`): for each key, its sums,
+/// length, kind, word types, when it was written and the lists it is in
+fn space_features(v: &View, args: &Value) -> Res {
+    let keys = strings(args, "keys");
+    if keys.len() > 2000 {
+        return Err("at most 2000 texts at once".into());
+    }
+    // every list a text is in: the heads of the member edges pointing at it
+    let mut lists: HashMap<u64, Vec<String>> = HashMap::new();
+    for (from, r, to, _) in v.all_edges()? {
+        if r == rel::MEMBER {
+            lists.entry(to).or_default().push(record::label(from));
+        }
+    }
+    let mut out = Vec::new();
+    for k in &keys {
+        let bare = k.trim().strip_prefix("note:").unwrap_or(k);
+        let Some(id) = record::parse_label(bare) else { continue };
+        let Some(rec) = v.record(id)? else { continue };
+        let text = v.render(id)?;
+        let m = Measure::of(&text);
+        let mut types: BTreeMap<&str, u32> = BTreeMap::new();
+        for (_, t) in crate::kinds::word_types(&text) {
+            *types.entry(t).or_default() += 1;
+        }
+        out.push(json!({
+            "key": k,
+            "s": m.ordinal,
+            "r": m.reversed,
+            "chars": text.chars().count(),
+            "words": text.split_whitespace().count(),
+            "kind": crate::kinds::detect(&text),
+            "types": types,
+            "created": rec.created,
+            "lists": lists.get(&id).cloned().unwrap_or_default(),
+            "frequency": m.frequency,
+        }));
+    }
+    Ok(json!({ "features": out }))
+}
+
 fn list_stats(v: &View) -> Res {
     let mut heads: Vec<u64> = Vec::new();
     let mut seen = HashSet::new();
@@ -308,6 +349,7 @@ pub const READ_ONLY: &[&str] = &[
     "lists.delist",
     "lists.unlist",
     "space.spread",
+    "space.features",
     "forge.preview",
     "entries.query",
     "settings.get",
@@ -638,6 +680,7 @@ pub fn call(g: &Graph, removed: &Removed, op: &str, args: &Value) -> Res {
 
         // ---- the space
         "space.spread" => spread_layout(args),
+        "space.features" => space_features(&g.view()?, args),
 
         // ---- the whole save
         "stats" => {
