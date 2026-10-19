@@ -182,6 +182,12 @@ views touched against their previous behaviour before committing.
       checker (b2ee841, 30a1ac9) and the conlang checker (item 10) become one trainable family.
       Each language has its own tagger, checker and corrector, chosen by the language guess or
       per note, and all are correctable in the UI.
+    - **Custom word types, not only standard linguistics:** users define their own tag sets
+      (names, colours, descriptions), e.g. a conlang's categories, a project's own ontology
+      or tags like "sacred", "technical" or "rhyme-bearing". A tag set is kept with the save,
+      can be chosen per note or language, and is trained from examples like any classifier.
+      The built-in noun/verb/... set is only one tag set among others, with nothing hard-coded
+      to it in the UI or the filters.
     - **Correcting word types should be fun:** click a label and pick the right type; the tagger
       learns, and its accuracy and progress are shown, with the same Skinner-box feedback loop
       as item 10.
