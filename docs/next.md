@@ -10,6 +10,22 @@ user-visible feature, setting, key or panel updates docs/parity.md in the same c
 `app/src/parity.rs`'s expected lists when a setting, key action or view changes). Nothing
 goes away without a line there saying why.
 
+**After Stage A (19 Oct, late evening UTC), while the user tries it:**
+- `b5b6b22` docs/format.md "One model for a definition and its placed instances": Stage B's
+  design. It covers the tables (`graph instances` keyed by (definition ref, container),
+  chunks of 64 packed instances), the migration from `graph blocks`, `PLACE` edges and
+  `space.maps`, large texts (pieces out of the row, windows, and today's caps with
+  file:line), the behaviour, the sizes, and 8 open questions for the user. No Stage B code
+  is written yet.
+- `b2cd700` a slid-away note list slides in when the pointer nears its edge (parity row
+  updated).
+- **Pick up:**
+  - wait for the user's answers to format.md's open questions, then build Stage B as
+    designed;
+  - still missing from parity.md's small items: the saves folder setting, listing the
+    system's fonts (desktop only; a webview can't), and the space's full search line (pf
+    chain, counts with icons).
+
 **Stage A of docs/wip/queued-requests.md (19 Oct, evening UTC): done; stop for the user.**
 The queue's "Order of work" puts the work in stages A–H; Stage A is finished and the user
 tries it before Stage B begins. Each piece below is its own commit, with the four checks, a
