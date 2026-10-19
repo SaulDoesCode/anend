@@ -32,7 +32,9 @@ docs/architecture.md (the whole).
     exportable; models are deterministic and inspectable.
   - The game, logic and language matter most. The everyday gematria features get fixes, not
     new features, unless asked.
-  - No glass ceilings: limits are settings, not constants.
+  - Limits the project sets for itself (piece sizes, render caps, hub quotas) are settings
+    with defaults. Real limits remain, and are stated where they bite: the user's hardware,
+    what can be built and run there, and what the tools doing the work can manage.
   - **The desktop app is the primary target.** The web build follows it, not the other way
     round. Heavy 3D moves off three.js to wgpu (the renderer line).
   - **Models from scratch come first.** The project's own engine trains and generates from
