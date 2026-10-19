@@ -52,6 +52,14 @@ stays a standing requirement:
   - items 1–3 (the bar);
   - item 12 (one notes count; the notes view as the typing view);
   - the remaining brief items (space search modes, save checkpoints, the IME test).
+- **Stage B, step 0 (before any code):** the design section in docs/format.md was drafted
+  before the user's answers, and its body still conflicts with them in places: a 1/100-unit
+  position grid (answer 6: no grid), chains as a container mime (answer 4: chains are their
+  own entries, and notes are unchanged), scenes as a container in one room (answer 2: many
+  scenes inside the save, in a scene table), "free texts" (answer 1: texts in scenes are
+  memory entries), no font size on text placements (answer 6: a `u8`, 0 for default), a
+  64 KiB piece size as a limit (answer 9: no limit; the piece size is a setting). Rewrite
+  the body so it agrees with the answers, delete the superseded parts, and only then build.
 - **Stage B, one model for things and their copies:** a single design for "a definition
   and its placed instances", used by text placements and duplicates (F4), chains (8),
   blocks (5), prefabs (19) and scenes.
