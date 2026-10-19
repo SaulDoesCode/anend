@@ -385,6 +385,13 @@ kbd { font: 12px var(--mono); border: 1px solid color-mix(in srgb, var(--dim) 50
 .notes.no-list { grid-template-columns: minmax(0, 1fr); }
 .notes.list-right { grid-template-columns: minmax(0, 1fr) 250px; }
 .notes.list-right .notelist { order: 2; }
+/* slid away: the list waits off its edge and slides in while the pointer is near it */
+.notes.no-list .list-edge { position: absolute; top: 0; bottom: 0; left: 0; width: 10px; z-index: 5; }
+.notes.no-list.list-right .list-edge { left: auto; right: 0; }
+.notes.no-list .notelist { position: absolute; top: 0; bottom: 0; left: 0; width: 250px; z-index: 6;
+  transform: translateX(calc(-100% - 16px)); transition: transform .15s ease; box-shadow: 0 4px 18px rgb(0 0 0 / .25); }
+.notes.no-list.list-right .notelist { left: auto; right: 0; transform: translateX(calc(100% + 16px)); }
+.notes.no-list .list-edge:hover + .notelist, .notes.no-list .notelist:hover, .notes.no-list .notelist:focus-within { transform: none; }
 .notelist { display: flex; flex-direction: column; gap: 6px; padding: 6px; overflow: hidden; min-height: 0; }
 .notelist ul { list-style: none; margin: 0; padding: 0; overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 2px; }
 .notelist li { padding: 4px 8px; border-radius: var(--radius); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; }

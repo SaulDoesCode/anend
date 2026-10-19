@@ -391,49 +391,52 @@ pub fn Notes() -> Element {
     let unsaved = dirty();
     rsx! {
         div { class: "{class}",
-            if !hide_list {
-                div { class: "card notelist",
-                    button { class: "primary", "data-tip": "start a new note · {ui.key_of(Action::NewNote)}", onclick: move |_| new_note(),
-                        Icon { name: "new" } "a new note" }
-                    ul { role: "listbox", "aria-label": "notes, newest first",
-                        if open().is_some_and(|n| n.key.is_empty()) {
-                            li { class: "on", role: "option", {if shown_title.trim().is_empty() { "untitled".to_string() } else { shown_title.clone() }} if unsaved { " •" } span { class: "when", "not saved yet" } }
-                        }
-                        if notes.is_empty() {
-                            li { class: "dim", "no notes" if !q().is_empty() { " with “{q}”" } }
-                        }
-                        for n in notes {
-                            li {
-                                key: "{n.key}",
-                                class: if n.key == cur_key { "on" } else { "" },
-                                title: "{n.title}",
-                                role: "option",
-                                tabindex: "0",
-                                onclick: {
+            // slid away, the list waits off the edge and slides in while the pointer is
+            // near that edge (or on the list), as the Bevy app's `hide_list`
+            if hide_list {
+                div { class: "list-edge", "aria-hidden": "true" }
+            }
+            div { class: "card notelist",
+                button { class: "primary", "data-tip": "start a new note · {ui.key_of(Action::NewNote)}", onclick: move |_| new_note(),
+                    Icon { name: "new" } "a new note" }
+                ul { role: "listbox", "aria-label": "notes, newest first",
+                    if open().is_some_and(|n| n.key.is_empty()) {
+                        li { class: "on", role: "option", {if shown_title.trim().is_empty() { "untitled".to_string() } else { shown_title.clone() }} if unsaved { " •" } span { class: "when", "not saved yet" } }
+                    }
+                    if notes.is_empty() {
+                        li { class: "dim", "no notes" if !q().is_empty() { " with “{q}”" } }
+                    }
+                    for n in notes {
+                        li {
+                            key: "{n.key}",
+                            class: if n.key == cur_key { "on" } else { "" },
+                            title: "{n.title}",
+                            role: "option",
+                            tabindex: "0",
+                            onclick: {
+                                let api = api.clone();
+                                let key = n.key.clone();
+                                move |_| {
                                     let api = api.clone();
-                                    let key = n.key.clone();
-                                    move |_| {
-                                        let api = api.clone();
-                                        let key = key.clone();
-                                        dioxus::dioxus_core::spawn_forever(async move {
-                                            match api.note(&key).await {
-                                                Ok(note) => {
-                                                    // with replacements, the note as written
-                                                    text.set(note.source.clone().unwrap_or_else(|| anend_core::note::compose(&note.title, &note.markdown)));
-                                                    tags.set(note.tags.clone());
-                                                    open.set(Some(note));
-                                                    seq += 1;
-                                                    dirty.set(false);
-                                                    armed.set(false);
-                                                }
-                                                Err(e) => ui.fail(e),
+                                    let key = key.clone();
+                                    dioxus::dioxus_core::spawn_forever(async move {
+                                        match api.note(&key).await {
+                                            Ok(note) => {
+                                                // with replacements, the note as written
+                                                text.set(note.source.clone().unwrap_or_else(|| anend_core::note::compose(&note.title, &note.markdown)));
+                                                tags.set(note.tags.clone());
+                                                open.set(Some(note));
+                                                seq += 1;
+                                                dirty.set(false);
+                                                armed.set(false);
                                             }
-                                        });
-                                    }
-                                },
-                                if n.key == cur_key { "{shown_title}" if unsaved { " •" } } else { "{n.title}" }
-                                span { class: "when", "{when(&n.created)}" if !n.tags.is_empty() { {format!(" · {}", n.tags.join(", "))} } }
-                            }
+                                            Err(e) => ui.fail(e),
+                                        }
+                                    });
+                                }
+                            },
+                            if n.key == cur_key { "{shown_title}" if unsaved { " •" } } else { "{n.title}" }
+                            span { class: "when", "{when(&n.created)}" if !n.tags.is_empty() { {format!(" · {}", n.tags.join(", "))} } }
                         }
                     }
                 }
