@@ -21,11 +21,10 @@ part is optional: ideas, answers when asked, and trying things when they feel li
   make, a sensible default is picked so work isn't blocked. The default is written down there
   as "chosen for now, change if you like", kept reversible, and built. Ask in conversation
   only when no default is reasonable.
-- **The user's ideas are built on as given,** in their plain sense, without being
-  restated back as "what you meant". Describe what was built in terms of the thing (what it
-  does, how it behaves), not in terms of the user. When a practical choice is needed, offer
-  it as options about the thing, e.g. "chains: A or B", never as a reading of the user.
-  If something built turns out wrong, change the thing.
+- **The user's ideas are built on as given,** in their plain sense. When a choice is
+  needed, ask plainly and directly, without hedging, without restating the idea back as an
+  interpretation, and without contrived phrasing that avoids reference. Take the answer as
+  given and build it. If something built turns out wrong, own it and change it.
 
 - **Usage limits:** pushes after every piece of work, a check-in after each limit that resumes
   the work, and the Resuming block in docs/next.md kept current. A cut-off then costs at most
