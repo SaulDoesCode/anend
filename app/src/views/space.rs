@@ -62,7 +62,7 @@ const fn sl(
 
 /// the physics panel; a weight runs from −1 (texts alike that way push apart) to +1 (they
 /// pull together)
-pub const SLIDERS: [Slider; 24] = [
+pub const SLIDERS: [Slider; 26] = [
     sl(
         "w_ordinal",
         "ordinal sums",
@@ -156,6 +156,16 @@ pub const SLIDERS: [Slider; 24] = [
     sl("depth", "depth by the measure", 0.0, 20.0, 0.25, 0.0, "depth"),
     sl("flat", "flatness", 0.0, 5.0, 0.05, 1.5, "depth"),
     sl("distance", "spread distance", 5.0, 200.0, 1.0, 26.0, "depth"),
+    sl("look", "look sensitivity", 0.2, 3.0, 0.05, 1.0, "camera"),
+    sl(
+        "smooth",
+        "look smoothness (higher: snappier)",
+        2.0,
+        40.0,
+        1.0,
+        14.0,
+        "camera",
+    ),
     sl("size", "text size", 0.1, 3.0, 0.05, 0.5, "texts"),
     sl("wrap", "text wrap (characters)", 16.0, 160.0, 1.0, 60.0, "texts"),
     sl("minPx", "hide texts under px", 0.0, 8.0, 0.1, 1.2, "texts"),

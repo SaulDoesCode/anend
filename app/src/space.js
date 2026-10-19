@@ -36,6 +36,7 @@ export const PHYSICS = {
   size: 0.5, wrap: 60, minPx: 1.2, depth: 0, flat: 1.5, qscale: 12, distance: 26,
   w_ordinal: 0.6, w_reversed: 0.3, w_bucket: 0.8, w_length: 0.2, w_types: 0.3, w_lists: 0.7, w_class: 0.5, w_time: 0.2, w_letters: 0.4,
   depth_by: 'none', reversed: 0,
+  look: 1, smooth: 14,
 };
 
 const typing = (e) => {
@@ -68,6 +69,11 @@ export class Space {
     this.bind = { ...DEFAULT_KEYS };
     this.p = { ...PHYSICS };
     this.speed = 6;
+    // the camera's turn as yaw (about the world's up), pitch (clamped short of straight up
+    // or down) and roll, kept apart: looking round in circles never builds up a roll.
+    // The mouse moves the targets; the camera eases onto them.
+    this.yaw = 0; this.pitch = 0; this.rollA = 0;
+    this.tyaw = 0; this.tpitch = 0;
     this.running = false;
     this.looking = false;
     this.paused = false;
@@ -997,25 +1003,35 @@ export class Space {
     return this.camera.position.clone().add(dir.multiplyScalar(t));
   }
 
+  applyTurn() {
+    this.camera.quaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, this.rollA, 'YXZ'));
+  }
+
+  // yaw, pitch and roll from where an ease left the camera
+  syncTurn() {
+    const e = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ');
+    this.yaw = this.tyaw = e.y;
+    this.pitch = this.tpitch = Math.max(-1.55, Math.min(1.55, e.x));
+    this.rollA = e.z;
+    this.applyTurn();
+  }
+
   home() {
     this.camera.position.set(0, 0, 0);
-    this.camera.quaternion.identity();
+    this.yaw = this.tyaw = this.pitch = this.tpitch = this.rollA = 0;
+    this.ease = null;
+    this.applyTurn();
     this.render();
   }
 
   level() {
-    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
-    if (Math.abs(fwd.y) > 0.999) fwd.set(0, 0, -1);
-    this.camera.up.set(0, 1, 0);
-    this.camera.lookAt(this.camera.position.clone().add(fwd));
+    this.rollA = 0;
+    this.applyTurn();
     this.render();
   }
 
   roll() {
-    const q = this.camera.quaternion;
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
-    return (Math.atan2(right.y, up.y) * 180) / Math.PI;
+    return (this.rollA * 180) / Math.PI;
   }
 
   // the arrow keys: the nearest text in that direction on screen, eased onto
@@ -1083,15 +1099,16 @@ export class Space {
       if (e.button !== 2) return;
       e.preventDefault();
       this.looking = true;
-      this.ease = null;
+      if (this.ease) { this.ease = null; this.syncTurn(); }
       h.classList.add('looking');
       try { h.setPointerCapture(e.pointerId); } catch { /* fine without */ }
     });
     h.addEventListener('pointermove', (e) => {
       if (this.bdrag) { this.dragBlock(e); return; }
       if (!this.looking) return;
-      this.camera.rotateY(-(e.movementX || 0) * LOOK);
-      this.camera.rotateX(-(e.movementY || 0) * LOOK);
+      const k = LOOK * (this.p.look || 1);
+      this.tyaw -= (e.movementX || 0) * k;
+      this.tpitch = Math.max(-1.55, Math.min(1.55, this.tpitch - (e.movementY || 0) * k));
     });
     const up = (e) => {
       if (this.bdrag && (e.button === 0 || e.type === 'lostpointercapture')) this.endBlockDrag();
@@ -1114,7 +1131,7 @@ export class Space {
       const b = this.bind;
       if (FLYING.some((a) => b[a] === k) || k === 'ShiftLeft' || k === 'ShiftRight') {
         this.keys.add(k);
-        this.ease = null;
+        if (this.ease) { this.ease = null; this.syncTurn(); }
         e.preventDefault();
       } else if (k.startsWith('Arrow') && !e.shiftKey) {
         e.preventDefault();
@@ -1144,8 +1161,8 @@ export class Space {
       if (this.held('fly_right')) c.translateX(v);
       if (this.held('fly_up')) c.translateY(v);
       if (this.held('fly_down')) c.translateY(-v);
-      if (this.held('roll_left')) c.rotateZ(ROLL * dt);
-      if (this.held('roll_right')) c.rotateZ(-ROLL * dt);
+      if (this.held('roll_left')) this.rollA += ROLL * dt;
+      if (this.held('roll_right')) this.rollA -= ROLL * dt;
     }
     if (this.ease) {
       const e = this.ease;
@@ -1153,7 +1170,16 @@ export class Space {
       const s = e.t * e.t * (3 - 2 * e.t);
       c.position.lerpVectors(e.fromPos, e.toPos, s);
       c.quaternion.slerpQuaternions(e.fromQuat, e.toQuat, s);
-      if (e.t >= 1) this.ease = null;
+      if (e.t >= 1) {
+        this.ease = null;
+        this.syncTurn();
+      }
+    } else {
+      // ease the turn onto where the mouse put it (frame-rate independent)
+      const a = 1 - Math.exp(-(this.p.smooth || 14) * dt);
+      this.yaw += (this.tyaw - this.yaw) * a;
+      this.pitch += (this.tpitch - this.pitch) * a;
+      this.applyTurn();
     }
     // the physics in fixed steps, however long the frame was
     if (!this.paused && this.order.length && !this.asleep()) {
