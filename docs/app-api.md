@@ -44,8 +44,9 @@ texts as reversed does), and asking for it answers an error.
 | `saves.import_texts` | `{data, other?, name?}`: weum's `all-of-it.json` or a backup's `texts.json` (`data`, text), with a backup's `other.json` (`other`) a whole save; into a new save `name`, or (texts alone) into the open save | `{save, memories, replaced, skipped, borrowing}` |
 | `notes.list` | `{q?, tags?, mode?, since?, until?}`: `q` words the notes must have; `tags` all of them, or any with `mode: "or"`; created between `since` and `until` (RFC 3339) | `[{key, title, tags, created, modified, edits, preview, words}]`, newest first |
 | `notes.tags` / `tags.all` | | `[{tag, count}]`: every tag and how many entries carry it, the most used first (then by name) |
-| `notes.get` | `{key}` | `{_key, title, markdown, tags, created, edits, modified}` |
-| `notes.save` | `{note, text?, on?}`: `text` is the editor's `# title` + markdown; `on` a key the note is about (a note edge) | the stored note (new notes get a key; an edit keeps the old text as a version) |
+| `notes.get` | `{key}` | `{_key, title, markdown, tags, created, edits, modified, source?, rendered?}`: `markdown` as it renders (replacements put in); `source` the note as written when it has replacements; `rendered` the markdown with saved filters' results put in, when it names any |
+| `notes.save` | `{note, text?, on?}`: `text` is the editor's `# title` + markdown; `on` a key the note is about (a note edge) | the stored note (new notes get a key; an edit keeps the old text as a version). `{{key}}` in the text is a replacement (below) |
+| `notes.alternatives` | `{word}` | `{word, ordinal, reversed, alternatives: [{text, key, list, ordinal, reversed, same_ordinal, same_reversed}]}`: the other words of the lists `word` is in (each list's head too), those keeping the ordinal sum first, then the reversed |
 | `notes.delete` | `{key}` | `null` |
 | `notes.on` | `{key}` | `[hit]`: the notes on an entry, oldest first |
 | `tags.add` / `tags.remove` | `{key, tag}` | `null` |
@@ -80,6 +81,23 @@ with the entries carrying them.
 
 A spread node goes into the world in front of a camera at the origin, looking down
 -z, as `(x·k, y·k, -(d + z))` with `k = (d + z) / d`.
+
+### Replacements
+
+- **`{{key}}`** in a note (a weum key such as `{{0,12}}`, of an entry other than the note)
+  is kept as a live reference (the graph's transclusion, `codec::Seg::Ref`): the note
+  shows that entry's text as it is now, and that entry may hold replacements of its own
+  (recursive; one that comes back to itself is an error, shown as the note failing to
+  render). Anything else between double braces stays as written.
+- **Sums**: a note is indexed by what it renders, so writing `{{key}}` where that entry's
+  text stood leaves its sums as they were; when a referenced entry changes, the notes
+  that refer to it directly are indexed again (their sums and words follow).
+- **`{{filter:name}}`** names a saved filter of the filters view (the save's `filters`
+  setting): a materialized view whose results (at most 50, as a markdown list) are put
+  in when the note is read (`notes.get`'s `rendered`); the stored note keeps the name.
+- **Synonym and register lists**: any list of the save is a set of words that may stand
+  for each other; `notes.alternatives` answers a word's, and the editor offers them in a
+  dropdown (the lists view manages the lists).
 
 ## Classifiers
 

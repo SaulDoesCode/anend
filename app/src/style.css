@@ -455,3 +455,8 @@ table.confusion td.miss { color: var(--bad); }
 .filter-panel .chip:not(.on) { background: color-mix(in srgb, var(--buttons) 35%, transparent); color: var(--text); }
 .filter-note { text-align: center; color: #bbb; font-size: 12px; padding: 2px; }
 .filter-square { margin-left: 6px; }
+
+/* the editor's replacements (views/notes.rs) */
+.editor .replace { gap: 6px; flex-wrap: wrap; }
+.editor .replace select { max-width: 280px; }
+.editor .replace input { width: 260px; }

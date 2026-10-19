@@ -28,7 +28,9 @@ Where the work stands, for picking it up in a new session. Branch:
     `app/docs/shots/desktop-pictures.png`, `web-pictures.png`.
 - **Done too:** word types on hover (tooltip and hover line in the memory view); the
   search filter panel (the memory view's strip, a filter square).
-- **Next, in order** (each committed and pushed): replacements in the editor; the spatial table; space search modes; save
+- **Done too:** replacements in the editor (`{{key}}`, `{{filter:name}}`, alternatives from
+  lists).
+- **Next, in order** (each committed and pushed): the spatial table; space search modes; save
   checkpoints; a real IME test.
 - **Disk:** build with `CARGO_INCREMENTAL=0` (target/debug/incremental grew to 5 GB and
   filled the disk once); `rm -f target/debug/deps/*anend*` drops stale test binaries.
@@ -991,9 +993,18 @@ progress is in `core/src/classify/STATUS.md`. The plan:
   verdicts (the texts given a yes or no, its latest 50), and shows its bias metric (KL,
   flipped, imbalance, prior skew); kept in the app's prefs, a line says how many it
   hides). Shot `app/docs/shots/desktop-filter.png`.
-- **Editor:** entry ids as replacements (recursive, with references to saved filter
+- ~~**Editor:** entry ids as replacements (recursive, with references to saved filter
   views; sums stay unchanged), and synonym/register lists chosen from a dropdown, with
-  their own management view.
+  their own management view.~~ Done 19 Oct (`core/src/ops/templates.rs`; docs/app-api.md
+  "Replacements"): `{{key}}` in a note is a live ref (recursive, cycle-safe), saved and
+  shown back as written; `{{filter:name}}` puts a saved filter's results in when read;
+  the note's sums are those of what it renders (a ref where the same text stood changes
+  nothing), and notes referring to an entry are indexed again when it changes (one level:
+  a ref to a ref isn't refreshed). Synonyms/registers: any list is one; the editor's
+  "alternatives" button offers the other words of the caret word's lists in a dropdown,
+  same-sum ones first (marked =); "put in" inserts `{{key}}` by key, words or
+  `filter:name`. Choices: no separate management view (the lists view is it), and the
+  rendered text, not the stored one, is what's indexed.
 - **Spatial memory table:** slug texts placed by hand in 3D, with coloured
   cubes/blocks/bricks and a gimbal to move, scale and rotate.
 - **Space search modes:** normal, classifier, and weum's multithreaded random hashmap

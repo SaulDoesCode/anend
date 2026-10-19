@@ -115,6 +115,12 @@ pub struct Note {
     pub created: String,
     #[serde(default)]
     pub edits: Vec<String>,
+    /// the note as written when it has replacements (`{{key}}` where an entry goes)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// its markdown with saved filters' results put in (`{{filter:name}}`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rendered: Option<String>,
 }
 
 /// what to find in the query model (`entries.query`)
@@ -630,6 +636,11 @@ pub trait Backend {
         args["name"] = json!(name);
         args["prompt"] = json!(prompt);
         self.call("models.generate", args)
+    }
+
+    /// the other members of the lists a word is in (synonyms, registers), with their sums
+    fn alternatives(&self, word: &str) -> Fut<Value> {
+        self.call("notes.alternatives", json!({ "word": word }))
     }
 
     // ---- pictures (`pictures.*`)

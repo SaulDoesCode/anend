@@ -1346,6 +1346,38 @@ impl<'t> Tx<'t> {
         Ok(out)
     }
 
+    /// the structured mentioners of an entry (templates, notes with replacements) with
+    /// their texts as they render now
+    fn transcluders(&self, id: u64) -> GResult<Vec<(u64, Record, String)>> {
+        let mut out = Vec::new();
+        for m in self.postings(&Term::Mention(id))? {
+            if m == id {
+                continue;
+            }
+            if let Some(r) = self.record(m)?
+                && !r.plain()
+                && let Ok(t) = self.render(m)
+            {
+                out.push((m, r, t));
+            }
+        }
+        Ok(out)
+    }
+
+    /// indexes the transcluders of a changed entry by what they render now
+    fn refresh(&mut self, before: Vec<(u64, Record, String)>) -> GResult<()> {
+        for (m, r, old_text) in before {
+            let Ok(new_text) = self.render(m) else { continue };
+            if new_text == old_text {
+                continue;
+            }
+            let old_terms = terms_of(&r, &old_text)?;
+            let new_terms = terms_of(&r, &new_text)?;
+            self.reindex(m, old_terms, new_terms);
+        }
+        Ok(())
+    }
+
     /// stores the borrowers' texts again after a source changed, so they render the same
     fn rehome(&mut self, borrowers: Vec<(u64, String)>) -> GResult<()> {
         for (m, text) in borrowers {
@@ -1375,6 +1407,7 @@ impl<'t> Tx<'t> {
         let old_text = self.render(id)?;
         let at = at.unwrap_or(self.now).max(old.created);
         let borrowers = self.borrowers(id)?;
+        let transcluders = self.transcluders(id)?;
         let new = match content {
             Content::Text(t) => {
                 if old.plain() && t == old_text && m.is_none_or(|m| m == old.mime) {
@@ -1434,7 +1467,8 @@ impl<'t> Tx<'t> {
         let new_text = self.render(id).unwrap_or_default();
         let new_terms = terms_of(&new, &new_text)?;
         self.reindex(id, old_terms, new_terms);
-        self.rehome(borrowers)
+        self.rehome(borrowers)?;
+        self.refresh(transcluders)
     }
 
     /// removes an entry, its edges and its versions; its id is reused later unless a

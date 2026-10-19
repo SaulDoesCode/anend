@@ -16,6 +16,7 @@ pub mod models;
 pub mod pictures;
 #[cfg(not(target_arch = "wasm32"))]
 mod saves;
+pub mod templates;
 pub mod texts;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -126,10 +127,17 @@ pub fn note_json<R: Reader>(v: &R, id: u64) -> Res {
         .rev()
         .map(|ver| iso(ver.at))
         .collect();
-    Ok(json!({
+    let mut out = json!({
         "_key": record::label(id), "title": title, "markdown": markdown, "tags": tag_names(v, id),
         "created": iso(r.created), "edits": edits, "modified": iso(r.edited),
-    }))
+    });
+    // a note with replacements: its text as written, `{{key}}` where an entry goes
+    if !r.plain()
+        && let Some(src) = templates::source_of(v, id)?
+    {
+        out["source"] = json!(src);
+    }
+    Ok(out)
 }
 
 fn search_ids(v: &View, q: &str) -> Result<Vec<u64>, String> {
@@ -283,6 +291,7 @@ pub const READ_ONLY: &[&str] = &[
     "notes.list",
     "notes.tags",
     "notes.get",
+    "notes.alternatives",
     "notes.delete",
     "notes.on",
     "tags.all",
@@ -417,7 +426,16 @@ pub fn call(g: &Graph, removed: &Removed, op: &str, args: &Value) -> Res {
             })?;
             Ok(Value::Null)
         }
-        "notes.get" => note_json(&g.view()?, id_arg(args, "key")?),
+        "notes.get" => {
+            let mut n = note_json(&g.view()?, id_arg(args, "key")?)?;
+            // saved filters' results where the note names them
+            let whole = crate::note::compose(s(&n, "title"), s(&n, "markdown"));
+            if whole.contains("{{filter:") {
+                n["rendered"] = json!(templates::with_views(g, removed, s(&n, "markdown"))?);
+            }
+            Ok(n)
+        }
+        "notes.alternatives" => templates::alternatives(g, args),
         "notes.save" => {
             let note = args.get("note").cloned().unwrap_or(Value::Null);
             let text = match args.get("text").and_then(Value::as_str) {
@@ -441,15 +459,29 @@ pub fn call(g: &Graph, removed: &Removed, op: &str, args: &Value) -> Res {
             let id = g.write(|tx| {
                 let id = match record::parse_label(&key) {
                     Some(id) if !key.is_empty() && tx.exists(id)? => {
-                        if tx.render(id)? != text {
-                            tx.edit_text(id, &text)?;
+                        // `{{key}}` replacements are kept as live refs
+                        match templates::run_of(tx, &text, Some(id))? {
+                            Some(run) => {
+                                if templates::source_of(tx, id)?.as_deref() != Some(text.as_str()) {
+                                    tx.edit_run(id, &run)?;
+                                }
+                            }
+                            None => {
+                                let r = tx.record(id)?.ok_or("gone")?;
+                                if !r.plain() || tx.render(id)? != text {
+                                    tx.edit_text(id, &text)?;
+                                }
+                            }
                         }
                         id
                     }
                     _ => {
                         let id = tx.alloc_id()?;
                         let now = tx.now;
-                        tx.put_text_at(id, &text, mime::MARKDOWN, now, now)?;
+                        match templates::run_of(tx, &text, None)? {
+                            Some(run) => tx.put_run_at(id, &run, mime::MARKDOWN, now, now)?,
+                            None => tx.put_text_at(id, &text, mime::MARKDOWN, now, now)?,
+                        }
                         id
                     }
                 };

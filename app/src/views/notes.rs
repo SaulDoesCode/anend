@@ -75,6 +75,14 @@ pub fn Notes() -> Element {
         _ => vec![],
     };
     let cur_key = open().map(|n| n.key).unwrap_or_default();
+    // read mode shows the note as saved (its replacements and views put in) until it's
+    // edited
+    let read_text = match open() {
+        Some(n) if !dirty() && !n.key.is_empty() => {
+            anend_core::note::compose(&n.title, n.rendered.as_deref().unwrap_or(&n.markdown))
+        }
+        _ => text(),
+    };
     let shown_title = anend_core::note::split(&text()).0;
     let api_d = api.clone();
     rsx! {
@@ -112,7 +120,8 @@ pub fn Notes() -> Element {
                                         dioxus::dioxus_core::spawn_forever(async move {
                                             match api.note(&key).await {
                                                 Ok(note) => {
-                                                    text.set(anend_core::note::compose(&note.title, &note.markdown));
+                                                    // with replacements, the note as written
+                                                    text.set(note.source.clone().unwrap_or_else(|| anend_core::note::compose(&note.title, &note.markdown)));
                                                     tags.set(note.tags.join(", "));
                                                     open.set(Some(note));
                                                     seq += 1;
@@ -176,7 +185,10 @@ pub fn Notes() -> Element {
                         // not bound to the signal while typing (a round trip per key would drop
                         // letters typed fast); its text is put in when a note opens
                         if reading() {
-                        div { class: "md rendered", dangerous_inner_html: crate::md::to_html(&text()) }
+                        div { class: "md rendered", dangerous_inner_html: crate::md::to_html(&read_text) }
+                    }
+                    if !reading() {
+                        Replace { text, dirty, seq }
                     }
                     for pad in [format!("{}-{}", cur_key, seq())].into_iter().filter(|_| !reading()) {
                             textarea {
@@ -209,4 +221,147 @@ pub fn Notes() -> Element {
                 }
             }
         }
+}
+
+/// the text before the selection, the word, the text after, and the word's alternatives
+type Around = (String, String, String, Vec<serde_json::Value>);
+
+/// the editor's replacements: `{{key}}` puts an entry's text in (live: it shows that
+/// entry as it is now), `{{filter:name}}` a saved filter's results; a word's synonyms and
+/// registers come from the lists it is in, those keeping the text's sum first
+#[component]
+fn Replace(text: Signal<String>, dirty: Signal<bool>, seq: Signal<u64>) -> Element {
+    let ui = ui();
+    let api = api();
+    // (the text before the selection, the word, the text after) and its alternatives
+    let mut alts: Signal<Option<Around>> = use_signal(|| None);
+    let mut find = use_signal(String::new);
+    let mut find_gen = use_signal(|| 0u64);
+    // puts a new text into the pad and the signal
+    let mut put = move |t: String| {
+        text.set(t.clone());
+        dirty.set(true);
+        let js = format!(
+            "const p = document.getElementById('note-pad'); if (p) {{ p.value = {}; p.focus(); }}",
+            serde_json::to_string(&t).unwrap_or_default()
+        );
+        document::eval(&js);
+    };
+    // the pad's text around its selection (the word under the caret when nothing is selected)
+    const AROUND: &str = r#"
+        const p = document.getElementById('note-pad');
+        if (!p) { dioxus.send(null); } else {
+          let a = p.selectionStart, b = p.selectionEnd, v = p.value;
+          if (a === b && WORD) {
+            while (a > 0 && /[\p{L}\p{N}'-]/u.test(v[a - 1])) a--;
+            while (b < v.length && /[\p{L}\p{N}'-]/u.test(v[b])) b++;
+          }
+          dioxus.send([v.slice(0, a), v.slice(a, b), v.slice(b)]);
+        }"#;
+    let api_a = api.clone();
+    let synonyms = move |_| {
+        let api = api_a.clone();
+        spawn(async move {
+            let mut ev = document::eval(&AROUND.replace("WORD", "true"));
+            let Ok(Some((before, word, after))) = ev.recv::<Option<(String, String, String)>>().await else {
+                return;
+            };
+            if word.trim().is_empty() {
+                ui.say("select a word (or put the caret in one) first");
+                return;
+            }
+            match api.alternatives(word.trim()).await {
+                Ok(v) => {
+                    let list: Vec<serde_json::Value> = v["alternatives"].as_array().cloned().unwrap_or_default();
+                    if list.is_empty() {
+                        ui.say(format!(
+                            "“{}” is in no list: make one of words that may stand for each other",
+                            word.trim()
+                        ));
+                        alts.set(None);
+                    } else {
+                        alts.set(Some((before, word, after, list)));
+                    }
+                }
+                Err(e) => ui.fail(e),
+            }
+        });
+    };
+    let api_f = api.clone();
+    let insert = move || {
+        let api = api_f.clone();
+        let want = find.peek().trim().to_string();
+        if want.is_empty() {
+            return;
+        }
+        spawn(async move {
+            // a key as it is, a filter by its name, else the first text with those words
+            let piece = if want.starts_with("filter:") || anend_core::graph::record::parse_label(&want).is_some() {
+                format!("{{{{{want}}}}}")
+            } else {
+                match api.search(&want, false).await {
+                    Ok(hits) if !hits.is_empty() => format!("{{{{{}}}}}", hits[0].key.trim_start_matches("note:")),
+                    Ok(_) => {
+                        ui.fail(format!("no text with “{want}”"));
+                        return;
+                    }
+                    Err(e) => {
+                        ui.fail(e);
+                        return;
+                    }
+                }
+            };
+            let mut ev = document::eval(&AROUND.replace("WORD", "false"));
+            let Ok(Some((before, sel, after))) = ev.recv::<Option<(String, String, String)>>().await else {
+                return;
+            };
+            let _ = sel;
+            put(format!("{before}{piece}{after}"));
+            find.set(String::new());
+            find_gen += 1;
+            ui.say(format!(
+                "{piece} goes in where the caret was: it shows that entry's text when read"
+            ));
+        });
+    };
+    let insert2 = insert.clone();
+    let _ = seq;
+    rsx! {
+        div { class: "replace row",
+            button { class: "plain", "data-tip": "a word's synonyms and registers: the other words of the lists it is in", onclick: synonyms,
+                Icon { name: "swap" } "alternatives" }
+            if let Some((before, word, after, list)) = alts() {
+                select {
+                    "aria-label": "replace “{word}” with",
+                    onchange: move |e| {
+                        let v = e.value();
+                        if !v.is_empty() {
+                            put(format!("{before}{v}{after}"));
+                            ui.say(format!("“{}” → “{v}”", word.trim()));
+                        }
+                        alts.set(None);
+                    },
+                    option { value: "", {format!("“{}” (o {} r {}) →", word.trim(), crate::gem::sums(word.trim()).0, crate::gem::sums(word.trim()).1)} }
+                    for a in list.iter() {
+                        option { key: "{a[\"key\"]}", value: "{a[\"text\"].as_str().unwrap_or(\"\")}",
+                            {format!("{}{} · {} · o {} r {}",
+                                if a["same_ordinal"].as_bool() == Some(true) { "= " } else { "" },
+                                a["text"].as_str().unwrap_or(""),
+                                a["list"].as_str().unwrap_or(""),
+                                a["ordinal"], a["reversed"])}
+                        }
+                    }
+                }
+            }
+            span { class: "grow" }
+            for g in [find_gen()] {
+                input { key: "{g}", r#type: "text", placeholder: "put in {{{{key}}}}: a key, words, or filter:name",
+                    "aria-label": "an entry to put in where the caret is",
+                    oninput: move |e| find.set(e.value()),
+                    onkeydown: { let insert = insert.clone(); move |e: KeyboardEvent| if e.key() == Key::Enter { insert() } },
+                }
+            }
+            button { onclick: move |_| insert2(), "put in" }
+        }
+    }
 }
