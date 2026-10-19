@@ -45,11 +45,11 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 
 | feature | was in | status |
 |---|---|---|
-| every action rebindable in a keys menu (click a binding, press the key, Esc cancels, swap on clash, reset to defaults), kept in the config | keys.rs, ui.rs `rebuild_remap` | missing (the Dioxus settings list the keys, fixed) |
-| 57 actions: views, save, new note, view/edit, slide the list, focus bar, buckets, toggles, sidecar arrows, flying, roll, level, home, speed, new/edit/delete/copy text, undo, reversed, pin, sliders, pause, settle, side sums, help, hud, export, save map, keys menu | keys.rs `Action` | partly: the Dioxus keys are hard-coded per view; flying keys live in space.js |
+| every action rebindable in a keys menu (click a binding, press the key, Esc cancels, swap on clash, reset to defaults), kept in the config | keys.rs, ui.rs `rebuild_remap` | has (19 Oct): app/src/keys.rs, the settings' keys section, `Prefs::keymap`; the page's listener keeps exactly the bound keys |
+| 57 actions: views, save, new note, view/edit, slide the list, focus bar, buckets, toggles, sidecar arrows, flying, roll, level, home, speed, new/edit/delete/copy text, undo, reversed, pin, sliders, pause, settle, side sums, help, hud, export, save map, keys menu | keys.rs `Action` | has: 64 actions (the Bevy ones, the atbash ones dropped with atbash, plus zoom, word types, details, the reader's steps, the note's classifiers and checking); space.js flies on the bound keys. Some actions wait for their feature (see the space and memory rows) |
 | Ctrl+1..9 to the views | keys.rs | has (order differs: Dioxus is memory, space, lists, reader, notes, tags, stats, models, filters; Bevy was editor, reader, memory, stats, space, lists, classifiers, tags, filters) |
-| Ctrl+, settings, Ctrl+K / K the keys menu | keys.rs | partly: Ctrl+, only |
-| `/` focuses the command bar | keys.rs `FocusTerm` | missing (Enter outside the bar does it) |
+| Ctrl+, settings, Ctrl+K / K the keys menu | keys.rs | has (Ctrl+K opens the settings at the keys) |
+| `/` focuses the command bar | keys.rs `FocusTerm` | has (and Enter outside the bar) |
 | zoom keys (Ctrl+= / Ctrl+− / Ctrl+0, PageUp/PageDown) | Dioxus only | has |
 
 ## Theme and visuals
@@ -61,26 +61,26 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | colour editing with hue / saturation / lightness sliders and a hex box | settings.rs | partly: a colour input per role |
 | Fira Sans / Fira Mono, bundled | typeface.rs (Bevy feathers fonts) | has (19 Oct): subset woff2 in assets/fonts, embedded as @font-face |
 | buttons: sand fill, accent when selected, dark/light text chosen by contrast | theme.rs | has |
-| the editor's markdown highlighting (headings, marks, emphasis, strike, code, links, urls, lists, quotes, tables, tags, rules, composing), colours derived from the palette for contrast | highlight.rs | missing |
-| setting: highlight on/off | config `highlight` | missing |
+| the editor's markdown highlighting (headings, marks, emphasis, strike, code, links, urls, lists, quotes, tables, tags, rules, composing), colours derived from the palette for contrast | highlight.rs | has (19 Oct): app/src/highlight.rs (its tests ported), a layer under a transparent-glyph textarea; theme.rs `hl_vars`; composing is the textarea's own |
+| setting: highlight on/off | config `highlight` | has (`Prefs::highlight`) |
 
 ## Notes (the editor)
 
 | feature | was in | status |
 |---|---|---|
-| note list newest first, new note button, the open one marked, unsaved marker (•) | ui.rs `rebuild_list` | partly: no unsaved marker |
+| note list newest first, new note button, the open one marked, unsaved marker (•) | ui.rs `rebuild_list` | has |
 | `# title` + markdown in the pad, mono font | ui.rs | has |
-| tags as chips with ×, a tag box (Enter or comma adds) | ui.rs `rebuild_meta`, `tag_input_key` | partly: a comma-separated box |
-| view / edit toggle (Ctrl+E) rendering the note | ui.rs | partly: the button, no key |
-| save (Ctrl+S), new note (Ctrl+N) | keys.rs | partly: Ctrl+S only |
+| tags as chips with ×, a tag box (Enter or comma adds) | ui.rs `rebuild_meta`, `tag_input_key` | has |
+| view / edit toggle (Ctrl+E) rendering the note | ui.rs | has |
+| save (Ctrl+S), new note (Ctrl+N) | keys.rs | has; a note without a # title isn't saved, as before |
 | delete with a confirmation | ui.rs `confirm_delete` | has (two clicks) |
-| slide the note list away / back (Ctrl+B), list on the right, hide until the pointer nears the edge | ui.rs, config `hide_list`, `list_right` | missing |
-| the note's classifiers: pick which classifiers index it, each one's class chip and a yes/no | index_panel.rs, JS notecls.js | missing |
-| markdown highlighting in the pad | highlight.rs | missing |
-| the bar finds notes by words; Enter opens the first; "n of m notes" at the bar's end | bar.rs | partly: Enter filters, no count |
+| slide the note list away / back (Ctrl+B), list on the right, hide until the pointer nears the edge | ui.rs, config `hide_list`, `list_right` | partly: Ctrl+B and the button slide it away; `list_right` is kept but has no switch yet; no pointer reveal |
+| the note's classifiers: pick which classifiers index it, each one's class chip and a yes/no | index_panel.rs, JS notecls.js | has (19 Oct): views/judge.rs, every class's probability too (Ctrl+I) |
+| markdown highlighting in the pad | highlight.rs | has |
+| the bar finds notes by words; Enter opens the first; "n of m notes" at the bar's end | bar.rs | partly: Enter filters, the count is there; Enter doesn't open the first |
 | written date and edits count | ui.rs | has |
 | replacements `{{key}}`, `{{filter:name}}`, alternatives from lists | Dioxus only | has |
-| the notes view has no horizontal scrollbar dragging the content off to the left | — | missing (bug reported 19 Oct) |
+| the notes view has no horizontal scrollbar dragging the content off to the left | — | has (19 Oct): the view never scrolls itself; its list and pad do |
 
 ## Reader
 

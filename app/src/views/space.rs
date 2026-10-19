@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 
 use crate::backend::Hit;
 use crate::gem::{self, Mode};
+use crate::keys::Action;
 use crate::shell::set_pref;
 use crate::ui::*;
 use crate::views::{TChip, use_keys};
@@ -59,6 +60,7 @@ try {{
     else if (c.cmd === 'stop') sp.stop();
     else if (c.cmd === 'mark') sp.mark(c.list, c.candidate);
     else if (c.cmd === 'focus') host.focus();
+    else if (c.cmd === 'keys') sp.setKeys(c.map);
   }}
 }} catch (e) {{
   dioxus.send({{ kind: 'error', key: '', text: String(e && e.message || e), note: false, x: 0, y: 0, ctrl: false, shift: false, alt: false, q: 0, hue: 0 }});
@@ -244,6 +246,11 @@ pub fn Space() -> Element {
         let shown = (ui.view)() == View::Space;
         sp.send(json!({ "cmd": if shown { "start" } else { "stop" } }));
     });
+    // the flying keys as the keymap binds them
+    use_effect(move || {
+        let map = crate::keys::Keymap::from_changes(&ui.prefs.read().keymap).flying();
+        sp.send(json!({ "cmd": "keys", "map": map }));
+    });
     use_effect(move || {
         let bg = ui.prefs.read().space_bg.clone();
         sp.send(json!({ "cmd": "room", "bg": bg, "ink": crate::theme::ink_on(&bg) }));
@@ -262,24 +269,23 @@ pub fn Space() -> Element {
                 }
                 return false;
             }
-            match k.key.as_str() {
-                // the engine flies and hops on these itself
-                "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" | " " => true,
-                "h" | "H" => {
-                    help.set(!help());
-                    true
-                }
-                "f" | "F" => {
-                    set_pref(ui, |p| p.space_reversed = !p.space_reversed);
-                    true
-                }
-                "Escape" => {
-                    let mut c = sp.card;
-                    c.set(None);
-                    true
-                }
-                _ => false,
+            if k.key == "Escape" {
+                let mut c = sp.card;
+                c.set(None);
+                return true;
             }
+            match k.action {
+                Some(Action::Help) => help.set(!help()),
+                Some(Action::Reversed) => set_pref(ui, |p| p.space_reversed = !p.space_reversed),
+                // the engine flies and hops on the rest itself
+                _ => {
+                    return matches!(
+                        k.key.as_str(),
+                        "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" | " "
+                    );
+                }
+            }
+            true
         });
     }
     let card = (sp.card)();

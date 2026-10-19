@@ -6,6 +6,7 @@
 use dioxus::prelude::*;
 
 use crate::backend::{Imported, SaveInfo};
+use crate::keys::{Action, Binding, Scope};
 use crate::shell::set_pref;
 use crate::theme::{PALETTES, ROLES, colour};
 use crate::ui::*;
@@ -425,27 +426,57 @@ fn download(name: &str, text: &str) {
     document::eval(&js);
 }
 
+/// the keys menu's answer: the key pressed while it waited for one
+pub fn rebind(mut ui: Ui, a: Action, k: &KeyPress) {
+    ui.listening.set(None);
+    if k.key == "Escape" {
+        ui.say("the key stays as it was");
+        return;
+    }
+    let Some(b) = Binding::of(&k.code, k.ctrl, k.shift, k.alt) else {
+        ui.fail(format!(
+            "{} can't be bound",
+            if k.code.is_empty() { &k.key } else { &k.code }
+        ));
+        return;
+    };
+    let mut map = ui.keymap();
+    let other = map.rebind(a, b);
+    set_pref(ui, |p| p.keymap = map.changes());
+    match other {
+        Some(o) => ui.say(format!(
+            "{} is {b} now; {} takes {} instead",
+            a.label(),
+            o.label(),
+            map.get(o)
+        )),
+        None => ui.say(format!("{} is {b} now", a.label())),
+    }
+}
+
+/// every action and its key: click a key, then press the new one (Esc leaves it); a key
+/// another action holds where both work is swapped with it; kept in the settings file
 #[component]
 fn Keys() -> Element {
+    let mut ui = ui();
+    let map = crate::keys::Keymap::from_changes(&ui.prefs.read().keymap);
+    let listening = (ui.listening)();
+    let changed = !ui.prefs.read().keymap.is_empty();
+    let mut groups: Vec<(Scope, Vec<Action>)> = Vec::new();
+    for a in Action::ALL {
+        match groups.iter_mut().find(|(s, _)| *s == a.scope()) {
+            Some((_, v)) => v.push(a),
+            None => groups.push((a.scope(), vec![a])),
+        }
+    }
     let rows = [
-        ("Ctrl+1 … Ctrl+9", "the views"),
-        ("Ctrl+,", "settings"),
-        ("Ctrl+= / Ctrl+−, Ctrl+PageUp / PageDown, Ctrl+0", "zoom"),
         ("Ctrl+Z / Ctrl+Shift+Z in the bar", "undo and redo the bar's typing"),
         (
-            "Ctrl+Z elsewhere",
-            "take back the latest action (forget, edit, lists, …)",
+            "Enter in the bar",
+            "the view's search; Ctrl+Enter saturates, Shift+Enter brings back a key",
         ),
-        (
-            "Enter",
-            "gsearch (a number, or a text's sum) and the words; Enter outside the bar goes to it",
-        ),
-        ("Ctrl+Enter", "gsearch the text's sum, remember it and toast its key"),
-        ("Shift+Enter", "bring back a key"),
         ("Delete in the bar", "forget the key typed"),
-        ("O / R / F", "ordinal, reversed (R toggles), frequency"),
-        ("G / S / L", "gsearch text, saturate, the sidecar's letters"),
-        ("← / →", "gsearch the sidecar's first or last sum"),
+        ("↑ ↓ in the space's bar", "its history"),
         (
             "click / Ctrl / Shift / Alt + click",
             "into the bar / candidate / list / select",
@@ -456,6 +487,30 @@ fn Keys() -> Element {
     ];
     rsx! {
         Fold { name: "keys", title: "keys",
+            div { class: "wide dim small",
+                "Click a key, then press the new one (with Ctrl, Alt or Shift if you like); Esc leaves it. A key another action holds is swapped with it. Keys without Ctrl or Alt only act while you're not typing in a text box."
+            }
+            div { class: "wide keymap",
+                for (scope , acts) in groups {
+                    div { key: "{scope.name()}", class: "keygroup",
+                        h4 { "{scope.name()}" }
+                        for a in acts {
+                            div { key: "{a.id()}", class: "keyrow",
+                                span { class: "what", "{a.label()}" }
+                                button {
+                                    class: if listening == Some(a) { "keycap on" } else if map.get(a) != a.default_binding() { "keycap changed" } else { "keycap" },
+                                    "aria-label": "the key for {a.label()}",
+                                    onclick: move |_| ui.listening.set(Some(a)),
+                                    if listening == Some(a) { "press a key…" } else { "{map.get(a)}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            div { class: "wide row",
+                button { disabled: !changed, onclick: move |_| { set_pref(ui, |p| p.keymap.clear()); ui.say("every key is back to its default"); }, Icon { name: "undo" } "reset to defaults" }
+            }
             div { class: "wide",
                 table { class: "keys",
                     for (k , what) in rows {

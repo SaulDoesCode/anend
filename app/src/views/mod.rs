@@ -2,6 +2,7 @@
 //! scroll) and loads when first shown; only the open one is visible.
 
 pub mod classifiers;
+pub mod judge;
 pub mod lists;
 pub mod memory;
 pub mod models;

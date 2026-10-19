@@ -5,6 +5,7 @@
 use dioxus::prelude::*;
 
 use crate::backend::{EntryQuery, Hit};
+use crate::keys::Action;
 use crate::ui::*;
 use crate::views::use_keys;
 
@@ -75,12 +76,17 @@ pub fn Reader() -> Element {
         if k.bar {
             return false;
         }
-        match (k.key.as_str(), expanded()) {
-            ("Escape", Some(_)) => expanded.set(None),
-            ("ArrowRight", Some(i)) => expanded.set(Some((i + 1).min(n.saturating_sub(1)))),
-            ("ArrowLeft", Some(i)) => expanded.set(Some(i.saturating_sub(1))),
-            ("ArrowRight", None) => page.set((p + 1).min(pages - 1)),
-            ("ArrowLeft", None) => page.set(p.saturating_sub(1)),
+        let step = match k.action {
+            Some(Action::ReadNext) => 1,
+            Some(Action::ReadPrev) => -1,
+            _ => 0,
+        };
+        match (k.key.as_str(), step, expanded()) {
+            ("Escape", _, Some(_)) => expanded.set(None),
+            (_, 1, Some(i)) => expanded.set(Some((i + 1).min(n.saturating_sub(1)))),
+            (_, -1, Some(i)) => expanded.set(Some(i.saturating_sub(1))),
+            (_, 1, None) => page.set((p + 1).min(pages - 1)),
+            (_, -1, None) => page.set(p.saturating_sub(1)),
             _ => return false,
         }
         true

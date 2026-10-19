@@ -61,6 +61,18 @@ pub struct Prefs {
     pub filter_open: bool,
     /// what the memory view's search filter keeps
     pub filter: MemFilter,
+    /// the keys changed from their defaults: action id → binding (keys.rs)
+    pub keymap: BTreeMap<String, String>,
+    /// colour the markdown in the note editor
+    pub highlight: bool,
+    /// the note list slid away
+    pub hide_list: bool,
+    /// the note list at the editor's right
+    pub list_right: bool,
+    /// the memory view's white mode: dark texts on white
+    pub white: bool,
+    /// the memory view labels every text's words with their types
+    pub word_types: bool,
 }
 
 /// the memory view's search filter: what of the shown texts it keeps (every part empty or
@@ -115,6 +127,12 @@ impl Default for Prefs {
             hub_url: String::new(),
             filter_open: false,
             filter: MemFilter::default(),
+            keymap: BTreeMap::new(),
+            highlight: true,
+            hide_list: false,
+            list_right: false,
+            white: false,
+            word_types: false,
         }
     }
 }

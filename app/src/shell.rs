@@ -5,6 +5,7 @@
 use dioxus::prelude::*;
 
 use crate::gem::Measure;
+use crate::keys::{Action, Binding};
 use crate::prefs::Prefs;
 use crate::ui::*;
 use crate::views;
@@ -15,6 +16,10 @@ const CSS: &str = include_str!("style.css");
 /// keeps the rest (typing, Tab, the browser's own)
 const KEYS_JS: &str = r#"
 const KEY = /^\d{1,3}(,\d{1,3}){0,5}$/;
+// the bindings the keymap holds here (`ctrl,shift,alt,code`), set by Rust per view
+window.__anendTaken = window.__anendTaken || new Set();
+// the keys menu waits for a key: every key goes to Rust
+window.__anendListen = false;
 window.addEventListener('keydown', (e) => {
   // an input method composing (IME): its keys are its own, Enter included
   if (e.isComposing || e.keyCode === 229) return;
@@ -22,16 +27,26 @@ window.addEventListener('keydown', (e) => {
   const bar = t.id === 'bar';
   const typing = t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable;
   const k = e.key, c = e.ctrlKey || e.metaKey;
+  const send = () => dioxus.send({ key: k, code: e.code, ctrl: c, shift: e.shiftKey, alt: e.altKey, bar, typing, text: bar ? t.value : '' });
+  if (window.__anendListen) {
+    if (!['Control', 'Shift', 'Alt', 'Meta'].includes(k)) { e.preventDefault(); send(); }
+    return;
+  }
+  const bound = window.__anendTaken.has(`${+c},${+e.shiftKey},${+e.altKey},${e.code}`);
+  // a text box keeps its own editing chords
+  const editing = typing && !bar && c && ['z', 'Z', 'y', 'x', 'c', 'v', 'a'].includes(k);
   let take = false, prevent = false;
-  if (c && (/^[1-9]$/.test(k) || [',', '=', '+', '-', '_', '0', 'PageUp', 'PageDown'].includes(k))) { take = true; prevent = true; }
-  else if (c && (k === 'z' || k === 'Z' || k === 'y') && (bar || !typing)) { take = true; prevent = true; }
+  if (editing) return;
+  if (c && (k === 'z' || k === 'Z' || k === 'y') && bar) { take = true; prevent = true; }
+  else if (bound && (c || e.altKey)) { take = true; prevent = true; }
+  else if (c && (k === 'PageUp' || k === 'PageDown' || k === '+')) { take = true; prevent = true; }
   else if (k === 'Escape') take = true;
   else if (bar && (k === 'Enter' || k === 'ArrowUp' || k === 'ArrowDown')) { take = true; prevent = true; }
   else if (bar && k === 'Delete' && KEY.test(t.value.trim()) && t.selectionStart === t.value.length) { take = true; prevent = true; }
-  else if (!typing && !e.altKey) { take = true; if (k.startsWith('Arrow') || k === ' ') prevent = true; }
+  else if (!typing && !e.altKey && !c) { take = true; if (bound || k.startsWith('Arrow') || k === ' ') prevent = true; }
   if (!take) return;
   if (prevent) e.preventDefault();
-  dioxus.send({ key: k, code: e.code, ctrl: c, shift: e.shiftKey, alt: e.altKey, bar, text: bar ? t.value : '' });
+  send();
 });
 // zen: the bars fade while the mouse and keys rest; the top bar slides in near the top
 let zenTimer = 0;
@@ -81,6 +96,7 @@ pub fn App() -> Element {
         bar_texts: Signal::new(Default::default()),
         seq: Signal::new(0),
         side: Signal::new(Default::default()),
+        listening: Signal::new(None),
     });
 
     // the save's name and counts, and again whenever something changed
@@ -104,6 +120,17 @@ pub fn App() -> Element {
         });
     });
 
+    // the page's key listener keeps the keys bound here from the browser
+    use_effect(move || {
+        let view = (ui.view)();
+        let keymap = crate::keys::Keymap::from_changes(&ui.prefs.read().keymap);
+        let listen = ui.listening.read().is_some();
+        let taken = serde_json::to_string(&keymap.taken(view)).unwrap_or_default();
+        document::eval(&format!(
+            "window.__anendTaken = new Set({taken}); window.__anendListen = {listen};"
+        ));
+    });
+
     // the keyboard
     {
         let api = api.clone();
@@ -118,7 +145,11 @@ pub fn App() -> Element {
     }
 
     let p = prefs.read();
-    let vars = crate::theme::css_vars(&p.palette, &p.colours);
+    let vars = format!(
+        "{}{}",
+        crate::theme::css_vars(&p.palette, &p.colours),
+        crate::theme::hl_vars(&p.palette, &p.colours)
+    );
     let zoom = p.zoom;
     let fs = p.font_size;
     let (zen, zen_delay, hide_bar) = (p.zen, p.zen_delay, p.hide_bar);
@@ -167,28 +198,67 @@ fn set_zoom(mut ui: Ui, z: f32) {
     ui.say(format!("zoom {}%", (z * 100.0).round()));
 }
 
-fn on_key(mut ui: Ui, api: Api, k: KeyPress) {
+fn on_key(mut ui: Ui, api: Api, mut k: KeyPress) {
     let view = *ui.view.peek();
-    if k.ctrl {
-        let n: Option<usize> = k.key.parse().ok();
-        if let Some(n) = n.filter(|n| (1..=View::ALL.len()).contains(n)) {
-            go(ui, View::ALL[n - 1]);
-            return;
-        }
-        let z = ui.prefs.peek().zoom;
+    // the keys menu is waiting for a key
+    if let Some(a) = *ui.listening.peek() {
+        crate::views::settings::rebind(ui, a, &k);
+        return;
+    }
+    let keymap = ui.keymap();
+    let pressed = Binding::of(&k.code, k.ctrl, k.shift, k.alt);
+    k.action = pressed.and_then(|b| keymap.action(view, b, k.typing || k.bar));
+    let z = ui.prefs.peek().zoom;
+    // the bar's own undo (Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z while in it)
+    if k.ctrl && k.bar && matches!(k.key.as_str(), "z" | "Z" | "y") {
+        ui.bar_undo(k.key != "z");
+        return;
+    }
+    if k.ctrl && !k.alt {
         match k.key.as_str() {
-            "," => {
-                let open = *ui.settings.peek();
-                ui.settings.set(!open);
-            }
-            "=" | "+" | "PageUp" => set_zoom(ui, z + 0.05),
-            "-" | "_" | "PageDown" => set_zoom(ui, z - 0.05),
-            "0" => set_zoom(ui, 1.0),
-            "z" | "Z" | "y" if k.bar => ui.bar_undo(k.key != "z"),
-            "z" => undo_last(ui, api),
+            "PageUp" | "+" => return set_zoom(ui, z + 0.05),
+            "PageDown" => return set_zoom(ui, z - 0.05),
             _ => {}
         }
+    }
+    let global = match k.action {
+        Some(Action::GotoMemory) => Some(View::Memory),
+        Some(Action::GotoSpace) => Some(View::Space),
+        Some(Action::GotoLists) => Some(View::Lists),
+        Some(Action::GotoReader) => Some(View::Reader),
+        Some(Action::GotoNotes) => Some(View::Notes),
+        Some(Action::GotoTags) => Some(View::Tags),
+        Some(Action::GotoStats) => Some(View::Stats),
+        Some(Action::GotoModels) => Some(View::Models),
+        Some(Action::GotoFilters) => Some(View::Filters),
+        _ => None,
+    };
+    if let Some(v) = global {
+        go(ui, v);
         return;
+    }
+    match k.action {
+        Some(Action::OpenSettings) => {
+            let open = *ui.settings.peek();
+            ui.settings.set(!open);
+            return;
+        }
+        Some(Action::OpenKeys) => {
+            crate::shell::set_pref(ui, |p| {
+                p.collapsed.remove("keys");
+            });
+            ui.settings.set(true);
+            return;
+        }
+        Some(Action::ZoomIn) => return set_zoom(ui, z + 0.05),
+        Some(Action::ZoomOut) => return set_zoom(ui, z - 0.05),
+        Some(Action::ZoomReset) => return set_zoom(ui, 1.0),
+        Some(Action::Undo) if !k.typing => return undo_last(ui, api),
+        Some(Action::FocusBar) if !*ui.settings.peek() => {
+            ui.focus_bar();
+            return;
+        }
+        _ => {}
     }
     if k.key == "Escape" {
         if ui.menu.peek().is_some() {
@@ -213,7 +283,7 @@ fn on_key(mut ui: Ui, api: Api, k: KeyPress) {
     }
     let handler = ui.keys.peek().iter().find(|(v, _)| *v == view).map(|(_, h)| *h);
     let taken = handler.map(|h| h.call(k.clone())).unwrap_or(false);
-    if !taken && !k.bar && k.key == "Enter" {
+    if !taken && !k.bar && !k.typing && k.key == "Enter" {
         ui.focus_bar();
     }
 }

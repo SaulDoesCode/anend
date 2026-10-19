@@ -93,7 +93,13 @@ pub struct KeyPress {
     pub shift: bool,
     pub alt: bool,
     pub bar: bool,
+    /// a text box (the bar or another) has the focus
+    #[serde(default)]
+    pub typing: bool,
     pub text: String,
+    /// the action the keymap gives this press here (set by the shell)
+    #[serde(skip)]
+    pub action: Option<crate::keys::Action>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -216,6 +222,8 @@ pub struct Ui {
     pub seq: Signal<u64>,
     /// what each view says at the command bar's right end (its counts, what Enter does)
     pub side: Signal<std::collections::HashMap<View, String>>,
+    /// the keys menu waits for a key for this action
+    pub listening: Signal<Option<crate::keys::Action>>,
 }
 
 pub fn ui() -> Ui {
@@ -257,6 +265,16 @@ pub async fn sleep_ms(ms: u64) {
 }
 
 impl Ui {
+    /// the keymap: the defaults with the person's changes
+    pub fn keymap(self) -> crate::keys::Keymap {
+        crate::keys::Keymap::from_changes(&self.prefs.peek().keymap)
+    }
+
+    /// what the key bound to an action is called, for tooltips
+    pub fn key_of(self, a: crate::keys::Action) -> String {
+        self.keymap().get(a).to_string()
+    }
+
     /// what the view says at the command bar's right end
     pub fn side_note(mut self, view: View, text: impl Into<String>) {
         let t = text.into();

@@ -13,7 +13,8 @@ const FONT = 40;
 const PX = 0.014;
 const LOOK = 0.0026;
 const ROLL = 1.4;
-const FLY = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyC', 'KeyQ', 'KeyE', 'ShiftLeft', 'ShiftRight']);
+// the flying keys by action, as the keymap binds them (Rust sends them: `keys`)
+const DEFAULT_KEYS = { fly_forward: 'KeyW', fly_back: 'KeyS', fly_left: 'KeyA', fly_right: 'KeyD', fly_up: 'Space', fly_down: 'KeyC', roll_left: 'KeyQ', roll_right: 'KeyE', level: 'KeyR', back_to_start: 'Home', slower: 'BracketLeft', faster: 'BracketRight' };
 
 const typing = (e) => {
   const t = e.target || {};
@@ -26,6 +27,7 @@ export class Space {
     this.send = send;
     this.items = new Map(); // id → {obj, el, hit, node}
     this.keys = new Set();
+    this.bind = { ...DEFAULT_KEYS };
     this.speed = 6;
     this.running = false;
     this.looking = false;
@@ -61,6 +63,15 @@ export class Space {
     this.resize();
     this.listen();
     this.loop = this.loop.bind(this);
+  }
+
+  setKeys(map) {
+    this.bind = { ...DEFAULT_KEYS, ...map };
+    this.keys.clear();
+  }
+
+  held(action) {
+    return this.keys.has(this.bind[action]);
   }
 
   setRoom(color, ink) {
@@ -265,17 +276,19 @@ export class Space {
     window.addEventListener('keydown', (e) => {
       if (!this.running || typing(e) || e.ctrlKey || e.metaKey || e.altKey) return;
       const k = e.code;
-      if (FLY.has(k)) {
+      const b = this.bind;
+      const flying = ['fly_forward', 'fly_back', 'fly_left', 'fly_right', 'fly_up', 'fly_down', 'roll_left', 'roll_right'];
+      if (flying.some((a) => b[a] === k) || k === 'ShiftLeft' || k === 'ShiftRight') {
         this.keys.add(k);
         this.ease = null;
         e.preventDefault();
-      } else if (k.startsWith('Arrow')) {
+      } else if (k.startsWith('Arrow') && !e.shiftKey) {
         e.preventDefault();
         this.hop(k);
-      } else if (k === 'KeyR') this.level();
-      else if (k === 'Home') this.home();
-      else if (k === 'BracketLeft') this.speed = Math.max(0.5, this.speed / 1.25);
-      else if (k === 'BracketRight') this.speed = Math.min(200, this.speed * 1.25);
+      } else if (k === b.level) this.level();
+      else if (k === b.back_to_start) this.home();
+      else if (k === b.slower) this.speed = Math.max(0.5, this.speed / 1.25);
+      else if (k === b.faster) this.speed = Math.min(200, this.speed * 1.25);
       else return;
       this.info();
     });
@@ -291,14 +304,14 @@ export class Space {
     const c = this.camera;
     if (k.size) {
       const v = this.speed * (k.has('ShiftLeft') || k.has('ShiftRight') ? 4 : 1) * dt;
-      if (k.has('KeyW')) c.translateZ(-v);
-      if (k.has('KeyS')) c.translateZ(v);
-      if (k.has('KeyA')) c.translateX(-v);
-      if (k.has('KeyD')) c.translateX(v);
-      if (k.has('Space')) c.translateY(v);
-      if (k.has('KeyC')) c.translateY(-v);
-      if (k.has('KeyQ')) c.rotateZ(ROLL * dt);
-      if (k.has('KeyE')) c.rotateZ(-ROLL * dt);
+      if (this.held('fly_forward')) c.translateZ(-v);
+      if (this.held('fly_back')) c.translateZ(v);
+      if (this.held('fly_left')) c.translateX(-v);
+      if (this.held('fly_right')) c.translateX(v);
+      if (this.held('fly_up')) c.translateY(v);
+      if (this.held('fly_down')) c.translateY(-v);
+      if (this.held('roll_left')) c.rotateZ(ROLL * dt);
+      if (this.held('roll_right')) c.rotateZ(-ROLL * dt);
       this.info();
     }
     if (this.ease) {

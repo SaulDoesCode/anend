@@ -16,6 +16,7 @@ use dioxus::prelude::*;
 
 use crate::backend::{BucketCount, Hit};
 use crate::gem::{self, Mode};
+use crate::keys::Action;
 use crate::shell::set_pref;
 use crate::ui::*;
 use crate::views::{TChip, use_keys};
@@ -165,6 +166,20 @@ async fn list_command(ui: Ui, api: Api, m: Mem, word: &str) -> bool {
     true
 }
 
+/// anagrams: everything with the same letters as `t`
+async fn letters_search(ui: Ui, api: Api, m: Mem, t: String) {
+    let letters = gem::letters(&gem::Measure::of(&t).frequency);
+    show_sum(ui, m, letters.clone(), None, None);
+    match api.gsearch(Mode::Frequency, &t).await {
+        Ok(hits) => {
+            set_topline(ui, &letters, Mode::Frequency, Some(&t), hits.len());
+            let mut r = m.results;
+            r.set(hits);
+        }
+        Err(e) => ui.fail(e),
+    }
+}
+
 /// Enter in the bar (weum's term onkeydown)
 async fn enter(mut ui: Ui, api: Api, m: Mem, raw: String, ctrl: bool, shift: bool) {
     let t = raw.trim().to_string();
@@ -239,17 +254,7 @@ async fn enter(mut ui: Ui, api: Api, m: Mem, raw: String, ctrl: bool, shift: boo
         return;
     }
     if mode == Mode::Frequency && !ctrl {
-        // anagrams: the same letters
-        let letters = gem::letters(&gem::Measure::of(&t).frequency);
-        show_sum(ui, m, letters.clone(), None, None);
-        match api.gsearch(Mode::Frequency, &t).await {
-            Ok(hits) => {
-                set_topline(ui, &letters, mode, Some(&t), hits.len());
-                let mut r = m.results;
-                r.set(hits);
-            }
-            Err(e) => ui.fail(e),
-        }
+        letters_search(ui, api.clone(), m, t.clone()).await;
         if saturate {
             saturate_and_show(ui, api, m, &t, false).await;
         }
@@ -458,8 +463,14 @@ pub fn Memory() -> Element {
             } else {
                 let measure = ui.measure.peek().clone();
                 let mode = ui.mode();
-                match k.key.as_str() {
-                    "r" | "R" => set_mode(
+                if k.key == "Escape" {
+                    let mut p = m.picking;
+                    p.set(false);
+                    ui.picks.write().selected.clear();
+                    return true;
+                }
+                match k.action {
+                    Some(Action::BucketReversed) => set_mode(
                         ui,
                         if mode == Mode::Reversed {
                             Mode::Ordinal
@@ -467,8 +478,8 @@ pub fn Memory() -> Element {
                             Mode::Reversed
                         },
                     ),
-                    "o" | "O" => set_mode(ui, Mode::Ordinal),
-                    "f" | "F" => set_mode(
+                    Some(Action::BucketOrdinal) => set_mode(ui, Mode::Ordinal),
+                    Some(Action::BucketFrequency) => set_mode(
                         ui,
                         if mode == Mode::Frequency {
                             Mode::Ordinal
@@ -476,11 +487,15 @@ pub fn Memory() -> Element {
                             Mode::Frequency
                         },
                     ),
-                    "g" | "G" => set_pref(ui, |p| p.gsearch_text = !p.gsearch_text),
-                    "s" | "S" => set_pref(ui, |p| p.saturate = !p.saturate),
-                    "l" | "L" => set_pref(ui, |p| p.letters = !p.letters),
-                    "c" | "C" if !ui.prefs.peek().tint.is_empty() => set_pref(ui, |p| p.cls_search = !p.cls_search),
-                    "ArrowLeft" => match measure {
+                    Some(Action::ToggleGsearch) => set_pref(ui, |p| p.gsearch_text = !p.gsearch_text),
+                    Some(Action::ToggleSaturate) => set_pref(ui, |p| p.saturate = !p.saturate),
+                    Some(Action::Letters) => set_pref(ui, |p| p.letters = !p.letters),
+                    Some(Action::WhiteMode) => set_pref(ui, |p| p.white = !p.white),
+                    Some(Action::WordTypes) => set_pref(ui, |p| p.word_types = !p.word_types),
+                    Some(Action::ClassifierSearch) if !ui.prefs.peek().tint.is_empty() => {
+                        set_pref(ui, |p| p.cls_search = !p.cls_search)
+                    }
+                    Some(Action::SideOrdinal) => match measure {
                         // the sidecar's first: the ordinal sum, gsearched in ordinal
                         Some(me) => {
                             set_mode(ui, Mode::Ordinal);
@@ -488,7 +503,7 @@ pub fn Memory() -> Element {
                         }
                         None => return false,
                     },
-                    "ArrowRight" => match measure {
+                    Some(Action::SideReversed) => match measure {
                         // the last: the reversed sum, gsearched in reversed
                         Some(me) => {
                             set_mode(ui, Mode::Reversed);
@@ -496,11 +511,16 @@ pub fn Memory() -> Element {
                         }
                         None => return false,
                     },
-                    "Escape" => {
-                        let mut p = m.picking;
-                        p.set(false);
-                        ui.picks.write().selected.clear();
-                    }
+                    Some(Action::SideFrequency) => match measure {
+                        // the letters: gsearched by frequency
+                        Some(me) => {
+                            set_mode(ui, Mode::Frequency);
+                            let _ = me;
+                            let t = ui.bar.peek().trim().to_string();
+                            dioxus::dioxus_core::spawn_forever(letters_search(ui, api.clone(), m, t));
+                        }
+                        None => return false,
+                    },
                     _ => return false,
                 }
                 true
@@ -1209,7 +1229,7 @@ pub fn MemoryStrip() -> Element {
                             let key = if md == Mode::Ordinal { "ArrowLeft" } else { "ArrowRight" };
                             let h = ui.keys.peek().iter().find(|(w, _)| *w == View::Memory).map(|(_, h)| *h);
                             if let Some(h) = h {
-                                h.call(KeyPress { key: key.into(), code: String::new(), ctrl: false, shift: false, alt: false, bar: false, text: String::new() });
+                                h.call(KeyPress { key: key.into(), code: String::new(), ctrl: false, shift: false, alt: false, bar: false, typing: false, text: String::new(), action: Some(if md == Mode::Ordinal { Action::SideOrdinal } else { Action::SideReversed }) });
                             }
                         },
                         "{v}"

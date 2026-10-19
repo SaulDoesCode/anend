@@ -252,6 +252,13 @@ table.saves { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.saves td, table.saves th { padding: 3px 6px; text-align: left; border-bottom: 1px solid color-mix(in srgb, var(--dim) 20%, transparent); }
 table.saves tr.open td:first-child { font-weight: 700; }
 table.keys td { padding: 2px 8px 2px 0; font-size: 13px; }
+.keymap { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 4px 18px; }
+.keygroup h4 { margin: 8px 0 2px; font-size: 12.5px; color: var(--dim); font-weight: 600; text-transform: none; }
+.keyrow { display: flex; align-items: center; gap: 8px; padding: 1px 0; font-size: 13px; }
+.keyrow .what { flex: 1; min-width: 0; }
+button.keycap { min-width: 74px; height: 22px; font: 12px var(--mono); background: var(--pad); color: var(--text); }
+button.keycap.changed { box-shadow: inset 0 0 0 1px var(--accent); }
+button.keycap.on { background: var(--accent); color: var(--on-button); }
 kbd { font: 12px var(--mono); border: 1px solid color-mix(in srgb, var(--dim) 50%, transparent); border-radius: 3px; padding: 0 4px; }
 .import { background: var(--pad); border-radius: var(--radius); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
 .steps { display: flex; gap: 6px; font-size: 12px; color: var(--dim); }
@@ -290,18 +297,70 @@ kbd { font: 12px var(--mono); border: 1px solid color-mix(in srgb, var(--dim) 50
 .md blockquote { margin: .4em 0; padding-left: 10px; border-left: 4px solid var(--accent); color: var(--dim); }
 
 /* ---------------------------------------------------------------- notes */
-.notes { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: var(--gap); height: 100%; }
-.notelist { display: flex; flex-direction: column; gap: 4px; padding: 6px; overflow: hidden; min-height: 0; }
-.notelist ul { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; min-height: 0; }
-.notelist li { padding: 3px 8px; border-radius: var(--radius); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* the view never scrolls itself (its list and its pad do), so nothing drags it sideways */
+.view.notes { overflow: hidden; }
+.notes { position: absolute; inset: 0; display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: var(--gap); min-width: 0; }
+.notes.no-list { grid-template-columns: minmax(0, 1fr); }
+.notes.list-right { grid-template-columns: minmax(0, 1fr) 250px; }
+.notes.list-right .notelist { order: 2; }
+.notelist { display: flex; flex-direction: column; gap: 6px; padding: 6px; overflow: hidden; min-height: 0; }
+.notelist ul { list-style: none; margin: 0; padding: 0; overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 2px; }
+.notelist li { padding: 4px 8px; border-radius: var(--radius); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; }
 .notelist li .when { display: block; font-size: 11px; color: var(--dim); }
 .notelist li:hover { background: color-mix(in srgb, var(--buttons) 35%, transparent); }
+.notelist li:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .notelist li.on { background: var(--accent); color: var(--on-button); }
-.notelist li.on .when { color: inherit; }
-.editor { display: flex; flex-direction: column; gap: 6px; padding: 6px; min-height: 0; min-width: 0; }
-.editor .head { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.editor .title { flex: 1; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 60px; }
-.editor textarea { flex: 1; min-height: 0; resize: none; font: 15px/1.4 var(--mono); padding: 10px; }
+.notelist li.on .when { color: inherit; opacity: .8; }
+.editor { display: flex; flex-direction: column; gap: 6px; padding: 8px; min-height: 0; min-width: 0; overflow: hidden; }
+.editor .head { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.editor .title { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 60px; max-width: 40%; }
+.tagchips { flex: 1; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-width: 120px; }
+.tagchips .chip .x { margin-left: 4px; opacity: .7; }
+.tagchips input.taginput { width: 110px; height: 22px; font-size: 13px; }
+button.plain.on { background: var(--accent); color: var(--on-button); }
+/* the pad: a transparent-glyph textarea over the highlighting layer, both the same box */
+.pad { position: relative; flex: 1; min-height: 0; background: var(--pad); border-radius: 5px; overflow: hidden; }
+.pad textarea, .pad pre.hl {
+  position: absolute; inset: 0; margin: 0; padding: 10px; border: 0; border-radius: 5px;
+  font: 15px/1.45 var(--mono); letter-spacing: 0; tab-size: 4; white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal;
+}
+.pad textarea { width: 100%; height: 100%; resize: none; background: transparent; color: var(--text); z-index: 1; }
+/* both always keep the same scrollbar room, so their lines wrap alike; the layer's is invisible */
+.pad textarea, .pad pre.hl { overflow-y: scroll; overflow-x: hidden; scrollbar-width: thin; }
+.pad textarea::-webkit-scrollbar, .pad pre.hl::-webkit-scrollbar { width: 10px; }
+.pad textarea::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--dim) 45%, transparent); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
+.pad pre.hl { scrollbar-color: transparent transparent; }
+.pad pre.hl::-webkit-scrollbar-thumb, .pad pre.hl::-webkit-scrollbar-track { background: transparent; }
+.pad.hl-on textarea { color: transparent; caret-color: var(--text); }
+.pad.hl-on textarea::selection { background: color-mix(in srgb, var(--accent) 45%, transparent); color: transparent; }
+.pad pre.hl { color: var(--text); pointer-events: none; z-index: 0; background: none; }
+.pad:not(.hl-on) pre.hl { visibility: hidden; }
+.hl .h-m { color: var(--hl-mark); }
+.hl .h-h { color: var(--hl-heading); font-weight: 700; }
+.hl .h-s { font-weight: 700; }
+.hl .h-e { color: var(--hl-emph); font-style: italic; }
+.hl .h-x { color: var(--hl-strike); text-decoration: line-through; }
+.hl .h-c { color: var(--hl-code); background: color-mix(in srgb, var(--code) 70%, transparent); border-radius: 2px; }
+.hl .h-l { color: var(--hl-link); text-decoration: underline; }
+.hl .h-u { color: var(--hl-url); }
+.hl .h-li, .hl .h-t { color: var(--hl-list); font-weight: 700; }
+.hl .h-q { color: var(--hl-quote); }
+.hl .h-g { color: var(--hl-tag); }
+.hl .h-r { color: var(--hl-rule); }
+/* a flagged stretch (spelling, grammar): a wavy underline under the glyphs */
+.hl mark.flag { background: none; color: inherit; text-decoration: underline wavy; text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+.hl mark.flag.spell { text-decoration-color: hsl(2 75% 52%); }
+.hl mark.flag.grammar { text-decoration-color: hsl(215 75% 52%); }
+/* what classifiers say of an entry (views/judge.rs) */
+.judge { display: flex; flex-direction: column; gap: 6px; background: var(--code); border-radius: 5px; padding: 8px 10px; flex: none; max-height: 40%; overflow: auto; }
+.judge-pick { gap: 4px; }
+.judge .chip:not(.on) { background: color-mix(in srgb, var(--buttons) 45%, transparent); color: var(--text); }
+.verdict { display: flex; flex-direction: column; gap: 3px; padding-top: 4px; border-top: 1px solid color-mix(in srgb, var(--dim) 25%, transparent); }
+.verdict .probs { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 2px 14px; }
+.prob { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.prob .c { width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prob.top .c { font-weight: 700; }
+.prob .p { width: 46px; text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
 
 /* ---------------------------------------------------------------- tags, stats, models, filters */
 .taglist { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -470,4 +529,4 @@ table.confusion td.miss { color: var(--bad); }
 /* the editor's replacements (views/notes.rs) */
 .editor .replace { gap: 6px; flex-wrap: wrap; }
 .editor .replace select { max-width: 280px; }
-.editor .replace input { width: 260px; }
+.editor .replace input { width: min(260px, 100%); }

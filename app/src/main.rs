@@ -4,7 +4,9 @@
 mod backend;
 mod fonts;
 mod gem;
+mod highlight;
 mod icons;
+mod keys;
 mod md;
 mod parity;
 mod prefs;
