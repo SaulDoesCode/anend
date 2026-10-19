@@ -118,6 +118,11 @@ fn spec_models_live_in_the_save() {
     assert_eq!(e["path"], "heads[0].kind");
     assert!(e["message"].as_str().unwrap().contains("unknown variant"), "{e}");
     let mut bad = kind_spec();
+    bad["heads"][0]["clases"] = json!(["a", "b"]);
+    let e = check(bad);
+    assert!(e["path"].as_str().unwrap().starts_with("heads[0]"), "{e}");
+    assert!(e["message"].as_str().unwrap().contains("unknown field"), "{e}");
+    let mut bad = kind_spec();
     bad["trunk"]["preset"] = json!("huge");
     assert_eq!(check(bad)["path"], "trunk.preset");
     let e = c("models.check", json!({ "spec": "{\"name\": \"x\", " })).unwrap();

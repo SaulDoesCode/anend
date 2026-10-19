@@ -572,6 +572,15 @@ fn start(store: Arc<Store>, g: &Arc<Graph>, args: &Value, limits: &Limits) -> Re
     };
     let fresh = base.is_none();
     let run_spec = resolved(&sp, limits)?;
+    // about how many examples: the queries' finds (pairs count once)
+    let found = src.lists.values().chain(src.tags.values()).map(Vec::len).sum::<usize>()
+        + sp.data
+            .iter()
+            .map(|q| match q {
+                DataQuery::Inline { items } => items.len(),
+                _ => 0,
+            })
+            .sum::<usize>();
     let job = Arc::new(Job {
         cancel: AtomicBool::new(false),
         state: Mutex::new(JobState {
@@ -579,6 +588,7 @@ fn start(store: Arc<Store>, g: &Arc<Graph>, args: &Value, limits: &Limits) -> Re
             state: "running".into(),
             rounds: 1,
             round: 1,
+            examples: found,
             ..JobState::default()
         }),
         started: std::time::Instant::now(),

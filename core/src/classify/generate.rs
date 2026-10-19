@@ -30,6 +30,7 @@ use super::train::{self, Example, FeedbackOpts, Target};
 /// how each next byte is picked
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+#[serde(deny_unknown_fields)]
 pub struct Sampling {
     /// 0 picks the most likely byte (greedy); otherwise logits are divided by it
     pub temperature: f32,
@@ -305,6 +306,7 @@ impl Measure {
 
 /// a critic's verdict that must (or must not) hold: `class` among its head's members
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Gate {
     pub critic: usize,
     pub class: usize,
@@ -312,6 +314,7 @@ pub struct Gate {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SumRange {
     pub measure: Measure,
     pub lo: u64,
@@ -324,6 +327,7 @@ pub struct SumRange {
 /// what a kept candidate must satisfy
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+#[serde(deny_unknown_fields)]
 pub struct Constraints {
     pub min_len: usize,
     /// 0: no limit

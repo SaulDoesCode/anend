@@ -23,7 +23,7 @@ enum Side {
     Import,
 }
 
-fn strs(v: &Value) -> Vec<String> {
+pub(crate) fn strs(v: &Value) -> Vec<String> {
     v.as_array()
         .into_iter()
         .flatten()
@@ -31,11 +31,11 @@ fn strs(v: &Value) -> Vec<String> {
         .collect()
 }
 
-fn nums(v: &Value) -> Vec<f64> {
+pub(crate) fn nums(v: &Value) -> Vec<f64> {
     v.as_array().into_iter().flatten().filter_map(Value::as_f64).collect()
 }
 
-fn pct(p: f64) -> String {
+pub(crate) fn pct(p: f64) -> String {
     format!("{:.0}%", p * 100.0)
 }
 
@@ -46,6 +46,9 @@ pub fn Models() -> Element {
     let mut chosen: Signal<Option<String>> = use_signal(|| None);
     let mut side = use_signal(|| Side::None);
     let mut rev = use_signal(|| 0u64);
+    // the classifiers or the spec models
+    let mut specs_tab = use_signal(|| ui.prefs.peek().folded("models: specs"));
+    let specs = use_hook(crate::views::specs::SpecState::new);
     let api_r = api.clone();
     let models = use_resource(move || {
         let api = api_r.clone();
@@ -53,6 +56,18 @@ pub fn Models() -> Element {
         async move { api.models().await }
     });
     use_keys(View::Models, move |k: KeyPress| {
+        if *specs_tab.peek() {
+            if k.bar && k.key == "Enter" {
+                let mut e = specs.enter;
+                e += 1;
+                return true;
+            }
+            if !k.bar && k.key == "Escape" {
+                specs.escape();
+                return true;
+            }
+            return false;
+        }
         if k.bar && k.key == "Enter" {
             // the try card runs as you type
             if chosen.peek().is_none()
@@ -95,15 +110,36 @@ pub fn Models() -> Element {
     rsx! {
         div { class: "page wide",
             div { class: "row",
-                h2 { "classifiers" }
-                span { class: "dim small", "trained on your lists, one class per list" }
+                div { class: "mtabs", role: "tablist", "aria-label": "kinds of model",
+                    for (on , label) in [(false, "classifiers"), (true, "spec models")] {
+                        button { key: "{label}", role: "tab", "aria-selected": "{specs_tab() == on}",
+                            class: if specs_tab() == on { "mtab on" } else { "mtab" },
+                            onclick: move |_| {
+                                specs_tab.set(on);
+                                crate::shell::set_pref(ui, |p| {
+                                    if on { p.collapsed.insert("models: specs".into()); } else { p.collapsed.remove("models: specs"); }
+                                });
+                            },
+                            "{label}" }
+                    }
+                }
+                if specs_tab() {
+                    span { class: "dim small", "described as data: what they read, their heads, what they learn from" }
+                } else {
+                    span { class: "dim small", "trained on your lists, one class per list" }
+                }
                 span { class: "grow" }
+                if !specs_tab() {
                 button { class: if side() == Side::New { "on" } else { "" }, onclick: move |_| side.set(if side() == Side::New { Side::None } else { Side::New }),
                     Icon { name: "new" } "new" }
                 button { class: if side() == Side::Import { "on" } else { "" }, "data-tip": "a classifier file (.anendcls)",
                     onclick: move |_| side.set(if side() == Side::Import { Side::None } else { Side::Import }),
                     Icon { name: "upload" } "import" }
+                }
             }
+            if specs_tab() {
+                crate::views::specs::SpecModels { state: specs }
+            } else {
             if let Some(n) = note {
                 div { class: "card bad", "{n}" }
             }
@@ -146,6 +182,7 @@ pub fn Models() -> Element {
                         },
                     }
                 }
+            }
             }
         }
     }
@@ -470,7 +507,7 @@ fn ClassifierPage(name: String, on_gone: EventHandler<()>) -> Element {
 }
 
 /// a class's hue, spread round the wheel (the memo palette's order)
-fn hue(i: usize, n: usize) -> f64 {
+pub(crate) fn hue(i: usize, n: usize) -> f64 {
     (i as f64 * 360.0 / n.max(1) as f64 + 24.0) % 360.0
 }
 
@@ -607,7 +644,7 @@ fn j_err(job: &Option<Value>) -> String {
 }
 
 #[component]
-fn Progress(job: Value) -> Element {
+pub(crate) fn Progress(job: Value) -> Element {
     let steps = job["steps"].as_f64().unwrap_or(0.0).max(1.0);
     let step = job["step"].as_f64().unwrap_or(0.0);
     let rounds = job["rounds"].as_u64().unwrap_or(1);
@@ -639,7 +676,7 @@ fn Progress(job: Value) -> Element {
 }
 
 /// points of a line through (x, y) pairs fitted to w × h
-fn spark(p: &[(f64, f64)], w: f64, h: f64) -> String {
+pub(crate) fn spark(p: &[(f64, f64)], w: f64, h: f64) -> String {
     if p.len() < 2 {
         return String::new();
     }
@@ -659,7 +696,7 @@ fn spark(p: &[(f64, f64)], w: f64, h: f64) -> String {
 }
 
 #[component]
-fn Metrics(event: Value, classes: Vec<String>) -> Element {
+pub(crate) fn Metrics(event: Value, classes: Vec<String>) -> Element {
     let m = &event["metrics"];
     let on = event["measured_on"].as_str().unwrap_or("");
     let per = m["classes"].as_array().cloned().unwrap_or_default();

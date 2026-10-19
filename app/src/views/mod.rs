@@ -9,6 +9,7 @@ pub mod notes;
 pub mod reader;
 pub mod settings;
 pub mod space;
+pub mod specs;
 pub mod stats;
 pub mod tags;
 

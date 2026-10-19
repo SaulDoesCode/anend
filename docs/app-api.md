@@ -219,7 +219,8 @@ renamed, deleted or bundled. One implementation answers them on the desktop and 
   shared hub it counts toward the member's two trainings and indexings at once, stops
   after two hours, and its `threads` are at most the hub's cores.
 - **Critics** are other spec models of the save, or its trained classifiers (a
-  classifier's head is its own name). The same seed gives the same candidates; `guided`
+  classifier's head is its own name). They judge the prompt and what was written
+  together (a `pairs` model: what was written). The same seed gives the same candidates; `guided`
   steers each byte toward what the critics want (slower).
 - **Untrained**, a model answers with its starting weights: random for a new trunk, the
   checkpoint's for a pretrained one (`"from": {"pretrained": dir}`), so a pretrained

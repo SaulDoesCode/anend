@@ -48,6 +48,7 @@ pub enum Feature {
 /// what a model reads
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum InputSpec {
     /// UTF-8 text, as bytes, with any feature channels
     Text {
@@ -83,6 +84,7 @@ fn codes() -> usize {
 /// machine profile, from the benchmark)
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+#[serde(deny_unknown_fields)]
 pub struct TrunkSpec {
     /// "test" (tests and CI only), "compact", "small", "base", or "auto"
     pub preset: Option<String>,
@@ -113,6 +115,7 @@ pub enum OutKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HeadDecl {
     pub name: String,
     pub kind: OutKind,
@@ -137,6 +140,7 @@ pub enum Value {
 /// where training data comes from: queries over a `Source` (the save), or inline
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "from", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum DataQuery {
     /// the members of list `list` as class `class` of head `head` (for a generate
     /// head: texts to learn to write; for a regress head: `value`)
@@ -169,6 +173,7 @@ pub enum DataQuery {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct InlineItem {
     pub input: Value,
     pub head: String,
@@ -199,6 +204,7 @@ pub enum WantDecl {
 
 /// another model judging what a generator writes
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CriticSpec {
     /// the model's name, resolved when generating
     pub model: String,
@@ -210,6 +216,7 @@ pub struct CriticSpec {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+#[serde(deny_unknown_fields)]
 pub struct TrainSpec {
     pub epochs: Option<usize>,
     pub batch: Option<usize>,
@@ -223,6 +230,7 @@ pub struct TrainSpec {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ModelSpec {
     #[serde(default = "v1")]
     pub version: u32,
@@ -1241,7 +1249,11 @@ pub fn generate_by(
         Value::Bytes(b) if b.is_empty() => (Vec::new(), Vec::new()),
         v => model.encode(v)?,
     };
+    // a continuation is judged whole (the start and what was written); a sequence to
+    // sequence model's output alone
+    let pairs = model.spec.data.iter().any(|q| matches!(q, DataQuery::Pairs { .. }));
     let opts = GenOpts {
+        judge_prompt: !bytes.is_empty() && !pairs,
         prompt: model.prompt(&bytes),
         sampling: sampling.clone(),
         candidates,

@@ -587,6 +587,51 @@ pub trait Backend {
         self.call("classify.enlist", json!({ "name": name, "class": class }))
     }
 
+    // ---- spec models (docs/models.md; `models.*`)
+    fn spec_models(&self) -> Fut<Vec<Value>> {
+        typed(self.call("models.list", json!({})))
+    }
+    fn spec_model(&self, name: &str) -> Fut<Value> {
+        self.call("models.get", json!({ "name": name }))
+    }
+    /// what making or saving a spec would say: `{ok}` or `{ok: false, path, message}`
+    fn check_spec(&self, spec: &str) -> Fut<Value> {
+        self.call("models.check", json!({ "spec": spec }))
+    }
+    fn create_spec(&self, spec: &str) -> Fut<Value> {
+        self.call("models.create", json!({ "spec": spec }))
+    }
+    fn update_spec(&self, name: &str, spec: &str) -> Fut<Value> {
+        self.call("models.update", json!({ "name": name, "spec": spec }))
+    }
+    fn delete_spec(&self, name: &str) -> Fut<()> {
+        unit(self.call("models.delete", json!({ "name": name })))
+    }
+    fn train_spec(&self, name: &str, epochs: Option<u32>, fresh: bool) -> Fut<Value> {
+        self.call(
+            "models.train",
+            json!({ "name": name, "epochs": epochs, "fresh": fresh }),
+        )
+    }
+    fn spec_job(&self, name: &str) -> Fut<Value> {
+        self.call("models.job", json!({ "name": name }))
+    }
+    fn cancel_spec(&self, name: &str) -> Fut<()> {
+        unit(self.call("models.cancel", json!({ "name": name })))
+    }
+    /// every head's answer on a text
+    fn run_spec(&self, name: &str, text: &str) -> Fut<Value> {
+        self.call("models.run", json!({ "name": name, "text": text }))
+    }
+    /// candidates from a generator, judged by its critics; `opts` holds `candidates`,
+    /// `max_len`, `temperature`, `seed`, `guided`
+    fn generate_spec(&self, name: &str, prompt: &str, opts: Value) -> Fut<Value> {
+        let mut args = opts;
+        args["name"] = json!(name);
+        args["prompt"] = json!(prompt);
+        self.call("models.generate", args)
+    }
+
     // ---- filters
     fn filters(&self) -> Fut<Vec<FilterPreset>> {
         typed(self.call("filters.list", json!({})))
