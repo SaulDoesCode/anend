@@ -362,18 +362,47 @@ since the Unix epoch), size (bytes), lists: [names]}`.
   need room under it, the rest work when it's full. On one's own machine a picture is at
   most 64 MB and 32768 pixels a side, with no count limit.
 
+## Scenes
+
+A save holds many scenes (`graph::scenes`; the design and the packed format are in
+docs/format.md). The room is the space's own scene and holds its blocks; the others are
+the saved scenes the space's scenes window lists, opens (`#name`), renames and deletes.
+A saved scene's texts come and go in the rows the space keeps,
+`[text, x, y, z, {key?, size?}]`: `key` is the entry's label (`note:<label>` for a note)
+and `size` the text's size in space units (kept as a font size in steps of 1/50; none for
+the default). A row without a key is saved as a memory entry first, so a scene's texts
+are always entries. Saves made before scenes kept saved scenes in the setting
+`space.maps`; they become scenes when the save opens (or a backup holding them is
+restored), and the old JSON stays as the setting `space.maps (before scenes)`.
+
+| op | args | data |
+|---|---|---|
+| `scenes.list` | | `[{id, name, parent, room, texts, blocks, created, edited}]` |
+| `scenes.maps` | | `{name: rows}`, every saved scene (not the room) |
+| `scenes.get` | `{name}` | `{id, name, rows}` |
+| `scenes.save` | `{name, rows}` | `{id, name, texts}`: the scene so named (made when there's none) holds these texts and no others |
+| `scenes.rename` | `{from, to}` | `{id, name}` |
+| `scenes.delete` | `{name}` | `{name, rows}`: what it held, for `scenes.save` to put back (an undo) |
+
+Merging a save brings each saved scene in whole, as `<name> 2` (or 3, ...) when the
+target has one so named; overlapping placements aren't settled by physics yet.
+
 ## Blocks (spatial saves)
 
-Blocks placed in the space, kept in the save's own tables (`graph blocks`, a redb
-multimap, and `graph block ids`), so they travel with the file, its backups and bundles
-(`blocks` in the backup's other file, restored with their ids) and merges (fresh ids; a
-text block finds its text in the target by what it says, a picture block its picture by
-hash). A block shows a **texture**: a text of the save (`kind: "text"`, `texture` its
-key: the entry label, a note's `note:` prefix taken off), a picture (`"picture"`, its
-id) or a plain colour (`"plain"`, `#rrggbb`). The table's key is `kind:texture` and its
-values are one 32 byte transform per block (the id, then x y z w h d as f32), so a text
-shown a thousand times is stored once with a thousand transforms. One implementation
-answers them on the desktop and the hub (`core/src/ops/blocks.rs`, `core/src/graph/blocks.rs`).
+Blocks placed in the space: placements of kind `block` in the room, the space's own
+scene (`graph::scenes`, docs/format.md). They travel with the file, its backups (the
+`scenes` and `instances` of the backup's other file; a backup made before scenes has
+`blocks`, which go into the room numbered afresh) and merges (a text block finds its text
+in the target by what it says, a picture block its picture by hash). A block shows a
+**texture**: a text of the save (`kind: "text"`, `texture` its key: the entry label, a
+note's `note:` prefix taken off), a picture (`"picture"`, its 32-hex-digit id) or a plain
+colour (`"plain"`, `#rrggbb`). A block's `id` is its address in the room,
+`<kind>:<texture>#<n>` (`text:3,14#2`): the n-th block showing that texture. The texture
+is stored once and each block is one packed placement (its position and its sides as the
+scale). Saves made before scenes kept blocks in `graph blocks` and `graph block ids`; they
+move into the room when the save opens, each texture's blocks numbered in the order they
+were made. One implementation answers them on the desktop and the hub
+(`core/src/ops/blocks.rs`, `core/src/graph/blocks.rs`).
 
 A block: `{id, kind, texture, x, y, z, w, h, d}`, its centre and its sides in space units.
 Sides are kept between 0.05 and 10000, places within 10⁶ of the origin. The texture tiles
@@ -385,13 +414,13 @@ a picture, `{colour}` for a colour, and `{gone: true}` when what it showed was d
 
 | op | args | data |
 |---|---|---|
-| `blocks.list` | `{lo?, hi?, kind?, texture?}` | the blocks, by id; `lo` and `hi` (`[x, y, z]` each) keep those whose boxes meet that region |
+| `blocks.list` | `{lo?, hi?, kind?, texture?}` | the blocks, by texture and number; `lo` and `hi` (`[x, y, z]` each) keep those whose boxes meet that region |
 | `blocks.stats` | | `{blocks, textures}` |
 | `blocks.add` | `{kind, texture, x?, y?, z?, w?, h?, d?}` or `{blocks: [..]}` | the new blocks and `ids` (place 0, sides 1 unless given) |
 | `blocks.move` | `{id, x?, y?, z?, by?}` | the block, moved (to x y z, or `by` `[dx, dy, dz]`); its size stays |
 | `blocks.scale` | `{id, w?, h?, d?}` | the block, resized; its place stays |
 | `blocks.set` | `{id, x?..d?, by?}` or `{changes: [..]}` | the blocks, each field given replaced |
-| `blocks.duplicate` | `{id or ids, by?: [1, 0, 0]}` | the copies (same texture, fresh ids) and `ids` |
+| `blocks.duplicate` | `{id or ids, by?: [1, 0, 0]}` | the copies (same texture, the next numbers) and `ids` |
 | `blocks.delete` | `{id or ids}` | `{removed: [block]}`: what was taken, to hand back to `blocks.restore` |
 | `blocks.restore` | `{blocks}` | `{restored}`: blocks put back with their ids (an undo); taken ids and missing textures are skipped |
 

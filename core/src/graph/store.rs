@@ -1796,7 +1796,6 @@ fn ensure_tables(txn: &WriteTransaction) -> GResult<()> {
     txn.open_table(SETTINGS).map_err(err)?;
     txn.open_table(MIMES).map_err(err)?;
     super::assets::ensure_tables(txn)?;
-    super::blocks::ensure_tables(txn)?;
     super::scenes::ensure_tables(txn)?;
     Ok(())
 }
@@ -1836,6 +1835,8 @@ impl Graph {
     pub fn from_db(db: Database) -> GResult<Graph> {
         let txn = db.begin_write().map_err(err)?;
         ensure_tables(&txn)?;
+        // saves made before scenes: their blocks move into the room
+        super::blocks::migrate(&txn)?;
         let mode = {
             let mut meta = txn.open_table(META).map_err(err)?;
             if meta.get("format").map_err(err)?.is_none() {
@@ -1863,6 +1864,8 @@ impl Graph {
         if mode == IndexMode::Memory {
             g.rebuild_memory()?;
         }
+        // saves made before scenes: their saved scenes and maps' placements move into scenes
+        g.migrate_maps()?;
         Ok(g)
     }
 
@@ -2114,8 +2117,10 @@ impl Graph {
         plain!(super::assets::PICTURES, "pictures");
         plain!(super::assets::PICTURE_BYTES, "picture bytes");
         multi!(super::assets::PICTURE_LISTS, "picture lists");
-        multi!(super::blocks::BLOCKS, "blocks");
-        plain!(super::blocks::BLOCK_IDS, "block ids");
+        plain!(super::scenes::SCENES, "scenes");
+        multi!(super::scenes::INSTANCES, "scene instances");
+        multi!(super::scenes::DETACHED, "scene detached");
+        multi!(super::scenes::PLACED, "placed");
         Ok(out)
     }
 

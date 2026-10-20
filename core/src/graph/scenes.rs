@@ -9,9 +9,9 @@
 //! | `graph scene detached` (multimap) | scene id | detached placements, the same layout with the entry's version after the definition |
 //! | `graph placed` (multimap) | definition ref | the scenes placing it |
 //!
-//! This module is the storage layer: the packed values, canonical and lossless, and the
-//! tables. The space doesn't use it yet, and nothing migrates into it yet (the next steps
-//! of the checklist's instance line).
+//! The room (the space's own scene, holding its blocks) is the scene the setting
+//! `scenes.room` names. `graph::blocks` keeps its block API over the room's placements,
+//! and `ops::scenes` reads and writes the saved scenes.
 
 use redb::{MultimapTableDefinition, ReadableDatabase, ReadableMultimapTable, ReadableTable, TableDefinition};
 use serde::{Deserialize, Serialize};
@@ -476,7 +476,7 @@ pub struct Placed {
     pub place: Placement,
 }
 
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -487,215 +487,29 @@ fn table(detached: bool) -> MultimapTableDefinition<'static, u64, &'static [u8]>
     if detached { DETACHED } else { INSTANCES }
 }
 
-impl Graph {
-    /// a new scene; its id
-    pub fn add_scene(&self, name: &str, parent: u64) -> GResult<u64> {
-        let name = name.trim();
-        if name.is_empty() {
-            return Err("a scene needs a name".into());
-        }
-        let txn = self.db().begin_write().map_err(err)?;
-        let id = {
-            let mut t = txn.open_table(SCENES).map_err(err)?;
-            if parent != 0 && t.get(parent).map_err(err)?.is_none() {
-                return Err(format!("no scene {parent}"));
-            }
-            let id = t.last().map_err(err)?.map(|(k, _)| k.value() + 1).unwrap_or(1);
-            let now = now_ms();
-            let s = Scene {
-                id,
-                name: name.to_string(),
-                parent,
-                created: now,
-                edited: now,
-                settings: serde_json::Value::Null,
-            };
-            t.insert(id, serde_json::to_vec(&s).map_err(err)?.as_slice())
-                .map_err(err)?;
-            id
-        };
-        txn.commit().map_err(err)?;
-        Ok(id)
-    }
+/// the setting naming the room's scene (its id, in decimal)
+pub const ROOM: &str = "scenes.room";
 
-    pub fn scenes(&self) -> GResult<Vec<Scene>> {
-        let txn = self.db().begin_read().map_err(err)?;
-        let t = txn.open_table(SCENES).map_err(err)?;
-        let mut out = Vec::new();
-        for item in t.iter().map_err(err)? {
-            let (_, v) = item.map_err(err)?;
-            out.push(serde_json::from_slice(v.value()).map_err(err)?);
-        }
-        Ok(out)
-    }
-
-    /// every placement in a scene, inheriting or detached, in (kind, definition, number)
-    /// order
-    pub fn placements(&self, scene: u64, detached: bool) -> GResult<Vec<Placed>> {
-        let txn = self.db().begin_read().map_err(err)?;
-        let t = txn.open_multimap_table(table(detached)).map_err(err)?;
-        let mut out = Vec::new();
-        for v in t.get(scene).map_err(err)? {
-            let ch = Chunk::decode(v.map_err(err)?.value(), detached)?;
-            out.extend(ch.places.into_iter().map(|place| Placed {
-                kind: ch.kind,
-                def: ch.def,
-                version: ch.version,
-                place,
-            }));
-        }
-        Ok(out)
-    }
-
-    /// writes placements into a scene: each replaces the one with its number (its
-    /// `n`), or is added under the next free number when `n` is 0; their numbers
-    pub fn place(
-        &self,
-        scene: u64,
-        detached: bool,
-        kind: Kind,
-        def: Def,
-        version: Option<u64>,
-        places: Vec<Placement>,
-    ) -> GResult<Vec<u64>> {
-        if !kind.takes(&def) {
-            return Err(format!("a {kind:?} can't place {def:?}"));
-        }
-        if detached != version.is_some() {
-            return Err("a detached placement has the version it was detached at, and only it".into());
-        }
-        let txn = self.db().begin_write().map_err(err)?;
-        let numbers = {
-            if txn.open_table(SCENES).map_err(err)?.get(scene).map_err(err)?.is_none() {
-                return Err(format!("no scene {scene}"));
-            }
-            let mut t = txn.open_multimap_table(table(detached)).map_err(err)?;
-            let head = Chunk::prefix(kind, &def, version, 0);
-            let head = &head[..head.len() - 1]; // without the chunk number
-            let mut mine: Vec<Placement> = Vec::new();
-            let mut old: Vec<Vec<u8>> = Vec::new();
-            for v in t.get(scene).map_err(err)? {
-                let v = v.map_err(err)?;
-                let b = v.value();
-                if b.starts_with(head) {
-                    let ch = Chunk::decode(b, detached)?;
-                    if ch.kind == kind && ch.def == def && ch.version == version {
-                        mine.extend(ch.places);
-                        old.push(b.to_vec());
-                    }
-                }
-            }
-            for b in &old {
-                t.remove(scene, b.as_slice()).map_err(err)?;
-            }
-            let mut next = mine.iter().map(|p| p.n).max().unwrap_or(0) + 1;
-            let mut numbers = Vec::new();
-            for mut p in places {
-                if p.n == 0 {
-                    p.n = next;
-                    next += 1;
-                }
-                numbers.push(p.n);
-                mine.retain(|q| q.n != p.n);
-                mine.push(p);
-            }
-            write_chunks(&mut t, scene, kind, def, version, mine)?;
-            txn.open_multimap_table(PLACED)
-                .map_err(err)?
-                .insert(def.bytes().as_slice(), scene)
-                .map_err(err)?;
-            numbers
-        };
-        txn.commit().map_err(err)?;
-        Ok(numbers)
-    }
-
-    /// takes placements out by number; how many went
-    pub fn unplace(
-        &self,
-        scene: u64,
-        detached: bool,
-        kind: Kind,
-        def: Def,
-        version: Option<u64>,
-        numbers: &[u64],
-    ) -> GResult<usize> {
-        let txn = self.db().begin_write().map_err(err)?;
-        let gone = {
-            let mut t = txn.open_multimap_table(table(detached)).map_err(err)?;
-            let mut mine: Vec<Placement> = Vec::new();
-            let mut old: Vec<Vec<u8>> = Vec::new();
-            for v in t.get(scene).map_err(err)? {
-                let v = v.map_err(err)?;
-                let ch = Chunk::decode(v.value(), detached)?;
-                if ch.kind == kind && ch.def == def && ch.version == version {
-                    mine.extend(ch.places);
-                    old.push(v.value().to_vec());
-                }
-            }
-            for b in &old {
-                t.remove(scene, b.as_slice()).map_err(err)?;
-            }
-            let before = mine.len();
-            mine.retain(|p| !numbers.contains(&p.n));
-            let gone = before - mine.len();
-            let empty = mine.is_empty();
-            write_chunks(&mut t, scene, kind, def, version, mine)?;
-            if empty && !self_places_elsewhere(&t, scene, &def, detached)? {
-                let other = txn.open_multimap_table(table(!detached)).map_err(err)?;
-                if !self_places_elsewhere(&other, scene, &def, !detached)? {
-                    txn.open_multimap_table(PLACED)
-                        .map_err(err)?
-                        .remove(def.bytes().as_slice(), scene)
-                        .map_err(err)?;
-                }
-            }
-            gone
-        };
-        txn.commit().map_err(err)?;
-        Ok(gone)
-    }
-
-    /// the scenes placing a definition, and how many placements each holds
-    pub fn placed_in(&self, def: Def) -> GResult<Vec<(u64, usize)>> {
-        let scenes: Vec<u64> = {
-            let txn = self.db().begin_read().map_err(err)?;
-            let t = txn.open_multimap_table(PLACED).map_err(err)?;
-            t.get(def.bytes().as_slice())
-                .map_err(err)?
-                .map(|v| v.map(|v| v.value()).map_err(err))
-                .collect::<GResult<_>>()?
-        };
-        let mut out = Vec::new();
-        for s in scenes {
-            let n = [false, true]
-                .iter()
-                .map(|&d| {
-                    self.placements(s, d)
-                        .map(|ps| ps.iter().filter(|p| p.def == def).count())
-                })
-                .sum::<GResult<usize>>()?;
-            out.push((s, n));
-        }
-        Ok(out)
-    }
+fn room_id(b: &[u8]) -> Option<u64> {
+    std::str::from_utf8(b).ok()?.trim().parse().ok()
 }
 
-/// whether any value of `scene` other than the ones just written places `def`
-fn self_places_elsewhere(
+/// a scene's values in one table, decoded, with their bytes
+fn values(
     t: &impl ReadableMultimapTable<u64, &'static [u8]>,
     scene: u64,
-    def: &Def,
     detached: bool,
-) -> GResult<bool> {
+) -> GResult<Vec<(Vec<u8>, Chunk)>> {
+    let mut out = Vec::new();
     for v in t.get(scene).map_err(err)? {
-        if Chunk::decode(v.map_err(err)?.value(), detached)?.def == *def {
-            return Ok(true);
-        }
+        let b = v.map_err(err)?.value().to_vec();
+        let ch = Chunk::decode(&b, detached)?;
+        out.push((b, ch));
     }
-    Ok(false)
+    Ok(out)
 }
 
+/// splits placements into chunks of 64 numbers and writes them
 fn write_chunks(
     t: &mut redb::MultimapTable<u64, &[u8]>,
     scene: u64,
@@ -723,6 +537,643 @@ fn write_chunks(
         i = j;
     }
     Ok(())
+}
+
+/// `graph placed` made to agree with what the scene holds now
+fn sync_placed(txn: &redb::WriteTransaction, scene: u64) -> GResult<()> {
+    let mut now: std::collections::BTreeSet<Vec<u8>> = Default::default();
+    for d in [false, true] {
+        let t = txn.open_multimap_table(table(d)).map_err(err)?;
+        for (_, ch) in values(&t, scene, d)? {
+            now.insert(ch.def.bytes());
+        }
+    }
+    let mut placed = txn.open_multimap_table(PLACED).map_err(err)?;
+    let mut stale = Vec::new();
+    for item in placed.iter().map_err(err)? {
+        let (k, vs) = item.map_err(err)?;
+        for v in vs {
+            if v.map_err(err)?.value() == scene && !now.contains(k.value()) {
+                stale.push(k.value().to_vec());
+            }
+        }
+    }
+    for k in stale {
+        placed.remove(k.as_slice(), scene).map_err(err)?;
+    }
+    for k in now {
+        placed.insert(k.as_slice(), scene).map_err(err)?;
+    }
+    Ok(())
+}
+
+/// writes placements of one (kind, definition, version) into a scene inside a write:
+/// each replaces the one with its number, or takes the next free number when its `n` is
+/// 0; `drop` takes numbers out. Their numbers.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn place_in(
+    txn: &redb::WriteTransaction,
+    scene: u64,
+    detached: bool,
+    kind: Kind,
+    def: Def,
+    version: Option<u64>,
+    places: Vec<Placement>,
+    drop: &[u64],
+) -> GResult<Vec<u64>> {
+    if !kind.takes(&def) {
+        return Err(format!("a {kind:?} can't place {def:?}"));
+    }
+    if detached != version.is_some() {
+        return Err("a detached placement has the version it was detached at, and only it".into());
+    }
+    if txn.open_table(SCENES).map_err(err)?.get(scene).map_err(err)?.is_none() {
+        return Err(format!("no scene {scene}"));
+    }
+    let numbers = {
+        let mut t = txn.open_multimap_table(table(detached)).map_err(err)?;
+        let mut mine: Vec<Placement> = Vec::new();
+        for (b, ch) in values(&t, scene, detached)? {
+            if ch.kind == kind && ch.def == def && ch.version == version {
+                mine.extend(ch.places);
+                t.remove(scene, b.as_slice()).map_err(err)?;
+            }
+        }
+        mine.retain(|p| !drop.contains(&p.n));
+        let mut next = mine.iter().map(|p| p.n).max().unwrap_or(0) + 1;
+        let mut numbers = Vec::new();
+        for mut p in places {
+            if p.n == 0 {
+                p.n = next;
+                next += 1;
+            }
+            numbers.push(p.n);
+            mine.retain(|q| q.n != p.n);
+            mine.push(p);
+        }
+        write_chunks(&mut t, scene, kind, def, version, mine)?;
+        numbers
+    };
+    sync_placed(txn, scene)?;
+    Ok(numbers)
+}
+
+/// a new scene inside a write; its id
+pub(crate) fn add_scene_in(txn: &redb::WriteTransaction, name: &str, parent: u64) -> GResult<u64> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("a scene needs a name".into());
+    }
+    let mut t = txn.open_table(SCENES).map_err(err)?;
+    if parent != 0 && t.get(parent).map_err(err)?.is_none() {
+        return Err(format!("no scene {parent}"));
+    }
+    let id = t.last().map_err(err)?.map(|(k, _)| k.value() + 1).unwrap_or(1);
+    let now = now_ms();
+    let s = Scene {
+        id,
+        name: name.to_string(),
+        parent,
+        created: now,
+        edited: now,
+        settings: serde_json::Value::Null,
+    };
+    t.insert(id, serde_json::to_vec(&s).map_err(err)?.as_slice())
+        .map_err(err)?;
+    Ok(id)
+}
+
+/// the room's scene inside a write, made when there's none
+pub(crate) fn room_in(txn: &redb::WriteTransaction) -> GResult<u64> {
+    let kept = {
+        let s = txn.open_table(super::store::SETTINGS).map_err(err)?;
+        s.get(ROOM).map_err(err)?.and_then(|v| room_id(v.value()))
+    };
+    if let Some(id) = kept
+        && txn.open_table(SCENES).map_err(err)?.get(id).map_err(err)?.is_some()
+    {
+        return Ok(id);
+    }
+    let id = add_scene_in(txn, "room", 0)?;
+    txn.open_table(super::store::SETTINGS)
+        .map_err(err)?
+        .insert(ROOM, id.to_string().as_bytes())
+        .map_err(err)?;
+    Ok(id)
+}
+
+impl Graph {
+    /// a new scene; its id
+    pub fn add_scene(&self, name: &str, parent: u64) -> GResult<u64> {
+        let txn = self.db().begin_write().map_err(err)?;
+        let id = add_scene_in(&txn, name, parent)?;
+        txn.commit().map_err(err)?;
+        Ok(id)
+    }
+
+    /// the room's scene (the space's own, holding its blocks), if it has been made
+    pub fn room(&self) -> GResult<Option<u64>> {
+        let txn = self.db().begin_read().map_err(err)?;
+        let s = txn.open_table(super::store::SETTINGS).map_err(err)?;
+        let kept = s.get(ROOM).map_err(err)?.and_then(|v| room_id(v.value()));
+        match kept {
+            Some(id) if txn.open_table(SCENES).map_err(err)?.get(id).map_err(err)?.is_some() => Ok(Some(id)),
+            _ => Ok(None),
+        }
+    }
+
+    pub fn scenes(&self) -> GResult<Vec<Scene>> {
+        let txn = self.db().begin_read().map_err(err)?;
+        let t = txn.open_table(SCENES).map_err(err)?;
+        let mut out = Vec::new();
+        for item in t.iter().map_err(err)? {
+            let (_, v) = item.map_err(err)?;
+            out.push(serde_json::from_slice(v.value()).map_err(err)?);
+        }
+        Ok(out)
+    }
+
+    pub fn scene(&self, id: u64) -> GResult<Option<Scene>> {
+        let txn = self.db().begin_read().map_err(err)?;
+        let t = txn.open_table(SCENES).map_err(err)?;
+        match t.get(id).map_err(err)? {
+            Some(v) => Ok(Some(serde_json::from_slice(v.value()).map_err(err)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// the first scene with this name
+    pub fn scene_named(&self, name: &str) -> GResult<Option<Scene>> {
+        Ok(self.scenes()?.into_iter().find(|s| s.name == name))
+    }
+
+    pub fn rename_scene(&self, id: u64, name: &str) -> GResult<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("a scene needs a name".into());
+        }
+        let txn = self.db().begin_write().map_err(err)?;
+        {
+            let mut t = txn.open_table(SCENES).map_err(err)?;
+            let mut s: Scene = match t.get(id).map_err(err)? {
+                Some(v) => serde_json::from_slice(v.value()).map_err(err)?,
+                None => return Err(format!("no scene {id}")),
+            };
+            s.name = name.to_string();
+            s.edited = now_ms();
+            t.insert(id, serde_json::to_vec(&s).map_err(err)?.as_slice())
+                .map_err(err)?;
+        }
+        txn.commit().map_err(err)
+    }
+
+    /// removes a scene with its placements; what it held (to put back)
+    pub fn delete_scene(&self, id: u64) -> GResult<(Scene, Vec<Placed>)> {
+        let s = self.scene(id)?.ok_or_else(|| format!("no scene {id}"))?;
+        let held = [self.placements(id, false)?, self.placements(id, true)?].concat();
+        let txn = self.db().begin_write().map_err(err)?;
+        {
+            for d in [false, true] {
+                txn.open_multimap_table(table(d))
+                    .map_err(err)?
+                    .remove_all(id)
+                    .map_err(err)?;
+            }
+            txn.open_table(SCENES).map_err(err)?.remove(id).map_err(err)?;
+            sync_placed(&txn, id)?;
+        }
+        txn.commit().map_err(err)?;
+        Ok((s, held))
+    }
+
+    /// every placement in a scene, inheriting or detached, in (kind, definition, number)
+    /// order
+    pub fn placements(&self, scene: u64, detached: bool) -> GResult<Vec<Placed>> {
+        let txn = self.db().begin_read().map_err(err)?;
+        let t = txn.open_multimap_table(table(detached)).map_err(err)?;
+        let mut out = Vec::new();
+        for (_, ch) in values(&t, scene, detached)? {
+            out.extend(ch.places.into_iter().map(|place| Placed {
+                kind: ch.kind,
+                def: ch.def,
+                version: ch.version,
+                place,
+            }));
+        }
+        Ok(out)
+    }
+
+    /// writes placements into a scene: each replaces the one with its number (its
+    /// `n`), or is added under the next free number when `n` is 0; their numbers
+    pub fn place(
+        &self,
+        scene: u64,
+        detached: bool,
+        kind: Kind,
+        def: Def,
+        version: Option<u64>,
+        places: Vec<Placement>,
+    ) -> GResult<Vec<u64>> {
+        let txn = self.db().begin_write().map_err(err)?;
+        let numbers = place_in(&txn, scene, detached, kind, def, version, places, &[])?;
+        txn.commit().map_err(err)?;
+        Ok(numbers)
+    }
+
+    /// takes placements out by number; how many went
+    pub fn unplace(
+        &self,
+        scene: u64,
+        detached: bool,
+        kind: Kind,
+        def: Def,
+        version: Option<u64>,
+        numbers: &[u64],
+    ) -> GResult<usize> {
+        let before = self.placements(scene, detached)?.len();
+        let txn = self.db().begin_write().map_err(err)?;
+        place_in(&txn, scene, detached, kind, def, version, vec![], numbers)?;
+        txn.commit().map_err(err)?;
+        Ok(before - self.placements(scene, detached)?.len())
+    }
+
+    /// replaces every inheriting text placement of a scene with these, in one write
+    pub fn set_texts(&self, scene: u64, texts: Vec<(u64, Vec<Placement>)>) -> GResult<()> {
+        let txn = self.db().begin_write().map_err(err)?;
+        {
+            if txn.open_table(SCENES).map_err(err)?.get(scene).map_err(err)?.is_none() {
+                return Err(format!("no scene {scene}"));
+            }
+            let mut t = txn.open_multimap_table(INSTANCES).map_err(err)?;
+            for (b, ch) in values(&t, scene, false)? {
+                if ch.kind == Kind::Text {
+                    t.remove(scene, b.as_slice()).map_err(err)?;
+                }
+            }
+            for (id, places) in texts {
+                write_chunks(&mut t, scene, Kind::Text, Def::Entry(id), None, places)?;
+            }
+            let mut st = txn.open_table(SCENES).map_err(err)?;
+            let mut s: Scene =
+                serde_json::from_slice(st.get(scene).map_err(err)?.expect("checked").value()).map_err(err)?;
+            s.edited = now_ms();
+            st.insert(scene, serde_json::to_vec(&s).map_err(err)?.as_slice())
+                .map_err(err)?;
+        }
+        sync_placed(&txn, scene)?;
+        txn.commit().map_err(err)
+    }
+
+    /// the scenes placing a definition, and how many placements each holds
+    pub fn placed_in(&self, def: Def) -> GResult<Vec<(u64, usize)>> {
+        let scenes: Vec<u64> = {
+            let txn = self.db().begin_read().map_err(err)?;
+            let t = txn.open_multimap_table(PLACED).map_err(err)?;
+            t.get(def.bytes().as_slice())
+                .map_err(err)?
+                .map(|v| v.map(|v| v.value()).map_err(err))
+                .collect::<GResult<_>>()?
+        };
+        let mut out = Vec::new();
+        for s in scenes {
+            let n = [false, true]
+                .iter()
+                .map(|&d| {
+                    self.placements(s, d)
+                        .map(|ps| ps.iter().filter(|p| p.def == def).count())
+                })
+                .sum::<GResult<usize>>()?;
+            out.push((s, n));
+        }
+        Ok(out)
+    }
+}
+
+// ---------------------------------------------------------------- migration
+
+/// a space text's size (world units per em) as a placement's font size: steps of 1/50,
+/// so the space's default 0.5 is 25 (docs/wip/questions.md, 1)
+pub fn font_of(size: f64) -> u8 {
+    (size * 50.0).round().clamp(1.0, 255.0) as u8
+}
+
+/// a font size back as a space text's size (None: the default)
+pub fn size_of(font: u8) -> Option<f64> {
+    (font != 0).then(|| font as f64 / 50.0)
+}
+
+/// where the old saved scenes' JSON is kept after it moved into scenes
+pub const MAPS_BEFORE: &str = "space.maps (before scenes)";
+
+impl Graph {
+    /// a saved scene's rows as the space keeps them, `[text, x, y, z, {key?, size?}]`,
+    /// into a scene's text placements: a row with a key places that entry (a note's key
+    /// is `note:<label>`), one without becomes a memory entry first (format.md answer 1)
+    pub fn rows_to_texts(&self, rows: &[serde_json::Value]) -> GResult<Vec<(u64, Vec<Placement>)>> {
+        let mut out: Vec<(u64, Vec<Placement>)> = Vec::new();
+        let mut keyless = Vec::new();
+        for r in rows {
+            let Some(a) = r.as_array().filter(|a| a.len() >= 4) else {
+                continue;
+            };
+            let pos = [a[1].as_f64(), a[2].as_f64(), a[3].as_f64()];
+            let [Some(x), Some(y), Some(z)] = pos else { continue };
+            let mut p = Placement::at(0, [x as f32, y as f32, z as f32]);
+            let o = a.get(4).cloned().unwrap_or_default();
+            if let Some(s) = o.get("size").and_then(serde_json::Value::as_f64) {
+                p.font = font_of(s);
+            }
+            let key = o.get("key").and_then(serde_json::Value::as_str).unwrap_or("");
+            let id = super::record::parse_label(key.strip_prefix("note:").unwrap_or(key));
+            match id {
+                Some(id) => push(&mut out, id, p),
+                None => {
+                    let text = a[0].as_str().unwrap_or("").trim().to_string();
+                    if !text.is_empty() {
+                        keyless.push((text, p));
+                    }
+                }
+            }
+        }
+        if !keyless.is_empty() {
+            let ids = self.write(|tx| {
+                keyless
+                    .iter()
+                    .map(|(t, _)| tx.save_text(t, super::record::mime::TEXT).map(|x| x.0))
+                    .collect::<GResult<Vec<u64>>>()
+            })?;
+            for (id, (_, p)) in ids.into_iter().zip(keyless) {
+                push(&mut out, id, p);
+            }
+        }
+        // each entry's placements numbered in row order, from 1
+        for (_, ps) in out.iter_mut() {
+            for (i, p) in ps.iter_mut().enumerate() {
+                p.n = i as u64 + 1;
+            }
+        }
+        Ok(out)
+    }
+
+    /// saves made before scenes: the space's saved scenes (`space.maps`, name → rows) and
+    /// the maps' `PLACE` edges become scenes; the old JSON is kept as [`MAPS_BEFORE`]
+    pub(crate) fn migrate_maps(&self) -> GResult<usize> {
+        let mut made = 0;
+        // PLACE edges: each map entry with some becomes a scene named by its text
+        let mut edges: std::collections::BTreeMap<u64, Vec<(u64, Vec<u8>)>> = Default::default();
+        {
+            let txn = self.db().begin_read().map_err(err)?;
+            let t = txn.open_multimap_table(super::store::EDGES).map_err(err)?;
+            for item in t.iter().map_err(err)? {
+                let (k, vs) = item.map_err(err)?;
+                let (from, r) = k.value();
+                if r != super::store::rel::PLACE {
+                    continue;
+                }
+                for v in vs {
+                    let v = v.map_err(err)?.value().to_vec();
+                    if v.len() >= 8 {
+                        let to = u64::from_be_bytes(v[..8].try_into().expect("8 bytes"));
+                        edges.entry(from).or_default().push((to, v[8..].to_vec()));
+                    }
+                }
+            }
+        }
+        for (map, placed) in edges {
+            let name = self
+                .render(map)
+                .unwrap_or_else(|_| format!("map {}", super::record::label(map)));
+            let scene = self.add_scene(&name, 0)?;
+            for (to, payload) in &placed {
+                let Some(pl) = super::place::Place::unpack(payload) else {
+                    continue;
+                };
+                let mut p = Placement::at(0, pl.pos);
+                p.flags = Some(pl.flags as u64 | ((pl.kind as u64) << 3)).filter(|f| *f != 0);
+                let kind = if pl.kind == super::place::Kind::Text {
+                    Kind::Text
+                } else {
+                    Kind::Block
+                };
+                if kind == Kind::Text {
+                    p.font = font_of(pl.scale[0] as f64);
+                    // anything else a text's placement had is kept whole
+                    let plain = super::place::Place::text(pl.pos, pl.scale[0], pl.color, pl.flags);
+                    if plain.pack() != pl.pack() {
+                        p.extra = Some(pl.pack().to_vec());
+                    }
+                } else {
+                    p.rot = (pl.rot != super::place::IDENTITY).then(|| super::place::pack_rotation(pl.rot));
+                    p.scale = Scale::Axes(pl.scale).canonical();
+                    p.colour = Some(u32::from_be_bytes(pl.color));
+                    p.extra = (pl.asset != 0).then(|| pl.asset.to_le_bytes().to_vec());
+                }
+                self.place(scene, false, kind, Def::Entry(*to), None, vec![p])?;
+            }
+            self.write(|tx| {
+                for (to, payload) in &placed {
+                    tx.unlink_exact(map, super::store::rel::PLACE, *to, payload)?;
+                }
+                Ok(())
+            })?;
+            made += 1;
+        }
+        // the space's saved scenes
+        let raw = {
+            let txn = self.db().begin_read().map_err(err)?;
+            let t = txn.open_table(super::store::SETTINGS).map_err(err)?;
+            t.get("space.maps").map_err(err)?.map(|v| v.value().to_vec())
+        };
+        if let Some(raw) = raw {
+            let maps: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(&raw).unwrap_or_default();
+            for (name, rows) in &maps {
+                let texts = self.rows_to_texts(rows.as_array().map(Vec::as_slice).unwrap_or(&[]))?;
+                let scene = self.add_scene(name, 0)?;
+                self.set_texts(scene, texts)?;
+                made += 1;
+            }
+            self.write(|tx| {
+                tx.set_setting(MAPS_BEFORE, &raw)?;
+                tx.remove_setting("space.maps")
+            })?;
+        }
+        Ok(made)
+    }
+}
+
+fn push(out: &mut Vec<(u64, Vec<Placement>)>, id: u64, p: Placement) {
+    match out.iter_mut().find(|(i, _)| *i == id) {
+        Some((_, ps)) => ps.push(p),
+        None => out.push((id, vec![p])),
+    }
+}
+
+// ---------------------------------------------------------------- backups
+
+/// an f32 in a backup: a number when finite (printed shortest, so it reads back exact),
+/// else its bits as `"bits:7fc00000"`
+fn f_json(v: f32) -> serde_json::Value {
+    if v.is_finite() {
+        serde_json::json!(v)
+    } else {
+        serde_json::json!(format!("bits:{:08x}", v.to_bits()))
+    }
+}
+
+fn f_read(v: &serde_json::Value) -> Option<f32> {
+    match v {
+        serde_json::Value::String(s) => u32::from_str_radix(s.strip_prefix("bits:")?, 16)
+            .ok()
+            .map(f32::from_bits),
+        _ => v.as_f64().map(|x| x as f32),
+    }
+}
+
+/// a definition as a backup writes it
+pub fn def_name(def: &Def, version: Option<u64>) -> String {
+    let base = match def {
+        Def::Entry(id) => format!("text:{}", super::record::label(*id)),
+        Def::Picture(h) => format!("picture:{}", h.iter().map(|b| format!("{b:02x}")).collect::<String>()),
+        Def::Colour([r, g, b]) => format!("plain:#{r:02x}{g:02x}{b:02x}"),
+        Def::Scene(id) => format!("scene:{id}"),
+    };
+    match version {
+        Some(v) => format!("{base}@{v}"),
+        None => base,
+    }
+}
+
+pub fn parse_def_name(s: &str) -> Option<(Def, Option<u64>)> {
+    let (s, version) = match s.rsplit_once('@') {
+        Some((a, v)) if !a.ends_with('#') => (a, Some(v.parse().ok()?)),
+        _ => (s, None),
+    };
+    let (kind, rest) = s.split_once(':')?;
+    let def = match kind {
+        "scene" => Def::Scene(rest.parse().ok()?),
+        "text" => super::blocks::def_of(super::blocks::Kind::Text, rest).ok()?,
+        "picture" => super::blocks::def_of(super::blocks::Kind::Picture, rest).ok()?,
+        "plain" => super::blocks::def_of(super::blocks::Kind::Plain, rest).ok()?,
+        _ => return None,
+    };
+    Some((def, version))
+}
+
+fn kind_name(k: Kind) -> &'static str {
+    match k {
+        Kind::Text => "text",
+        Kind::Block => "block",
+        Kind::Prefab => "prefab",
+    }
+}
+
+impl Graph {
+    /// every placement of every scene as backup rows: `[scene, "inherit" | "detached",
+    /// kind, definition, n, {pos, font?, rot?, scale?, colour?, flags?, extra?}]`
+    pub fn instance_rows(&self) -> GResult<Vec<serde_json::Value>> {
+        use serde_json::json;
+        let mut out = Vec::new();
+        for s in self.scenes()? {
+            for d in [false, true] {
+                for p in self.placements(s.id, d)? {
+                    let q = &p.place;
+                    let mut o = json!({ "pos": q.pos.iter().map(|v| f_json(*v)).collect::<Vec<_>>() });
+                    if q.font != 0 {
+                        o["font"] = json!(q.font);
+                    }
+                    if let Some(r) = q.rot {
+                        o["rot"] = json!(r);
+                    }
+                    match q.scale {
+                        Scale::One => {}
+                        Scale::Uniform(v) => o["scale"] = f_json(v),
+                        Scale::Axes(a) => o["scale"] = json!(a.iter().map(|v| f_json(*v)).collect::<Vec<_>>()),
+                    }
+                    if let Some(c) = q.colour {
+                        o["colour"] = json!(format!("#{c:08x}"));
+                    }
+                    if let Some(f) = q.flags {
+                        o["flags"] = json!(f);
+                    }
+                    if let Some(x) = &q.extra {
+                        o["extra"] = json!(crate::classifiers::base64(x));
+                    }
+                    out.push(json!([
+                        s.id,
+                        if d { "detached" } else { "inherit" },
+                        kind_name(p.kind),
+                        def_name(&p.def, p.version),
+                        q.n,
+                        o
+                    ]));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// puts scenes and their placements back from a backup, keeping their ids; rows that
+    /// don't read are skipped
+    pub fn put_instance_rows(&self, scenes: &[Scene], rows: &[serde_json::Value]) -> GResult<usize> {
+        let txn = self.db().begin_write().map_err(err)?;
+        let mut n = 0;
+        {
+            {
+                let mut t = txn.open_table(SCENES).map_err(err)?;
+                for s in scenes {
+                    t.insert(s.id, serde_json::to_vec(s).map_err(err)?.as_slice())
+                        .map_err(err)?;
+                }
+            }
+            for r in rows {
+                let Some(a) = r.as_array().filter(|a| a.len() == 6) else {
+                    continue;
+                };
+                let (Some(scene), Some(how), Some(kind), Some(def), Some(num)) = (
+                    a[0].as_u64(),
+                    a[1].as_str(),
+                    a[2].as_str(),
+                    a[3].as_str(),
+                    a[4].as_u64(),
+                ) else {
+                    continue;
+                };
+                let kind = match kind {
+                    "text" => Kind::Text,
+                    "block" => Kind::Block,
+                    "prefab" => Kind::Prefab,
+                    _ => continue,
+                };
+                let Some((def, version)) = parse_def_name(def) else {
+                    continue;
+                };
+                let o = &a[5];
+                let pos: Vec<f32> = o["pos"].as_array().into_iter().flatten().filter_map(f_read).collect();
+                let Ok(pos) = <[f32; 3]>::try_from(pos) else { continue };
+                let mut p = Placement::at(num, pos);
+                p.font = o["font"].as_u64().unwrap_or(0).min(255) as u8;
+                p.rot = o["rot"].as_u64().map(|v| v as u32);
+                p.scale = match &o["scale"] {
+                    serde_json::Value::Array(v) => {
+                        let v: Vec<f32> = v.iter().filter_map(f_read).collect();
+                        <[f32; 3]>::try_from(v).map(Scale::Axes).unwrap_or(Scale::One)
+                    }
+                    serde_json::Value::Null => Scale::One,
+                    v => f_read(v).map(Scale::Uniform).unwrap_or(Scale::One),
+                };
+                p.colour = o["colour"]
+                    .as_str()
+                    .and_then(|c| u32::from_str_radix(c.trim_start_matches('#'), 16).ok());
+                p.flags = o["flags"].as_u64();
+                p.extra = o["extra"].as_str().and_then(crate::classifiers::unbase64);
+                if place_in(&txn, scene, how == "detached", kind, def, version, vec![p], &[]).is_ok() {
+                    n += 1;
+                }
+            }
+        }
+        txn.commit().map_err(err)?;
+        Ok(n)
+    }
 }
 
 #[cfg(test)]

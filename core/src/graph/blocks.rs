@@ -1,29 +1,28 @@
 //! Spatial saves: blocks placed in the space, each showing a texture (a text of the save,
 //! one of its pictures, or a plain colour) tiled over its faces.
 //!
-//! | table | key | holds |
-//! |---|---|---|
-//! | `graph blocks` (multimap) | what the block shows: `text:<entry label>`, `picture:<hash>` or `plain:<#rrggbb>` | one 32 byte value per instance: its id and transform ([`Transform::to_bytes`]) |
-//! | `graph block ids` | instance id | its key in `graph blocks` |
-//!
-//! A texture is stored once (the text is an entry, the picture is in `graph pictures`)
-//! and every block showing it is one 32 byte value under the same key, so a thousand
-//! copies of one text cost a thousand transforms and nothing more. The values sort by
-//! the id (big endian first), so a key's instances come back in the order they were made.
-//! Moving or scaling a block replaces its value; `graph block ids` finds the key from the
-//! id without a scan. A region query reads every value once (no spatial index yet: the
-//! values are small and a save's blocks number in the thousands, not millions).
+//! Blocks are placements of kind `Block` in the room's scene (`graph::scenes`): the
+//! texture is the definition (an entry, a picture by hash, a plain colour) and each
+//! block a placement under it, its position and its sides (w, h, d) as the scale. A
+//! block's id is its address, `<kind>:<texture>#<n>` ([`block_id`]): the n-th block
+//! showing that texture. A thousand copies of one text cost about 15 bytes each (format.md).
+//! Saves made before scenes kept blocks in `graph blocks` and `graph block ids`;
+//! [`migrate`] moves them into the room when the save opens. A region query reads the
+//! room's placements once (no spatial index yet).
 //!
 //! A block's size is in the space's units; its texture tiles at one tile per unit
 //! ([`TILE`]), so making a block bigger shows more tiles instead of stretching one.
 
-use redb::{MultimapTableDefinition, ReadableDatabase, ReadableMultimapTable, ReadableTable, TableDefinition};
+use redb::{MultimapTableDefinition, MultimapTableHandle, ReadableMultimapTable, TableDefinition};
 use serde::{Deserialize, Serialize};
 
+use super::record;
+use super::scenes::{self, Def, Kind as SKind, Placed, Placement, Scale};
 use super::store::{GResult, Graph, err};
 
-pub const BLOCKS: MultimapTableDefinition<&str, &[u8]> = MultimapTableDefinition::new("graph blocks");
-pub const BLOCK_IDS: TableDefinition<u64, &str> = TableDefinition::new("graph block ids");
+/// the tables blocks were kept in before scenes (read once, by [`migrate`])
+pub const OLD_BLOCKS: MultimapTableDefinition<&str, &[u8]> = MultimapTableDefinition::new("graph blocks");
+pub const OLD_BLOCK_IDS: TableDefinition<u64, &str> = TableDefinition::new("graph block ids");
 
 /// the side of one texture tile, in space units
 pub const TILE: f32 = 1.0;
@@ -32,12 +31,6 @@ pub const MIN_SIDE: f32 = 0.05;
 pub const MAX_SIDE: f32 = 10_000.0;
 /// how far from the origin a block may be
 pub const MAX_COORD: f32 = 1.0e6;
-
-pub fn ensure_tables(txn: &redb::WriteTransaction) -> GResult<()> {
-    txn.open_multimap_table(BLOCKS).map_err(err)?;
-    txn.open_table(BLOCK_IDS).map_err(err)?;
-    Ok(())
-}
 
 /// what a block shows
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -173,7 +166,8 @@ impl Transform {
 /// one block
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Block {
-    pub id: u64,
+    /// its address in the room ([`block_id`])
+    pub id: String,
     pub kind: Kind,
     pub texture: String,
     #[serde(flatten)]
@@ -187,96 +181,212 @@ pub struct BlockUse {
     pub textures: u64,
 }
 
+/// a block's address in the room: `<kind>:<texture>#<n>`, its texture's key and its
+/// number among that texture's blocks
+pub fn block_id(kind: Kind, texture: &str, n: u64) -> String {
+    format!("{}#{n}", key(kind, texture))
+}
+
+/// an address's texture and number
+pub fn split_id(id: &str) -> Option<(Kind, String, u64)> {
+    let (k, n) = id.rsplit_once('#')?;
+    let (kind, texture) = split_key(k)?;
+    Some((kind, texture.to_string(), n.parse().ok()?))
+}
+
+/// what a texture is as a scene definition
+pub fn def_of(kind: Kind, texture: &str) -> GResult<Def> {
+    let t = texture.trim();
+    match kind {
+        Kind::Text => record::parse_label(t.strip_prefix("note:").unwrap_or(t))
+            .map(Def::Entry)
+            .ok_or_else(|| format!("{t:?} isn't a text's key")),
+        Kind::Picture => {
+            let b = (0..16)
+                .map(|i| t.get(2 * i..2 * i + 2).and_then(|h| u8::from_str_radix(h, 16).ok()))
+                .collect::<Option<Vec<u8>>>()
+                .filter(|_| t.len() == 32)
+                .ok_or_else(|| format!("{t:?} isn't a picture's hash (32 hex digits)"))?;
+            Ok(Def::Picture(b.try_into().expect("16 bytes")))
+        }
+        Kind::Plain => {
+            let ok = t.len() == 7 && t.starts_with('#') && t[1..].chars().all(|c| c.is_ascii_hexdigit());
+            if !ok {
+                return Err(format!("{t:?} isn't a colour (#rrggbb)"));
+            }
+            let v = u32::from_str_radix(&t[1..], 16).map_err(err)?;
+            Ok(Def::Colour([(v >> 16) as u8, (v >> 8) as u8, v as u8]))
+        }
+    }
+}
+
+/// a definition back as a texture
+pub fn texture_of(def: &Def) -> Option<(Kind, String)> {
+    Some(match def {
+        Def::Entry(id) => (Kind::Text, record::label(*id)),
+        Def::Picture(h) => (Kind::Picture, h.iter().map(|b| format!("{b:02x}")).collect()),
+        Def::Colour([r, g, b]) => (Kind::Plain, format!("#{r:02x}{g:02x}{b:02x}")),
+        Def::Scene(_) => return None,
+    })
+}
+
+/// the shape flag every block has for now (`place::Kind::Cube`, bits 3–6)
+const CUBE: u64 = (super::place::Kind::Cube as u64) << 3;
+
+fn placement(t: &Transform, n: u64) -> Placement {
+    let mut p = Placement::at(n, [t.x, t.y, t.z]);
+    p.scale = Scale::Axes([t.w, t.h, t.d]).canonical();
+    p.flags = Some(CUBE);
+    p
+}
+
+fn transform(p: &Placement) -> Transform {
+    let [w, h, d] = match p.scale {
+        Scale::One => [1.0; 3],
+        Scale::Uniform(v) => [v; 3],
+        Scale::Axes(a) => a,
+    };
+    Transform {
+        x: p.pos[0],
+        y: p.pos[1],
+        z: p.pos[2],
+        w,
+        h,
+        d,
+    }
+}
+
+fn block_of(p: &Placed) -> Option<Block> {
+    if p.kind != SKind::Block {
+        return None;
+    }
+    let (kind, texture) = texture_of(&p.def)?;
+    Some(Block {
+        id: block_id(kind, &texture, p.place.n),
+        kind,
+        texture,
+        t: transform(&p.place),
+    })
+}
+
+/// the old tables' blocks moved into the room, inside the write that opens the save;
+/// how many moved. Each texture's blocks keep their order (they sorted by id) as their
+/// numbers 1, 2, ...; a texture that doesn't read as a definition is kept as the old
+/// tables had it and the tables stay
+pub(crate) fn migrate(txn: &redb::WriteTransaction) -> GResult<usize> {
+    let had = txn
+        .list_multimap_tables()
+        .map_err(err)?
+        .any(|h| h.name() == OLD_BLOCKS.name());
+    if !had {
+        return Ok(0);
+    }
+    let mut groups: Vec<(Def, Vec<Placement>)> = Vec::new();
+    {
+        let t = txn.open_multimap_table(OLD_BLOCKS).map_err(err)?;
+        for item in t.iter().map_err(err)? {
+            let (k, vs) = item.map_err(err)?;
+            let (kind, texture) = split_key(k.value()).ok_or("an old block's key doesn't read")?;
+            let def = def_of(kind, texture)?;
+            let mut ps = Vec::new();
+            for v in vs {
+                let (_, tr) = Transform::from_bytes(v.map_err(err)?.value()).ok_or("an old block doesn't read")?;
+                ps.push(placement(&tr, 0));
+            }
+            groups.push((def, ps));
+        }
+    }
+    let n: usize = groups.iter().map(|g| g.1.len()).sum();
+    if n > 0 {
+        let room = scenes::room_in(txn)?;
+        for (def, ps) in groups {
+            scenes::place_in(txn, room, false, SKind::Block, def, None, ps, &[])?;
+        }
+    }
+    txn.delete_multimap_table(OLD_BLOCKS).map_err(err)?;
+    txn.delete_table(OLD_BLOCK_IDS).map_err(err)?;
+    Ok(n)
+}
+
 impl Graph {
-    fn next_block_id(t: &redb::Table<u64, &str>) -> GResult<u64> {
-        Ok(t.last().map_err(err)?.map(|(k, _)| k.value() + 1).unwrap_or(1))
+    /// the room's placements (none before the room is made)
+    fn room_placements(&self) -> GResult<Vec<Placed>> {
+        match self.room()? {
+            Some(r) => self.placements(r, false),
+            None => Ok(vec![]),
+        }
     }
 
-    /// places a block; its id
-    pub fn add_block(&self, kind: Kind, texture: &str, t: Transform) -> GResult<u64> {
-        Ok(self.add_blocks(&[(kind, texture.to_string(), t)])?[0])
+    /// places a block in the room; its id
+    pub fn add_block(&self, kind: Kind, texture: &str, t: Transform) -> GResult<String> {
+        Ok(self.add_blocks(&[(kind, texture.to_string(), t)])?.swap_remove(0))
     }
 
-    /// places several blocks in one write; their ids
-    pub fn add_blocks(&self, blocks: &[(Kind, String, Transform)]) -> GResult<Vec<u64>> {
+    /// places several blocks in the room in one write; their ids
+    pub fn add_blocks(&self, blocks: &[(Kind, String, Transform)]) -> GResult<Vec<String>> {
         let mut checked = Vec::with_capacity(blocks.len());
         for (kind, texture, t) in blocks {
-            checked.push((key(*kind, texture.trim()), t.checked()?));
+            checked.push((*kind, texture.trim().to_string(), def_of(*kind, texture)?, t.checked()?));
+        }
+        if checked.is_empty() {
+            return Ok(vec![]);
         }
         let txn = self.db().begin_write().map_err(err)?;
-        let ids = {
-            let mut ids_t = txn.open_table(BLOCK_IDS).map_err(err)?;
-            let mut b = txn.open_multimap_table(BLOCKS).map_err(err)?;
-            let first = Self::next_block_id(&ids_t)?;
-            let mut out = Vec::with_capacity(checked.len());
-            for (id, (k, t)) in (first..).zip(checked.iter()) {
-                b.insert(k.as_str(), t.to_bytes(id).as_slice()).map_err(err)?;
-                ids_t.insert(id, k.as_str()).map_err(err)?;
-                out.push(id);
+        let mut out = Vec::with_capacity(checked.len());
+        {
+            let room = scenes::room_in(&txn)?;
+            for (kind, texture, def, t) in checked {
+                let n = scenes::place_in(&txn, room, false, SKind::Block, def, None, vec![placement(&t, 0)], &[])?[0];
+                out.push(block_id(kind, &texture_of(&def).map(|x| x.1).unwrap_or(texture), n));
             }
-            out
-        };
+        }
         txn.commit().map_err(err)?;
-        Ok(ids)
+        Ok(out)
     }
 
     /// one block
-    pub fn block(&self, id: u64) -> GResult<Option<Block>> {
-        let txn = self.db().begin_read().map_err(err)?;
-        let ids = txn.open_table(BLOCK_IDS).map_err(err)?;
-        let Some(k) = ids.get(id).map_err(err)?.map(|v| v.value().to_string()) else {
+    pub fn block(&self, id: &str) -> GResult<Option<Block>> {
+        let Some((kind, texture, n)) = split_id(id) else {
             return Ok(None);
         };
-        let b = txn.open_multimap_table(BLOCKS).map_err(err)?;
-        for v in b.get(k.as_str()).map_err(err)? {
-            let v = v.map_err(err)?;
-            if let Some((i, t)) = Transform::from_bytes(v.value())
-                && i == id
-            {
-                let (kind, texture) = split_key(&k).ok_or("a block's key doesn't read")?;
-                return Ok(Some(Block {
-                    id,
-                    kind,
-                    texture: texture.to_string(),
-                    t,
-                }));
-            }
-        }
-        Ok(None)
+        let def = def_of(kind, &texture)?;
+        Ok(self
+            .room_placements()?
+            .iter()
+            .find(|p| p.kind == SKind::Block && p.def == def && p.place.n == n)
+            .and_then(block_of))
     }
 
     /// moves or resizes blocks (each its whole new transform) in one write; the ones
     /// that weren't there are skipped, the rest come back as they are now
-    pub fn set_blocks(&self, changes: &[(u64, Transform)]) -> GResult<Vec<Block>> {
-        let mut checked = Vec::with_capacity(changes.len());
+    pub fn set_blocks(&self, changes: &[(String, Transform)]) -> GResult<Vec<Block>> {
+        let mut out = Vec::new();
+        let mut todo = Vec::new();
         for (id, t) in changes {
-            checked.push((*id, t.checked()?));
+            let t = t.checked()?;
+            if let Some(mut b) = self.block(id)? {
+                b.t = t;
+                todo.push(b);
+            }
         }
         let txn = self.db().begin_write().map_err(err)?;
-        let mut out = Vec::new();
         {
-            let ids = txn.open_table(BLOCK_IDS).map_err(err)?;
-            let mut b = txn.open_multimap_table(BLOCKS).map_err(err)?;
-            for (id, t) in checked {
-                let Some(k) = ids.get(id).map_err(err)?.map(|v| v.value().to_string()) else {
-                    continue;
-                };
-                let old: Option<Vec<u8>> = b
-                    .get(k.as_str())
-                    .map_err(err)?
-                    .filter_map(|v| v.ok().map(|v| v.value().to_vec()))
-                    .find(|v| v.len() == 32 && v[..8] == id.to_be_bytes());
-                if let Some(old) = old {
-                    b.remove(k.as_str(), old.as_slice()).map_err(err)?;
-                }
-                b.insert(k.as_str(), t.to_bytes(id).as_slice()).map_err(err)?;
-                let (kind, texture) = split_key(&k).ok_or("a block's key doesn't read")?;
-                out.push(Block {
-                    id,
-                    kind,
-                    texture: texture.to_string(),
-                    t,
-                });
+            let room = scenes::room_in(&txn)?;
+            for b in todo {
+                let (_, _, n) = split_id(&b.id).expect("read above");
+                let mut p = placement(&b.t, n);
+                p.n = n;
+                scenes::place_in(
+                    &txn,
+                    room,
+                    false,
+                    SKind::Block,
+                    def_of(b.kind, &b.texture)?,
+                    None,
+                    vec![p],
+                    &[],
+                )?;
+                out.push(b);
             }
         }
         txn.commit().map_err(err)?;
@@ -284,55 +394,64 @@ impl Graph {
     }
 
     /// takes blocks away; the ones that were there, as they were (to put them back)
-    pub fn delete_blocks(&self, ids: &[u64]) -> GResult<Vec<Block>> {
+    pub fn delete_blocks(&self, ids: &[String]) -> GResult<Vec<Block>> {
         let mut out = Vec::new();
         for id in ids {
-            if let Some(b) = self.block(*id)? {
+            if let Some(b) = self.block(id)? {
                 out.push(b);
             }
         }
         let txn = self.db().begin_write().map_err(err)?;
         {
-            let mut ids_t = txn.open_table(BLOCK_IDS).map_err(err)?;
-            let mut t = txn.open_multimap_table(BLOCKS).map_err(err)?;
+            let room = scenes::room_in(&txn)?;
             for b in &out {
-                let k = key(b.kind, &b.texture);
-                t.remove(k.as_str(), b.t.to_bytes(b.id).as_slice()).map_err(err)?;
-                ids_t.remove(b.id).map_err(err)?;
+                let (_, _, n) = split_id(&b.id).expect("read above");
+                scenes::place_in(
+                    &txn,
+                    room,
+                    false,
+                    SKind::Block,
+                    def_of(b.kind, &b.texture)?,
+                    None,
+                    vec![],
+                    &[n],
+                )?;
             }
         }
         txn.commit().map_err(err)?;
         Ok(out)
     }
 
-    /// puts blocks back with their own ids (an undo, a restore); the ids already in use
-    /// are skipped
+    /// puts blocks back with their own ids (an undo); the ids already in use are skipped,
+    /// and a block without a number (`#0`, or an old backup's) gets the next free one
     pub fn put_blocks(&self, blocks: &[Block]) -> GResult<usize> {
+        let mut todo = Vec::new();
+        for b in blocks {
+            let n = split_id(&b.id).map(|x| x.2).unwrap_or(0);
+            if n != 0 && self.block(&b.id)?.is_some() {
+                continue;
+            }
+            todo.push((def_of(b.kind, &b.texture)?, b.t.checked()?, n));
+        }
+        if todo.is_empty() {
+            return Ok(0);
+        }
         let txn = self.db().begin_write().map_err(err)?;
-        let mut n = 0;
         {
-            let mut ids_t = txn.open_table(BLOCK_IDS).map_err(err)?;
-            let mut t = txn.open_multimap_table(BLOCKS).map_err(err)?;
-            for b in blocks {
-                if b.id == 0 || ids_t.get(b.id).map_err(err)?.is_some() {
-                    continue;
-                }
-                let tr = b.t.checked()?;
-                let k = key(b.kind, &b.texture);
-                t.insert(k.as_str(), tr.to_bytes(b.id).as_slice()).map_err(err)?;
-                ids_t.insert(b.id, k.as_str()).map_err(err)?;
-                n += 1;
+            let room = scenes::room_in(&txn)?;
+            for (def, t, n) in &todo {
+                scenes::place_in(&txn, room, false, SKind::Block, *def, None, vec![placement(t, *n)], &[])?;
             }
         }
         txn.commit().map_err(err)?;
-        Ok(n)
+        Ok(todo.len())
     }
 
     /// copies of blocks, each moved by `offset`; the new ids
-    pub fn duplicate_blocks(&self, ids: &[u64], offset: [f32; 3]) -> GResult<Vec<u64>> {
+    pub fn duplicate_blocks(&self, ids: &[String], offset: [f32; 3]) -> GResult<Vec<String>> {
         let mut new = Vec::new();
         for id in ids {
-            let b = self.block(*id)?.ok_or_else(|| format!("no block {id}"))?;
+            let b = self.block(id)?.ok_or_else(|| format!("no block {id}"))?;
             let mut t = b.t;
             t.x += offset[0];
             t.y += offset[1];
@@ -342,68 +461,34 @@ impl Graph {
         self.add_blocks(&new)
     }
 
-    /// every block, or (with a region) those whose boxes meet it, by id
+    /// every block in the room, or (with a region) those whose boxes meet it
     pub fn blocks(&self, region: Option<([f32; 3], [f32; 3])>) -> GResult<Vec<Block>> {
-        let txn = self.db().begin_read().map_err(err)?;
-        let t = txn.open_multimap_table(BLOCKS).map_err(err)?;
-        let mut out = Vec::new();
-        for item in t.iter().map_err(err)? {
-            let (k, vs) = item.map_err(err)?;
-            let Some((kind, texture)) = split_key(k.value()) else {
-                continue;
-            };
-            for v in vs {
-                let v = v.map_err(err)?;
-                let Some((id, tr)) = Transform::from_bytes(v.value()) else {
-                    continue;
-                };
-                if region.is_some_and(|(lo, hi)| !tr.meets(lo, hi)) {
-                    continue;
-                }
-                out.push(Block {
-                    id,
-                    kind,
-                    texture: texture.to_string(),
-                    t: tr,
-                });
-            }
-        }
-        out.sort_by_key(|b| b.id);
-        Ok(out)
+        Ok(self
+            .room_placements()?
+            .iter()
+            .filter_map(block_of)
+            .filter(|b| region.is_none_or(|(lo, hi)| b.t.meets(lo, hi)))
+            .collect())
     }
 
-    /// the instances of one texture
+    /// the blocks showing one texture
     pub fn blocks_of(&self, kind: Kind, texture: &str) -> GResult<Vec<Block>> {
-        let txn = self.db().begin_read().map_err(err)?;
-        let t = txn.open_multimap_table(BLOCKS).map_err(err)?;
-        let mut out = Vec::new();
-        for v in t.get(key(kind, texture).as_str()).map_err(err)? {
-            let v = v.map_err(err)?;
-            if let Some((id, tr)) = Transform::from_bytes(v.value()) {
-                out.push(Block {
-                    id,
-                    kind,
-                    texture: texture.to_string(),
-                    t: tr,
-                });
-            }
-        }
-        Ok(out)
+        let def = def_of(kind, texture)?;
+        Ok(self
+            .room_placements()?
+            .iter()
+            .filter(|p| p.def == def)
+            .filter_map(block_of)
+            .collect())
     }
 
     /// how many blocks and distinct textures
     pub fn block_use(&self) -> GResult<BlockUse> {
-        use redb::ReadableTableMetadata;
-        let txn = self.db().begin_read().map_err(err)?;
-        let t = txn.open_multimap_table(BLOCKS).map_err(err)?;
-        let mut textures = 0;
-        for item in t.iter().map_err(err)? {
-            item.map_err(err)?;
-            textures += 1;
-        }
+        let bs = self.blocks(None)?;
+        let textures: std::collections::BTreeSet<String> = bs.iter().map(|b| key(b.kind, &b.texture)).collect();
         Ok(BlockUse {
-            blocks: t.len().map_err(err)?,
-            textures,
+            blocks: bs.len() as u64,
+            textures: textures.len() as u64,
         })
     }
 }
@@ -420,6 +505,10 @@ mod tests {
         }
     }
 
+    use redb::ReadableDatabase;
+
+    const PIC: &str = "000102030405060708090a0b0c0d0e0f";
+
     #[test]
     fn transforms_round_trip_and_sort_by_id() {
         let a = Transform {
@@ -431,54 +520,95 @@ mod tests {
             d: 2.0,
         };
         assert_eq!(Transform::from_bytes(&a.to_bytes(7)), Some((7, a)));
-        assert!(t(0.0, 1.0).to_bytes(2) < t(-9.0, 1.0).to_bytes(300));
         assert!(Transform::from_bytes(&[0; 31]).is_none());
         assert_eq!(a.repeats(), [[4.0, 0.5], [2.0, 0.5], [4.0, 2.0]]);
         assert!(t(f32::NAN, 1.0).checked().is_err());
         assert_eq!(t(0.0, 0.0).checked().unwrap().w, MIN_SIDE);
+        assert_eq!(transform(&placement(&a, 3)), a);
+        assert_eq!(split_id("text:1,2#7"), Some((Kind::Text, "1,2".into(), 7)));
+        assert_eq!(split_id("plain:#a0b0c0#2"), Some((Kind::Plain, "#a0b0c0".into(), 2)));
+        assert!(def_of(Kind::Picture, "ab").is_err());
     }
 
     #[test]
-    fn repeated_textures_share_one_key() {
+    fn blocks_are_room_placements_numbered_per_texture() {
         let g = Graph::in_memory().unwrap();
         let ids = g
             .add_blocks(&[
                 (Kind::Text, "1,2".into(), t(0.0, 1.0)),
                 (Kind::Text, "1,2".into(), t(5.0, 2.0)),
-                (Kind::Picture, "ab".into(), t(-5.0, 1.0)),
+                (Kind::Picture, PIC.into(), t(-5.0, 1.0)),
             ])
             .unwrap();
-        assert_eq!(ids, vec![1, 2, 3]);
+        assert_eq!(ids, ["text:1,2#1", "text:1,2#2", &format!("picture:{PIC}#1")]);
         assert_eq!(g.block_use().unwrap(), BlockUse { blocks: 3, textures: 2 });
         assert_eq!(g.blocks_of(Kind::Text, "1,2").unwrap().len(), 2);
 
-        // move and scale replace the value; the key stays
-        let moved = g.set_blocks(&[(2, t(9.0, 3.0)), (99, t(0.0, 1.0))]).unwrap();
+        // moving one replaces it under its number
+        let moved = g
+            .set_blocks(&[("text:1,2#2".into(), t(9.0, 3.0)), ("text:1,2#99".into(), t(0.0, 1.0))])
+            .unwrap();
         assert_eq!(moved.len(), 1);
-        assert_eq!(g.block(2).unwrap().unwrap().t, t(9.0, 3.0));
+        assert_eq!(g.block("text:1,2#2").unwrap().unwrap().t, t(9.0, 3.0));
         assert_eq!(g.block_use().unwrap().blocks, 3);
 
-        // a region
-        let near: Vec<u64> = g
+        let near: Vec<String> = g
             .blocks(Some(([-1.0, -1.0, -1.0], [1.0, 1.0, 1.0])))
             .unwrap()
-            .iter()
+            .into_iter()
             .map(|b| b.id)
             .collect();
-        assert_eq!(near, vec![1]);
+        assert_eq!(near, ["text:1,2#1"]);
 
-        // duplicate, delete, put back
-        let copies = g.duplicate_blocks(&[1, 3], [0.0, 2.0, 0.0]).unwrap();
-        assert_eq!(copies, vec![4, 5]);
-        assert_eq!(g.block(5).unwrap().unwrap().t.y, 2.0);
-        assert_eq!(g.blocks_of(Kind::Picture, "ab").unwrap().len(), 2);
-        let gone = g.delete_blocks(&[1, 4]).unwrap();
+        // duplicate, delete, put back with the same ids
+        let pic = format!("picture:{PIC}#1");
+        let copies = g
+            .duplicate_blocks(&["text:1,2#1".into(), pic.clone()], [0.0, 2.0, 0.0])
+            .unwrap();
+        assert_eq!(copies, ["text:1,2#3", &format!("picture:{PIC}#2")]);
+        assert_eq!(g.block(&copies[1]).unwrap().unwrap().t.y, 2.0);
+        let gone = g.delete_blocks(&["text:1,2#1".into(), "text:1,2#3".into()]).unwrap();
         assert_eq!(gone.len(), 2);
         assert_eq!(g.blocks_of(Kind::Text, "1,2").unwrap().len(), 1);
         assert_eq!(g.put_blocks(&gone).unwrap(), 2);
-        assert_eq!(g.put_blocks(&gone).unwrap(), 0);
+        assert_eq!(g.put_blocks(&gone).unwrap(), 0, "their ids are in use again");
         assert_eq!(g.blocks(None).unwrap().len(), 5);
-        // the next id is past the highest
-        assert_eq!(g.add_block(Kind::Plain, "#ff0000", t(0.0, 1.0)).unwrap(), 6);
+        assert_eq!(g.block("text:1,2#1").unwrap().unwrap().t, t(0.0, 1.0));
+        assert_eq!(
+            g.add_block(Kind::Plain, "#FF0000", t(0.0, 1.0)).unwrap(),
+            "plain:#ff0000#1"
+        );
+    }
+
+    #[test]
+    fn old_saves_move_their_blocks_into_the_room() {
+        let db = redb::Database::builder()
+            .create_with_backend(redb::backends::InMemoryBackend::new())
+            .unwrap();
+        // the tables as saves had them before scenes
+        let txn = db.begin_write().unwrap();
+        {
+            let mut b = txn.open_multimap_table(OLD_BLOCKS).unwrap();
+            let mut ids = txn.open_table(OLD_BLOCK_IDS).unwrap();
+            for (id, k, tr) in [
+                (1u64, "text:1,2", t(0.0, 1.0)),
+                (2, "plain:#112233", t(1.0, 2.0)),
+                (3, "text:1,2", t(5.0, 3.0)),
+            ] {
+                b.insert(k, tr.to_bytes(id).as_slice()).unwrap();
+                ids.insert(id, k).unwrap();
+            }
+        }
+        txn.commit().unwrap();
+        let g = Graph::from_db(db).unwrap();
+        let bs = g.blocks(None).unwrap();
+        assert_eq!(bs.len(), 3);
+        // a texture's blocks keep their order as their numbers
+        assert_eq!(g.block("text:1,2#1").unwrap().unwrap().t, t(0.0, 1.0));
+        assert_eq!(g.block("text:1,2#2").unwrap().unwrap().t, t(5.0, 3.0));
+        assert_eq!(g.block("plain:#112233#1").unwrap().unwrap().t, t(1.0, 2.0));
+        // the old tables are gone, so opening again moves nothing twice
+        let txn = g.db().begin_read().unwrap();
+        assert!(!txn.list_multimap_tables().unwrap().any(|h| h.name() == "graph blocks"));
     }
 }

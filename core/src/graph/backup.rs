@@ -253,7 +253,8 @@ impl Graph {
                 v
             }).collect::<Vec<_>>(),
             "picture_lists": self.picture_list_rows()?,
-            "blocks": self.blocks(None)?,
+            "scenes": self.scenes()?,
+            "instances": self.instance_rows()?,
         });
         Ok((
             serde_json::to_string(&Value::Array(rows)).map_err(err)?,
@@ -391,14 +392,35 @@ impl Graph {
                 self.tag_picture(id, l, true)?;
             }
         }
+        if let Some(scenes) = o.get("scenes").and_then(Value::as_array) {
+            let scenes: Vec<super::scenes::Scene> = scenes
+                .iter()
+                .filter_map(|s| serde_json::from_value(s.clone()).ok())
+                .collect();
+            let rows: Vec<Value> = o
+                .get("instances")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            self.put_instance_rows(&scenes, &rows)?;
+        }
+        // backups made before scenes: their blocks go into the room, numbered afresh
         let blocks: Vec<super::blocks::Block> = o
             .get("blocks")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .filter_map(|b| serde_json::from_value(b.clone()).ok())
+            .filter_map(|b| {
+                let mut b = b.clone();
+                if b.get("id").is_some_and(Value::is_number) {
+                    b["id"] = json!("");
+                }
+                serde_json::from_value(b).ok()
+            })
             .collect();
         self.put_blocks(&blocks)?;
+        // a backup made before scenes: its saved scenes (a setting then) become scenes
+        self.migrate_maps()?;
         Ok(())
     }
 }

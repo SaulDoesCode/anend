@@ -406,6 +406,10 @@ impl Saves {
             let limits = self.models.unwrap_or(super::classify::Limits::NONE);
             return super::blocks::call(&g, op, args, &limits);
         }
+        if super::scenes::routed(op) {
+            let (_, g) = self.current()?;
+            return super::scenes::call(&g, op, args);
+        }
         if super::pictures::routed(op) {
             let (_, g) = self.current()?;
             let limits = self.models.unwrap_or(super::classify::Limits::NONE);

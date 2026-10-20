@@ -18,6 +18,7 @@ pub mod models;
 pub mod pictures;
 #[cfg(not(target_arch = "wasm32"))]
 mod saves;
+pub mod scenes;
 pub mod templates;
 pub mod texts;
 
@@ -88,7 +89,7 @@ fn strings(args: &Value, k: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn is_note<R: Reader>(v: &R, id: u64) -> bool {
+pub(crate) fn is_note<R: Reader>(v: &R, id: u64) -> bool {
     v.record(id).ok().flatten().is_some_and(|r| r.mime == mime::MARKDOWN)
 }
 

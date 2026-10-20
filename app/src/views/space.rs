@@ -461,10 +461,12 @@ fn envale(ui: Ui, api: Api, sp: Sp, n: u64, mode: Mode) {
     dioxus::dioxus_core::spawn_forever(gsearch(ui, api, sp, n, mode, None));
 }
 
-/// the maps kept in the save: name → rows
+/// the scenes saved in the save: name → rows (`scenes.maps`)
 async fn maps(api: &Api) -> BTreeMap<String, Value> {
-    let raw = api.setting("space.maps").await.ok().flatten().unwrap_or_default();
-    serde_json::from_str(&raw).unwrap_or_default()
+    match api.call("scenes.maps", json!({})).await {
+        Ok(v) => serde_json::from_value(v).unwrap_or_default(),
+        Err(_) => BTreeMap::new(),
+    }
 }
 
 /// `#123` an ordinal bucket, `#r123` a reversed one, `#name` a map
@@ -1096,7 +1098,12 @@ pub fn Space() -> Element {
                 }
                 Some(Action::Settle) => sp.send(json!({ "cmd": "settle" })),
                 Some(Action::Pin) => sp.send(json!({ "cmd": "pin" })),
-                Some(Action::DeleteText) => match sp.block.peek().as_ref().and_then(|b| b["id"].as_u64()) {
+                Some(Action::DeleteText) => match sp
+                    .block
+                    .peek()
+                    .as_ref()
+                    .and_then(|b| b["id"].as_str().map(str::to_string))
+                {
                     Some(id) => delete_block(ui, api.clone(), sp, id),
                     None => sp.send(json!({ "cmd": "remove" })),
                 },
@@ -1201,7 +1208,7 @@ pub fn Space() -> Element {
                     counts: (sp.block_use)(),
                     on_send: move |v: Value| sp.send(v),
                     on_duplicate: { let api = api_b.clone(); move |b: Value| duplicate_block(ui, api.clone(), sp, b) },
-                    on_delete: { let api = api_b.clone(); move |id: u64| delete_block(ui, api.clone(), sp, id) },
+                    on_delete: { let api = api_b.clone(); move |id: String| delete_block(ui, api.clone(), sp, id) },
                 }
             }
             if p.space.show_details {
@@ -1343,14 +1350,9 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
                     return;
                 }
                 dioxus::dioxus_core::spawn_forever(async move {
-                    let mut all = maps(&api).await;
                     let n = rows.as_array().map(|a| a.len()).unwrap_or(0);
-                    all.insert(name.clone(), rows);
-                    match api
-                        .set_setting("space.maps", &serde_json::to_string(&all).unwrap_or_default())
-                        .await
-                    {
-                        Ok(()) => {
+                    match api.call("scenes.save", json!({ "name": name, "rows": rows })).await {
+                        Ok(_) => {
                             let mut r = sp.scenes_rev;
                             r += 1;
                             set_pref(ui, |p| p.space.address = name.clone());
@@ -1447,7 +1449,7 @@ async fn load_blocks(ui: Ui, api: Api, sp: Sp) {
     }
 }
 
-fn delete_block(ui: Ui, api: Api, sp: Sp, id: u64) {
+fn delete_block(ui: Ui, api: Api, sp: Sp, id: String) {
     dioxus::dioxus_core::spawn_forever(async move {
         match api.call("blocks.delete", json!({ "ids": [id] })).await {
             Ok(_) => {
@@ -1463,7 +1465,7 @@ fn delete_block(ui: Ui, api: Api, sp: Sp, id: u64) {
 }
 
 fn duplicate_block(ui: Ui, api: Api, sp: Sp, b: Value) {
-    let id = b["id"].as_u64().unwrap_or(0);
+    let id = b["id"].as_str().unwrap_or("").to_string();
     // side by side, along its width
     let by = b["w"].as_f64().unwrap_or(1.0) + 0.1;
     dioxus::dioxus_core::spawn_forever(async move {
@@ -1491,7 +1493,7 @@ fn Blocks(
     counts: (u64, u64),
     on_send: EventHandler<Value>,
     on_duplicate: EventHandler<Value>,
-    on_delete: EventHandler<u64>,
+    on_delete: EventHandler<String>,
 ) -> Element {
     let ui = ui();
     let api = api();
@@ -1527,7 +1529,7 @@ fn Blocks(
     let w = window_width();
     let field = move |b: Value, k: &'static str| {
         let v = b[k].as_f64().unwrap_or(0.0);
-        let id = b["id"].as_u64().unwrap_or(0);
+        let id = b["id"].as_str().unwrap_or("").to_string();
         rsx! {
             label { class: "bfield", title: if "whd".contains(k) { "a side, in units (the texture tiles once per unit)" } else { "its centre, in units" },
                 span { "{k}" }
@@ -1601,7 +1603,7 @@ fn Blocks(
                                 }
                             }
                         }
-                        span { class: "dim", " · block {b[\"id\"]}" }
+                        span { class: "dim", title: "{b[\"id\"].as_str().unwrap_or(\"\")}", {format!(" · block {} of this texture", b["id"].as_str().and_then(|i| i.rsplit_once('#')).map_or("", |x| x.1))} }
                     }
                     div { class: "bfields",
                         {field(b.clone(), "x")}
@@ -1613,7 +1615,7 @@ fn Blocks(
                     }
                     div { class: "row",
                         button { class: "btn small", title: "a copy beside it (the texture is stored once)", onclick: { let b = b.clone(); move |_| on_duplicate.call(b.clone()) }, Icon { name: "copy" } "copy" }
-                        button { class: "btn small", title: "{ui.key_of(Action::DeleteText)}", onclick: { let id = b["id"].as_u64().unwrap_or(0); move |_| on_delete.call(id) }, Icon { name: "delete" } "delete" }
+                        button { class: "btn small", title: "{ui.key_of(Action::DeleteText)}", onclick: { let id = b["id"].as_str().unwrap_or("").to_string(); move |_| on_delete.call(id.clone()) }, Icon { name: "delete" } "delete" }
                     }
                 }
             } else {
@@ -1772,17 +1774,17 @@ fn Scenes(rev: Signal<u64>, on_open: EventHandler<String>, on_save: EventHandler
     });
     let all: BTreeMap<String, Value> = all.read().clone().unwrap_or_default();
     let here = ui.prefs.read().space.address.clone();
-    // writes the scenes back, then reads them again
+    // one `scenes.*` call, then the list read again; `then` sees its answer
     let store = {
         let api = api.clone();
-        move |m: BTreeMap<String, Value>, said: String| {
+        move |op: &'static str, args: Value, said: String, then: Option<Callback<Value>>| {
             let api = api.clone();
             dioxus::dioxus_core::spawn_forever(async move {
-                match api
-                    .set_setting("space.maps", &serde_json::to_string(&m).unwrap_or_default())
-                    .await
-                {
-                    Ok(()) => {
+                match api.call(op, args).await {
+                    Ok(v) => {
+                        if let Some(f) = then {
+                            f.call(v);
+                        }
                         ui.say(said);
                         local += 1;
                     }
@@ -1824,10 +1826,8 @@ fn Scenes(rev: Signal<u64>, on_open: EventHandler<String>, on_save: EventHandler
                                         if to == n { return; }
                                         if !ok_name(&to) { ui.fail("a scene's name: 1 to 96 of letters, digits, _ and -"); return; }
                                         if all.contains_key(&to) { ui.fail(format!("there's a scene {to} already")); return; }
-                                        let mut m = all.clone();
-                                        if let Some(v) = m.remove(&n) { m.insert(to.clone(), v); }
                                         if ui.prefs.peek().space.address == n { let t = to.clone(); set_pref(ui, move |p| p.space.address = t); }
-                                        store(m, format!("renamed {n} to {to}"));
+                                        store("scenes.rename", json!({ "from": n, "to": to }), format!("renamed {n} to {to}"), None);
                                     }
                                 },
                             }
@@ -1842,14 +1842,12 @@ fn Scenes(rev: Signal<u64>, on_open: EventHandler<String>, on_save: EventHandler
                             "aria-label": "delete",
                             onclick: {
                                 let n = n.clone();
-                                let all = all.clone();
                                 let store = store.clone();
                                 move |_| {
                                     if armed().as_deref() != Some(n.as_str()) { armed.set(Some(n.clone())); return; }
                                     armed.set(None);
-                                    let mut m = all.clone();
-                                    if let Some(v) = m.remove(&n) { gone.set(Some((n.clone(), v))); }
-                                    store(m, format!("deleted the scene {n}"));
+                                    let keep = Callback::new(move |v: Value| gone.set(Some((v["name"].as_str().unwrap_or("").to_string(), v["rows"].clone()))));
+                                    store("scenes.delete", json!({ "name": n }), format!("deleted the scene {n}"), Some(keep));
                                 }
                             },
                             Icon { name: "delete" }
@@ -1861,13 +1859,10 @@ fn Scenes(rev: Signal<u64>, on_open: EventHandler<String>, on_save: EventHandler
                     div { class: "scene dim small",
                         "deleted {n} "
                         button { class: "plain", onclick: {
-                                let all = all.clone();
                                 let store = store.clone();
                                 move |_| {
-                                    let mut m = all.clone();
-                                    m.insert(n.clone(), v.clone());
                                     gone.set(None);
-                                    store(m, format!("{n} is back"));
+                                    store("scenes.save", json!({ "name": n, "rows": v }), format!("{n} is back"), None);
                                 }
                             },
                             Icon { name: "undo" } "undo" }

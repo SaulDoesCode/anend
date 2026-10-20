@@ -25,8 +25,11 @@ The answers left these open. Each is written into the design as its default.
 6. **Scene hierarchy.** "Hierarchical features" is read as each scene having an optional
    parent scene, so scenes nest like folders. Prefabs are scenes placed inside other
    scenes.
-7. **The room** is the save's first scene, named "room", and keeps its texts and copies
-   between sessions.
+7. **The room** is a scene of the save (the setting `scenes.room` names it) and keeps its
+   blocks. Its texts stay a live spread from searches, as before, and are kept when the
+   room is saved as a named scene. (Revised 20 Oct while building it: keeping every
+   search's results as placements would fill the room with texts nobody placed.) Copies
+   made in the room are still page-only until the room is saved.
 8. **Old maps with `PLACE` edges** become scenes named by the map entry's text; the map
    entry itself stays in the memory as an ordinary entry.
 9. **Positions are stored as plain f32s** (12 bytes a placement). A lossless compact

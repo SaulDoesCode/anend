@@ -93,9 +93,12 @@ docs/architecture.md (the whole).
       (20 Oct: built, and checked against the CPU on a software GPU, where reading is
       about 60 times slower than the CPU; the speed on a real GPU is unmeasured until the
       user's `gpu.report`. Offered as an update on pull request #8.)
-- [ ] Instances: placements, many scenes inside a save (a scene table), blocks with the
+- [x] Instances: placements, many scenes inside a save (a scene table), blocks with the
       scene, packed transforms with defaults costing nothing, the migration from today's
       tables (#5, F4, answers 1, 2, 6).
+      (20 Oct: the scene table, packed placements, blocks in the room's scene, saved scenes
+      on scenes, the migration, backups and whole-scene merges. Copies made in the live room
+      stay page-only until the room is saved; see docs/wip/questions.md 7.)
 - [ ] Inheritance: placements follow their entry or prefab, kept in two tables, inheriting
       and detached; detach or modify chosen up front (answers 3, 8).
 - [ ] Text placements carry a `u8` font size, 0 for the default (answer 6).

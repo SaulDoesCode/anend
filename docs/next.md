@@ -23,12 +23,11 @@ departure says why in its commit).
   bit for bit; it reads about 60 times slower than the CPU, so a real GPU's speed is
   unknown until the user's `gpu.report`. The language starter's fetch is untested
   against gutenberg.org (the container's network refuses it).
-- In progress: "Instances". Done: `core/src/graph/scenes.rs`, the storage layer (the
-  scene table, the packed placement chunks exactly as docs/format.md lays them out, the
-  inheriting and detached tables, `graph placed`), with tests. Next in this line: the
-  migration from `graph blocks`, `PLACE` edges and `space.maps` (format bump), the ops
-  (`scenes.*`), then the space using scenes instead of `space.maps` and page-only copies,
-  with the parity guards for the scenes window and copies kept.
+- Done: "Instances" (scenes in the save; blocks and saved scenes on them; migration
+  checked by hand on a save made by the previous build, web and desktop).
+- Next: the GPU report's findings (the user's GTX 1070 Ti: exact, but reading 0.12x to
+  0.38x the CPU's speed): auto chooses by measured speed, then the GPU overhead work.
+  After that, "Inheritance" on the checklist.
 
 **After Stage A (19 Oct, late evening UTC), while the user tries it:**
 - `b5b6b22` docs/format.md "One model for a definition and its placed instances": Stage B's

@@ -304,6 +304,8 @@ pub struct AssetsWritten {
     pub models: usize,
     pub pictures: usize,
     pub blocks: usize,
+    /// saved scenes brought in whole
+    pub scenes: usize,
 }
 
 /// a save's spec models, pictures and blocks into another (a merge's second half; the entries
@@ -364,6 +366,40 @@ pub fn assets(target: &crate::graph::Graph, src: &crate::graph::Graph) -> GResul
     }
     if !new.is_empty() {
         w.blocks = target.add_blocks(&new)?.len();
+    }
+    // saved scenes come in whole (format.md answer 5): each is included as it is, named
+    // `<name> 2` (or 3, ...) when the target has one so named; a text placement finds its
+    // text in the target, as blocks do
+    use crate::graph::scenes::{Def, Kind as SKind};
+    let src_room = src.room()?;
+    let mut names: std::collections::HashSet<String> = target.scenes()?.into_iter().map(|s| s.name).collect();
+    for sc in src.scenes()? {
+        if Some(sc.id) == src_room {
+            continue;
+        }
+        let mut name = sc.name.clone();
+        let mut k = 2;
+        while names.contains(&name) {
+            name = format!("{} {k}", sc.name);
+            k += 1;
+        }
+        let mut texts: Vec<(u64, Vec<crate::graph::scenes::Placement>)> = Vec::new();
+        for p in src.placements(sc.id, false)? {
+            let (SKind::Text, Def::Entry(id)) = (p.kind, p.def) else {
+                continue;
+            };
+            let Ok(e) = src.entry(id) else { continue };
+            let text = src.render(id)?;
+            let to = target.save_text(&text, e.record.mime)?.0;
+            match texts.iter_mut().find(|(i, _)| *i == to) {
+                Some((_, ps)) => ps.push(p.place),
+                None => texts.push((to, vec![p.place])),
+            }
+        }
+        let id = target.add_scene(&name, 0)?;
+        target.set_texts(id, texts)?;
+        names.insert(name);
+        w.scenes += 1;
     }
     Ok(w)
 }

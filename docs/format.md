@@ -147,7 +147,7 @@ runs), `edges`, `history` (past versions as text), `settings`, `specs` (spec mod
 records), `pictures` (`[{id, mime, width, height, name, added, size, data: base64}]`)
 and `picture_lists` (`[[list, id]]`).
 
-## One model for a definition and its placed instances (design, not built yet)
+## One model for a definition and its placed instances (design, partly built)
 
 The design for the instance lines of docs/checklist.md (instances, inheritance, font sizes,
 long texts, chains, merging). It follows the user's answers 1–9 at the end of this section;
@@ -157,7 +157,14 @@ draft they overturned (a position grid, chains and scenes as containers, free te
 fixed piece size) are gone from here. Choices the answers leave open are defaults listed in
 docs/wip/questions.md.
 
-Today the same idea is stored four ways: text copies in the room are `entry~2` node keys
+**Built so far (20 Oct):** the tables and the packed placements (`core/src/graph/scenes.rs`);
+the migration of `graph blocks`, `PLACE` edges and `space.maps`; the room's blocks and
+the saved scenes' texts on scenes (`blocks.*`, `scenes.*`); backups and whole-scene
+merges. Not yet: inheritance (detach or modify, with overrides), prefabs, chains, font
+sizes in the space beyond a saved text's size, physics settling overlaps on merge, long
+texts. The rest of this section is the design; "today" below means before scenes.
+
+Before scenes, the same idea was stored four ways: text copies in the room are `entry~2` node keys
 that live only in the page until a scene is saved; saved scenes are one JSON setting
 (`space.maps`: name → rows `[text, x, y, z, {key, size}]`, the text repeated in every row);
 blocks are 32-byte values in `graph blocks` plus a `graph block ids` row each; and core's

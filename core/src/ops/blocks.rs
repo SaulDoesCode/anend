@@ -47,16 +47,17 @@ fn vec3(v: &Value) -> Option<[f32; 3]> {
     Some([a[0].as_f64()? as f32, a[1].as_f64()? as f32, a[2].as_f64()? as f32])
 }
 
-fn ids(args: &Value) -> Result<Vec<u64>, String> {
-    let one = args.get("id").and_then(Value::as_u64);
-    let many: Vec<u64> = args
+/// block ids: an `id` or `ids`, each a block's address (`text:3,14#2`)
+fn ids(args: &Value) -> Result<Vec<String>, String> {
+    let one = args.get("id").and_then(Value::as_str).map(str::to_string);
+    let many: Vec<String> = args
         .get("ids")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(Value::as_u64)
+        .filter_map(|v| v.as_str().map(str::to_string))
         .collect();
-    let all: Vec<u64> = one.into_iter().chain(many).collect();
+    let all: Vec<String> = one.into_iter().chain(many).collect();
     if all.is_empty() {
         return Err("which blocks? (id or ids)".into());
     }
@@ -156,7 +157,7 @@ pub fn call(g: &Graph, op: &str, args: &Value, limits: &Limits) -> Res {
                 new.push((kind, tex, transform(it, Transform::default())));
             }
             let ids = g.add_blocks(&new)?;
-            let blocks: Vec<Block> = ids.iter().filter_map(|id| g.block(*id).ok().flatten()).collect();
+            let blocks: Vec<Block> = ids.iter().filter_map(|id| g.block(id).ok().flatten()).collect();
             let mut out = listed(g, &blocks)?;
             out["ids"] = json!(ids);
             Ok(out)
@@ -172,8 +173,12 @@ pub fn call(g: &Graph, op: &str, args: &Value, limits: &Limits) -> Res {
             }
             let mut changes = Vec::new();
             for it in &items {
-                let id = it.get("id").and_then(Value::as_u64).ok_or("which block? (id)")?;
-                let b = g.block(id)?.ok_or_else(|| format!("no block {id}"))?;
+                let id = it
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .ok_or("which block? (id)")?
+                    .to_string();
+                let b = g.block(&id)?.ok_or_else(|| format!("no block {id}"))?;
                 let mut t = transform(it, b.t);
                 match op {
                     "blocks.move" => (t.w, t.h, t.d) = (b.t.w, b.t.h, b.t.d),
@@ -198,7 +203,7 @@ pub fn call(g: &Graph, op: &str, args: &Value, limits: &Limits) -> Res {
             }
             let by = args.get("by").and_then(vec3).unwrap_or([1.0, 0.0, 0.0]);
             let new = g.duplicate_blocks(&ids, by)?;
-            let blocks: Vec<Block> = new.iter().filter_map(|id| g.block(*id).ok().flatten()).collect();
+            let blocks: Vec<Block> = new.iter().filter_map(|id| g.block(id).ok().flatten()).collect();
             let mut out = listed(g, &blocks)?;
             out["ids"] = json!(new);
             Ok(out)
@@ -248,28 +253,32 @@ mod tests {
             ] }),
         )
         .unwrap();
-        assert_eq!(r["ids"], json!([1, 2, 3]));
+        assert_eq!(
+            r["ids"],
+            json!([format!("text:{label}#1"), format!("text:{label}#2"), "plain:#a0b0c0#1"])
+        );
+        let (b1, b2, b3) = (format!("text:{label}#1"), format!("text:{label}#2"), "plain:#a0b0c0#1");
         // the text is sent once for the two blocks showing it
         assert_eq!(r["textures"].as_object().unwrap().len(), 2);
         assert_eq!(r["textures"][format!("text:{label}")]["text"], "listen");
         assert_eq!(r["blocks"][2]["texture"], "#a0b0c0");
 
         // move keeps the size, scale keeps the place
-        let m = c("blocks.move", json!({ "id": 1, "x": 5, "w": 99 })).unwrap();
+        let m = c("blocks.move", json!({ "id": b1, "x": 5, "w": 99 })).unwrap();
         assert_eq!(
             (m["blocks"][0]["x"].as_f64(), m["blocks"][0]["w"].as_f64()),
             (Some(5.0), Some(3.0))
         );
-        let s = c("blocks.scale", json!({ "id": 1, "x": 0, "w": 6 })).unwrap();
+        let s = c("blocks.scale", json!({ "id": b1, "x": 0, "w": 6 })).unwrap();
         assert_eq!(
             (s["blocks"][0]["x"].as_f64(), s["blocks"][0]["w"].as_f64()),
             (Some(5.0), Some(6.0))
         );
-        let s = c("blocks.set", json!({ "changes": [{ "id": 2, "by": [0, 1, 0] }] })).unwrap();
+        let s = c("blocks.set", json!({ "changes": [{ "id": b2, "by": [0, 1, 0] }] })).unwrap();
         assert_eq!(s["blocks"][0]["y"].as_f64(), Some(1.0));
 
-        let d = c("blocks.duplicate", json!({ "ids": [1, 2], "by": [0, 0, 3] })).unwrap();
-        assert_eq!(d["ids"], json!([4, 5]));
+        let d = c("blocks.duplicate", json!({ "ids": [b1, b2], "by": [0, 0, 3] })).unwrap();
+        assert_eq!(d["ids"], json!([format!("text:{label}#3"), format!("text:{label}#4")]));
         assert_eq!(
             c("blocks.stats", json!({})).unwrap(),
             json!({ "blocks": 5, "textures": 2 })
@@ -278,7 +287,7 @@ mod tests {
         // block 1 (x 5, w 6) and block 2 (x 4) meet it; their copies are 3 further back
         assert_eq!(near["blocks"].as_array().unwrap().len(), 2);
 
-        let gone = c("blocks.delete", json!({ "ids": [1, 3] })).unwrap();
+        let gone = c("blocks.delete", json!({ "ids": [b1, b3] })).unwrap();
         assert_eq!(c("blocks.stats", json!({})).unwrap()["blocks"], 3);
         assert_eq!(
             c("blocks.restore", json!({ "blocks": gone["removed"] })).unwrap()["restored"],
