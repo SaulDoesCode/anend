@@ -598,7 +598,7 @@ fn reading_words(r: &serde_json::Value) -> String {
     };
     let mut s = format!("now on {dev}");
     if let Some(g) = r["gpu"].as_str() {
-        s += &format!(": {g}");
+        s += &format!(", {g}");
     }
     if r["device"] != "cpu" {
         s += if r["exact"] == true {
@@ -608,7 +608,7 @@ fn reading_words(r: &serde_json::Value) -> String {
         };
     }
     if let Some(n) = r["note"].as_str() {
-        s += &format!(" ({n})");
+        s += &format!(": {n}");
     }
     s
 }
@@ -651,7 +651,7 @@ fn GpuSettings() -> Element {
     let report = move |_| {
         let api = api.clone();
         busy.set(true);
-        ui.say("measuring the GPU and the CPU; this takes a minute or two");
+        ui.say("measuring the GPU and the CPU; this can take several minutes");
         spawn(async move {
             let r = api.call("gpu.report", serde_json::json!({})).await;
             busy.set(false);
@@ -695,12 +695,12 @@ fn GpuSettings() -> Element {
                 span { class: "dim small", "{now}" }
             }
             div { class: "wide dim small",
-                "Predicting, classifier search, indexing, buckets and colouring by a classifier. Training picks its device on the classifier's page."
+                "Predicting, classifier search, indexing, buckets, colouring by a classifier and filters by one. Training picks its device on the classifier's page."
             }
             label { "a report on this machine's GPU" }
             div { class: "row",
                 button { disabled: busy(), onclick: report, Icon { name: "stats" } if busy() { "measuring…" } else { "write a GPU report" } }
-                span { class: "dim small", "the adapter and driver, its limits, whether every kernel gives the CPU's bits, and timings of a fixed training run and of reading 10 000 texts on the CPU and the GPU; it takes a minute or two" }
+                span { class: "dim small", "the adapter and driver, its limits, whether every kernel gives the CPU's bits, and timings of a fixed training run and of reading 10 000 texts on the CPU and the GPU; it can take several minutes" }
             }
             if !written().is_empty() {
                 div { class: "wide small", "{written} — paste the file back to report how the GPU does" }

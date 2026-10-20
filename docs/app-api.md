@@ -127,6 +127,10 @@ quotas and job limits (two trainings or indexings at once per member, two hours 
 | `classify.cancel` | `{name}` | the job (it ends `cancelled`, writing nothing) |
 | `classify.predict` | `{name, texts?: [text], keys?: [key]}` | `{classes, trained, results: [{key, text, probs, top, class, members}], device}` |
 | `classify.search` | `{name, class, q?, limit?: 50}` | `{classes, class, stack: [names], trained, scanned, results: [{key, text, note, prob, top, top_class, member}], device}`, most likely first |
+| `classify.starters` | | `[{id, title, about, classes, source: rules\|bundled\|fetched, licence, gematria, fetched?, urls?}]` |
+| `classify.starter` | `{id, name?: its title, preset?, train?: true, epochs?, wait?}` | `{classifier: details, job, texts}`: its training texts written as lists (one per class, headed `<title>: <class>`), a classifier made on them, and its training started |
+| `classify.starter_fetch` | `{id}` (a fetched starter) | the starter, with `got`: books fetched now (the desktop and a hub; not in a browser on its own) |
+| `classify.starter_score` | `{name}` (a classifier made from a starter, trained) | `{name, starter, title, texts, right, accuracy, classes: [{class, texts, right}], seconds, device}` on the starter's held-out texts |
 | `classify.device` | `{device?: auto\|cpu\|gpu\|gpu_fast}` (sets it; refused on a shared hub) | `{device, reading, choices}`: where classifiers read texts in this process |
 | `gpu.report` | `{texts?: 10000, steps?: 40, sizes?: ["compact", "small"]}` (not on a shared hub) | the GPU report (below) |
 | `classify.contributions` | `{name, key or text, class?}` (the top class if left out) | `{class, text, results: [{name, share, input_share, grad_norm, classes, probs, top, top_class, judged}]}` |
@@ -179,6 +183,21 @@ quotas and job limits (two trainings or indexings at once per member, two hours 
   `--gpu`) or why `auto` chose the CPU. Rows kept in the buckets from a reading that
   isn't exact are kept apart from the CPU's (the stamp differs), so switching devices
   reads them again.
+- **Starters** (`core/src/starters.rs`) are labelled texts whose classes are known for
+  certain, so a classifier's accuracy on them is checked by a machine. Made by rules:
+  even or odd numbers; even or odd ordinal gematria sums of a few English words (with the
+  gematria inputs); runs of common English or Afrikaans words; corpus sentences as
+  written or with the spelling checker's corruptions; whole corpus sentences or their
+  first words; phrases naming fruit, stones or animals. Each rule starter has 80
+  training texts and 100 held-out texts a class, made with separate seeds (and, for the
+  corpus, from separate lines); a held-out text that came out the same as a training text
+  is replaced. Where the class can be read back from the text alone, the tests check every
+  generated text against the rule (`starters::check`). Public domain: the six authors
+  bundled in `core/corpus/authors` (regions 0–7 of each to train, 8–9 held out), and four
+  Project Gutenberg books in English, German, French and Dutch, fetched when asked into
+  the saves folder's `starters/` and refused unless the book's own `Language:` line says
+  the language its class expects (every fifth paragraph held out). Each starter's
+  `licence` says where its texts come from and on what terms.
 - **`gpu.report`** measures this machine (`core/src/classify/report.rs`): the build, the
   CPU's threads and kernels, the adapter (name, vendor, device, type, backend, driver,
   driver info), its limits, the exactness probe of every kernel in both precisions, what

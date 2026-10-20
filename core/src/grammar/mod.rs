@@ -723,6 +723,17 @@ pub fn corrupt(sentence: &str, seed: u64, lex: &dyn Fn(&str) -> bool) -> (String
 // ---------------------------------------------------------------- training
 
 /// the models, trained from the corpus the first time they're asked for
+/// the clean sentences the checker learns from (the project's own prose)
+pub fn corpus() -> &'static str {
+    CORPUS
+}
+
+/// whether the bundled lexicon (`words.fc`) knows a lowercase word
+pub fn is_word(w: &str) -> bool {
+    static L: OnceLock<Lexicon> = OnceLock::new();
+    L.get_or_init(Lexicon::load).words.contains(w)
+}
+
 pub fn model() -> &'static Model {
     static M: OnceLock<Model> = OnceLock::new();
     M.get_or_init(train)

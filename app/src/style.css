@@ -598,6 +598,9 @@ table.confusion td.miss { color: var(--bad); }
 .probbar.wide { width: min(260px, 34%); height: 8px; }
 .num { font: 12px var(--mono); color: var(--dim); width: 44px; text-align: right; flex: none; }
 .t.dim.small { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.starters .starter { padding: 10px 0; border-top: 1px solid var(--pad); display: flex; flex-direction: column; gap: 4px; }
+.starters .starter .row { flex-wrap: wrap; gap: 6px; align-items: center; }
+.held-out .big { font-size: 1.6em; }
 @media (max-width: 700px) { .cls-layout { grid-template-columns: 1fr; } .cls-list { position: static; max-height: 30vh; } }
 /* the page's controls sit at the right: their tips open leftwards, inside the window */
 .page.wide [data-tip]::after { left: auto; right: 0; transform: none; }

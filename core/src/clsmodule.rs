@@ -531,6 +531,7 @@ impl Store {
                 history,
                 outputs: BTreeMap::new(),
                 version: 0,
+                starter: None,
                 seed: p.seed,
                 created: now.clone(),
                 modified: now,

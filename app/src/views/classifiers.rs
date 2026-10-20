@@ -22,6 +22,7 @@ enum Side {
     None,
     New,
     Import,
+    Starters,
 }
 
 pub(crate) fn strs(v: &Value) -> Vec<String> {
@@ -133,6 +134,9 @@ pub fn Models() -> Element {
                 if !specs_tab() {
                 button { class: if side() == Side::New { "on" } else { "" }, onclick: move |_| side.set(if side() == Side::New { Side::None } else { Side::New }),
                     Icon { name: "new" } "new" }
+                button { class: if side() == Side::Starters { "on" } else { "" }, "data-tip": "ready-made classifiers whose answers a rule can check",
+                    onclick: move |_| side.set(if side() == Side::Starters { Side::None } else { Side::Starters }),
+                    Icon { name: "star" } "starters" }
                 button { class: if side() == Side::Import { "on" } else { "" }, "data-tip": "a classifier file (.anendcls)",
                     onclick: move |_| side.set(if side() == Side::Import { Side::None } else { Side::Import }),
                     Icon { name: "upload" } "import" }
@@ -172,12 +176,15 @@ pub fn Models() -> Element {
                     match side() {
                         Side::New => rsx! { NewClassifier { on_made } },
                         Side::Import => rsx! { ImportClassifier { on_made } },
+                        Side::Starters => rsx! { Starters { on_made } },
                         Side::None => match open {
                             Some(name) => rsx! { ClassifierPage { key: "{name}", name: name.clone(), on_gone: move |_| { chosen.set(None); rev += 1; } } },
                             None => rsx! {
                                 div { class: "card empty",
                                     p { "A classifier learns to tell your lists apart: each list is a class, its members the examples." }
                                     p { "Make two or more lists (in the memory view: Shift+click a text to make it a list's head, then Alt+click texts and put them in it), then press " b { "new" } "." }
+                                    p { "Or begin with a starter: ready-made texts whose classes a rule knows for certain, so how well a classifier learned them is measured on texts it never saw. "
+                                        button { onclick: move |_| side.set(Side::Starters), Icon { name: "star" } "starters" } }
                                 }
                             },
                         },
@@ -508,12 +515,18 @@ fn ClassifierPage(name: String, on_gone: EventHandler<()>) -> Element {
                     if !inputs.is_empty() {
                         {format!(" · builds on {}", inputs.join(", "))}
                     }
+                    if let Some(s) = d["starter"].as_str() {
+                        {format!(" · from the starter {s:?}")}
+                    }
                 }
             }
             crate::views::clsmore::Tabs { tab }
             match tab() {
                 Tab::Learn => rsx! {
                     Train { name: name.clone(), details: d.clone(), job: job(), on_start: move |j: Value| { job.set(Some(j)); watching.set(true); } }
+                    if trained && d["starter"].is_string() {
+                        HeldOut { name: name.clone(), version: d["version"].as_u64().unwrap_or(0) }
+                    }
                     if trained {
                         Steer { name: name.clone(), details: d.clone() }
                     }
@@ -531,6 +544,147 @@ fn ClassifierPage(name: String, on_gone: EventHandler<()>) -> Element {
                 Tab::Buckets => rsx! { crate::views::clsmore::Buckets { name: name.clone() } },
                 Tab::Checks => rsx! { crate::views::clsmore::Checks { name: name.clone(), all: all_names.clone() } },
             }
+        }
+    }
+}
+
+// ------------------------------------------------------------------ starters
+
+/// the starters: each one's classes, where its texts come from and on what terms; making
+/// one writes its training texts as lists and trains a classifier on them
+#[component]
+fn Starters(on_made: EventHandler<String>) -> Element {
+    let ui = ui();
+    let api = api();
+    let mut rev = use_signal(|| 0u64);
+    let mut busy: Signal<Option<String>> = use_signal(|| None);
+    let api_l = api.clone();
+    let all = use_resource(move || {
+        let api = api_l.clone();
+        let _ = rev();
+        async move { api.call("classify.starters", json!({})).await }
+    });
+    let list: Vec<Value> = match &*all.read() {
+        Some(Ok(v)) => v.as_array().cloned().unwrap_or_default(),
+        Some(Err(e)) => return rsx! { div { class: "card bad", "{e}" } },
+        None => return rsx! { div { class: "card dim", "…" } },
+    };
+    rsx! {
+        div { class: "card starters",
+            h3 { "starters" }
+            p { class: "dim small",
+                "Texts whose classes are known for certain: made by a rule, or taken from public-domain books. Making one writes its training texts into lists (one per class) and trains a classifier on them; its page then scores it on texts held out from training, which it never saw."
+            }
+            for s in list {
+                {
+                    let id = s["id"].as_str().unwrap_or("").to_string();
+                    let classes = strs(&s["classes"]);
+                    let source = match s["source"].as_str() {
+                        Some("rules") => "made by rules",
+                        Some("bundled") => "public domain, comes with the app",
+                        _ => "public domain, fetched when asked",
+                    };
+                    let needs_fetch = s["fetched"] == false;
+                    let this_busy = busy().as_deref() == Some(id.as_str());
+                    let (api_m, id_m) = (api.clone(), id.clone());
+                    let make = move |_| {
+                        let (api, id) = (api_m.clone(), id_m.clone());
+                        busy.set(Some(id.clone()));
+                        spawn(async move {
+                            let r = api.call("classify.starter", json!({ "id": id })).await;
+                            busy.set(None);
+                            match r {
+                                Ok(v) => {
+                                    let n = v["classifier"]["name"].as_str().unwrap_or("").to_string();
+                                    ui.say(format!("{n}: {} texts in its lists; training", v["texts"]));
+                                    ui.touched();
+                                    on_made.call(n);
+                                }
+                                Err(e) => ui.fail(e),
+                            }
+                        });
+                    };
+                    let (api_f, id_f) = (api.clone(), id.clone());
+                    let fetch = move |_| {
+                        let (api, id) = (api_f.clone(), id_f.clone());
+                        busy.set(Some(id.clone()));
+                        spawn(async move {
+                            let r = api.call("classify.starter_fetch", json!({ "id": id })).await;
+                            busy.set(None);
+                            match r {
+                                Ok(v) => { ui.say(format!("fetched {} books", v["got"])); rev += 1; }
+                                Err(e) => ui.fail(e),
+                            }
+                        });
+                    };
+                    rsx! {
+                        div { key: "{id}", class: "starter",
+                            div { class: "row",
+                                b { {s["title"].as_str().unwrap_or("")} }
+                                for (i , c) in classes.iter().enumerate() {
+                                    span { key: "{c}", class: "chip cls-class", style: "--hue: {hue(i, classes.len())};", "{c}" }
+                                }
+                                span { class: "grow" }
+                                if needs_fetch {
+                                    button { disabled: busy().is_some(), onclick: fetch, Icon { name: "download" } if this_busy { "fetching…" } else { "fetch its books" } }
+                                } else {
+                                    button { disabled: busy().is_some(), onclick: make, Icon { name: "new" } if this_busy { "making…" } else { "make and train it" } }
+                                }
+                            }
+                            div { class: "small", {s["about"].as_str().unwrap_or("")} }
+                            div { class: "dim small", "{source}: " {s["licence"].as_str().unwrap_or("")} }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// a starter classifier's score on the starter's held-out texts, read again when its
+/// weights change
+#[component]
+fn HeldOut(name: String, version: u64) -> Element {
+    let api = api();
+    let mut again = use_signal(|| 0u64);
+    let n0 = name.clone();
+    let score = use_resource(move || {
+        let (api, n) = (api.clone(), n0.clone());
+        let _ = (again(), version);
+        async move { api.call("classify.starter_score", json!({ "name": n })).await }
+    });
+    let body = match &*score.read() {
+        Some(Ok(v)) => {
+            let per: Vec<String> = v["classes"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|c| format!("{} {}/{}", c["class"].as_str().unwrap_or(""), c["right"], c["texts"]))
+                .collect();
+            let dev = match v["device"]["device"].as_str() {
+                Some("cpu") | None => "the CPU".to_string(),
+                Some(_) => format!("the GPU ({})", v["device"]["gpu"].as_str().unwrap_or("")),
+            };
+            rsx! {
+                div { class: "row",
+                    b { class: "big", {pct(v["accuracy"].as_f64().unwrap_or(0.0))} }
+                    span { {format!("right on {} of {} held-out texts it never trained on", v["right"], v["texts"])} }
+                }
+                div { class: "dim small", {per.join(" · ")} }
+                div { class: "dim small", {format!("read on {dev} in {:.2} s", v["seconds"].as_f64().unwrap_or(0.0))} }
+            }
+        }
+        Some(Err(e)) => rsx! { div { class: "bad small", "{e}" } },
+        None => rsx! { div { class: "dim small", "scoring on the held-out texts…" } },
+    };
+    rsx! {
+        div { class: "card held-out",
+            div { class: "row",
+                h3 { "held-out score" }
+                span { class: "grow" }
+                button { class: "plain", "data-tip": "score it again", onclick: move |_| again += 1, Icon { name: "refresh" } }
+            }
+            {body}
         }
     }
 }

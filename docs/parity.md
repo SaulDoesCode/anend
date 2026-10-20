@@ -188,7 +188,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | feature | was in | status |
 |---|---|---|
 | list, new from lists (classes, not-list, builds on, size, one class / several) | classify_ui.rs | has |
-| starter examples (fruit, stones, animals) | classify_ui.rs | missing |
+| starter examples (fruit, stones, animals) | classify_ui.rs | has (20 Oct): the starters panel (the models view's "starters" button, and the empty state) makes fruit, stones and animals and seven more (number, gematria, English, spelling, sentence, authors, languages), each with its source and licence; a classifier made from one shows its held-out score (`classify.starter*`) |
 | training: epochs, rounds, from scratch, progress, loss line, cancel, metrics, confusion, growth | classify_ui.rs | has (growth history back 19 Oct); the page has the Bevy tabs again: learn, use, buckets, checks |
 | use: try a text, yes/no per class, "why" (each classifier's part, end to end) | classify_ui.rs, `classify.contributions` | has |
 | steering: bias per class, temperature, threshold, channel gains, the bias it adds (flipped, KL) | classify_ui.rs | has |

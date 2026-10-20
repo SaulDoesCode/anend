@@ -372,6 +372,7 @@ fn summary(store: &Store, d: &clfs::Definition) -> Value {
         "head": head_name(d.head),
         "preset": d.preset,
         "gematria": d.gematria,
+        "starter": d.starter,
         "inputs": d.inputs,
         "trained": d.trained(),
         "version": d.version,
@@ -561,6 +562,133 @@ fn device_call(args: &Value, limits: &Limits) -> Res {
         "reading": device::reading(c, limits.gpu),
         "choices": ["auto", "cpu", "gpu", "gpu_fast"],
     }))
+}
+
+/// a starter's summary
+#[cfg(not(target_arch = "wasm32"))]
+fn starter_json(s: &crate::starters::Starter, books: &Path) -> Value {
+    let mut v = json!(s);
+    if s.source == crate::starters::Source::Fetched {
+        v["fetched"] = json!(crate::starters::fetched(books));
+        v["urls"] = json!(
+            crate::starters::BOOKS
+                .iter()
+                .map(|(n, _)| crate::starters::book_url(*n))
+                .collect::<Vec<_>>()
+        );
+    }
+    v
+}
+
+/// the starter classifiers (`crate::starters`): `classify.starters` lists them,
+/// `classify.starter_fetch {id}` fetches a fetched one's texts, `classify.starter {id,
+/// name?, preset?, train?: true, epochs?, wait?}` writes its training texts as lists and
+/// makes (and trains) a classifier on them, and `classify.starter_score {name}` scores a
+/// classifier made from one on the starter's held-out texts
+#[cfg(not(target_arch = "wasm32"))]
+fn starter_call(saves: &Saves, op: &str, args: &Value, limits: &Limits) -> Res {
+    use crate::starters::{self, Split};
+    let books = saves.dir().join("starters");
+    match op {
+        "classify.starters" => Ok(Value::Array(
+            starters::STARTERS.iter().map(|s| starter_json(s, &books)).collect(),
+        )),
+        "classify.starter_fetch" => {
+            let id = s(args, "id");
+            let sp = starters::get(id).ok_or_else(|| format!("no starter {id:?}"))?;
+            if sp.source != starters::Source::Fetched {
+                return Err(format!("{:?} has nothing to fetch", sp.title));
+            }
+            let got = starters::fetch(&books, &starters::http_get)?;
+            let mut v = starter_json(sp, &books);
+            v["got"] = json!(got);
+            Ok(v)
+        }
+        "classify.starter" => {
+            let id = s(args, "id");
+            let sp = starters::get(id).ok_or_else(|| format!("no starter {id:?}"))?;
+            let (_, models) = saves.models()?;
+            let (_, g) = saves.graph("")?;
+            let name = match s(args, "name").trim() {
+                "" => sp.title.to_string(),
+                n => n.to_string(),
+            };
+            if models.classifier(&name).is_ok() {
+                return Err(format!("there's already a classifier called {name:?}"));
+            }
+            let ex = starters::examples(id, Split::Train, Some(&books))?;
+            // a list per class, headed "<title>: <class>", holding its training texts
+            let heads = g.write(|tx| {
+                let mut heads = Vec::new();
+                for class in sp.classes {
+                    heads.push(
+                        tx.save_text(&format!("{}: {class}", sp.title), crate::ops::mime::TEXT)?
+                            .0,
+                    );
+                }
+                for (text, c) in &ex {
+                    let (m, _) = tx.save_text(text, crate::ops::mime::TEXT)?;
+                    tx.add_member(heads[*c], m)?;
+                }
+                Ok(heads)
+            })?;
+            let refs = heads
+                .iter()
+                .map(|h| parse_ref(&crate::graph::record::label(*h)))
+                .collect::<Result<Vec<_>, _>>()?;
+            let preset = match s(args, "preset") {
+                "" => clfs::DEFAULT_PRESET,
+                p => p,
+            };
+            models.create_classifier_with(&name, &refs, None, HeadKind::Single, preset, vec![], sp.gematria)?;
+            let mut def = models.classifier(&name)?;
+            def.starter = Some(id.to_string());
+            models.put_classifier(&mut def, None)?;
+            let job = if args.get("train").and_then(Value::as_bool).unwrap_or(true) {
+                let wait = args.get("wait").and_then(Value::as_bool).unwrap_or(false);
+                start(models.clone(), &name, &train_args(args), wait, limits)?
+            } else {
+                Value::Null
+            };
+            Ok(json!({ "classifier": details(&models, &def)?, "job": job, "texts": ex.len() }))
+        }
+        "classify.starter_score" => {
+            let (_, models) = saves.models()?;
+            models.allow_gpu_reads(limits.gpu);
+            let stack = models.stack(name_arg(args)?)?;
+            let def = stack.def();
+            let id = def
+                .starter
+                .clone()
+                .ok_or_else(|| format!("{:?} wasn't made from a starter", def.name))?;
+            let sp = starters::get(&id).ok_or_else(|| format!("no starter {id:?}"))?;
+            if !def.trained() {
+                return Err(format!("train {:?} first", def.name));
+            }
+            let held = starters::examples(&id, Split::Held, Some(&books))?;
+            let texts: Vec<&str> = held.iter().map(|(t, _)| t.as_str()).collect();
+            let started = std::time::Instant::now();
+            let outs = stack.outputs(&texts, pool());
+            let seconds = started.elapsed().as_secs_f64();
+            let mut per = vec![(0usize, 0usize); sp.classes.len()];
+            for ((_, c), o) in held.iter().zip(&outs) {
+                per[*c].0 += 1;
+                if o.top == *c {
+                    per[*c].1 += 1;
+                }
+            }
+            let right: usize = per.iter().map(|p| p.1).sum();
+            Ok(json!({
+                "name": def.name, "starter": id, "title": sp.title,
+                "texts": held.len(), "right": right,
+                "accuracy": right as f64 / held.len().max(1) as f64,
+                "classes": sp.classes.iter().zip(&per).map(|(c, (n, r))| json!({ "class": c, "texts": n, "right": r })).collect::<Vec<_>>(),
+                "seconds": seconds,
+                "device": stack.reading(),
+            }))
+        }
+        _ => Err(format!("no call {op:?}")),
+    }
 }
 
 /// `gpu.report`: the machine's GPU, the exactness probe and timings next to the CPU
@@ -1320,6 +1448,11 @@ pub fn saves_call(saves: &Saves, op: &str, args: &Value, limits: &Limits) -> Res
     if op == "gpu.report" {
         return gpu_report(args, limits);
     }
+    // the browser build reaches the starters through the hub
+    #[cfg(not(target_arch = "wasm32"))]
+    if op.starts_with("classify.starter") {
+        return starter_call(saves, op, args, limits);
+    }
     if op.starts_with("classify.") || op.starts_with("filters.") {
         let (_, models) = saves.models()?;
         return call(models, op, args, limits);
@@ -1445,6 +1578,75 @@ mod tests {
             .call("classify.train", &json!({ "name": "k", "device": "gpu" }))
             .unwrap_err();
         assert!(e.contains("--gpu"), "{e}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn starters_make_lists_train_and_score_on_held_out_texts() {
+        let dir = temp("starters");
+        let ws = Saves::new(&dir, "notes").with_models(Limits::NONE);
+        let c = |op: &str, a: Value| ws.call(op, &a);
+        let all = c("classify.starters", json!({})).unwrap();
+        let ids: Vec<&str> = all
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["id"].as_str().unwrap())
+            .collect();
+        assert!(
+            ids.contains(&"things") && ids.contains(&"authors") && ids.contains(&"languages"),
+            "{all}"
+        );
+        assert!(
+            all.as_array().unwrap().iter().all(|s| s["licence"].is_string()),
+            "every one says its terms"
+        );
+        let langs = all.as_array().unwrap().iter().find(|s| s["id"] == "languages").unwrap();
+        assert_eq!(langs["fetched"], false);
+        assert!(
+            c("classify.starter", json!({ "id": "languages" }))
+                .unwrap_err()
+                .contains("fetch")
+        );
+        assert!(c("classify.starter_fetch", json!({ "id": "things" })).is_err());
+
+        let made = c(
+            "classify.starter",
+            json!({ "id": "things", "preset": "tiny", "epochs": 8, "threads": 2, "wait": true }),
+        )
+        .unwrap();
+        assert_eq!(made["texts"], 240, "{made}");
+        assert_eq!(made["job"]["state"], "done", "{made}");
+        assert_eq!(made["classifier"]["starter"], "things");
+        assert_eq!(
+            made["classifier"]["classes"],
+            json!([
+                "fruit, stones and animals: fruit",
+                "fruit, stones and animals: stones",
+                "fruit, stones and animals: animals"
+            ])
+        );
+        // the lists hold the training texts
+        let lists = c("lists.stats", json!({})).unwrap().to_string();
+        assert!(lists.contains("fruit, stones and animals: stones"), "{lists}");
+        assert!(
+            c("classify.starter", json!({ "id": "things" }))
+                .unwrap_err()
+                .contains("already")
+        );
+
+        let sc = c("classify.starter_score", json!({ "name": "fruit, stones and animals" })).unwrap();
+        assert_eq!(sc["texts"], 300, "{sc}");
+        let acc = sc["accuracy"].as_f64().unwrap();
+        assert!(acc > 0.5, "well above a third by chance: {sc}");
+        let per: u64 = sc["classes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x["right"].as_u64().unwrap())
+            .sum();
+        assert_eq!(per, sc["right"].as_u64().unwrap());
+        assert!(c("classify.starter_score", json!({ "name": "nope" })).is_err());
         let _ = std::fs::remove_dir_all(dir);
     }
 

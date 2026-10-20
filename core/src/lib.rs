@@ -22,6 +22,8 @@ pub mod ops;
 pub mod simd;
 pub mod specs;
 pub mod spread;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod starters;
 pub mod store;
 pub mod texts;
 pub mod vfs;

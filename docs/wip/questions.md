@@ -43,3 +43,20 @@ The answers left these open. Each is written into the design as its default.
     applies to the whole process (on a `--local` hub, to everything it serves), since
     whether a GPU exists depends on the machine. A shared hub reads on its CPU unless
     started with `--gpu`, and its members can't change it.
+
+## Starter classifiers (checklist: starters a machine can check)
+
+12. **"Not English" is Afrikaans.** The English-or-not starter contrasts common English
+    words with common Afrikaans words (the language the word types misread). Other
+    languages can be added as more classes.
+13. **The public-domain sets are the bundled authors and four Gutenberg books** (Pride and
+    Prejudice, Die Verwandlung, Les Misérables I, Max Havelaar) for a language starter.
+    No US government works yet: none is bundled, and this container can't reach outside
+    sites to choose and check one. The book numbers were chosen from memory; each fetch
+    is refused unless the book's own `Language:` line matches, but the fetch itself is
+    untested against gutenberg.org (the container's network refuses it).
+14. **A starter writes its texts into the save** as memory entries and lists, so it trains
+    like any other classifier and its texts can be looked at. The other choice would keep
+    them outside the save; that would need a second way of training.
+15. **The default size is the compact preset**, as for a new classifier; the starter call
+    takes `preset` to pick another.

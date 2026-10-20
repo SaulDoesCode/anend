@@ -139,6 +139,9 @@ pub struct Definition {
     /// bumped by every write of the weights
     #[serde(default)]
     pub version: u64,
+    /// the starter it was made from (`starters`), whose held-out texts score it
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub starter: Option<String>,
     pub seed: u64,
     pub created: String,
     pub modified: String,
@@ -285,6 +288,7 @@ impl Definition {
             history: vec![],
             outputs: BTreeMap::new(),
             version: 0,
+            starter: None,
             created: now.clone(),
             modified: now,
         };
