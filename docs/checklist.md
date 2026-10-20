@@ -61,21 +61,24 @@ docs/architecture.md (the whole).
 - [x] The instance design written, with the user's answers 1–9 (docs/format.md).
 - [x] Rewrite the design section's body in docs/format.md so it agrees with answers 1–9 (the
       conflicts are listed in docs/wip/queued-requests.md), and delete the superseded parts.
-- [ ] The GPU for classifying, not only training:
+- [x] The GPU for classifying, not only training:
   - `classify.predict`, `search`, indexing, buckets and tints, batched through `GpuNet`;
   - a CPU fallback that says why;
   - `gpu.report`: a settings button that writes a JSON file with the adapter and driver,
     the limits, the exactness probe against the CPU for every kernel, and timings of a
     fixed training run and of predicting 10k texts on CPU and GPU. The user runs it and
     pastes the file.
-- [ ] Starter classifiers whose correctness a machine can check:
+- [x] Starter classifiers whose correctness a machine can check:
   - **generated with rule-given labels:** number properties, gematria properties, English or
     not, spelled right or corrupted, sentence or fragment, and fruit, stones and animals;
   - **from public-domain data sets:** CC0 or public domain first (Gutenberg, US government
     works), then permissive licences with attribution noted, each licence checked, large
     sets fetched on demand;
   - each shows its held-out score.
-- [ ] ▶ **usable:** fast classifier search on the GPU, with starters that show it working.
+- [x] ▶ **usable:** fast classifier search on the GPU, with starters that show it working.
+      (20 Oct: built, and checked against the CPU on a software GPU, where reading is
+      about 60 times slower than the CPU; the speed on a real GPU is unmeasured until the
+      user's `gpu.report`. Offered as an update on pull request #8.)
 - [ ] Instances: placements, many scenes inside a save (a scene table), blocks with the
       scene, packed transforms with defaults costing nothing, the migration from today's
       tables (#5, F4, answers 1, 2, 6).

@@ -177,6 +177,17 @@ a class, its members the examples.
   into a **list** (`classifier: class`), and see the **verdicts** you gave.
 - **export** writes it as a `.anendcls` file; **import** takes one in (each class goes
   to the list of its name, made when there's none). Delete takes two clicks.
+- **starters** (the star button, or the empty page): ready-made classifiers whose texts'
+  classes are known for certain, so how well one learned is measured, not guessed. Most
+  are made by a rule (even or odd numbers, even or odd gematria sums, English or
+  Afrikaans, words spelled right or garbled, sentences or fragments, fruit, stones and
+  animals); **who wrote it** uses six public-domain authors that come with the app, and
+  **which language** fetches four public-domain Project Gutenberg books when you ask.
+  Each says where its texts come from and on what terms. **make and train it** writes its
+  training texts into the open save as lists (400 a class for the rule-made ones; use a
+  save of its own to keep them apart) and trains a classifier on them. Its page then
+  shows a **held-out score**: how many texts it never trained on it puts in the right
+  class, per class too, read again whenever it is trained or taught.
 
 ### Spec models
 
@@ -230,6 +241,14 @@ run again.
 - **saves**: every save with its counts and size. **open**, **new**, **copy**, **rename**,
   **delete** (two clicks), a **backup** (its texts in one JSON, the rest in another), and
   **import** weum's `all-of-it.json` into the open save.
+- **the GPU**: where classifiers read texts (trying, search, indexing, buckets,
+  colouring and filters by a classifier). **auto** uses the GPU when it gives exactly the
+  CPU's results and isn't a software renderer, else the CPU; or pick **the CPU**, **the
+  GPU** or **the GPU, fast** (a little different from the CPU, faster). The line under it
+  says where reading runs now, and why when it fell back to the CPU. **write a GPU
+  report** measures this machine (the GPU's name and driver, whether every kernel gives
+  the CPU's results, and how fast training and reading are on each) and writes it to a
+  JSON file in the data folder's `exports` (a download on the web), for sending back.
 - **keys**: every shortcut.
 - **the hub**: the hub's address (sharing from the app comes back here when the hub's
   sharing moves to the entry graph; for now share on the hub's site).

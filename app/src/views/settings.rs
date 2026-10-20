@@ -651,7 +651,7 @@ fn GpuSettings() -> Element {
     let report = move |_| {
         let api = api.clone();
         busy.set(true);
-        ui.say("measuring the GPU and the CPU; this takes a few minutes, at most about a quarter of an hour");
+        ui.say("measuring the GPU and the CPU; this takes some minutes (about twenty on a software renderer)");
         spawn(async move {
             let r = api.call("gpu.report", serde_json::json!({})).await;
             busy.set(false);
@@ -700,7 +700,7 @@ fn GpuSettings() -> Element {
             label { "a report on this machine's GPU" }
             div { class: "row",
                 button { disabled: busy(), onclick: report, Icon { name: "stats" } if busy() { "measuring…" } else { "write a GPU report" } }
-                span { class: "dim small", "the adapter and driver, its limits, whether every kernel gives the CPU's bits, and timings of a fixed training run and of reading up to 10 000 texts on the CPU and the GPU (two minutes at most on each); it takes a few minutes, at most about a quarter of an hour" }
+                span { class: "dim small", "the adapter and driver, its limits, whether every kernel gives the CPU's bits, and timings of a fixed training run and of reading up to 10 000 texts on the CPU and the GPU (two minutes at most on each); it takes some minutes, about twenty on a software renderer" }
             }
             if !written().is_empty() {
                 div { class: "wide small", "{written} — paste the file back to report how the GPU does" }

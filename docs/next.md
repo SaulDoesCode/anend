@@ -16,10 +16,15 @@ where they speak of stages, the checklist replaces them.
 
 **Now (20 Oct):** working down docs/checklist.md (its order is a sensible default; a
 departure says why in its commit).
-- Done: the instance design's body in docs/format.md rewritten to agree with answers 1–9
-  (the defaults it picked are in docs/wip/questions.md).
-- In progress: the GPU for classifying (`classify.predict`, `search`, indexing, buckets and
-  tints through `GpuNet`, a CPU fallback that says why, `gpu.report`). Not started yet.
+- Done: the instance design's body rewritten (`9e7566f`); the GPU for classifying with
+  `classify.device` and `gpu.report` (`f5310df`, `3eb3904`); the starters (`faaa1b3`,
+  `3eb3904`); the ▶ usable point (README, guide, the offer on PR #8).
+- Measured here: llvmpipe is bit-exact on every kernel and packed reading equals the CPU
+  bit for bit; it reads about 60 times slower than the CPU, so a real GPU's speed is
+  unknown until the user's `gpu.report`. The language starter's fetch is untested
+  against gutenberg.org (the container's network refuses it).
+- Next: "Instances" (the scene table, placements, the migration; docs/format.md's design).
+  Not started.
 
 **After Stage A (19 Oct, late evening UTC), while the user tries it:**
 - `b5b6b22` docs/format.md "One model for a definition and its placed instances": Stage B's

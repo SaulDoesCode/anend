@@ -667,7 +667,7 @@ fn HeldOut(name: String, version: u64) -> Element {
             };
             rsx! {
                 div { class: "row",
-                    b { class: "big", {pct(v["accuracy"].as_f64().unwrap_or(0.0))} }
+                    b { class: "big", {format!("{:.1}%", 100.0 * v["accuracy"].as_f64().unwrap_or(0.0))} }
                     span { {format!("right on {} of {} held-out texts it never trained on", v["right"], v["texts"])} }
                 }
                 div { class: "dim small", {per.join(" · ")} }

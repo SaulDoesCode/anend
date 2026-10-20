@@ -141,9 +141,19 @@ thread count. Models are described by a declarative spec ([docs/models.md](docs/
 from safetensors and a `tokenizer.json`. Use `"from": {"pretrained": "<dir>"}` in a spec,
 or see `core/examples/pretrained.rs`.
 
-**The GPU:** an optional backend (`--features gpu`, wgpu) runs inference and training on
-the GPU. It is bit-exact on a software GPU, and is turned on per run with
-`"device": "gpu"`. `core/examples/gpu_bench.rs` measures it on your hardware.
+**The GPU:** a backend (wgpu, the cargo feature `gpu`, on in the desktop app and the hub)
+trains and reads texts on the GPU. Classifiers read on it (trying, search, indexing,
+buckets, colouring, filters) with every text's windows packed into a few submissions;
+the settings' GPU section picks auto, the CPU, the GPU or the GPU fast. In exact
+precision it gives the CPU's bits on a device whose kernels the probe finds exact (this
+was checked on a software GPU, llvmpipe, only). **write a GPU report** in the settings
+(`gpu.report`) writes a JSON file about your GPU: the adapter, driver, limits, the probe
+of every kernel, and training and reading timings next to the CPU.
+`core/examples/gpu_bench.rs` measures larger models.
+
+**Starter classifiers** (`core/src/starters.rs`) have texts whose classes are known for
+certain (made by rules, or public-domain books), so each is scored on held-out texts:
+`cargo run --release -p anend-core --example starters` prints the table.
 
 [core/src/classify/STATUS.md](core/src/classify/STATUS.md) has the details and what's
 measured.
