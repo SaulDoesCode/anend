@@ -14,6 +14,13 @@ goes away without a line there saying why.
 nothing waits on the user). Pick up at its first unticked line. The notes below are history;
 where they speak of stages, the checklist replaces them.
 
+**Now (20 Oct):** working down docs/checklist.md (its order is a sensible default; a
+departure says why in its commit).
+- Done: the instance design's body in docs/format.md rewritten to agree with answers 1–9
+  (the defaults it picked are in docs/wip/questions.md).
+- In progress: the GPU for classifying (`classify.predict`, `search`, indexing, buckets and
+  tints through `GpuNet`, a CPU fallback that says why, `gpu.report`). Not started yet.
+
 **After Stage A (19 Oct, late evening UTC), while the user tries it:**
 - `b5b6b22` docs/format.md "One model for a definition and its placed instances": Stage B's
   design. It covers the tables (`graph instances` keyed by (definition ref, container),

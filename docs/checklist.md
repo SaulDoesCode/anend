@@ -59,7 +59,7 @@ docs/architecture.md (the whole).
 - [x] Save checkpoints.
 - [x] The IME check (web).
 - [x] The instance design written, with the user's answers 1–9 (docs/format.md).
-- [ ] Rewrite the design section's body in docs/format.md so it agrees with answers 1–9 (the
+- [x] Rewrite the design section's body in docs/format.md so it agrees with answers 1–9 (the
       conflicts are listed in docs/wip/queued-requests.md), and delete the superseded parts.
 - [ ] The GPU for classifying, not only training:
   - `classify.predict`, `search`, indexing, buckets and tints, batched through `GpuNet`;

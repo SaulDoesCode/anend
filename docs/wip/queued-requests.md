@@ -15,6 +15,8 @@ numbered items below (#n) hold the detail it refers to.
   memory entries), no font size on text placements (answer 6: a `u8`, 0 for default), a
   64 KiB piece size as a limit (answer 9: no limit; the piece size is a setting). Rewrite
   the body so it agrees with the answers, delete the superseded parts, and only then build.
+  **Done 20 Oct:** the body is rewritten; the defaults it chose where the answers left a
+  choice open are in docs/wip/questions.md.
 
 ## Do first: fixes from using the app (19 Oct, evening UTC)
 
