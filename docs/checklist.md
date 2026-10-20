@@ -1,6 +1,9 @@
 # The checklist
 
-One linear list. Work goes down it in order, and each line is ticked when it is done. There
+One list of what's to be done, each line ticked when it is done. The order is a sensible
+default, not a script: take lines in whatever order the work makes sense in (dependencies,
+shared code, what unblocks what, what's cheap while nearby), and say why when departing from
+it. There
 are no stages and no dates. A **▶ usable** line marks where the lines above it add up to
 something usable as a whole; at each of those, a pull request is offered (merging stays up
 to the user) and the README and guide are written up.
@@ -20,9 +23,12 @@ docs/architecture.md (the whole).
   - docs/parity.md updated, with nothing removed without a line saying why.
 
   Then the next line starts. Nothing waits on the user.
-- **The user's ideas are built as given.** When a choice is needed and a default is
-  reasonable, pick it, keep it reversible, build it, and list it in docs/wip/questions.md.
-  Otherwise ask plainly and directly. Take answers as given. Own and fix what turns out wrong.
+- **The user's ideas are the aim; making them work well is the job.** Bring engineering
+  judgement to them: how they fit together, what they need first, what makes them good to
+  use. Their intent is kept, without literal transcription and without second-guessing it.
+  When a real choice is the user's, pick a reasonable default, keep it reversible, build it,
+  and list it in docs/wip/questions.md; ask plainly when no default is reasonable. Own and fix
+  what turns out wrong.
 - **Pushes after every piece.** docs/next.md's Resuming block says which line is in progress
   and where it stopped.
 - **Standing requirements:**
