@@ -31,3 +31,15 @@ The answers left these open. Each is written into the design as its default.
    entry itself stays in the memory as an ordinary entry.
 9. **Positions are stored as plain f32s** (12 bytes a placement). A lossless compact
    encoding may come later, measured before it is kept.
+
+## Reading texts on the GPU (checklist: the GPU for classifying)
+
+10. **Where classifiers read texts by default: `auto`.** The GPU is used when it is not a
+    software renderer and the exactness probe finds it bit-exact on every kernel in exact
+    precision, so the results are the CPU's; otherwise the CPU. The settings' GPU section
+    can pick the CPU, the GPU or the GPU fast instead. The other reasonable default is the
+    CPU always, which is slower but needs no probe at start.
+11. **The choice is for the machine, not the save.** It is kept in the app's settings and
+    applies to the whole process (on a `--local` hub, to everything it serves), since
+    whether a GPU exists depends on the machine. A shared hub reads on its CPU unless
+    started with `--gpu`, and its members can't change it.

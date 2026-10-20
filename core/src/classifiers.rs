@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 use crate::classify::compose::{Contribution, Edge, Graph, StackReport};
+use crate::classify::device::{self, Choice, Reading, Runner};
 use crate::classify::grow::{self, Grower};
 use crate::classify::metrics::Metrics;
 use crate::classify::steer::Output;
@@ -359,6 +360,35 @@ pub struct Stack {
     pub node: usize,
     /// definitions in graph order
     pub defs: Vec<Definition>,
+    /// where its texts are read, decided on first use
+    pub read: Read,
+}
+
+/// where a stack reads texts: the choice it was loaded with, and (on first use) the
+/// device that gives and the nets uploaded to it
+pub struct Read {
+    pub choice: Choice,
+    /// whether the GPU may be used here
+    pub allowed: bool,
+    /// the save's classifiers file, naming the uploaded nets
+    pub origin: String,
+    state: std::sync::OnceLock<(Reading, Vec<Option<std::sync::Arc<Runner>>>)>,
+}
+
+impl Read {
+    pub fn new(choice: Choice, allowed: bool, origin: String) -> Read {
+        Read {
+            choice,
+            allowed,
+            origin,
+            state: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// the CPU, as the reference
+    pub fn cpu() -> Read {
+        Read::new(Choice::Cpu, false, String::new())
+    }
 }
 
 impl Stack {
@@ -374,13 +404,47 @@ impl Stack {
         self.defs.iter().map(|d| d.name.clone()).collect()
     }
 
-    /// head 0's steered output for every text, in parallel
+    /// where this stack reads texts, and the nets on the device for it (opened on first
+    /// use; a net the device can't take sends the whole stack to the CPU, saying why)
+    fn reader(&self) -> &(Reading, Vec<Option<std::sync::Arc<Runner>>>) {
+        self.read.state.get_or_init(|| {
+            let r = device::reading(self.read.choice, self.read.allowed);
+            if !r.device.is_gpu() {
+                return (r, vec![]);
+            }
+            let mut runners = Vec::new();
+            for (d, n) in self.defs.iter().zip(&self.graph.nodes) {
+                let key = format!("{}\u{0}{}\u{0}{}", self.read.origin, d.name, d.version);
+                match device::runner(&key, r.device, &n.clf.net) {
+                    Ok(x) => runners.push(x),
+                    Err(e) => {
+                        let note = format!("{:?} doesn't fit the GPU ({e}): read on the CPU", d.name);
+                        return (Reading::cpu(r.choice, Some(note)), vec![]);
+                    }
+                }
+            }
+            (r, runners)
+        })
+    }
+
+    /// where this stack reads texts
+    pub fn reading(&self) -> &Reading {
+        &self.reader().0
+    }
+
+    /// every node's steered outputs and the judged node's pooled vector for many texts,
+    /// on the stack's device
+    pub fn read_many(&self, texts: &[&str], pool: &Pool) -> Vec<(Vec<Output>, Vec<f32>)> {
+        let runners: Vec<Option<&Runner>> = self.reader().1.iter().map(|r| r.as_deref()).collect();
+        self.graph.read_node_many(self.node, texts, &runners, pool)
+    }
+
+    /// head 0's steered output for every text, on the stack's device (the pool on the CPU)
     pub fn outputs(&self, texts: &[&str], pool: &Pool) -> Vec<Output> {
-        let slots: Vec<std::sync::Mutex<Option<Output>>> = texts.iter().map(|_| Default::default()).collect();
-        pool.run(texts.len(), &|i| {
-            *slots[i].lock().unwrap() = Some(self.graph.predict(self.node, texts[i]).swap_remove(0));
-        });
-        slots.into_iter().map(|s| s.into_inner().unwrap().unwrap()).collect()
+        self.read_many(texts, pool)
+            .into_iter()
+            .map(|(mut o, _)| o.swap_remove(0))
+            .collect()
     }
 
     /// the extra inputs of every text
@@ -774,6 +838,11 @@ impl Store {
             node: order.len() - 1,
             graph,
             defs: order,
+            read: Read::new(
+                device::choice(),
+                self.gpu_reads(),
+                self.path().to_string_lossy().into_owned(),
+            ),
         })
     }
 

@@ -90,6 +90,8 @@ pub struct Prefs {
     pub bars_swapped: bool,
     /// an app token from the hub's profile page (sharing needs one)
     pub hub_token: String,
+    /// where classifiers read texts: auto, cpu, gpu or gpu_fast (`classify.device`)
+    pub read_device: String,
 }
 
 /// the space's own settings
@@ -201,6 +203,7 @@ impl Default for Prefs {
             bottom_bar: 32.0,
             bars_swapped: false,
             hub_token: String::new(),
+            read_device: "auto".into(),
         }
     }
 }

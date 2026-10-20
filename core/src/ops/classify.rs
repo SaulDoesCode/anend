@@ -544,9 +544,50 @@ fn inputs_arg(args: &Value) -> Result<Vec<Input>, String> {
 
 // ---------------------------------------------------------------- the calls
 
+/// `classify.device`: where classifiers read texts (predict, search, indexing, buckets,
+/// tints), for this process; `{device}` sets it (auto, cpu, gpu, gpu_fast)
+fn device_call(args: &Value, limits: &Limits) -> Res {
+    use crate::classify::device::{self, Choice};
+    if let Some(d) = args.get("device").and_then(Value::as_str) {
+        if limits.shared {
+            return Err("a shared hub decides where it reads texts".into());
+        }
+        let c = Choice::parse(d).ok_or_else(|| format!("{d:?} isn't auto, cpu, gpu or gpu_fast"))?;
+        device::set_choice(c);
+    }
+    let c = device::choice();
+    Ok(json!({
+        "device": c.name(),
+        "reading": device::reading(c, limits.gpu),
+        "choices": ["auto", "cpu", "gpu", "gpu_fast"],
+    }))
+}
+
+/// `gpu.report`: the machine's GPU, the exactness probe and timings next to the CPU
+/// (`classify::report`); `{texts, steps, sizes}` shrink it. Not on a shared hub: it
+/// keeps the machine busy for a while.
+pub fn gpu_report(args: &Value, limits: &Limits) -> Res {
+    if limits.shared {
+        return Err("the GPU report is for a machine of your own (the desktop, or a --local hub)".into());
+    }
+    let mut o = crate::classify::report::Opts::default();
+    if let Some(n) = args.get("texts").and_then(Value::as_u64) {
+        o.texts = (n as usize).clamp(1, 100_000);
+    }
+    if let Some(n) = args.get("steps").and_then(Value::as_u64) {
+        o.steps = (n as usize).clamp(1, 1000);
+    }
+    if let Some(v) = args.get("sizes").and_then(Value::as_array) {
+        o.sizes = v.iter().filter_map(Value::as_str).map(String::from).collect();
+    }
+    Ok(crate::classify::report::report(&o))
+}
+
 pub fn call(store: Arc<Store>, op: &str, args: &Value, limits: &Limits) -> Res {
     let st: &Store = &store;
+    st.allow_gpu_reads(limits.gpu);
     match op {
+        "classify.device" => device_call(args, limits),
         "classify.list" => Ok(Value::Array(st.classifiers()?.iter().map(|d| summary(st, d)).collect())),
         "classify.create" => {
             let lists = args
@@ -663,7 +704,9 @@ pub fn call(store: Arc<Store>, op: &str, args: &Value, limits: &Limits) -> Res {
                     v
                 })
                 .collect();
-            Ok(json!({ "classes": classes, "trained": stack.def().trained(), "results": results }))
+            Ok(
+                json!({ "classes": classes, "trained": stack.def().trained(), "results": results, "device": stack.reading() }),
+            )
         }
         "classify.search" => {
             let stack = st.stack(name_arg(args)?)?;
@@ -700,6 +743,7 @@ pub fn call(store: Arc<Store>, op: &str, args: &Value, limits: &Limits) -> Res {
             Ok(json!({
                 "classes": classes, "class": classes[c], "stack": stack.names(),
                 "trained": def.trained(), "scanned": cands.len(), "results": results,
+                "device": stack.reading(),
             }))
         }
         "classify.contributions" => {
@@ -911,6 +955,7 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value, limits: &Limits) -> Res {
                     Ok(rep) => {
                         s["state"] = json!(if rep.stopped { "cancelled" } else { "done" });
                         s["report"] = json!(rep);
+                        s["device"] = json!(stack.reading());
                     }
                     Err(e) => {
                         s["state"] = json!("failed");
@@ -1046,6 +1091,7 @@ fn phase3(store: Arc<Store>, op: &str, args: &Value, limits: &Limits) -> Res {
                 "classes": classes,
                 "palette": memo::palette(classes.len()).into_iter().map(hex_colour).collect::<Vec<_>>(),
                 "tints": refs.iter().zip(tints).map(|(r, t)| json!({ "key": r.label(), "class": t.as_ref().and_then(|t| t.class), "strength": t.map(|t| t.strength) })).collect::<Vec<_>>(),
+                "device": stack.reading(),
             }))
         }
         "classify.indexed" => {
@@ -1261,12 +1307,19 @@ impl Saves {
 
 /// whether a [`Saves`] with models answers `op` here
 pub fn routed(op: &str) -> bool {
-    op.starts_with("classify.") || op.starts_with("filters.") || op == "saves.export" || op == "saves.import"
+    op.starts_with("classify.")
+        || op.starts_with("filters.")
+        || op == "gpu.report"
+        || op == "saves.export"
+        || op == "saves.import"
 }
 
 /// the ops that need a save's models: `classify.*` and `filters.*` on the open save's,
 /// and bundles (`saves.export`, `saves.import`) carrying the classifiers
 pub fn saves_call(saves: &Saves, op: &str, args: &Value, limits: &Limits) -> Res {
+    if op == "gpu.report" {
+        return gpu_report(args, limits);
+    }
     if op.starts_with("classify.") || op.starts_with("filters.") {
         let (_, models) = saves.models()?;
         return call(models, op, args, limits);
@@ -1458,6 +1511,50 @@ mod tests {
         .unwrap();
         assert_eq!(p["results"][0]["class"], "rocks", "{p}");
         assert_eq!(p["results"][1]["class"], "fruit", "{p}");
+        assert!(p["device"]["device"].is_string(), "where it read: {p}");
+
+        // where texts are read: the choice and what it gives here; the CPU is always on
+        // offer, and a shared hub doesn't let it be changed
+        let d = c("classify.device", json!({ "device": "cpu" })).unwrap();
+        assert_eq!(d["device"], "cpu", "{d}");
+        assert_eq!(d["reading"]["device"], "cpu", "{d}");
+        assert!(c("classify.device", json!({ "device": "abacus" })).is_err());
+        let shared = Saves::new(&dir, "notes").with_models(Limits::shared());
+        assert!(shared.call("classify.device", &json!({ "device": "gpu" })).is_err());
+        assert!(shared.call("gpu.report", &json!({})).is_err());
+
+        // the same answers read on the GPU (every text's windows packed), where there is one
+        {
+            use crate::classifiers::Read;
+            use crate::classify::device::{Choice, Device};
+            let (_, st) = ws.models().unwrap();
+            let mut on_cpu = st.stack("kind").unwrap();
+            on_cpu.read = Read::cpu();
+            let mut on_gpu = st.stack("kind").unwrap();
+            on_gpu.read = Read::new(Choice::Gpu, true, "test".into());
+            let texts: Vec<String> = (0..30)
+                .map(|i| format!("{} {} {}", f[i % 8], r[(i * 3) % 8], "and more words ".repeat(i % 7)))
+                .collect();
+            let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
+            let a = on_cpu.outputs(&texts, pool());
+            let b = on_gpu.outputs(&texts, pool());
+            let reading = on_gpu.reading();
+            if Device::Gpu.check().is_ok() {
+                assert_eq!(reading.device, Device::Gpu, "{reading:?}");
+            } else {
+                assert_eq!(reading.device, Device::Cpu);
+                assert!(reading.note.is_some(), "it says why: {reading:?}");
+            }
+            for (x, y) in a.iter().zip(&b) {
+                if reading.exact {
+                    assert_eq!(x.probs, y.probs);
+                } else {
+                    for (p, q) in x.probs.iter().zip(&y.probs) {
+                        assert!((p - q).abs() < 1e-3, "{p} vs {q}");
+                    }
+                }
+            }
+        }
 
         let found = c(
             "classify.search",

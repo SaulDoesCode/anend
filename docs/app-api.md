@@ -125,8 +125,10 @@ quotas and job limits (two trainings or indexings at once per member, two hours 
 | `classify.train` | `{name, epochs?, lr?, batch?, max_steps?, threads?, rounds?, fresh?, wait?}` | the job: `{name, state: running\|done\|failed\|cancelled, round, rounds, epoch, step, steps, loss, lr, tokens_per_sec, losses: [[step, loss]], evals: [{step, round, loss, accuracy, macro_f1}], seconds, examples, error?, summary?}` |
 | `classify.job` | `{name}` | the job, or `{name, state: "idle"}` |
 | `classify.cancel` | `{name}` | the job (it ends `cancelled`, writing nothing) |
-| `classify.predict` | `{name, texts?: [text], keys?: [key]}` | `{classes, trained, results: [{key, text, probs, top, class, members}]}` |
-| `classify.search` | `{name, class, q?, limit?: 50}` | `{classes, class, stack: [names], trained, scanned, results: [{key, text, note, prob, top, top_class, member}]}`, most likely first |
+| `classify.predict` | `{name, texts?: [text], keys?: [key]}` | `{classes, trained, results: [{key, text, probs, top, class, members}], device}` |
+| `classify.search` | `{name, class, q?, limit?: 50}` | `{classes, class, stack: [names], trained, scanned, results: [{key, text, note, prob, top, top_class, member}], device}`, most likely first |
+| `classify.device` | `{device?: auto\|cpu\|gpu\|gpu_fast}` (sets it; refused on a shared hub) | `{device, reading, choices}`: where classifiers read texts in this process |
+| `gpu.report` | `{texts?: 10000, steps?: 40, sizes?: ["compact", "small"]}` (not on a shared hub) | the GPU report (below) |
 | `classify.contributions` | `{name, key or text, class?}` (the top class if left out) | `{class, text, results: [{name, share, input_share, grad_norm, classes, probs, top, top_class, judged}]}` |
 | `classify.steer` | `{name, steer: {bias?: [..] or {class: value}, temperature?, threshold?, gains?: {letter, word, side, extra}, reset?}, save?: true}` | `{steer, classes, saved, bias: {texts, mean_kl, max_kl, flipped, shift, prior, prior_skew, imbalance}}` (`bias` null until trained) |
 | `classify.feedback` | `{name, key or text, class, yes, weight?: 1}` | `{entry: {classifier, key, text, class, yes, weight, time, stack, before, after}}` |
@@ -164,6 +166,28 @@ quotas and job limits (two trainings or indexings at once per member, two hours 
   class as a list headed by the memory `"<classifier>: <class>"` (replacing what that list
   held), which other classifiers can be trained on.
 - Search, enlist and similar look through up to 20 000 memories and notes.
+- **Where texts are read** (predict, search, indexing, buckets, tints, filters by a
+  classifier): `classify.device` picks it for the process; the app sends its setting at
+  start. `auto` (the default) reads on the GPU in exact precision when there is a GPU
+  that isn't a software renderer and the exactness probe finds it bit-exact on every
+  kernel, so the results are the CPU's; else on the CPU. `gpu` and `gpu_fast` use the
+  GPU whatever the probe found (`gpu_fast` with plain operators, within a small
+  difference). On the GPU, every text's windows are packed into a few submissions
+  (`GpuNet::text_runs`), and the nets stay uploaded between calls. `device` in a result
+  is the `reading`: `{choice, device, exact, gpu?, note?}`, where `note` says why it reads
+  somewhere other than asked (no GPU, a net too large for it, a shared hub without
+  `--gpu`) or why `auto` chose the CPU. Rows kept in the buckets from a reading that
+  isn't exact are kept apart from the CPU's (the stamp differs), so switching devices
+  reads them again.
+- **`gpu.report`** measures this machine (`core/src/classify/report.rs`): the build, the
+  CPU's threads and kernels, the adapter (name, vendor, device, type, backend, driver,
+  driver info), its limits, the exactness probe of every kernel in both precisions, what
+  `auto` chooses, and per preset a fixed training run (`steps` steps of batch 8 on 64
+  generated two-class texts) on the CPU, the GPU and the GPU fast, with whether the GPU's
+  weights equal the CPU's bit for bit, then predicting `texts` generated texts on each,
+  with texts per second and how many results differ from the CPU's. The settings' GPU
+  section writes it to a file (the data folder's `exports` on the desktop, a download on
+  the web).
 
 In a [bundle](#bundles), `classifiers` carries each classifier as `{definition, weights?,
 feedback?}`, the weights base64 (the `ANENDCLS` file). It is left out when there are none,
@@ -180,12 +204,12 @@ probability band (0 for 0–10 % … 9 for 90–100 %).
 
 | op | args | data |
 |---|---|---|
-| `classify.index` | `{name, keys?, wait?}` (every memory and note if no keys) | the job `{name, state: running\|done\|failed\|cancelled, done, total, report?: {total, computed, cached, stopped, seconds}, error?}` |
+| `classify.index` | `{name, keys?, wait?}` (every memory and note if no keys) | the job `{name, state: running\|done\|failed\|cancelled, done, total, report?: {total, computed, cached, stopped, seconds}, device?, error?}` |
 | `classify.index_job` / `classify.index_cancel` | `{name}` | the job (or `{state: "idle"}`) |
 | `classify.buckets` | `{name}` | `{name, classes, indexed, palette: [hex], buckets: [{class, index, bands: [10 counts], count}]}` (the last is `uncertain`) |
 | `classify.bucket` | `{name, class (name, index or "uncertain") or key or text, band?, min?, limit?: 500}` | `{class, count, stale, indexed, hits: [hit + prob]}`, surest first |
 | `classify.near` | `{name, key or text, by?: embedding\|outputs, limit?: 20}` | `{text, indexed, row, results: [{key, text, note, cosine}]}` among the indexed texts |
-| `classify.tints` | `{name, keys}` (≤ 5000) | `{classes, palette, tints: [{key, class (null: uncertain), strength}]}` |
+| `classify.tints` | `{name, keys}` (≤ 5000) | `{classes, palette, tints: [{key, class (null: uncertain), strength}], device}` |
 | `classify.indexed` | `{key}` | `{key, chosen, verdicts: [{name, classes, probs, top, class, members, confidence, valid, checked, validators: [[by, p]], palette}], classifiers: [{name, trained, chosen}]}` |
 | `classify.set_index` | `{key, names}` | `{chosen}` |
 | `classify.validators` | `{name, set?: [{by, class, min?: 0.5, mode?: gate\|weigh}]}` | `{validators}` |

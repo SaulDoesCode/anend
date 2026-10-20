@@ -251,3 +251,54 @@ fn classification_and_model_run_match_the_cpu() {
         }
     }
 }
+
+#[test]
+fn packed_texts_match_the_cpu_one_by_one() {
+    use crate::classify::Classifier;
+    let Some(g) = device() else { return };
+    for prec in [Precision::Exact, Precision::Fast] {
+        let exact = exact_device(g, prec);
+        for (name, cfg) in configs() {
+            let heads = [HeadSpec::single("c", &["a", "b", "c"])];
+            let mut clf = Classifier::new(cfg.clone(), &heads, 5).unwrap();
+            for b in &mut clf.net.blocks {
+                b.wo.iter_mut()
+                    .enumerate()
+                    .for_each(|(i, v)| *v += ((i % 13) as f32 - 6.0) * 0.003);
+                b.wd.iter_mut()
+                    .enumerate()
+                    .for_each(|(i, v)| *v += ((i % 11) as f32 - 5.0) * 0.003);
+            }
+            let gn = GpuNet::new(g, &clf.net, prec).unwrap();
+            // lengths from one byte to several windows, so windows of every size pack
+            let texts: Vec<String> = (0..23)
+                .map(|i| {
+                    (0..(i * i % 97) + 1)
+                        .map(|j| (b'a' + ((i * 7 + j * 3) % 26) as u8) as char)
+                        .collect()
+                })
+                .collect();
+            let bytes: Vec<&[u8]> = texts.iter().map(|t| t.as_bytes()).collect();
+            let extra = vec![0.25f32; cfg.extra];
+            let extras: Vec<&[f32]> = texts.iter().map(|_| extra.as_slice()).collect();
+            let gains = clf.gains();
+            let runs = gn.text_runs(&clf.net, &bytes, &extras, &gains);
+            for (t, r) in texts.iter().zip(&runs) {
+                let cpu = clf.run(t, &extra, &gains, None);
+                assert_eq!(r.windows, cpu.windows, "{name}: windows");
+                close(
+                    &format!("{name} {prec:?} packed logits {}", t.len()),
+                    &r.logits[0],
+                    &cpu.logits[0],
+                    exact,
+                );
+                close(
+                    &format!("{name} {prec:?} packed pooled {}", t.len()),
+                    &r.pooled,
+                    &cpu.pooled,
+                    exact,
+                );
+            }
+        }
+    }
+}

@@ -196,6 +196,12 @@ impl GpuNet {
     }
 
     pub(crate) fn acts(&self, b: usize, n: usize, masks: bool) -> Acts {
+        self.acts_for(b, n, n * n, masks)
+    }
+
+    /// activations for `n` rows in all whose windows' attention squares add up to `sq`
+    /// (one window: `sq = n²`; packed windows: the sum of each one's)
+    fn acts_for(&self, b: usize, n: usize, sq: usize, masks: bool) -> Acts {
         let g = self.g;
         let blk = &self.blocks[b];
         let (d, dh) = (self.d, self.dh);
@@ -216,7 +222,7 @@ impl GpuNet {
             qrs: g.zeros(qk(h * n)),
             kxh: g.zeros(qk(kv * n * dh)),
             krs: g.zeros(qk(kv * n)),
-            p: g.zeros(h * n * n),
+            p: g.zeros(h * sq),
             ctx: g.zeros(n * h * dh),
             o: g.zeros(n * d),
             hres: g.zeros(n * d),
@@ -235,6 +241,15 @@ impl GpuNet {
 
     /// records block `l` over a window of n rows: x → out, its activations into `t`
     pub(crate) fn block_fwd(&self, r: &mut Run, l: usize, x: &Buf, out: &Buf, t: &Acts, n: usize) {
+        self.block_fwd_packed(r, l, x, out, t, &[n]);
+    }
+
+    /// records block `l` over windows packed one after another (`lens` rows each): the
+    /// row-wise work (norms, projections, the feed-forward) runs over all the rows at
+    /// once, attention per window. Each output element is computed by the same chain as
+    /// for its window alone, so packing changes no bits.
+    pub(crate) fn block_fwd_packed(&self, r: &mut Run, l: usize, x: &Buf, out: &Buf, t: &Acts, lens: &[usize]) {
+        let n: usize = lens.iter().sum();
         let b = &self.blocks[l];
         let (d, dh, eps) = (self.d, self.dh, self.eps);
         let (h, kv, ff) = (b.heads, b.kv, b.ff);
@@ -256,9 +271,26 @@ impl GpuNet {
             r.add_rows(&t.qkv, bq, n * w3, w3);
         }
         let (qd, kd) = if self.qk_norm { (&t.q0, &t.k0) } else { (&t.q, &t.k) };
-        r.copy_strided((&t.qkv, 0, dh, w3), (qd, 0, n * dh, dh), dh, n, h);
-        r.copy_strided((&t.qkv, aw, dh, w3), (kd, 0, n * dh, dh), dh, n, kv);
-        r.copy_strided((&t.qkv, aw + kv * dh, dh, w3), (&t.v, 0, n * dh, dh), dh, n, kv);
+        // where each window starts: its first row, and its attention square
+        let mut at = Vec::with_capacity(lens.len());
+        let (mut s, mut sq) = (0, 0);
+        for &m in lens {
+            at.push((s, sq, m));
+            s += m;
+            sq += m * m;
+        }
+        for &(s, _, m) in &at {
+            let (qo, ko) = (h * dh * s, kv * dh * s);
+            r.copy_strided((&t.qkv, s * w3, dh, w3), (qd, qo, m * dh, dh), dh, m, h);
+            r.copy_strided((&t.qkv, s * w3 + aw, dh, w3), (kd, ko, m * dh, dh), dh, m, kv);
+            r.copy_strided(
+                (&t.qkv, s * w3 + aw + kv * dh, dh, w3),
+                (&t.v, ko, m * dh, dh),
+                dh,
+                m,
+                kv,
+            );
+        }
         if self.qk_norm {
             let (qn, kn) = (b.qn.as_ref().expect("qn"), b.kn.as_ref().expect("kn"));
             r.norm_fwd(
@@ -280,33 +312,36 @@ impl GpuNet {
                 eps,
             );
         }
-        r.rope((&t.q, 0), &self.cos, &self.sin, h * n, dh / 2, n, 0, false);
-        r.rope((&t.k, 0), &self.cos, &self.sin, kv * n, dh / 2, n, 0, false);
-        let pv_a = View::of(&t.p, 0, n, 1, n * n);
-        let pv_b = View::of(&t.v, 0, dh, 1, n * dh).per(per);
-        let pv_y = View::of(&t.ctx, 0, aw, 1, dh);
-        if self.causal {
-            r.scores(
-                (&t.q, 0, n * dh),
-                (&t.k, 0, n * dh),
-                (&t.p, 0),
-                n,
-                n,
-                dh,
-                h,
-                0,
-                scale,
-                per,
-            );
-            r.softmax((&t.p, 0), h * n, n, Some((n, 0)));
-            r.gemm(pv_a, pv_b, pv_y, n, n, dh, h, false, Some(0));
-        } else {
-            let qa = View::of(&t.q, 0, dh, 1, n * dh);
-            let kb = View::of(&t.k, 0, 1, dh, n * dh).per(per);
-            r.gemm(qa, kb, View::of(&t.p, 0, n, 1, n * n), n, dh, n, h, false, None);
-            r.scale((&t.p, 0), scale, h * n * n);
-            r.softmax((&t.p, 0), h * n, n, None);
-            r.gemm(pv_a, pv_b, pv_y, n, n, dh, h, false, None);
+        for &(s, sq, m) in &at {
+            let (qo, ko, po) = (h * dh * s, kv * dh * s, h * sq);
+            r.rope((&t.q, qo), &self.cos, &self.sin, h * m, dh / 2, m, 0, false);
+            r.rope((&t.k, ko), &self.cos, &self.sin, kv * m, dh / 2, m, 0, false);
+            let pv_a = View::of(&t.p, po, m, 1, m * m);
+            let pv_b = View::of(&t.v, ko, dh, 1, m * dh).per(per);
+            let pv_y = View::of(&t.ctx, s * aw, aw, 1, dh);
+            if self.causal {
+                r.scores(
+                    (&t.q, qo, m * dh),
+                    (&t.k, ko, m * dh),
+                    (&t.p, po),
+                    m,
+                    m,
+                    dh,
+                    h,
+                    0,
+                    scale,
+                    per,
+                );
+                r.softmax((&t.p, po), h * m, m, Some((m, 0)));
+                r.gemm(pv_a, pv_b, pv_y, m, m, dh, h, false, Some(0));
+            } else {
+                let qa = View::of(&t.q, qo, dh, 1, m * dh);
+                let kb = View::of(&t.k, ko, 1, dh, m * dh).per(per);
+                r.gemm(qa, kb, View::of(&t.p, po, m, 1, m * m), m, dh, m, h, false, None);
+                r.scale((&t.p, po), scale, h * m * m);
+                r.softmax((&t.p, po), h * m, m, None);
+                r.gemm(pv_a, pv_b, pv_y, m, m, dh, h, false, None);
+            }
         }
         r.gemm(
             View::rows(&t.ctx, aw),
@@ -488,17 +523,139 @@ impl GpuNet {
     /// the mean of the heads' logits over every window of some data
     /// (`train::forward_text` on the device)
     pub fn text_logits(&self, net: &Net, data: &[u8], extra: &[f32], gains: &Gains) -> Vec<Vec<f32>> {
-        let ws = net.windows_of(data).0;
-        let mut avg: Vec<Vec<f32>> = net.heads.iter().map(|h| vec![0.0; h.width()]).collect();
-        for w in &ws {
-            for (a, l) in avg.iter_mut().zip(self.head_logits(net, w, extra, gains)) {
-                a.iter_mut().zip(l).for_each(|(x, y)| *x += y);
-            }
-        }
-        let nw = ws.len() as f32;
-        avg.iter_mut().flatten().for_each(|v| *v /= nw);
-        avg
+        self.text_runs(net, &[data], &[extra], gains).swap_remove(0).logits
     }
+
+    /// whether `n` packed rows whose attention squares add up to `sq` fit one submission
+    fn fits_pack(&self, n: usize, sq: usize) -> bool {
+        let max = self.g.max_floats();
+        let mut total = 3 * n * self.d;
+        for b in &self.blocks {
+            let w3 = (b.heads + 2 * b.kv) * self.dh;
+            let widest = [b.heads * sq, n * w3, n * b.ff, n * self.d]
+                .into_iter()
+                .max()
+                .unwrap_or(0);
+            if widest > max {
+                return false;
+            }
+            let qk = if self.qk_norm { 3 } else { 1 };
+            let block = n * (9 * self.d + w3 + 2 + qk * (b.heads + 2 * b.kv) * self.dh + 4 * b.ff) + b.heads * sq;
+            total = total.max(3 * n * self.d + block);
+        }
+        total <= PACK_FLOATS
+    }
+
+    /// many windows through the trunk, packed into as few submissions as fit
+    /// ([`PACK_FLOATS`] of activations, at most [`PACK_WINDOWS`] windows each): every
+    /// window's final normed rows [n × d], the same values `forward` gives one by one
+    pub fn forward_many(&self, net: &Net, ws: &[&Window], gains: &Gains) -> Vec<Vec<f32>> {
+        let mut out = Vec::with_capacity(ws.len());
+        let mut i = 0;
+        while i < ws.len() {
+            let (mut n, mut sq, mut j) = (0, 0, i);
+            while j < ws.len() && j - i < PACK_WINDOWS {
+                let m = ws[j].len();
+                if j > i && !self.fits_pack(n + m, sq + m * m) {
+                    break;
+                }
+                n += m;
+                sq += m * m;
+                j += 1;
+            }
+            out.extend(self.forward_pack(net, &ws[i..j], gains, n, sq));
+            i = j;
+        }
+        out
+    }
+
+    fn forward_pack(&self, net: &Net, ws: &[&Window], gains: &Gains, n: usize, sq: usize) -> Vec<Vec<f32>> {
+        let g = self.g;
+        let d = self.d;
+        let lens: Vec<usize> = ws.iter().map(|w| w.len()).collect();
+        let mut emb = Vec::with_capacity(n * d);
+        for w in ws {
+            assert!(w.len() <= self.max_len, "window longer than max_len");
+            emb.extend(net.embed(w, gains));
+        }
+        let x0 = g.upload(&emb);
+        let x1 = g.zeros(n * d);
+        let mut r = g.run(self.prec);
+        let mut acts: Option<Acts> = None;
+        let (mut xa, mut xb) = (&x0, &x1);
+        for l in 0..self.blocks.len() {
+            let same = acts
+                .as_ref()
+                .is_some_and(|a| a.qkv.len == n * self.w3(l) && a.gg.len == n * self.blocks[l].ff);
+            if !same {
+                acts = Some(self.acts_for(l, n, sq, false));
+            }
+            self.block_fwd_packed(&mut r, l, xa, xb, acts.as_ref().unwrap(), &lens);
+            std::mem::swap(&mut xa, &mut xb);
+        }
+        let xf = g.zeros(n * d);
+        self.top_fwd(&mut r, xa, &xf, None, None, n);
+        let t0 = r.read(&xf, 0, n * d);
+        let all = r.submit().swap_remove(t0);
+        let mut out = Vec::with_capacity(ws.len());
+        let mut at = 0;
+        for m in lens {
+            out.push(all[at..at + m * d].to_vec());
+            at += m * d;
+        }
+        out
+    }
+
+    /// many texts at once, every window of all of them packed through the trunk: per
+    /// text, each head's logits and the pooled vector averaged over its windows in
+    /// window order, as `Classifier::run_bytes` computes them on the CPU. `extras` is one
+    /// per text.
+    pub fn text_runs(&self, net: &Net, texts: &[&[u8]], extras: &[&[f32]], gains: &Gains) -> Vec<TextRun> {
+        assert_eq!(texts.len(), extras.len(), "one extra input per text");
+        let per: Vec<Vec<Window>> = texts.iter().map(|t| net.windows_of(t).0).collect();
+        let flat: Vec<&Window> = per.iter().flatten().collect();
+        let rows = self.forward_many(net, &flat, gains);
+        let mut rows = rows.into_iter();
+        per.iter()
+            .zip(extras)
+            .map(|(ws, extra)| {
+                let mut logits: Vec<Vec<f32>> = net.heads.iter().map(|h| vec![0.0; h.width()]).collect();
+                let mut pool_sum = vec![0f32; net.cfg.pooled()];
+                for w in ws {
+                    let xf = rows.next().expect("a window's rows");
+                    let (_, pv) = pooled(net, &xf, w.len());
+                    let z = head_input(net, w, &xf, extra, gains);
+                    for (h, acc) in logits.iter_mut().enumerate() {
+                        acc.iter_mut().zip(head_logits(net, &z, h)).for_each(|(a, b)| *a += b);
+                    }
+                    pool_sum.iter_mut().zip(&pv).for_each(|(a, b)| *a += b);
+                }
+                let nw = ws.len() as f32;
+                logits.iter_mut().flatten().for_each(|v| *v /= nw);
+                pool_sum.iter_mut().for_each(|v| *v /= nw);
+                TextRun {
+                    logits,
+                    pooled: pool_sum,
+                    windows: ws.len(),
+                }
+            })
+            .collect()
+    }
+}
+
+/// most activation floats one packed submission holds (128 MiB)
+pub const PACK_FLOATS: usize = 32 << 20;
+/// most windows one packed submission holds
+pub const PACK_WINDOWS: usize = 256;
+
+/// a text's run on the device: what `Classifier::run_bytes` gives on the CPU
+#[derive(Clone, Debug)]
+pub struct TextRun {
+    /// per head, the mean of the windows' logits
+    pub logits: Vec<Vec<f32>>,
+    /// the mean of the windows' pooled vectors
+    pub pooled: Vec<f32>,
+    pub windows: usize,
 }
 
 /// pooled rows, the side vector and the extra inputs: the heads' input, as the tail of

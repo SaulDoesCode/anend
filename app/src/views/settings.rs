@@ -43,6 +43,8 @@ pub fn Settings() -> Element {
                 hr {}
                 Saves {}
                 hr {}
+                GpuSettings {}
+                hr {}
                 Keys {}
                 if cfg!(feature = "hub") {
                     hr {}
@@ -583,6 +585,127 @@ fn read_path(ui: Ui, step: Signal<Step>, target: String, path: String) {
     {
         let _ = (step, target, path);
         ui.fail("pick the file instead");
+    }
+}
+
+/// what a `reading` answer says, in words
+fn reading_words(r: &serde_json::Value) -> String {
+    let dev = match r["device"].as_str() {
+        Some("gpu") => "the GPU",
+        Some("gpu_fast") => "the GPU (fast)",
+        Some("cpu") => "the CPU",
+        _ => return String::new(),
+    };
+    let mut s = format!("now on {dev}");
+    if let Some(g) = r["gpu"].as_str() {
+        s += &format!(": {g}");
+    }
+    if r["device"] != "cpu" {
+        s += if r["exact"] == true {
+            ", the CPU's results bit for bit"
+        } else {
+            ", within a small difference of the CPU's results"
+        };
+    }
+    if let Some(n) = r["note"].as_str() {
+        s += &format!(" ({n})");
+    }
+    s
+}
+
+/// the GPU: where classifiers read texts (predict, search, indexing, buckets, tints),
+/// and a report on this machine's GPU for the user to send back
+#[component]
+fn GpuSettings() -> Element {
+    let ui = ui();
+    let api = api();
+    let mut state = use_signal(|| serde_json::Value::Null);
+    let mut busy = use_signal(|| false);
+    let mut written = use_signal(String::new);
+    {
+        let api = api.clone();
+        use_hook(move || {
+            spawn(async move {
+                if let Ok(v) = api.call("classify.device", serde_json::json!({})).await {
+                    state.set(v);
+                }
+            });
+        });
+    }
+    let choice = ui.prefs.read().read_device.clone();
+    let now = reading_words(&state.read()["reading"]);
+    let set = {
+        let api = api.clone();
+        move |e: Event<FormData>| {
+            let v = e.value();
+            set_pref(ui, |p| p.read_device = v.clone());
+            let api = api.clone();
+            spawn(async move {
+                match api.call("classify.device", serde_json::json!({ "device": v })).await {
+                    Ok(r) => state.set(r),
+                    Err(e) => ui.fail(e),
+                }
+            });
+        }
+    };
+    let report = move |_| {
+        let api = api.clone();
+        busy.set(true);
+        ui.say("measuring the GPU and the CPU; this takes a minute or two");
+        spawn(async move {
+            let r = api.call("gpu.report", serde_json::json!({})).await;
+            busy.set(false);
+            let r = match r {
+                Ok(r) => r,
+                Err(e) => return ui.fail(e),
+            };
+            let text = serde_json::to_string_pretty(&r).unwrap_or_default();
+            let secs = (now_ms() / 1000.0) as u64;
+            let file = format!("gpu-report-{secs}.json");
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let dir = crate::prefs::data_dir().join("exports");
+                let path = dir.join(&file);
+                match std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, &text)) {
+                    Ok(()) => {
+                        written.set(format!("written to {}", path.display()));
+                        ui.say(format!("the GPU report is in {}", path.display()));
+                    }
+                    Err(e) => ui.fail(format!("couldn't write {}: {e}", path.display())),
+                }
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                download(&file, &text);
+                written.set(format!("downloaded as {file}"));
+                ui.say(format!("the GPU report downloaded as {file}"));
+            }
+        });
+    };
+    rsx! {
+        Fold { name: "gpu", title: "the GPU",
+            label { r#for: "readdev", "classifiers read texts on" }
+            div { class: "row",
+                select { id: "readdev", onchange: set,
+                    option { value: "auto", selected: choice == "auto", "auto: the GPU when it gives the CPU's results" }
+                    option { value: "cpu", selected: choice == "cpu", "the CPU" }
+                    option { value: "gpu", selected: choice == "gpu", "the GPU" }
+                    option { value: "gpu_fast", selected: choice == "gpu_fast", "the GPU, fast" }
+                }
+                span { class: "dim small", "{now}" }
+            }
+            div { class: "wide dim small",
+                "Predicting, classifier search, indexing, buckets and colouring by a classifier. Training picks its device on the classifier's page."
+            }
+            label { "a report on this machine's GPU" }
+            div { class: "row",
+                button { disabled: busy(), onclick: report, Icon { name: "stats" } if busy() { "measuring…" } else { "write a GPU report" } }
+                span { class: "dim small", "the adapter and driver, its limits, whether every kernel gives the CPU's bits, and timings of a fixed training run and of reading 10 000 texts on the CPU and the GPU; it takes a minute or two" }
+            }
+            if !written().is_empty() {
+                div { class: "wide small", "{written} — paste the file back to report how the GPU does" }
+            }
+        }
     }
 }
 

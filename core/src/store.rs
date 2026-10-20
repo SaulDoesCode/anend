@@ -25,6 +25,8 @@ pub struct Store {
     path: std::path::PathBuf,
     /// where the classifiers' texts and lists come from, when not these tables
     pub(crate) texts: Option<std::sync::Arc<dyn crate::texts::Texts>>,
+    /// whether classifiers may read texts on the GPU here (a shared hub: only with `--gpu`)
+    gpu_reads: std::sync::atomic::AtomicBool,
 }
 
 impl Store {
@@ -46,9 +48,19 @@ impl Store {
             db,
             path: path.to_path_buf(),
             texts: None,
+            gpu_reads: std::sync::atomic::AtomicBool::new(true),
         };
         store.index_existing_notes()?;
         Ok(store)
+    }
+
+    /// whether classifiers may read texts on the GPU here
+    pub fn gpu_reads(&self) -> bool {
+        self.gpu_reads.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn allow_gpu_reads(&self, yes: bool) {
+        self.gpu_reads.store(yes, std::sync::atomic::Ordering::Relaxed)
     }
 
     /// a store whose classifiers read their texts and lists from `texts` (`texts.rs`)

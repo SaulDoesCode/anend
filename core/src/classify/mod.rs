@@ -42,6 +42,7 @@ pub mod model;
 pub mod pattern;
 pub mod pool;
 pub mod pretrained;
+pub mod report;
 pub mod safetensors;
 pub mod spec;
 pub mod steer;

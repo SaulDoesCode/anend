@@ -130,6 +130,19 @@ pub fn App() -> Element {
         });
     }
 
+    // where classifiers read texts, as chosen in the settings (a shared hub keeps its own)
+    {
+        let api = api.clone();
+        use_hook(move || {
+            let device = prefs.peek().read_device.clone();
+            spawn(async move {
+                let _ = api
+                    .call("classify.device", serde_json::json!({ "device": device }))
+                    .await;
+            });
+        });
+    }
+
     // the save's name and counts, and again whenever something changed
     {
         let api = api.clone();
