@@ -128,7 +128,7 @@ pub fn Models() -> Element {
                 if specs_tab() {
                     span { class: "dim small", "described as data: what they read, their heads, what they learn from" }
                 } else {
-                    span { class: "dim small", "trained on your lists, one class per list" }
+                    span { class: "dim small", "learn classes from example lists, then read any text" }
                 }
                 span { class: "grow" }
                 if !specs_tab() {

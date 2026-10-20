@@ -155,8 +155,11 @@ without writing anything.
 
 ![a trained classifier](guide/classifiers.png)
 
-A **classifier** reads a text and says which of your lists it belongs with: each list is
-a class, its members the examples.
+A **classifier** learns from examples given as lists (each list a class, its members the
+examples) and then reads any text, in the save or newly typed. Its verdicts order classifier
+search, colour the memory and the space, and answer in the reader and the notes.
+Classifiers are one use of the transformer engine, which also runs spec models (taggers,
+generators, critics).
 
 - **new**: a name, two or more lists (or one and a "none of them" list), a size (**tiny**
   trains in seconds, **compact** is the default, **small** and **base** learn more and
@@ -197,7 +200,7 @@ A **spec model** is a model described as plain data ([the format](../docs/models
 reads, how big it is, what comes out (classes, labels, numbers, or text it writes), what
 it learns from in this save, and for a writer, which other models judge what it writes.
 
-- **new** starts from a template, filled in with your lists: a **classifier** (one class
+- **new** starts from a template, filled in with the save's lists: a **classifier** (one class
   of several), a **tagger** (any of several labels) or a **generator** (writes texts like a
   list's, judged by a trained classifier or spec model of the save when there is one).
   Edit it, then **make it**.
@@ -273,8 +276,8 @@ shared waits for an admin unless you're trusted. Running one is in
 | **gsearch** | finding every text that shares a sum with yours |
 | **saturate** | remembering what you search |
 | **list** | a text heading other texts; the **candidate** is the one about to join |
-| **classifier** | a model trained on your lists, one class per list |
-| **steering** | your hand on a classifier: bias, temperature, threshold |
+| **classifier** | a model that learns classes from example lists and reads any text |
+| **steering** | adjusting a classifier by hand: bias, temperature, threshold |
 | **spec model** | a model described as data: inputs, trunk, heads, data, critics |
 | **head** | one output of a model: classes, labels, values, or the text it writes |
 | **critic** | another model judging what a generator writes |

@@ -52,7 +52,7 @@ pub fn Judge(entry: String, #[props(default)] title: String) -> Element {
                 Icon { name: "classifier" }
                 if title.is_empty() { span { class: "dim small", "classifiers to measure it on:" } } else { span { class: "dim small", "{title}" } }
                 if all.is_empty() {
-                    span { class: "dim small", "none yet: make one in the models view (Ctrl+8) from your lists" }
+                    span { class: "dim small", "none yet: make one in the models view (Ctrl+8)" }
                 }
                 for (name , trained , on) in all.clone() {
                     button {
