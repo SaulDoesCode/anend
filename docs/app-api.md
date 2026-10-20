@@ -128,11 +128,11 @@ quotas and job limits (two trainings or indexings at once per member, two hours 
 | `classify.predict` | `{name, texts?: [text], keys?: [key]}` | `{classes, trained, results: [{key, text, probs, top, class, members}], device}` |
 | `classify.search` | `{name, class, q?, limit?: 50}` | `{classes, class, stack: [names], trained, scanned, results: [{key, text, note, prob, top, top_class, member}], device}`, most likely first |
 | `classify.starters` | | `[{id, title, about, classes, source: rules\|bundled\|fetched, licence, gematria, fetched?, urls?}]` |
-| `classify.starter` | `{id, name?: its title, preset?, train?: true, epochs?, wait?}` | `{classifier: details, job, texts}`: its training texts written as lists (one per class, headed `<title>: <class>`), a classifier made on them, and its training started |
+| `classify.starter` | `{id, name?: its title, preset?, per_class?: 400 (rule starters), train?: true, epochs?, wait?}` | `{classifier: details, job, texts}`: its training texts written as lists (one per class, headed `<title>: <class>`), a classifier made on them, and its training started |
 | `classify.starter_fetch` | `{id}` (a fetched starter) | the starter, with `got`: books fetched now (the desktop and a hub; not in a browser on its own) |
 | `classify.starter_score` | `{name}` (a classifier made from a starter, trained) | `{name, starter, title, texts, right, accuracy, classes: [{class, texts, right}], seconds, device}` on the starter's held-out texts |
 | `classify.device` | `{device?: auto\|cpu\|gpu\|gpu_fast}` (sets it; refused on a shared hub) | `{device, reading, choices}`: where classifiers read texts in this process |
-| `gpu.report` | `{texts?: 10000, steps?: 40, sizes?: ["compact", "small"]}` (not on a shared hub) | the GPU report (below) |
+| `gpu.report` | `{texts?: 10000, steps?: 40, sizes?: ["compact", "small"], budget?: 120}` (not on a shared hub) | the GPU report (below) |
 | `classify.contributions` | `{name, key or text, class?}` (the top class if left out) | `{class, text, results: [{name, share, input_share, grad_norm, classes, probs, top, top_class, judged}]}` |
 | `classify.steer` | `{name, steer: {bias?: [..] or {class: value}, temperature?, threshold?, gains?: {letter, word, side, extra}, reset?}, save?: true}` | `{steer, classes, saved, bias: {texts, mean_kl, max_kl, flipped, shift, prior, prior_skew, imbalance}}` (`bias` null until trained) |
 | `classify.feedback` | `{name, key or text, class, yes, weight?: 1}` | `{entry: {classifier, key, text, class, yes, weight, time, stack, before, after}}` |
@@ -185,11 +185,13 @@ quotas and job limits (two trainings or indexings at once per member, two hours 
   reads them again.
 - **Starters** (`core/src/starters.rs`) are labelled texts whose classes are known for
   certain, so a classifier's accuracy on them is checked by a machine. Made by rules:
-  even or odd numbers; even or odd ordinal gematria sums of a few English words (with the
-  gematria inputs); runs of common English or Afrikaans words; corpus sentences as
-  written or with the spelling checker's corruptions; whole corpus sentences or their
-  first words; phrases naming fruit, stones or animals. Each rule starter has 80
-  training texts and 100 held-out texts a class, made with separate seeds (and, for the
+  even or odd numbers; even or odd ordinal gematria sums of single words from the lexicon
+  (with the gematria inputs); runs of common English or Afrikaans words; two to five
+  common English words as they are or garbled (about every other letter replaced) into
+  non-words; whole corpus
+  sentences or their
+  first words; phrases naming fruit, stones or animals. Each rule starter has 400
+  training texts (`per_class`) and 100 held-out texts a class, made with separate seeds (and, for the
   corpus, from separate lines); a held-out text that came out the same as a training text
   is replaced. Where the class can be read back from the text alone, the tests check every
   generated text against the rule (`starters::check`). Public domain: the six authors
@@ -197,14 +199,22 @@ quotas and job limits (two trainings or indexings at once per member, two hours 
   Project Gutenberg books in English, German, French and Dutch, fetched when asked into
   the saves folder's `starters/` and refused unless the book's own `Language:` line says
   the language its class expects (every fifth paragraph held out). Each starter's
-  `licence` says where its texts come from and on what terms.
+  `licence` says where its texts come from and on what terms. Held-out accuracy with the
+  compact preset and the starters' training defaults, measured 20 Oct in a release build
+  on 4 cores (`cargo run --release -p anend-core --example starters compact 40 400 10`):
+  even or odd 100%, even or odd sum 97%, English or not 95.5%, spelled right or not 90.5%,
+  sentence or fragment 96%, fruit, stones and animals 94.7%, who wrote it 72.9% (96
+  passages); the language starter wasn't measured (its books couldn't be fetched here).
+  Starters train longer than a hand-made classifier (at least 40 epochs, patience 10): with
+  the shorter defaults several stayed near chance.
 - **`gpu.report`** measures this machine (`core/src/classify/report.rs`): the build, the
   CPU's threads and kernels, the adapter (name, vendor, device, type, backend, driver,
   driver info), its limits, the exactness probe of every kernel in both precisions, what
   `auto` chooses, and per preset a fixed training run (`steps` steps of batch 8 on 64
   generated two-class texts) on the CPU, the GPU and the GPU fast, with whether the GPU's
-  weights equal the CPU's bit for bit, then predicting `texts` generated texts on each,
-  with texts per second and how many results differ from the CPU's. The settings' GPU
+  weights equal the CPU's bit for bit, then predicting `texts` generated texts on each in
+  chunks of 500, stopping after `budget` seconds a device (a software renderer would take
+  hours), with texts per second and how many results differ from the CPU's. The settings' GPU
   section writes it to a file (the data folder's `exports` on the desktop, a download on
   the web).
 

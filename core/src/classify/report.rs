@@ -22,6 +22,11 @@ pub struct Opts {
     pub texts: usize,
     /// optimizer steps in the fixed training run
     pub steps: usize,
+    /// seconds each device may spend predicting, per size: a slow device (a software
+    /// renderer) stops early and its rate is over the texts it got through
+    pub budget: f64,
+    /// texts predicted between looks at the time
+    pub chunk: usize,
 }
 
 impl Default for Opts {
@@ -30,6 +35,8 @@ impl Default for Opts {
             sizes: vec!["compact".into(), "small".into()],
             texts: 10_000,
             steps: 40,
+            budget: 120.0,
+            chunk: 500,
         }
     }
 }
@@ -155,27 +162,54 @@ fn train_on(size: &str, device: Device, steps: usize, data: &[Example]) -> Resul
     Ok((secs, clf.to_bytes(), v))
 }
 
-/// predicting `texts` on one device: seconds and each text's probabilities
-fn predict_on(clf: &Classifier, device: Device, texts: &[&str], pool: &Pool) -> Result<(f64, Vec<Vec<f32>>), String> {
+/// predicting `texts` on one device, `chunk` at a time, stopping once `budget` seconds
+/// have gone by: seconds and the probabilities of the texts it got through
+fn predict_on(
+    clf: &Classifier,
+    device: Device,
+    texts: &[&str],
+    pool: &Pool,
+    budget: f64,
+    chunk: usize,
+) -> Result<(f64, Vec<Vec<f32>>), String> {
     let t = Instant::now();
-    let probs: Vec<Vec<f32>> = match device {
-        Device::Cpu => clf
-            .predict_many(texts, &[], pool)
-            .into_iter()
-            .map(|mut o| o.swap_remove(0).probs)
-            .collect(),
-        _ => {
-            let r: Runner = Runner::open(device, &clf.net)?.ok_or("no GPU")?;
-            let bytes: Vec<&[u8]> = texts.iter().map(|t| t.as_bytes()).collect();
-            let zero = vec![0f32; clf.net.cfg.extra];
-            let extras: Vec<&[f32]> = texts.iter().map(|_| zero.as_slice()).collect();
-            r.text_runs(&clf.net, &bytes, &extras, &clf.gains())
-                .into_iter()
-                .map(|(l, _)| clf.read(&l).swap_remove(0).probs)
-                .collect()
-        }
+    let runner = match device {
+        Device::Cpu => None,
+        _ => Some(Runner::open(device, &clf.net)?.ok_or("no GPU")?),
     };
+    let zero = vec![0f32; clf.net.cfg.extra];
+    let mut probs: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
+    for chunk in texts.chunks(chunk.max(1)) {
+        if !probs.is_empty() && t.elapsed().as_secs_f64() > budget {
+            break;
+        }
+        match &runner {
+            None => probs.extend(
+                clf.predict_many(chunk, &[], pool)
+                    .into_iter()
+                    .map(|mut o| o.swap_remove(0).probs),
+            ),
+            Some(r) => {
+                let bytes: Vec<&[u8]> = chunk.iter().map(|t| t.as_bytes()).collect();
+                let extras: Vec<&[f32]> = chunk.iter().map(|_| zero.as_slice()).collect();
+                probs.extend(
+                    r.text_runs(&clf.net, &bytes, &extras, &clf.gains())
+                        .into_iter()
+                        .map(|(l, _)| clf.read(&l).swap_remove(0).probs),
+                );
+            }
+        }
+    }
     Ok((t.elapsed().as_secs_f64(), probs))
+}
+
+/// a predicting run's figures
+fn rate(secs: f64, done: usize, all: usize) -> Value {
+    let mut v = json!({ "seconds": secs, "texts": done, "texts_per_sec": done as f64 / secs.max(1e-9) });
+    if done < all {
+        v["stopped"] = json!(format!("after {done} of {all} texts: the time budget ran out"));
+    }
+    v
 }
 
 /// how far a device's probabilities are from the CPU's
@@ -209,10 +243,11 @@ pub fn report(o: &Opts) -> Value {
             let clf = Classifier::from_bytes(&cpu_bytes)?;
             v["weights"] = json!(clf.net.params().iter().map(|(_, p)| p.len()).sum::<usize>());
             v["train"] = json!({ "cpu": cpu });
-            let (cpu_secs, cpu_probs) = predict_on(&clf, Device::Cpu, &texts, &cpu_pool)?;
+            let (cpu_secs, cpu_probs) = predict_on(&clf, Device::Cpu, &texts, &cpu_pool, o.budget, o.chunk)?;
+            let cpu_rate = cpu_probs.len() as f64 / cpu_secs.max(1e-9);
             v["predict"] = json!({
                 "texts": texts.len(),
-                "cpu": { "seconds": cpu_secs, "texts_per_sec": texts.len() as f64 / cpu_secs.max(1e-9) },
+                "cpu": rate(cpu_secs, cpu_probs.len(), texts.len()),
             });
             if gpu_ok.is_ok() {
                 for (name, dev) in [("gpu", Device::Gpu), ("gpu_fast", Device::GpuFast)] {
@@ -223,13 +258,12 @@ pub fn report(o: &Opts) -> Value {
                         }
                         Err(e) => v["train"][name] = json!({ "error": e }),
                     }
-                    match predict_on(&clf, dev, &texts, &cpu_pool) {
+                    match predict_on(&clf, dev, &texts, &cpu_pool, o.budget, o.chunk) {
                         Ok((secs, probs)) => {
-                            let mut p = json!({
-                                "seconds": secs,
-                                "texts_per_sec": texts.len() as f64 / secs.max(1e-9),
-                                "speedup_over_cpu": cpu_secs / secs.max(1e-9),
-                            });
+                            let mut p = rate(secs, probs.len(), texts.len());
+                            p["speedup_over_cpu"] =
+                                json!(p["texts_per_sec"].as_f64().unwrap_or(0.0) / cpu_rate.max(1e-9));
+                            // the texts both got through
                             p["against_cpu"] = compare(&cpu_probs, &probs);
                             v["predict"][name] = p;
                         }
@@ -258,7 +292,7 @@ pub fn report(o: &Opts) -> Value {
         "reading": device::reading(device::choice(), true),
         "workload": {
             "train": format!("{} steps of batch 8 on 64 two-class texts, seed 7", o.steps),
-            "predict": format!("{} texts of 20 to about 400 bytes", o.texts),
+            "predict": format!("{} texts of 20 to about 400 bytes, at most {} s on each device", o.texts, o.budget),
         },
         "sizes": sizes,
         "seconds": started.elapsed().as_secs_f64(),
@@ -275,12 +309,25 @@ mod tests {
             sizes: vec!["tiny".into()],
             texts: 12,
             steps: 2,
+            budget: 600.0,
+            chunk: 500,
         });
         eprintln!("{r:#}");
         let s = &r["sizes"][0];
         assert!(s.get("error").is_none(), "{r}");
         assert!(s["train"]["cpu"]["seconds"].as_f64().is_some(), "{r}");
         assert_eq!(s["predict"]["texts"], 12, "{r}");
+        assert_eq!(s["predict"]["cpu"]["texts"], 12, "{r}");
+        // a budget of nothing stops after the first chunk
+        let short = report(&Opts {
+            sizes: vec!["tiny".into()],
+            texts: 12,
+            steps: 1,
+            budget: 0.0,
+            chunk: 5,
+        });
+        assert_eq!(short["sizes"][0]["predict"]["cpu"]["texts"], 5, "{short}");
+        assert!(short["sizes"][0]["predict"]["cpu"]["stopped"].is_string(), "{short}");
         if Device::Gpu.check().is_ok() {
             // the probe ran, and exact precision on an exact device gives the CPU's bits
             assert!(

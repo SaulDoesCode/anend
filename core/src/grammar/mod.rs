@@ -728,10 +728,24 @@ pub fn corpus() -> &'static str {
     CORPUS
 }
 
+fn lexicon() -> &'static Lexicon {
+    static L: OnceLock<Lexicon> = OnceLock::new();
+    L.get_or_init(Lexicon::load)
+}
+
 /// whether the bundled lexicon (`words.fc`) knows a lowercase word
 pub fn is_word(w: &str) -> bool {
-    static L: OnceLock<Lexicon> = OnceLock::new();
-    L.get_or_init(Lexicon::load).words.contains(w)
+    lexicon().words.contains(w)
+}
+
+/// the bundled lexicon's words, sorted
+pub fn word_list() -> &'static [String] {
+    static W: OnceLock<Vec<String>> = OnceLock::new();
+    W.get_or_init(|| {
+        let mut v: Vec<String> = lexicon().words.iter().cloned().collect();
+        v.sort();
+        v
+    })
 }
 
 pub fn model() -> &'static Model {

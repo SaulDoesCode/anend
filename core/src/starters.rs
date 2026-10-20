@@ -4,7 +4,7 @@
 //!
 //! - **made by rules** (`Source::Rules`): the texts are generated, and the rule that made
 //!   each one gives its class (even or odd numbers, the parity of a gematria sum, English
-//!   or Afrikaans words, a clean or a corrupted sentence, a sentence or a fragment of one,
+//!   or Afrikaans words, words spelled right or garbled, a sentence or a fragment of one,
 //!   fruit, stones or animals). Where a rule can be read back from the text alone,
 //!   [`check`] does so, and the tests hold every generated text to it;
 //! - **bundled public-domain texts** (`Source::Bundled`): the class is where the text
@@ -43,7 +43,7 @@ pub struct Starter {
     pub gematria: bool,
 }
 
-const RULES_LICENCE: &str = "made by this project's rules (core/src/starters.rs, MPL-2.0); the word lists are the project's own, and the English sentences come from core/src/grammar/corpus.txt, the project's own prose";
+const RULES_LICENCE: &str = "this project's rules (core/src/starters.rs, MPL-2.0); the word lists are the project's own, the English sentences come from core/src/grammar/corpus.txt (the project's own prose), and the lexicon is the MIT-licensed word-list package (core/src/grammar/words-LICENSE)";
 
 pub const STARTERS: &[Starter] = &[
     Starter {
@@ -58,7 +58,7 @@ pub const STARTERS: &[Starter] = &[
     Starter {
         id: "gematria-parity",
         title: "even or odd sum",
-        about: "a few English words, by whether their ordinal gematria sum is even",
+        about: "an English word, by whether its ordinal gematria sum is even",
         classes: &["even sum", "odd sum"],
         source: Source::Rules,
         licence: RULES_LICENCE,
@@ -76,8 +76,8 @@ pub const STARTERS: &[Starter] = &[
     Starter {
         id: "spelling",
         title: "spelled right or not",
-        about: "sentences as written, or with words dropped, doubled, swapped, mistyped or confused (the spelling checker's corruptions)",
-        classes: &["spelled right", "corrupted"],
+        about: "two to five common English words, as they are or garbled (about every other letter replaced at random) into words the lexicon doesn't know",
+        classes: &["spelled right", "garbled"],
         source: Source::Rules,
         licence: RULES_LICENCE,
         gematria: false,
@@ -132,7 +132,7 @@ pub enum Split {
 }
 
 /// generated texts per class: to train on, and held out
-pub const TRAIN_PER_CLASS: usize = 80;
+pub const TRAIN_PER_CLASS: usize = 400;
 pub const HELD_PER_CLASS: usize = 100;
 
 // ---------------------------------------------------------------- word lists
@@ -509,13 +509,15 @@ fn generate(id: &str, split: Split, class: usize, i: usize) -> String {
             s.push((b'0' + last as u8) as char);
             s
         }
-        "gematria-parity" => loop {
-            let n = 1 + r.below(3);
-            let s = (0..n).map(|_| r.pick(ENGLISH)).collect::<Vec<_>>().join(" ");
-            if (ordinal(&s).rem_euclid(2)) as usize == class {
-                break s;
+        "gematria-parity" => {
+            let words = crate::grammar::word_list();
+            loop {
+                let w = &words[r.below(words.len())];
+                if (3..=10).contains(&w.len()) && ordinal(w).rem_euclid(2) as usize == class {
+                    break w.clone();
+                }
             }
-        },
+        }
         "english" => {
             let words = if class == 0 {
                 only(ENGLISH, AFRIKAANS)
@@ -526,15 +528,39 @@ fn generate(id: &str, split: Split, class: usize, i: usize) -> String {
             (0..n).map(|_| r.pick(&words)).collect::<Vec<_>>().join(" ")
         }
         "spelling" => {
-            let s = sentence(split, i);
-            if class == 0 {
-                return s.to_string();
+            // two to five common English words of three letters or more, as they are or
+            // garbled
+            let common: Vec<&str> = only(ENGLISH, AFRIKAANS);
+            let n = 2 + r.below(4);
+            let mut words: Vec<String> = Vec::new();
+            while words.len() < n {
+                let w = r.pick(&common);
+                if w.len() >= 3 {
+                    words.push(w.to_string());
+                }
             }
-            // corrupted until it differs (a corruption can come out as the same text)
-            (0..)
-                .map(|k| crate::grammar::corrupt(s, seed.wrapping_add(k), &crate::grammar::is_word).0)
-                .find(|c| c != s)
-                .expect("some corruption changes it")
+            if class == 1 {
+                // garbled: about every other letter of each word replaced by a random one,
+                // until the word is none the lexicon knows
+                for w in words.iter_mut() {
+                    *w = loop {
+                        let g: String = w
+                            .bytes()
+                            .map(|b| {
+                                if r.below(2) == 0 {
+                                    (b'a' + r.below(26) as u8) as char
+                                } else {
+                                    b as char
+                                }
+                            })
+                            .collect();
+                        if !crate::grammar::is_word(&g) {
+                            break g;
+                        }
+                    };
+                }
+            }
+            words.join(" ")
         }
         "sentence" => {
             let s = sentence(split, i);
@@ -577,6 +603,16 @@ pub fn check(id: &str, text: &str) -> Option<usize> {
             d.is_ascii_digit().then(|| ((d - b'0') % 2) as usize)
         }
         "gematria-parity" => Some(ordinal(text).rem_euclid(2) as usize),
+        "spelling" => {
+            let known: Vec<bool> = text.split_whitespace().map(crate::grammar::is_word).collect();
+            if known.iter().all(|k| *k) {
+                Some(0)
+            } else if known.iter().all(|k| !k) {
+                Some(1)
+            } else {
+                None
+            }
+        }
         "english" => {
             let words: Vec<&str> = text.split_whitespace().collect();
             let en = only(ENGLISH, AFRIKAANS);
@@ -727,10 +763,15 @@ pub fn fetch(dir: &Path, get: &dyn Fn(&str) -> Result<Vec<u8>, String>) -> Resul
 
 /// a starter's labelled texts for a split; `dir` holds fetched books
 pub fn examples(id: &str, split: Split, dir: Option<&Path>) -> Result<Vec<(String, usize)>, String> {
+    examples_with(id, split, dir, TRAIN_PER_CLASS)
+}
+
+/// `examples` with `per` generated training texts a class (rule starters)
+pub fn examples_with(id: &str, split: Split, dir: Option<&Path>, per: usize) -> Result<Vec<(String, usize)>, String> {
     let s = get(id).ok_or_else(|| format!("no starter {id:?}"))?;
     Ok(match s.source {
         Source::Rules => {
-            let train: Vec<(String, usize)> = (0..TRAIN_PER_CLASS)
+            let train: Vec<(String, usize)> = (0..per)
                 .flat_map(|i| (0..s.classes.len()).map(move |c| (generate(id, Split::Train, c, i), c)))
                 .collect();
             if split == Split::Train {
@@ -809,11 +850,7 @@ mod tests {
                 if let Some(k) = check(s.id, t) {
                     assert_eq!(k, *c, "{}: {t:?}", s.id);
                 } else {
-                    assert!(
-                        ["spelling", "sentence"].contains(&s.id),
-                        "{}: the rule can't read {t:?}",
-                        s.id
-                    );
+                    assert_eq!(s.id, "sentence", "the rule can't read {t:?}");
                 }
             }
             // the same every time

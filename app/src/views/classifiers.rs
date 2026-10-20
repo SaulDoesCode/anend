@@ -573,7 +573,7 @@ fn Starters(on_made: EventHandler<String>) -> Element {
         div { class: "card starters",
             h3 { "starters" }
             p { class: "dim small",
-                "Texts whose classes are known for certain: made by a rule, or taken from public-domain books. Making one writes its training texts into lists (one per class) and trains a classifier on them; its page then scores it on texts held out from training, which it never saw."
+                "Texts whose classes are known for certain: made by a rule, or taken from public-domain books. Making one writes its training texts into this save as lists, one per class (400 texts a class for the rule-made ones), and trains a classifier on them; its page then scores it on texts held out from training, which it never saw."
             }
             for s in list {
                 {

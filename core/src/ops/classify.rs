@@ -616,7 +616,11 @@ fn starter_call(saves: &Saves, op: &str, args: &Value, limits: &Limits) -> Res {
             if models.classifier(&name).is_ok() {
                 return Err(format!("there's already a classifier called {name:?}"));
             }
-            let ex = starters::examples(id, Split::Train, Some(&books))?;
+            let per = args
+                .get("per_class")
+                .and_then(Value::as_u64)
+                .map_or(starters::TRAIN_PER_CLASS, |n| (n as usize).clamp(10, 5000));
+            let ex = starters::examples_with(id, Split::Train, Some(&books), per)?;
             // a list per class, headed "<title>: <class>", holding its training texts
             let heads = g.write(|tx| {
                 let mut heads = Vec::new();
@@ -643,6 +647,10 @@ fn starter_call(saves: &Saves, op: &str, args: &Value, limits: &Limits) -> Res {
             models.create_classifier_with(&name, &refs, None, HeadKind::Single, preset, vec![], sp.gematria)?;
             let mut def = models.classifier(&name)?;
             def.starter = Some(id.to_string());
+            // longer than a hand-made classifier's default: early stopping on a few dozen
+            // held-back texts otherwise ends it within a second (core/examples/starters.rs)
+            def.train.epochs = def.train.epochs.max(40);
+            def.train.patience = def.train.patience.max(10);
             models.put_classifier(&mut def, None)?;
             let job = if args.get("train").and_then(Value::as_bool).unwrap_or(true) {
                 let wait = args.get("wait").and_then(Value::as_bool).unwrap_or(false);
@@ -704,6 +712,9 @@ pub fn gpu_report(args: &Value, limits: &Limits) -> Res {
     }
     if let Some(n) = args.get("steps").and_then(Value::as_u64) {
         o.steps = (n as usize).clamp(1, 1000);
+    }
+    if let Some(n) = args.get("budget").and_then(Value::as_f64) {
+        o.budget = n.clamp(0.0, 3600.0);
     }
     if let Some(v) = args.get("sizes").and_then(Value::as_array) {
         o.sizes = v.iter().filter_map(Value::as_str).map(String::from).collect();
@@ -1612,10 +1623,11 @@ mod tests {
 
         let made = c(
             "classify.starter",
-            json!({ "id": "things", "preset": "tiny", "epochs": 8, "threads": 2, "wait": true }),
+            json!({ "id": "things", "preset": "tiny", "per_class": 80, "epochs": 8, "threads": 2, "wait": true }),
         )
         .unwrap();
         assert_eq!(made["texts"], 240, "{made}");
+        assert_eq!(made["classifier"]["train"]["patience"], 10, "{made}");
         assert_eq!(made["job"]["state"], "done", "{made}");
         assert_eq!(made["classifier"]["starter"], "things");
         assert_eq!(

@@ -56,7 +56,12 @@ The answers left these open. Each is written into the design as its default.
     is refused unless the book's own `Language:` line matches, but the fetch itself is
     untested against gutenberg.org (the container's network refuses it).
 14. **A starter writes its texts into the save** as memory entries and lists, so it trains
-    like any other classifier and its texts can be looked at. The other choice would keep
-    them outside the save; that would need a second way of training.
+    like any other classifier and its texts can be looked at. A rule starter writes 400
+    texts a class (800 to 1200 entries), which is what got most of them well above
+    chance; making one in a save of its own keeps them apart from your texts. The other
+    choice would keep them outside the save; that would need a second way of training.
 15. **The default size is the compact preset**, as for a new classifier; the starter call
     takes `preset` to pick another.
+16. **Starters train longer than a hand-made classifier** (at least 40 epochs, patience
+    10). With the defaults (14 epochs, patience 4) early stopping on a few dozen held-back
+    texts ended training within a second and left several starters near chance.

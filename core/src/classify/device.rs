@@ -363,8 +363,8 @@ pub fn reading(choice: Choice, allowed: bool) -> Reading {
     };
     if let Err(e) = want.check() {
         let note = match choice {
-            Choice::Auto => format!("no GPU ({e}), so the CPU reads"),
-            _ => format!("no GPU here ({e}): read on the CPU"),
+            Choice::Auto => format!("no GPU: {e}; so the CPU reads"),
+            _ => format!("no GPU here: {e}; read on the CPU"),
         };
         return Reading::cpu(choice, Some(note));
     }
@@ -372,7 +372,7 @@ pub fn reading(choice: Choice, allowed: bool) -> Reading {
     {
         let g = match super::gpu::shared() {
             Ok(g) => g,
-            Err(e) => return Reading::cpu(choice, Some(format!("no GPU here ({e}): read on the CPU"))),
+            Err(e) => return Reading::cpu(choice, Some(format!("no GPU here: {e}; read on the CPU"))),
         };
         let name = g.describe();
         let exact = want == Device::Gpu && probe_exact().unwrap_or(false);
@@ -380,9 +380,7 @@ pub fn reading(choice: Choice, allowed: bool) -> Reading {
             if g.info.device_type == wgpu::DeviceType::Cpu {
                 return Reading::cpu(
                     choice,
-                    Some(format!(
-                        "the only GPU is a software renderer ({name}), so the CPU reads"
-                    )),
+                    Some(format!("the only GPU is a software renderer, {name}, so the CPU reads")),
                 );
             }
             if !exact {
