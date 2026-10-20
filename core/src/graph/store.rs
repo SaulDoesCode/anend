@@ -1797,6 +1797,7 @@ fn ensure_tables(txn: &WriteTransaction) -> GResult<()> {
     txn.open_table(MIMES).map_err(err)?;
     super::assets::ensure_tables(txn)?;
     super::blocks::ensure_tables(txn)?;
+    super::scenes::ensure_tables(txn)?;
     Ok(())
 }
 

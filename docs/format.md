@@ -431,8 +431,9 @@ settings too.
 ### Sizes: 10k copies of one text in one scene
 
 Today's figures were measured with a script over the stored layouts. The new figure is
-worked out from the layout above (108 bits a placement, plus a value prefix of about 6
-bytes per chunk of 64), not yet measured. redb adds a few bytes of overhead per stored
+the encoder's output (`core/src/graph/scenes.rs`, test `defaults_cost_what_the_design_says`:
+136 094 bytes of values for 10k default-sized text placements, 108 bits each plus each
+chunk's prefix), without redb's own overhead. redb adds a few bytes of overhead per stored
 value: today that is per placement, and after this change it is per chunk of 64.
 
 | stored as | 38-character text | 1000-character text |
@@ -440,7 +441,7 @@ value: today that is per placement, and after this change it is per chunk of 64.
 | today, a saved scene (`space.maps` JSON) | 0.74 MB (74 B a copy), rewritten whole on every save | 10.4 MB (1036 B a copy) |
 | today, blocks showing it (`graph blocks` + `graph block ids`) | 490 KB (32 + 8 + ~9 B) | the same |
 | today, `PLACE` edges | ~500 KB (42 B out-edge value + 8 B in-edge, plus the keys) | the same |
-| after, text placements at free positions | about 136 KB (13.6 B a copy) | the same |
+| after, text placements at free positions | 136 KB (13.6 B a copy) | the same |
 
 The text is stored once whatever its length, and a placement costs the same for any
 definition. Most of a placement is its 12-byte position. The first draft's 1/100 grid

@@ -147,6 +147,16 @@ impl BitWriter {
     pub fn bits(&self) -> usize {
         self.bits
     }
+
+    /// the bytes, with the count of padding bits in the first three bits (which the
+    /// writer began with three zero bits for)
+    pub fn finish_padded(mut self) -> Vec<u8> {
+        let pad = (8 - self.bits % 8) % 8;
+        if let Some(b) = self.bytes.first_mut() {
+            *b |= (pad as u8) << 5;
+        }
+        self.bytes
+    }
 }
 
 pub struct BitReader<'a> {
