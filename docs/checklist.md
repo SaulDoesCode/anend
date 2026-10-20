@@ -29,6 +29,20 @@ docs/architecture.md (the whole).
   When a real choice is the user's, pick a reasonable default, keep it reversible, build it,
   and list it in docs/wip/questions.md; ask plainly when no default is reasonable. Own and fix
   what turns out wrong.
+- **Describe what things are for as the project means them.** UI text, docs, comments and
+  commit messages say what a feature does and why it exists, at the scope it was asked for,
+  never narrowed to one use case. A reference case, 20 Oct: the classifiers view said "A
+  classifier learns to tell your lists apart". That misrepresented the project in three
+  ways:
+  1. Lists are only where the examples come from. Classifiers read any text, which is what
+     classifier search, colouring and the reader's measures are for.
+  2. Classifiers are one use of the transformer engine. The core is meant for more than
+     classification: spec models, generation, taggers and critics, some still under
+     construction.
+  3. "Your" added a possessive nothing called for.
+
+  When writing such a line, check it against docs/architecture.md and the features that
+  exist, and leave out possessives and framings that limit a feature to less than it does.
 - **Pushes after every piece.** docs/next.md's Resuming block says which line is in progress
   and where it stopped.
 - **Standing requirements:**
