@@ -124,7 +124,7 @@ fn vowel(c: char) -> u64 {
 }
 
 fn consonant(c: char) -> u64 {
-    // weum's table, t and v both 16
+    // weum's table, with t and v as separate values (t 16, v 17), as the user corrected it
     match c {
         'b' => 1,
         'c' => 2,
@@ -141,10 +141,11 @@ fn consonant(c: char) -> u64 {
         'q' => 13,
         'r' => 14,
         's' => 15,
-        't' | 'v' => 16,
-        'w' => 17,
-        'x' => 18,
-        'z' => 19,
+        't' => 16,
+        'v' => 17,
+        'w' => 18,
+        'x' => 19,
+        'z' => 20,
         _ => 0,
     }
 }
