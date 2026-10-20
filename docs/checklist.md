@@ -113,9 +113,7 @@ docs/architecture.md (the whole).
 - [ ] The language: s (docs/s.md, the user's spec) as the high-level form of the 5-bit
       format. Allocate the 5-bit format's unused escape space efficiently for s's tokens
       and suffix forms, and document the mapping in docs/format.md. Tail calls run in
-      constant space, as s §6 requires. The runtime is deterministic: s's `#prng` with
-      seeds, and no wall-clock or OS randomness in programs run from saves unless asked
-      for (#11).
+      constant space, as s §6 requires (#11).
 - [ ] The notes view as s's code editor: a right-aligned mode (the acting word stands at the
       right), highlighting by s's word classes (commands, suffix forms, literals, locals),
       outline, go to definition, inline results, step debugging, completion (#11, #12).
