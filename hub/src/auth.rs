@@ -26,6 +26,7 @@ pub fn secret() -> String {
 }
 
 /// a short id for a save
+#[cfg_attr(not(feature = "hub"), allow(dead_code))]
 pub fn short_id() -> String {
     const ABC: &[u8] = b"abcdefghijkmnpqrstuvwxyz23456789";
     let mut rng = rand::rng();
@@ -98,6 +99,7 @@ pub fn new_link(store: &Store, user: &str) -> Result<String, String> {
 }
 
 /// who an address is, kept as a hash so the hub never stores addresses
+#[cfg_attr(not(feature = "hub"), allow(dead_code))]
 pub fn address_key(ip: IpAddr) -> String {
     format!("ip:{}", &hex(&digest(&ip.to_string()))[..16])
 }

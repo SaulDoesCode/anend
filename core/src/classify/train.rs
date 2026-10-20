@@ -14,10 +14,11 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
+use super::device::{Device, Trainer};
 use super::kernels::{self as k, softmax_rows};
 use super::math::{self, Rng, key, mix};
 use super::metrics::{self, Metrics};
-use super::model::{BlockT, Gains, HeadKind, Mode, Net, Trace};
+use super::model::{BlockT, END, Gains, HeadKind, Mode, Net, Trace};
 use super::pool::{self, Pool};
 use super::text::{self, Window};
 use super::{Classifier, FEEDBACK_KEPT};
@@ -36,6 +37,12 @@ pub enum Target {
     Label(usize, bool),
     /// regression: the values
     Values(Vec<f32>),
+    /// generative head: predict each next byte (and the end) of the example's bytes,
+    /// counting only the bytes from index `from` on (a prompt before it is context)
+    Next { from: usize },
+    /// generative head: make each next byte from `from` on less likely
+    /// (unlikelihood, −ln(1 − p)), for samples judged bad
+    Avoid { from: usize },
 }
 
 impl Target {
@@ -45,6 +52,11 @@ impl Target {
             Target::Class(c) | Target::Not(c) | Target::Label(c, _) => Some(*c),
             _ => None,
         }
+    }
+
+    /// whether the target is for the generative head
+    pub fn generative(&self) -> bool {
+        matches!(self, Target::Next { .. } | Target::Avoid { .. })
     }
 }
 
@@ -57,6 +69,13 @@ pub struct Example {
     pub weight: f32,
     /// inputs from other classifiers; empty means zeros
     pub extra: Vec<f32>,
+    /// the data as bytes when it isn't text (pictures, binary); used instead of `text`
+    /// when not empty
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub raw: Vec<u8>,
+    /// more targets on other heads of the same model, trained in the same pass
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub also: Vec<(usize, Target)>,
 }
 
 impl Example {
@@ -72,7 +91,41 @@ impl Example {
             target,
             weight: 1.0,
             extra: Vec::new(),
+            raw: Vec::new(),
+            also: Vec::new(),
         }
+    }
+
+    /// an example over bytes that need not be text
+    pub fn bytes(raw: &[u8], head: usize, target: Target) -> Example {
+        let mut e = Example::new("", head, target);
+        e.raw = raw.to_vec();
+        e
+    }
+
+    /// a text for the generative head to learn whole
+    pub fn generate(text: &str) -> Example {
+        Example::new(text, 0, Target::Next { from: 0 })
+    }
+
+    /// another head's target in the same pass
+    pub fn and(mut self, head: usize, target: Target) -> Example {
+        self.also.push((head, target));
+        self
+    }
+
+    /// the data: `raw` if set, else the text's bytes
+    pub fn data(&self) -> &[u8] {
+        if self.raw.is_empty() {
+            self.text.as_bytes()
+        } else {
+            &self.raw
+        }
+    }
+
+    /// every (head, target) of the example, the main one first
+    pub fn targets(&self) -> impl Iterator<Item = (usize, &Target)> {
+        std::iter::once((self.head, &self.target)).chain(self.also.iter().map(|(h, t)| (*h, t)))
     }
 
     pub fn weighted(mut self, w: f32) -> Example {
@@ -96,6 +149,9 @@ pub fn head_loss(kind: HeadKind, logits: &[f32], t: &Target, smoothing: f32) -> 
     let kw = logits.len();
     let kf = kw as f32;
     let bad = || Err(format!("target {t:?} does not fit a {kind:?} head of {kw}"));
+    if t.generative() {
+        return bad();
+    }
     match kind {
         HeadKind::Single => {
             let m = logits.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
@@ -161,16 +217,71 @@ pub fn head_loss(kind: HeadKind, logits: &[f32], t: &Target, smoothing: f32) -> 
     }
 }
 
+/// the generative loss of one window: at each position t whose next token is a byte
+/// (or SEP, read as END) at data index ≥ `from`, cross-entropy of the next token
+/// (`Next`) or −ln(1 − p) (`Avoid`), averaged over those positions. `offset` is the
+/// data index of the window's first byte. Returns (loss, d(loss)/d(logits) [n ×
+/// GEN_OUT], positions counted).
+pub fn gen_loss(net: &Net, logits: &[f32], tokens: &[u32], offset: usize, t: &Target) -> (f32, Vec<f32>, usize) {
+    let n = tokens.len();
+    let out = net.cfg.gen_out();
+    let mut g = vec![0f32; n * out];
+    let (from, avoid) = match t {
+        Target::Next { from } => (*from, false),
+        Target::Avoid { from } => (*from, true),
+        _ => return (0.0, g, 0),
+    };
+    let mut rows = Vec::new();
+    for p in 0..n.saturating_sub(1) {
+        let next = tokens[p + 1];
+        let class = match next {
+            // a vocabulary: every token is a class (the end token included)
+            t if net.lexicon.is_some() => t as usize,
+            b if b < 256 => b as usize,
+            text::SEP => END,
+            _ => continue,
+        };
+        if class >= out {
+            continue;
+        }
+        if offset + p >= from {
+            rows.push((p, class));
+        }
+    }
+    let count = rows.len();
+    let mut loss = 0f32;
+    for &(p, class) in &rows {
+        let row = &logits[p * out..(p + 1) * out];
+        let tg = if avoid {
+            Target::Not(class)
+        } else {
+            Target::Class(class)
+        };
+        let (l, d) = head_loss(HeadKind::Single, row, &tg, 0.0).expect("fits");
+        loss += l;
+        let inv = 1.0 / count as f32;
+        g[p * out..(p + 1) * out]
+            .iter_mut()
+            .zip(&d)
+            .for_each(|(a, b)| *a = b * inv);
+    }
+    (if count > 0 { loss / count as f32 } else { 0.0 }, g, count)
+}
+
 /// whether a text falls in the validation share: a seeded hash of its bytes, so the
 /// same text always lands on the same side
 pub fn is_validation(text: &str, fraction: f32, seed: u64) -> bool {
-    let h = mix(math::fnv(seed, text.as_bytes())) >> 40;
+    is_validation_bytes(text.as_bytes(), fraction, seed)
+}
+
+pub fn is_validation_bytes(data: &[u8], fraction: f32, seed: u64) -> bool {
+    let h = mix(math::fnv(seed, data)) >> 40;
     (h as f32) * (1.0 / 16_777_216.0) < fraction
 }
 
 /// indices of training and validation examples
 pub fn split(data: &[Example], fraction: f32, seed: u64) -> (Vec<usize>, Vec<usize>) {
-    (0..data.len()).partition(|&i| !is_validation(&data[i].text, fraction, seed))
+    (0..data.len()).partition(|&i| !is_validation_bytes(data[i].data(), fraction, seed))
 }
 
 // ---------------------------------------------------------------- optimizer
@@ -285,28 +396,87 @@ pub fn lr_at(step: usize, total: usize, warmup: usize, lr: f32, min_ratio: f32) 
 }
 
 /// which tensors train: everything, or the heads only when the trunk is frozen
+/// (params end with the heads' pairs, then num, then the generative pair)
 pub fn trainable(net: &Net, freeze_trunk: bool) -> Vec<bool> {
     let n = net.params().len();
     let heads = 2 * net.heads.len();
-    (0..n).map(|i| !freeze_trunk || i >= n - heads).collect()
+    (0..n)
+        .map(|i| !freeze_trunk || (i >= n - 3 - heads && i < n - 3) || i >= n - 2)
+        .collect()
 }
 
 // ---------------------------------------------------------------- gradients
 
 /// one window of a training text: the whole text if it fits, else a crop placed by the key
 pub fn crop(net: &Net, text: &str, key: u64) -> Window {
+    crop_bytes(net, text.as_bytes(), key).0
+}
+
+/// `crop` over bytes, with the crop's start; a causal model's crop ends in SEP only
+/// where the data ends
+pub fn crop_bytes(net: &Net, b: &[u8], key: u64) -> (Window, usize) {
+    if net.lexicon.is_some() {
+        return crop_seq(net, &net.sequence(b, 0).0, key);
+    }
     let room = net.cfg.room();
-    let b = text.as_bytes();
+    let causal = net.cfg.causal;
     if b.len() <= room {
-        return text::window(b);
+        return (text::window_with(b, causal, true), 0);
     }
     let start = (mix(key) % (b.len() - room + 1) as u64) as usize;
-    text::window(&b[start..start + room])
+    let end = start + room == b.len();
+    (
+        text::window_with(&b[start..start + room], causal, !causal || end),
+        start,
+    )
+}
+
+/// `crop` over a token sequence (`Net::sequence`), the same windows as `crop_bytes`
+pub fn crop_seq(net: &Net, ts: &[u32], key: u64) -> (Window, usize) {
+    let room = net.cfg.room();
+    let causal = net.cfg.causal;
+    if ts.len() <= room {
+        return (net.window_tokens(ts, true), 0);
+    }
+    let start = (mix(key) % (ts.len() - room + 1) as u64) as usize;
+    let end = start + room == ts.len();
+    (net.window_tokens(&ts[start..start + room], !causal || end), start)
+}
+
+/// an example's data as the token sequence the net reads, and its targets with each
+/// generative target's `from` (a byte index) as a token index
+pub fn sequence_of(net: &Net, ex: &Example) -> (Vec<u32>, Vec<(usize, Target)>) {
+    let first = from_of(ex);
+    let (ts, at) = net.sequence(ex.data(), first.unwrap_or(0));
+    let moved = |f: usize| if Some(f) == first { at } else { f };
+    let targets = ex
+        .targets()
+        .map(|(h, t)| {
+            let t = match t {
+                Target::Next { from } => Target::Next { from: moved(*from) },
+                Target::Avoid { from } => Target::Avoid { from: moved(*from) },
+                t => t.clone(),
+            };
+            (h, t)
+        })
+        .collect();
+    (ts, targets)
+}
+
+fn from_of(ex: &Example) -> Option<usize> {
+    ex.targets().find_map(|(_, t)| match t {
+        Target::Next { from } | Target::Avoid { from } => Some(*from),
+        _ => None,
+    })
 }
 
 /// every window of a text forward, and the mean of their logits (in window order)
-pub fn forward_text(net: &Net, text: &str, extra: &[f32], gains: &Gains) -> (Vec<Trace>, Vec<Vec<f32>>) {
-    let ws = text::windows(text, net.cfg.max_len, net.cfg.stride);
+pub fn forward_text(net: &Net, text: &[u8], extra: &[f32], gains: &Gains) -> (Vec<Trace>, Vec<Vec<f32>>) {
+    forward_windows(net, &net.windows_of(text).0, extra, gains)
+}
+
+/// windows forward, and the mean of their logits (in window order)
+pub fn forward_windows(net: &Net, ws: &[Window], extra: &[f32], gains: &Gains) -> (Vec<Trace>, Vec<Vec<f32>>) {
     let trs: Vec<Trace> = ws
         .iter()
         .map(|w| net.forward(w, extra, gains, Mode::EVAL, None))
@@ -326,14 +496,36 @@ pub fn forward_text(net: &Net, text: &str, extra: &[f32], gains: &Gains) -> (Vec
 /// backward for `forward_text`: each window gets d(loss)/d(mean logits)/windows; returns
 /// d(loss)/d(extra) summed over the windows in order
 pub fn backward_text(net: &Net, trs: &[Trace], dlogits: &[Vec<f32>], tp: &[BlockT], g: &mut Net) -> Vec<f32> {
+    backward_text_gen(net, trs, dlogits, &[], tp, g)
+}
+
+/// `backward_text` with each window's d(loss)/d(generative logits) (empty for none)
+pub fn backward_text_gen(
+    net: &Net,
+    trs: &[Trace],
+    dlogits: &[Vec<f32>],
+    dgen: &[Vec<f32>],
+    tp: &[BlockT],
+    g: &mut Net,
+) -> Vec<f32> {
     let nw = trs.len() as f32;
     let dl: Vec<Vec<f32>> = dlogits.iter().map(|d| d.iter().map(|v| v / nw).collect()).collect();
     let mut dextra = vec![0f32; net.cfg.extra];
-    for tr in trs {
-        let de = net.backward(tr, &dl, tp, g);
+    for (i, tr) in trs.iter().enumerate() {
+        let dg = dgen.get(i).map_or(&[][..], |v| &v[..]);
+        let de = net.backward_gen(tr, &dl, dg, tp, g);
         dextra.iter_mut().zip(de).for_each(|(a, b)| *a += b);
     }
     dextra
+}
+
+/// the loss weight of the head a target is for
+fn head_weight(net: &Net, head: usize, t: &Target) -> f32 {
+    if t.generative() {
+        net.generator.as_ref().map_or(1.0, |g| g.weight)
+    } else {
+        net.heads[head].spec.weight
+    }
 }
 
 /// how an example's gradient is taken
@@ -359,31 +551,71 @@ fn zeros_for(net: &Net, e: &[f32]) -> Vec<f32> {
     }
 }
 
-/// adds coef·∇loss of one example into g; returns (loss, tokens)
+/// adds `into += scale·d`, creating it when empty
+fn add_scaled(into: &mut Vec<f32>, d: &[f32], scale: f32) {
+    if into.is_empty() {
+        *into = vec![0.0; d.len()];
+    }
+    into.iter_mut().zip(d).for_each(|(a, b)| *a += b * scale);
+}
+
+/// adds coef·∇loss of one example (every target, each times its head's weight) into g;
+/// returns (loss, tokens)
 fn example_grad(net: &Net, tp: &[BlockT], ex: &Example, it: &Item, smoothing: f32, g: &mut Net) -> (f32, usize) {
     let extra = zeros_for(net, &ex.extra);
-    let kind = net.heads[ex.head].spec.kind;
     let mut dls = vec![Vec::new(); net.heads.len()];
+    let mut loss = 0f32;
     match it.how {
         How::Crop(kk) => {
-            let w = crop(net, &ex.text, kk);
+            let (ts, targets) = sequence_of(net, ex);
+            let (w, start) = crop_seq(net, &ts, kk);
             let mode = Mode {
                 dropout: net.cfg.dropout,
                 key: kk,
             };
             let tr = net.forward(&w, &extra, &net.cfg.gains, mode, None);
-            let (l, d) = head_loss(kind, &net.logits(&tr, ex.head), &ex.target, smoothing).expect("checked target");
-            dls[ex.head] = d.iter().map(|v| v * it.coef).collect();
-            net.backward(&tr, &dls, tp, g);
-            (l, w.len())
+            let mut dgen = Vec::new();
+            for (h, t) in targets.iter().map(|(h, t)| (*h, t)) {
+                let hw = head_weight(net, h, t);
+                if t.generative() {
+                    let (l, d, _) = gen_loss(net, &net.gen_logits(&tr), &w.tokens, start, t);
+                    loss += hw * l;
+                    add_scaled(&mut dgen, &d, hw * it.coef);
+                } else {
+                    let kind = net.heads[h].spec.kind;
+                    let (l, d) = head_loss(kind, &net.logits(&tr, h), t, smoothing).expect("checked target");
+                    loss += hw * l;
+                    add_scaled(&mut dls[h], &d, hw * it.coef);
+                }
+            }
+            net.backward_gen(&tr, &dls, &dgen, tp, g);
+            (loss, w.len())
         }
         How::Whole => {
-            let (trs, avg) = forward_text(net, &ex.text, &extra, &net.cfg.gains);
-            let (l, d) = head_loss(kind, &avg[ex.head], &ex.target, smoothing).expect("checked target");
-            dls[ex.head] = d.iter().map(|v| v * it.coef).collect();
+            let (ts, targets) = sequence_of(net, ex);
+            let (ws, starts) = net.windows_over(&ts);
+            let (trs, avg) = forward_windows(net, &ws, &extra, &net.cfg.gains);
+            let nw = trs.len() as f32;
+            let mut dgen: Vec<Vec<f32>> = Vec::new();
+            for (h, t) in targets.iter().map(|(h, t)| (*h, t)) {
+                let hw = head_weight(net, h, t);
+                if t.generative() {
+                    dgen.resize(trs.len(), Vec::new());
+                    for (i, tr) in trs.iter().enumerate() {
+                        let (l, d, _) = gen_loss(net, &net.gen_logits(tr), tr.tokens(), starts[i], t);
+                        loss += hw * l / nw;
+                        add_scaled(&mut dgen[i], &d, hw * it.coef / nw);
+                    }
+                } else {
+                    let kind = net.heads[h].spec.kind;
+                    let (l, d) = head_loss(kind, &avg[h], t, smoothing).expect("checked target");
+                    loss += hw * l;
+                    add_scaled(&mut dls[h], &d, hw * it.coef);
+                }
+            }
             let tokens = trs.iter().map(|t| t.n).sum();
-            backward_text(net, &trs, &dls, tp, g);
-            (l, tokens)
+            backward_text_gen(net, &trs, &dls, &dgen, tp, g);
+            (loss, tokens)
         }
     }
 }
@@ -444,6 +676,9 @@ pub struct Evaluation {
     pub loss: f64,
     /// per head, when the data had examples for it
     pub heads: Vec<Option<Metrics>>,
+    /// the generative head's mean cross-entropy in bits per predicted byte
+    #[serde(default)]
+    pub bits_per_byte: Option<f64>,
 }
 
 impl Evaluation {
@@ -458,15 +693,41 @@ pub fn evaluate(clf: &Classifier, data: &[Example], idx: &[usize], pool: &Pool) 
     let net = &clf.net;
     type Slot = Mutex<Option<(f32, Vec<f32>)>>;
     let slots: Vec<Slot> = idx.iter().map(|_| Mutex::new(None)).collect();
+    let gen_nats: Vec<Mutex<(f64, usize)>> = idx.iter().map(|_| Mutex::new((0.0, 0))).collect();
     pool.run(idx.len(), &|i| {
         let ex = &data[idx[i]];
         let extra = zeros_for(net, &ex.extra);
-        let logits = clf
-            .run(&ex.text, &extra, &net.cfg.gains, None)
-            .logits
-            .swap_remove(ex.head);
-        let (l, _) = head_loss(net.heads[ex.head].spec.kind, &logits, &ex.target, 0.0).unwrap_or((0.0, vec![]));
-        *slots[i].lock().unwrap() = Some((l, logits));
+        let mut total = 0f32;
+        let mut main = Vec::new();
+        let (ts, targets) = sequence_of(net, ex);
+        let (ws, starts) = net.windows_over(&ts);
+        let (trs, avg) = forward_windows(net, &ws, &extra, &net.cfg.gains);
+        for (j, (h, t)) in targets.iter().map(|(h, t)| (*h, t)).enumerate() {
+            let hw = head_weight(net, h, t);
+            if t.generative() {
+                let (mut nats, mut count) = (0f64, 0usize);
+                for (w, tr) in trs.iter().enumerate() {
+                    let (l, _, c) = gen_loss(net, &net.gen_logits(tr), tr.tokens(), starts[w], t);
+                    nats += l as f64 * c as f64;
+                    count += c;
+                }
+                if count > 0 {
+                    total += hw * (nats / count as f64) as f32;
+                }
+                if matches!(t, Target::Next { .. }) {
+                    let mut g = gen_nats[i].lock().unwrap();
+                    g.0 += nats;
+                    g.1 += count;
+                }
+            } else {
+                let (l, _) = head_loss(net.heads[h].spec.kind, &avg[h], t, 0.0).unwrap_or((0.0, vec![]));
+                total += hw * l;
+            }
+            if j == 0 && !t.generative() {
+                main = avg[h].clone();
+            }
+        }
+        *slots[i].lock().unwrap() = Some((total, main));
     });
     let (mut loss, mut wsum) = (0f64, 0f64);
     let nh = net.heads.len();
@@ -479,6 +740,9 @@ pub fn evaluate(clf: &Classifier, data: &[Example], idx: &[usize], pool: &Pool) 
         loss += ex.weight as f64 * l as f64;
         wsum += ex.weight as f64;
         let h = ex.head;
+        if ex.target.generative() {
+            continue;
+        }
         match (net.heads[h].spec.kind, &ex.target) {
             (HeadKind::Single, Target::Class(c)) => {
                 let mut p = logits;
@@ -506,9 +770,14 @@ pub fn evaluate(clf: &Classifier, data: &[Example], idx: &[usize], pool: &Pool) 
             })
         })
         .collect();
+    let (nats, count) = gen_nats
+        .into_iter()
+        .map(|m| m.into_inner().unwrap())
+        .fold((0f64, 0usize), |a, b| (a.0 + b.0, a.1 + b.1));
     Evaluation {
         loss: if wsum > 0.0 { loss / wsum } else { 0.0 },
         heads,
+        bits_per_byte: (count > 0).then(|| nats / count as f64 / std::f64::consts::LN_2),
     }
 }
 
@@ -556,6 +825,9 @@ pub struct TrainOpts {
     /// keep an exponential moving average of the weights with this decay (0: off);
     /// evaluation, early stopping and the result use the average
     pub ema: f32,
+    /// where the forward and backward passes run (the CPU unless asked; see `device`)
+    #[serde(default)]
+    pub device: Device,
 }
 
 impl Default for TrainOpts {
@@ -581,6 +853,7 @@ impl Default for TrainOpts {
             freeze_trunk: false,
             max_steps: 0,
             ema: 0.0,
+            device: Device::Cpu,
         }
     }
 }
@@ -656,12 +929,16 @@ pub struct TrainReport {
 /// checks every example against the classifier's heads
 pub fn check(clf: &Classifier, data: &[Example]) -> Result<(), String> {
     for (i, ex) in data.iter().enumerate() {
-        let h = clf
-            .net
-            .heads
-            .get(ex.head)
-            .ok_or(format!("example {i}: no head {}", ex.head))?;
-        head_loss(h.spec.kind, &vec![0.0; h.width()], &ex.target, 0.0).map_err(|e| format!("example {i}: {e}"))?;
+        for (head, t) in ex.targets() {
+            if t.generative() {
+                if clf.net.generator.is_none() {
+                    return Err(format!("example {i}: the model has no generative head"));
+                }
+                continue;
+            }
+            let h = clf.net.heads.get(head).ok_or(format!("example {i}: no head {head}"))?;
+            head_loss(h.spec.kind, &vec![0.0; h.width()], t, 0.0).map_err(|e| format!("example {i}: {e}"))?;
+        }
         if !ex.extra.is_empty() && ex.extra.len() != clf.net.cfg.extra {
             return Err(format!(
                 "example {i}: {} extra inputs, the classifier takes {}",
@@ -705,7 +982,7 @@ pub fn fit(
     // class counts and balancing weights, per head
     let mut counts: Vec<Vec<f32>> = clf.net.heads.iter().map(|h| vec![0.0; h.width()]).collect();
     for &i in train {
-        if let Some(c) = data[i].target.class() {
+        if let (Some(c), false) = (data[i].target.class(), data[i].target.generative()) {
             counts[data[i].head][c] += 1.0;
         }
     }
@@ -738,6 +1015,7 @@ pub fn fit(
     let train_mask = trainable(&clf.net, o.freeze_trunk);
     let mut adam = Adam::new(&clf.net);
     let bufs = buffers(&clf.net, pool.threads());
+    let mut dev = Trainer::open(o.device, &clf.net)?;
     let mut grad = clf.net.zeros_like();
     let mut report = TrainReport {
         train_examples: train.len(),
@@ -794,7 +1072,19 @@ pub fn fit(
                     how: How::Crop(key(&[o.seed, base_steps + step as u64, i as u64])),
                 })
                 .collect();
-            let (loss, tk) = batch_grad(&clf.net, data, &items, o.label_smoothing, &pool, &bufs, &mut grad);
+            let (loss, tk) = match dev.as_mut() {
+                Some(dv) => {
+                    let crops: Vec<(usize, f32, u64)> = items
+                        .iter()
+                        .map(|it| match it.how {
+                            How::Crop(kk) => (it.ex, it.coef, kk),
+                            How::Whole => unreachable!("training crops"),
+                        })
+                        .collect();
+                    dv.batch(&clf.net, data, &crops, o.label_smoothing, &mut grad)
+                }
+                None => batch_grad(&clf.net, data, &items, o.label_smoothing, &pool, &bufs, &mut grad),
+            };
             tokens += tk as u64;
             let (scale, norm) = clip_scale(&grad, o.clip, &train_mask);
             let lr = lr_at(step, total, warmup, o.lr, o.min_lr);
@@ -934,6 +1224,8 @@ impl Feedback {
             target,
             weight: self.weight,
             extra: self.extra.clone(),
+            raw: Vec::new(),
+            also: Vec::new(),
         })
     }
 }
@@ -1062,6 +1354,75 @@ impl Classifier {
         self.meta.feedback = kept;
         Ok(rep)
     }
+}
+
+/// a few AdamW steps at a flat rate on whole examples: every step takes the first
+/// `fresh` examples and `o.replay` drawn from the rest (keyed by seed and step), the
+/// loss on all windows. What `Classifier::feedback` and generator reinforcement share.
+/// Returns each step's loss.
+pub fn tune(clf: &mut Classifier, data: &[Example], fresh: usize, o: &FeedbackOpts) -> Result<Vec<f64>, String> {
+    check(clf, data)?;
+    let pool = Pool::new(if o.threads == 0 { pool::available() } else { o.threads });
+    if !clf.opt.as_ref().is_some_and(|a| a.fits(&clf.net)) {
+        clf.opt = Some(Adam::new(&clf.net));
+    }
+    let mask = trainable(&clf.net, o.freeze_trunk);
+    let bufs = buffers(&clf.net, pool.threads());
+    let mut grad = clf.net.zeros_like();
+    let adam_o = AdamOpts {
+        b1: 0.9,
+        b2: 0.98,
+        eps: 1e-8,
+        weight_decay: 0.0,
+    };
+    let mut losses = Vec::new();
+    for _ in 0..o.steps {
+        let mut r = Rng::new(key(&[o.seed, 0x7e5e, clf.meta.steps]));
+        let mut pick: Vec<usize> = (0..fresh.min(data.len())).collect();
+        if data.len() > fresh {
+            pick.extend((0..o.replay).map(|_| fresh + r.below(data.len() - fresh)));
+        }
+        let wsum: f32 = pick.iter().map(|&i| data[i].weight).sum();
+        if wsum <= 0.0 {
+            break;
+        }
+        let items: Vec<Item> = pick
+            .iter()
+            .map(|&i| Item {
+                ex: i,
+                coef: data[i].weight / wsum,
+                how: How::Whole,
+            })
+            .collect();
+        let (loss, _) = batch_grad(&clf.net, data, &items, 0.0, &pool, &bufs, &mut grad);
+        let (scale, _) = clip_scale(&grad, o.clip, &mask);
+        let adam = clf.opt.as_mut().expect("set above");
+        adam.step(&mut clf.net, &grad, o.lr, &adam_o, scale, &mask, Some(&pool));
+        clf.meta.steps += 1;
+        losses.push(loss);
+    }
+    Ok(losses)
+}
+
+/// the generative head's negative log-likelihood of `data[from..]` given what comes
+/// before it (in nats, summed), and how many predictions that is (the end included)
+pub fn nll(clf: &Classifier, data: &[u8], from: usize) -> (f64, usize) {
+    let net = &clf.net;
+    let (ts, from) = net.sequence(data, from);
+    let (ws, starts) = net.windows_over(&ts);
+    let extra = vec![0.0; net.cfg.extra];
+    let (mut nats, mut count) = (0f64, 0usize);
+    let mut seen = 0usize;
+    for (w, &st) in ws.iter().zip(&starts) {
+        let tr = net.forward(w, &extra, &clf.gains(), Mode::EVAL, None);
+        // windows overlap: count each predicted byte once, in the first window holding it
+        let t = Target::Next { from: from.max(seen) };
+        let (l, _, c) = gen_loss(net, &net.gen_logits(&tr), &w.tokens, st, &t);
+        nats += l as f64 * c as f64;
+        count += c;
+        seen = st + w.len() - 1;
+    }
+    (nats, count)
 }
 
 #[cfg(test)]

@@ -19,69 +19,125 @@ most 200; past that, calls that would add something answer "your saves fill …"
 reading and deleting still work. A `--local` hub answers only requests addressed to
 `localhost`, an IP address or its `--url` (see [security](security.md)).
 
-A **hit** is `{"key": "0,12", "text": "...", "note": false, "ordinal": 79, "reversed": 83}`.
-A key is a memory's bytes joined by commas, or `note:<key>` for a note.
+A save is an **entry graph** ([format](format.md)): every text, note, list name and tag
+is an entry under a key, and lists, tags and notes-on are edges between entries. The
+desktop app answers the same ops in process with the same code (`anend_core::ops`), so
+both answer alike.
+
+A **key** is an entry's weum label, its key bytes joined by commas (`0,12`); `note:0,12`
+reads as `0,12`. A **hit** is `{"key": "0,12", "text": "...", "note": false, "ordinal":
+79, "reversed": 83}`: a note (an entry of mime `text/markdown`, `# title` and markdown)
+shows as its title. Sums are weum's ordinal and reversed; **atbash is gone** (it grouped
+texts as reversed does), and asking for it answers an error.
 
 | op | args | data |
 |---|---|---|
-| `hello` | | `{save, saves: [name], counts: {notes, memories}}` |
-| `saves.list` | | `[{name, open, notes, memories, size, modified}]` |
+| `hello` | | `{save, saves: [name], counts: {notes, memories}}` (memories: entries that are neither notes nor tags) |
+| `saves.list` | | `[{name, open, notes, memories, size, modified}]` (counts for the open save only) |
 | `saves.open` / `saves.new` | `{name}` | `{save}` |
-| `saves.copy` | `{name, to?}` | `{save}` |
-| `saves.rename` | `{name, to}` | `{save}` |
+| `saves.copy` | `{name, to?}` | `{save}` (through a backup and restore, classifiers copied along) |
+| `saves.rename` | `{name, to}` (the open one too) | `{save}` |
 | `saves.delete` | `{name}` (not the open one) | `null` |
+| `saves.checkpoint` | `{name?}` | `{id, checkpoints}`: a checkpoint of the open save (a redb persistent savepoint; the name defaults to the time). At most 20 a save on a shared hub. A checkpoint keeps the pages it needs, so the file grows until it's deleted |
+| `saves.checkpoints` | | `[{id, name, at}]`, oldest first |
+| `saves.restore_checkpoint` | `{id}` | the checkpoints left: the open save as it was at that checkpoint; what changed since goes, and so do the checkpoints made after it |
+| `saves.delete_checkpoint` | `{id}` | the checkpoints left |
 | `saves.export` | `{name?}` (the open save if left out) | the save as a [bundle](#bundles) |
-| `saves.import` | `{bundle, name?, merge?}`: a new save keeping the bundle's keys (named after it, or `name`, with a number when taken), or with `merge: true` into the open save, where what's new gets fresh keys | `{save, memories, notes, lists}` or `{merged: true, memories, notes, lists}` |
-| `notes.list` | `{q?, tags?, mode?}`: `q` the words the notes must have; `tags` the tags they must have, all of them, or any with `mode: "or"` | `[{key, title, tags, created, modified, edits, preview, words}]`, newest first |
-| `notes.tags` | | `[{tag, count}]`: every tag the notes have and how many have it, the most used first (then by name) |
-| `notes.get` | `{key}` | the note: `{_key, title, markdown, tags, created, edits}` |
-| `notes.save` | `{note, text?}`: `text` is the editor's `# title` + markdown | the stored note (new notes get a key) |
+| `saves.import` | `{bundle, name?, merge?}`: a new save keeping the bundle's keys (named after it, or `name`, with a number when taken); with `merge: true` into the open save: a whole bundle's entries are merged (the same text is one entry; new ones get fresh keys, their lists, tags and notes-on come along), weum rows alone keep their keys | `{save, memories, notes, lists, ...}` or `{merged: true, memories, notes, lists}` (what was new) |
+| `saves.backup` | `{name?}` | the desktop writes `texts.json` and `other.json` into `backups/` and answers `{paths}`; the hub answers `{paths: [], texts, other}` |
+| `saves.import_texts` | `{data, other?, name?}`: weum's `all-of-it.json` or a backup's `texts.json` (`data`, text), with a backup's `other.json` (`other`) a whole save; into a new save `name`, or (texts alone) into the open save | `{save, memories, replaced, skipped, borrowing}` |
+| `notes.list` | `{q?, tags?, mode?, since?, until?}`: `q` words the notes must have; `tags` all of them, or any with `mode: "or"`; created between `since` and `until` (RFC 3339) | `[{key, title, tags, created, modified, edits, preview, words}]`, newest first |
+| `notes.tags` / `tags.all` | | `[{tag, count}]`: every tag and how many entries carry it, the most used first (then by name) |
+| `notes.get` | `{key}` | `{_key, title, markdown, tags, created, edits, modified, source?, rendered?}`: `markdown` as it renders (replacements put in); `source` the note as written when it has replacements; `rendered` the markdown with saved filters' results put in, when it names any |
+| `notes.save` | `{note, text?, on?}`: `text` is the editor's `# title` + markdown; `on` a key the note is about (a note edge) | the stored note (new notes get a key; an edit keeps the old text as a version). `{{key}}` in the text is a replacement (below) |
+| `notes.alternatives` | `{word}` | `{word, ordinal, reversed, alternatives: [{text, key, list, ordinal, reversed, same_ordinal, same_reversed}]}`: the other words of the lists `word` is in (each list's head too), those keeping the ordinal sum first, then the reversed |
 | `notes.delete` | `{key}` | `null` |
-| `mem.measure` | `{text}` | `{ordinal, reversed, atbash, frequency, gsum, pf_ordinal, pf_reversed, triangle, s, r}`; `triangle` is ⌊√(s·r)⌋ |
-| `mem.gsearch` | `{bucket: ordinal\|reversed\|atbash\|frequency, key: number or text}` | `{bucket, hits}` |
+| `notes.on` | `{key}` | `[hit]`: the notes on an entry, oldest first |
+| `tags.add` / `tags.remove` | `{key, tag}` | `null` |
+| `tags.entries` | `{tags, mode?}` | `[hit]` carrying all (or any) of them |
+| `mem.measure` | `{text}` | `{ordinal, reversed, frequency, gsum, pf_ordinal, pf_reversed, triangle, s, r}`; `triangle` is ⌊√(s·r)⌋ |
+| `mem.gsearch` | `{bucket: ordinal\|reversed\|frequency, key: number or text}` | `{bucket, hits}` |
 | `mem.search` | `{q, variations?: true}` | `[hit]` |
-| `mem.saturate` | `{text}` | `{key, new}` |
-| `mem.forget` | `{key}` | `{text}` |
+| `mem.random` | `{q?, limit?: 60, seed?}` | hits: any `limit` texts sharing a word with `q` (any text when it's empty), shuffled by `seed` (a fresh one when left out); weum's random hashmap search |
+| `mem.saturate` | `{text}` | `{key, new}` (the entry with that text, made when there's none) |
+| `mem.forget` | `{key}` (any entry) | `{text}` |
 | `mem.remember` | `{key}` | hit |
+| `mem.put` | `{key, text}` | `null`: edits the entry, or puts a forgotten one back with its edges |
 | `mem.all` | `{limit?: 5000}` | `[hit]` |
+| `mem.buckets` | `{bucket: ordinal\|reversed}` | `{buckets: [{sum, count}]}` |
+| `entries.query` | `{words?, bucket?, from?, to?, since?, until?, tag?, kind?: notes\|memories, limit?: 300}` | `{total, hits}` |
+| `entries.info` | `{key}` | `{key, mime, created, edited, kind, detected, fixed, kinds}`: when it was written and edited (RFC 3339), and its kind: `detected` by its pattern (`core/src/kinds.rs`: link, email, number, date, time, json, hashtag, word, name, phrase, sentence, text), or the one set by hand (`fixed`) |
+| `entries.set_kind` | `{key, kind}` (one of `kinds`; empty goes back to the detected one) | `null`; kept in the save's settings as `kind <key>` |
 | `lists.stats` | | `{lists: [{list, name, members: [hit], count, ordinal_sum, reversed_sum, ordinal_mean, reversed_mean, whole: measure, vector: [26]}], dot: [[cosine]]}` (`dot` is empty past 1000 lists) |
 | `lists.enlist` / `lists.delist` | `{list, member}` (keys) | `null` |
 | `lists.unlist` | `{list}` | `{removed}` |
-| `space.spread` | `{texts: [{id, text}], reversed?}` | `{d, buckets, nodes: [{id, x, y, z, s, r, q, hue}]}` |
+| `space.spread` | `{texts: [{id, text}], reversed?}` | `{d, buckets, nodes: [{id, x, y, z, s, r, q, hue}]}` (the old spiral layout; the app's space no longer uses it) |
+| `space.features` | `{keys: [key]}` (at most 2000) | `{features: [{key, s, r, chars, words, kind, types: {type: n}, created (ms), lists: [list key], frequency}]}`: what the space's free spread weighs texts by; unknown keys are left out |
 | `forge.preview` | `{ingredients: [{save, effect: add\|take away\|keep shared}] (at most 32), filter?}` | `{memories, notes, lists, sample, titles}` |
 | `forge.make` | the same and `{name}` | `{save, memories, notes, lists}` |
 | `forge.pour` | the same | what went into the open save |
-| `stats` | | `{notes, words, saves, memories, tags: [[tag, n]], first, latest}` |
+| `settings.get` / `settings.set` | `{name}` / `{name, value}` | `{value}` / `null` |
+| `stats` | | `{notes, words, saves, memories, tags: [[tag, n]], first, latest, entries, by_mime, edges, versions, body_bytes, borrowing}` |
 
-The forge's `filter` takes `{words, ordinal_from, ordinal_to, reversed_from, reversed_to, memories, notes, lists}`.
+The forge's `filter` takes `{words, ordinal_from, ordinal_to, reversed_from,
+reversed_to, memories, notes, lists}`. In the forge an entry is its mime and rendered
+text: `add` joins saves (the same text once), `take away` drops what another save has,
+`keep shared` keeps only what it has too; list pairs follow the same rules, tags come
+with the entries carrying them.
 
 A spread node goes into the world in front of a camera at the origin, looking down
 -z, as `(x·k, y·k, -(d + z))` with `k = (d + z) / d`.
+
+### Replacements
+
+- **`{{key}}`** in a note (a weum key such as `{{0,12}}`, of an entry other than the note)
+  is kept as a live reference (the graph's transclusion, `codec::Seg::Ref`): the note
+  shows that entry's text as it is now, and that entry may hold replacements of its own
+  (recursive; one that comes back to itself is an error, shown as the note failing to
+  render). Anything else between double braces stays as written.
+- **Sums**: a note is indexed by what it renders, so writing `{{key}}` where that entry's
+  text stood leaves its sums as they were; when a referenced entry changes, the notes
+  that refer to it directly are indexed again (their sums and words follow).
+- **`{{filter:name}}`** names a saved filter of the filters view (the save's `filters`
+  setting): a materialized view whose results (at most 50, as a markdown list) are put
+  in when the note is read (`notes.get`'s `rendered`); the stored note keeps the name.
+- **Synonym and register lists**: any list of the save is a set of words that may stand
+  for each other; `notes.alternatives` answers a word's, and the editor offers them in a
+  dropdown (the lists view manages the lists).
 
 ## Classifiers
 
 A save's classifiers (`core/src/classifiers.rs`; the engine is `core/src/classify/`):
 each is trained on lists, one class per list, the members' texts as examples (a note
-reads as its title and markdown). `name` picks the classifier in every call. A `class` is
+reads as its title and markdown). They keep their own tables in a file beside the save (`<name>.models`), reading the graph's lists and texts. `name` picks the classifier in every call. A `class` is
 a class name or its index. A text to judge is given as `key` (a memory or note) or
-`text`. Without a hub, the web app answers these with "classifiers need a hub for now".
+`text`. One implementation answers them on the desktop and the hub alike
+(`core/src/ops/classify.rs`, through `ops::Saves::with_models`); the hub adds only its
+quotas and job limits (two trainings or indexings at once per member, two hours each).
 
 | op | args | data |
 |---|---|---|
-| `classify.list` | | `[summary]`: `{name, classes, lists, not, head, preset, inputs, trained, version, accuracy, macro_f1, examples, outputs, modified, training}` |
-| `classify.create` | `{name, classes: [list keys], not?: list key, preset?: tiny\|compact\|small\|base (compact), head?: single\|multi, inputs?: [name or {from, coupling}]}` | details (below) |
+| `classify.list` | | `[summary]`: `{name, classes, lists, not, head, preset, gematria, inputs, trained, version, accuracy, macro_f1, examples, outputs, modified, training}` |
+| `classify.create` | `{name, classes: [list keys], not?: list key, preset?: tiny\|compact\|small\|base (compact), head?: single\|multi, inputs?: [name or {from, coupling}], gematria?: false}` (`gematria: true` adds the letter-value, word-sum and side-vector input channels; off by default, and classifiers made before it was optional keep theirs on) | details (below) |
 | `classify.get` | `{name}` | details: the summary and `{steer, history, train, created, feedback_count, feedback: [latest 50], size: {weights, d_model, layers, blocks, max_len, steps, growth}, job}` |
 | `classify.delete` | `{name}` (not while it trains, nor while another builds on it) | `null` |
 | `classify.couple` | `{name, from, coupling}` (0 to 10; 0 keeps end-to-end feedback out of `from`) | summary |
 | `classify.train` | `{name, epochs?, lr?, batch?, max_steps?, threads?, rounds?, fresh?, wait?}` | the job: `{name, state: running\|done\|failed\|cancelled, round, rounds, epoch, step, steps, loss, lr, tokens_per_sec, losses: [[step, loss]], evals: [{step, round, loss, accuracy, macro_f1}], seconds, examples, error?, summary?}` |
 | `classify.job` | `{name}` | the job, or `{name, state: "idle"}` |
 | `classify.cancel` | `{name}` | the job (it ends `cancelled`, writing nothing) |
-| `classify.predict` | `{name, texts?: [text], keys?: [key]}` | `{classes, trained, results: [{key, text, probs, top, class, members}]}` |
-| `classify.search` | `{name, class, q?, limit?: 50}` | `{classes, class, stack: [names], trained, scanned, results: [{key, text, note, prob, top, top_class, member}]}`, most likely first |
+| `classify.predict` | `{name, texts?: [text], keys?: [key]}` | `{classes, trained, results: [{key, text, probs, top, class, members}], device}` |
+| `classify.search` | `{name, class, q?, limit?: 50}` | `{classes, class, stack: [names], trained, scanned, results: [{key, text, note, prob, top, top_class, member}], device}`, most likely first |
+| `classify.starters` | | `[{id, title, about, classes, source: rules\|bundled\|fetched, licence, gematria, fetched?, urls?}]` |
+| `classify.starter` | `{id, name?: its title, preset?, per_class?: 400 (rule starters), train?: true, epochs?, wait?}` | `{classifier: details, job, texts}`: its training texts written as lists (one per class, headed `<title>: <class>`), a classifier made on them, and its training started |
+| `classify.starter_fetch` | `{id}` (a fetched starter) | the starter, with `got`: books fetched now (the desktop and a hub; not in a browser on its own) |
+| `classify.starter_score` | `{name}` (a classifier made from a starter, trained) | `{name, starter, title, texts, right, accuracy, classes: [{class, texts, right}], seconds, device}` on the starter's held-out texts |
+| `classify.device` | `{device?: auto\|cpu\|gpu\|gpu_fast}` (sets it; refused on a shared hub) | `{device, reading, choices}`: where classifiers read texts in this process |
+| `gpu.report` | `{texts?: 10000, steps?: 40, sizes?: ["compact", "small"], budget?: 120}` (not on a shared hub) | the GPU report (below) |
 | `classify.contributions` | `{name, key or text, class?}` (the top class if left out) | `{class, text, results: [{name, share, input_share, grad_norm, classes, probs, top, top_class, judged}]}` |
 | `classify.steer` | `{name, steer: {bias?: [..] or {class: value}, temperature?, threshold?, gains?: {letter, word, side, extra}, reset?}, save?: true}` | `{steer, classes, saved, bias: {texts, mean_kl, max_kl, flipped, shift, prior, prior_skew, imbalance}}` (`bias` null until trained) |
 | `classify.feedback` | `{name, key or text, class, yes, weight?: 1}` | `{entry: {classifier, key, text, class, yes, weight, time, stack, before, after}}` |
 | `classify.feedback_stack` | the same | `{entry, report: {before, after, grad_norms, losses}, touched: [names]}` |
+| `classify.unfeedback` | `{name}` | `{entry, left}`: takes back the latest yes/no on `name` (one or through its stack): the classifiers it wrote get their weights back exactly, and the entry leaves the feedback log; the last 20 can be taken back, until the next training |
 | `classify.enlist` | `{name, class, threshold?}` (the steered threshold if left out) | `{list, name, members}` |
 | `classify.represent` | `{name, key or text}` | `{vector}` |
 | `classify.similar` | `{name, key or text, limit?: 20}` | `{text, results: [{key, text, note, cosine}]}` |
@@ -114,6 +170,53 @@ a class name or its index. A text to judge is given as `key` (a memory or note) 
   class as a list headed by the memory `"<classifier>: <class>"` (replacing what that list
   held), which other classifiers can be trained on.
 - Search, enlist and similar look through up to 20 000 memories and notes.
+- **Where texts are read** (predict, search, indexing, buckets, tints, filters by a
+  classifier): `classify.device` picks it for the process; the app sends its setting at
+  start. `auto` (the default) reads on the GPU in exact precision when there is a GPU
+  that isn't a software renderer and the exactness probe finds it bit-exact on every
+  kernel, so the results are the CPU's; else on the CPU. `gpu` and `gpu_fast` use the
+  GPU whatever the probe found (`gpu_fast` with plain operators, within a small
+  difference). On the GPU, every text's windows are packed into a few submissions
+  (`GpuNet::text_runs`), and the nets stay uploaded between calls. `device` in a result
+  is the `reading`: `{choice, device, exact, gpu?, note?}`, where `note` says why it reads
+  somewhere other than asked (no GPU, a net too large for it, a shared hub without
+  `--gpu`) or why `auto` chose the CPU. Rows kept in the buckets from a reading that
+  isn't exact are kept apart from the CPU's (the stamp differs), so switching devices
+  reads them again.
+- **Starters** (`core/src/starters.rs`) are labelled texts whose classes are known for
+  certain, so a classifier's accuracy on them is checked by a machine. Made by rules:
+  even or odd numbers; even or odd ordinal gematria sums of single words from the lexicon
+  (with the gematria inputs); runs of common English or Afrikaans words; two to five
+  common English words as they are or garbled (about every other letter replaced) into
+  non-words; whole corpus
+  sentences or their
+  first words; phrases naming fruit, stones or animals. Each rule starter has 400
+  training texts (`per_class`) and 100 held-out texts a class, made with separate seeds (and, for the
+  corpus, from separate lines); a held-out text that came out the same as a training text
+  is replaced. Where the class can be read back from the text alone, the tests check every
+  generated text against the rule (`starters::check`). Public domain: the six authors
+  bundled in `core/corpus/authors` (regions 0–7 of each to train, 8–9 held out), and four
+  Project Gutenberg books in English, German, French and Dutch, fetched when asked into
+  the saves folder's `starters/` and refused unless the book's own `Language:` line says
+  the language its class expects (every fifth paragraph held out). Each starter's
+  `licence` says where its texts come from and on what terms. Held-out accuracy with the
+  compact preset and the starters' training defaults, measured 20 Oct in a release build
+  on 4 cores (`cargo run --release -p anend-core --example starters compact 40 400 10`):
+  even or odd 100%, even or odd sum 97%, English or not 95.5%, spelled right or not 90.5%,
+  sentence or fragment 96%, fruit, stones and animals 94.7%, who wrote it 72.9% (96
+  passages); the language starter wasn't measured (its books couldn't be fetched here).
+  Starters train longer than a hand-made classifier (at least 40 epochs, patience 10): with
+  the shorter defaults several stayed near chance.
+- **`gpu.report`** measures this machine (`core/src/classify/report.rs`): the build, the
+  CPU's threads and kernels, the adapter (name, vendor, device, type, backend, driver,
+  driver info), its limits, the exactness probe of every kernel in both precisions, what
+  `auto` chooses, and per preset a fixed training run (`steps` steps of batch 8 on 64
+  generated two-class texts) on the CPU, the GPU and the GPU fast, with whether the GPU's
+  weights equal the CPU's bit for bit, then predicting `texts` generated texts on each in
+  chunks of 500, stopping after `budget` seconds a device (a software renderer would take
+  hours), with texts per second and how many results differ from the CPU's. The settings' GPU
+  section writes it to a file (the data folder's `exports` on the desktop, a download on
+  the web).
 
 In a [bundle](#bundles), `classifiers` carries each classifier as `{definition, weights?,
 feedback?}`, the weights base64 (the `ANENDCLS` file). It is left out when there are none,
@@ -130,12 +233,12 @@ probability band (0 for 0–10 % … 9 for 90–100 %).
 
 | op | args | data |
 |---|---|---|
-| `classify.index` | `{name, keys?, wait?}` (every memory and note if no keys) | the job `{name, state: running\|done\|failed\|cancelled, done, total, report?: {total, computed, cached, stopped, seconds}, error?}` |
+| `classify.index` | `{name, keys?, wait?}` (every memory and note if no keys) | the job `{name, state: running\|done\|failed\|cancelled, done, total, report?: {total, computed, cached, stopped, seconds}, device?, error?}` |
 | `classify.index_job` / `classify.index_cancel` | `{name}` | the job (or `{state: "idle"}`) |
 | `classify.buckets` | `{name}` | `{name, classes, indexed, palette: [hex], buckets: [{class, index, bands: [10 counts], count}]}` (the last is `uncertain`) |
 | `classify.bucket` | `{name, class (name, index or "uncertain") or key or text, band?, min?, limit?: 500}` | `{class, count, stale, indexed, hits: [hit + prob]}`, surest first |
 | `classify.near` | `{name, key or text, by?: embedding\|outputs, limit?: 20}` | `{text, indexed, row, results: [{key, text, note, cosine}]}` among the indexed texts |
-| `classify.tints` | `{name, keys}` (≤ 5000) | `{classes, palette, tints: [{key, class (null: uncertain), strength}]}` |
+| `classify.tints` | `{name, keys}` (≤ 5000) | `{classes, palette, tints: [{key, class (null: uncertain), strength}], device}` |
 | `classify.indexed` | `{key}` | `{key, chosen, verdicts: [{name, classes, probs, top, class, members, confidence, valid, checked, validators: [[by, p]], palette}], classifiers: [{name, trained, chosen}]}` |
 | `classify.set_index` | `{key, names}` | `{chosen}` |
 | `classify.validators` | `{name, set?: [{by, class, min?: 0.5, mode?: gate\|weigh}]}` | `{validators}` |
@@ -151,10 +254,192 @@ probability band (0 for 0–10 % … 9 for 90–100 %).
 
 A filter expression is JSON with `op`: `and`/`or` `{of: [..]}`, `not` `{of}`, `class`
 `{classifier, class, min?, max?, top?}` (min defaults to the steered threshold; the
-classifier's validators apply), `words` `{q}`, `sum` `{bucket: ordinal|reversed|atbash,
+classifier's validators apply), `words` `{q}`, `sum` `{bucket: ordinal|reversed,
 from?, to?}`, `list` `{list}`, `tags` `{tags, any?}`, `kind` `{kind: memories|notes}`,
 `preset` `{name}`. A validator in `gate` mode zeroes a classifier's probabilities on
 texts it doesn't pass; in `weigh` mode multiplies them by its own.
+
+## Spec models
+
+Models made from a declarative spec ([models](models.md)): JSON saying what a model
+reads, how big its trunk is, its heads (classify, multi, regress, generate), the data it
+learns from (queries over the save's lists and tags, or inline), and, for a generator,
+the critics that judge what it writes. Each one's definition (its spec's JSON, created,
+modified, its trainings) lives in the save itself (table `graph spec models`), so it goes
+along wherever the save file goes: copies, renames, backups, bundles, the hub's share and
+take, and merges. The trained weights (megabytes; hundreds of them for a pretrained
+model) stay in the save's models file (`<name>.models`, beside its classifiers), which is
+copied, renamed, deleted and bundled with it; weights that no longer fit their
+definition's shape are unused, and the model answers as untrained. A save from before
+this keeps its definitions in the models file; opening it moves them into the save
+(nothing is lost). One implementation answers them on the desktop and the hub
+(`core/src/ops/models.rs`). `name` picks the model; a spec's `name` is its model's name
+(no classifier of the save may have it, since critics find models by name).
+
+| op | args | data |
+|---|---|---|
+| `models.list` | | `[summary]`: `{name, trained, version, created, modified, input: text\|bytes\|image\|numbers, heads: [{name, kind, classes}], generates, critics: [model names], pretrained, device, loss, accuracy, macro_f1, bits_per_byte, steps, training}` (the metrics from the latest training) |
+| `models.get` | `{name}` | the summary and `{source, history: [training], job}`; `source` is the spec as written |
+| `models.check` | `{spec}` (an object, or its JSON text) | `{ok: true, name}` or `{ok: false, path, message}`: what `models.create` would say, without storing |
+| `models.create` | `{spec}` | details; a spec that doesn't pass answers an error naming where: `model spec "x" at heads[0].classes: head "a": classify needs at least two classes` |
+| `models.update` | `{name, spec}` (not while it trains; a new `name` in the spec renames it) | details and `weights_kept`: edits to the data, critics, constraints, sampling, training options or device keep the trained weights; a change to the input, trunk, heads, `from` or `seed` drops them |
+| `models.delete` | `{name}` (not while it trains) | `null` |
+| `models.train` | `{name, epochs?, max_steps?, fresh?, wait?}` | the job: `{name, state: running\|done\|failed\|cancelled, epoch, step, steps, loss, lr, tokens_per_sec, losses: [[step, loss]], evals: [{step, loss, accuracy, macro_f1, bits_per_byte?}], seconds, examples, error?, model?: summary}` |
+| `models.job` / `models.cancel` | `{name}` | the job (or `{name, state: "idle"}`); a cancelled run writes nothing |
+| `models.run` | `{name, text or input, temperature?, top_k?, top_p?, max_len?, seed?}` | `{name, trained, seconds, outputs: {head: answer}}`; an answer is `{kind: "classes", probs: {class: p}, top, members}`, `{kind: "values", values: {name: v}}` or `{kind: "generated", text}` (what a generate head writes after the input; `bytes`, `numbers` or `image: {width, height, png}` for other inputs) |
+| `models.generate` | `{name, prompt?, candidates?: 8, temperature?, top_k?, top_p?, max_len?, seed?, guided?: false}` | `{name, trained, seed, seconds, critics: [{model, head, want, weight}], candidates: [{text, index, score, scores: [per critic, 0 to 1], logp, kept, broken: [rules]}]}`: kept candidates first, best score first |
+| `models.pretrained` | | `{any, folders}`: whether any folder may be named (one's own machine), or the folders a shared hub offers |
+
+- `input` is a value of the model's input type: `{"text": ".."}`, `{"numbers": [..]}`,
+  `{"bytes": [..]}`, `{"picture": id}` (a picture of the save, scaled to the model's
+  size); `text` is short for the first. `prompt` is text for the generator
+  to continue (empty: from nothing).
+- **Data** comes from the save when training starts: a `list` query names a list by its
+  name (the text of its head entry) or its key; `tagged` an entry tag; `pairs` two lists
+  side by side; each member's text (a note: its title and markdown) is one example. For a
+  `numbers` input a member's text is the numbers, separated by spaces or commas. A
+  picture model's data is the save's [pictures](#pictures) (`pictures`, a list of them
+  or all), or inline.
+- **Training** runs as the classifiers' does: on a thread of its own, continuing from the
+  trained weights unless `fresh`, written when it finishes unless the spec changed
+  meanwhile. `epochs` and `max_steps` override the spec's `train` for this run. On a
+  shared hub it counts toward the member's two trainings and indexings at once, stops
+  after two hours, and its `threads` are at most the hub's cores.
+- **Critics** are other spec models of the save, or its trained classifiers (a
+  classifier's head is its own name). They judge the prompt and what was written
+  together (a `pairs` model: what was written). The same seed gives the same candidates; `guided`
+  steers each byte toward what the critics want (slower).
+- **Untrained**, a model answers with its starting weights: random for a new trunk, the
+  checkpoint's for a pretrained one (`"from": {"pretrained": dir}`), so a pretrained
+  generator writes before any tuning.
+- **On a shared hub** (not `--local`), a pretrained folder must be one under a folder the
+  hub was started with (`--pretrained DIR`, repeatable), named relative to it
+  (`models.pretrained` lists them); without any the hub loads none. A trunk may have
+  about 40 M weights at most, `"device"` must be the CPU, a call writes at most 2000 bytes
+  and draws at most 32 candidates. On one's own machine (the desktop, `--local`) any
+  folder and device work.
+- `trained` is true when the model has trained and its weights fit its spec.
+- In a [bundle](#bundles), `models` carries each as `{record, weights?}` (the record is
+  `{name, source, created, modified, version, history}`, the weights the model file in
+  base64); the records are in its `other.specs` too.
+- **Merging** a save into the open one (`saves.import` with `merge`, `POST
+  /app/hub/{id}?merge=1`) brings its spec models in untrained: one with a name the open
+  save has already is the same model when its spec is the same JSON (nothing changes),
+  and otherwise comes in beside it as `<name> 2` (3, ...; its spec's `name` too), so the
+  open save's own models, and the critics that name them, answer as before. The merge's
+  answer counts them in `models` (and pictures in `pictures`).
+
+## Pictures
+
+Pictures live in the save itself (tables `graph pictures`, `graph picture bytes`,
+`graph picture lists`; [format](format.md#other-tables)), so they go wherever the save
+goes: copies, renames, backups (`other.json`'s `pictures`, the bytes in base64), bundles,
+the hub's share and take, and merges (a picture is known by the hash of its bytes, so
+the same picture in both saves stays one, and its lists are joined). A picture is a PNG
+or JPEG, decoded when it comes in so only ones that read are kept. Its `id` is a 128-bit
+FNV-1a hash of its bytes (32 hex digits). Lists hold pictures by name: the pictures of
+list `"cats"` sit beside the texts of the list whose head is `cats` (or on their own).
+Spec models train on them ([models](models.md): `{"from": "pictures", "list": "cats",
+"head": .., "class": ..}`) and read one by id (`models.run` with `input: {picture: id}`).
+One implementation answers them on the desktop and the hub (`core/src/ops/pictures.rs`).
+
+A picture's details: `{id, mime: "image/png"|"image/jpeg", width, height, name, added (ms
+since the Unix epoch), size (bytes), lists: [names]}`.
+
+| op | args | data |
+|---|---|---|
+| `pictures.add` | `{data (base64, or a data: URL) or path (one's own machine only), name?, list?, thumb?}` | the details and `new` (false when the save had those bytes already: nothing changes) and, with `thumb`, a thumbnail; `name` defaults to the file's name for a path; `list` puts it into that list |
+| `pictures.list` | `{list?, thumb?}` | `[details]`, oldest first: the save's pictures or a list's; `thumb` (16 to 512) adds each one's thumbnail, a PNG in base64 fitting `thumb` × `thumb` |
+| `pictures.lists` | | `[{list, count}]`: the lists that hold pictures |
+| `pictures.get` | `{id, thumb?}` | the details and `data`, the file in base64, or with `thumb` only the thumbnail |
+| `pictures.name` | `{id, name}` | the details |
+| `pictures.tag` | `{id, list, remove?: false}` | `{id, lists, changed}`: the picture put into a list, or with `remove` taken out |
+| `pictures.delete` | `{id}` | `null`; it leaves its lists too |
+
+- **Limits**: on a shared hub (not `--local`) a picture is at most 4 MB and 8192 pixels a
+  side, a save holds at most 2000 of them, they come as data (not paths), and they count
+  in the member's quota (they're in the save's file); `pictures.add` and `pictures.tag`
+  need room under it, the rest work when it's full. On one's own machine a picture is at
+  most 64 MB and 32768 pixels a side, with no count limit.
+
+## Scenes
+
+A save holds many scenes (`graph::scenes`; the design and the packed format are in
+docs/format.md). The room is the space's own scene and holds its blocks; the others are
+the saved scenes the space's scenes window lists, opens (`#name`), renames and deletes.
+A saved scene's texts come and go in the rows the space keeps,
+`[text, x, y, z, {key?, size?}]`: `key` is the entry's label (`note:<label>` for a note)
+and `size` the text's size in space units (kept as a font size in steps of 1/50; none for
+the default). A row without a key is saved as a memory entry first, so a scene's texts
+are always entries. Saves made before scenes kept saved scenes in the setting
+`space.maps`; they become scenes when the save opens (or a backup holding them is
+restored), and the old JSON stays as the setting `space.maps (before scenes)`.
+
+| op | args | data |
+|---|---|---|
+| `scenes.list` | | `[{id, name, parent, room, texts, blocks, created, edited}]` |
+| `scenes.maps` | | `{name: rows}`, every saved scene (not the room) |
+| `scenes.get` | `{name}` | `{id, name, rows}` |
+| `scenes.save` | `{name, rows}` | `{id, name, texts}`: the scene so named (made when there's none) holds these texts and no others |
+| `scenes.rename` | `{from, to}` | `{id, name}` |
+| `scenes.delete` | `{name}` | `{name, rows}`: what it held, for `scenes.save` to put back (an undo) |
+
+Merging a save brings each saved scene in whole, as `<name> 2` (or 3, ...) when the
+target has one so named; overlapping placements aren't settled by physics yet.
+
+## Blocks (spatial saves)
+
+Blocks placed in the space: placements of kind `block` in the room, the space's own
+scene (`graph::scenes`, docs/format.md). They travel with the file, its backups (the
+`scenes` and `instances` of the backup's other file; a backup made before scenes has
+`blocks`, which go into the room numbered afresh) and merges (a text block finds its text
+in the target by what it says, a picture block its picture by hash). A block shows a
+**texture**: a text of the save (`kind: "text"`, `texture` its key: the entry label, a
+note's `note:` prefix taken off), a picture (`"picture"`, its 32-hex-digit id) or a plain
+colour (`"plain"`, `#rrggbb`). A block's `id` is its address in the room,
+`<kind>:<texture>#<n>` (`text:3,14#2`): the n-th block showing that texture. The texture
+is stored once and each block is one packed placement (its position and its sides as the
+scale). Saves made before scenes kept blocks in `graph blocks` and `graph block ids`; they
+move into the room when the save opens, each texture's blocks numbered in the order they
+were made. One implementation answers them on the desktop and the hub
+(`core/src/ops/blocks.rs`, `core/src/graph/blocks.rs`).
+
+A block: `{id, kind, texture, x, y, z, w, h, d}`, its centre and its sides in space units.
+Sides are kept between 0.05 and 10000, places within 10⁶ of the origin. The texture tiles
+at one tile per unit, so a bigger block shows more tiles rather than a stretched one (the
+app sets each face's UVs from its size, with repeat wrapping). The answers that list
+blocks are `{blocks: [block], textures: {"kind:texture": about}}`, where `about` is
+`{text}` for a text (sent once however many blocks show it), `{name, width, height}` for
+a picture, `{colour}` for a colour, and `{gone: true}` when what it showed was deleted.
+
+| op | args | data |
+|---|---|---|
+| `blocks.list` | `{lo?, hi?, kind?, texture?}` | the blocks, by texture and number; `lo` and `hi` (`[x, y, z]` each) keep those whose boxes meet that region |
+| `blocks.stats` | | `{blocks, textures}` |
+| `blocks.add` | `{kind, texture, x?, y?, z?, w?, h?, d?}` or `{blocks: [..]}` | the new blocks and `ids` (place 0, sides 1 unless given) |
+| `blocks.move` | `{id, x?, y?, z?, by?}` | the block, moved (to x y z, or `by` `[dx, dy, dz]`); its size stays |
+| `blocks.scale` | `{id, w?, h?, d?}` | the block, resized; its place stays |
+| `blocks.set` | `{id, x?..d?, by?}` or `{changes: [..]}` | the blocks, each field given replaced |
+| `blocks.duplicate` | `{id or ids, by?: [1, 0, 0]}` | the copies (same texture, the next numbers) and `ids` |
+| `blocks.delete` | `{id or ids}` | `{removed: [block]}`: what was taken, to hand back to `blocks.restore` |
+| `blocks.restore` | `{blocks}` | `{restored}`: blocks put back with their ids (an undo); taken ids and missing textures are skipped |
+
+- **Limits**: at most 5000 blocks a call; on a shared hub a save holds at most 50 000.
+  `blocks.list`, `blocks.stats` and `blocks.delete` work when a member's quota is full.
+
+## Spelling and word choice
+
+A proof of concept of the classifiers (`core/src/grammar`): a detector finds words that
+are probably errors (misspellings, repeated words, a confusable word where another of its
+set fits better: their/there/they're, its/it's, then/than, ...), and a suggester ranks
+replacements. Both are small logistic regressions trained, the first time they're asked
+for, on deterministic corruptions of `core/src/grammar/corpus.txt`; a fifth of it is held
+out to measure them (`report`). Words the save holds elsewhere are never errors.
+
+| op | args | data |
+|---|---|---|
+| `grammar.check` | `{text, threshold?: 0.5, exclude?}` | `{flags: [{start, end (bytes), from, to (UTF-16 units), word, p, kind: "spelling"\|"repeated"\|"confused", suggestions: [{text, p}]}], report}`; an empty suggestion takes the word out with the space before it; `exclude` is the key of the note being checked, whose own words don't count as the save's |
+| `grammar.report` | | `{train_sentences, test_sentences, precision, recall, f1, errors, flagged, caught, top1, top3, false_alarms_per_1000, threshold, by_kind: [[kind, caught, errors]]}` |
 
 ## Saves in and out
 
@@ -177,26 +462,15 @@ hub's own pages (`Origin` must match), answers in the usual envelope.
 
 ## Bundles
 
-A save as plain JSON, keys and all (`core/src/bundle.rs`). The web app keeps one in the
-browser's IndexedDB when it runs without a hub, and moves saves between the browser and a
-workspace with `saves.export` and `saves.import`; a bundle is also a file you can keep.
+A save as plain JSON: its [backup](format.md#backup) in one document,
+`{"anend": 2, "name", "memories": texts.json's rows, "other": other.json}`, plus
+`classifiers` (`{definition, weights?, feedback?}` each, the weights base64) and `models`
+(spec models, `{record, weights?}` each) when it has any. Importing it restores the save
+keys and all; merging it leaves the classifiers out and brings the spec models (untrained)
+and pictures in as described under [spec models](#spec-models).
+A bundle of weum rows alone (`{"memories": [[text, [key bytes]], ...]}`) imports as weum's
+`all-of-it.json` does. Old bundles (`anend: 1` with notes as records) aren't read.
 
-The app decides once, as it loads: it posts `api/hello` beside its page, and a JSON
-envelope back means a hub served it, so every call goes to the hub and IndexedDB is never
-opened. Anything else (a static server's 404 or 501, no server at all, or `?offline` in
-the address) and it runs offline: `hub/web/local` answers the same calls in the page,
-the way app.rs does, and keeps each save in IndexedDB as a bundle and the key allocator's
-state, written after every call that changes something. A hub that drops out later is
-still the hub; the app reconnects. `node hub/web/test/parity.mjs` holds the two to the
-same answers.
-
-```json
-{ "anend": 1, "name": "notes",
-  "notes": [{ "_key": "1000000", "title": "a note", "markdown": "body", "tags": [], "created": "2026-10-13T09:00:00Z", "edits": [] }],
-  "memories": [["listen", [0]], ["silent", [1]]],
-  "lists": [["0", "1"], ["0", "note:1000000"]],
-  "settings": { "space map: home": "7b2278223a317d" } }
-```
-
-`memories` are weum's `[text, key bytes]` (1 to 4 bytes); `lists` are `[list, member]`
-labels (a memory's key bytes comma separated, or `note:<key>`); `settings` values are hex.
+The old JavaScript web app and its offline engine are retired: the web app is the Dioxus
+app's web build (`app/`), served at `/app/`. Running without a hub comes with the Rust
+core compiled to WebAssembly ([next](next.md)).

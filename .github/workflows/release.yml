@@ -1,6 +1,6 @@
 name: release
 
-# Push a tag like v0.2.0 to build the app and the hub for Linux and Windows and
+# Push a tag like v0.2.0 to build the desktop app (anend-app) and the hub for Linux and Windows and
 # attach them to a GitHub release of that name. "Run workflow" on the Actions tab
 # builds them too, as downloadable artifacts, without making a release.
 on:
@@ -33,11 +33,18 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev libfontconfig1-dev
+          sudo apt-get install -y --no-install-recommends pkg-config libwebkit2gtk-4.1-dev libxdo-dev
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - name: build the app and the hub
-        run: cargo build --release --locked --workspace
+      - name: the web app (built into the hub)
+        shell: bash
+        run: |
+          cargo install --locked wasm-bindgen-cli --version 0.2.129
+          sh app/web/build.sh
+      - name: build the desktop app and the hub
+        run: cargo build --release --locked -p anend-app -p anend-hub
 
       - name: package
         shell: bash
@@ -45,7 +52,7 @@ jobs:
           dir=anend-${{ github.ref_name }}-${{ matrix.name }}
           dir=${dir//\//-}
           mkdir "$dir"
-          cp target/release/anend${{ matrix.exe }} target/release/anend-hub${{ matrix.exe }} README.md LICENSE "$dir"/
+          cp target/release/anend-app${{ matrix.exe }} target/release/anend-hub${{ matrix.exe }} README.md LICENSE "$dir"/
           if [ "$RUNNER_OS" = "Windows" ]; then
             7z a "$dir.zip" "$dir" >/dev/null
             echo "ASSET=$dir.zip" >> "$GITHUB_ENV"

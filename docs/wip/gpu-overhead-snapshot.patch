@@ -1,0 +1,707 @@
+diff --git a/core/examples/gpu_profile.rs b/core/examples/gpu_profile.rs
+new file mode 100644
+index 0000000..8080cb6
+--- /dev/null
++++ b/core/examples/gpu_profile.rs
+@@ -0,0 +1,110 @@
++//! Where the time goes when classifiers read texts on the GPU: per text, the dispatches,
++//! submissions, bind groups and buffers, and the time split between preparing (the CPU
++//! side: embedding, windows, recording), encoding and submitting, waiting for the device,
++//! and reading results back, next to the CPU reading the same texts.
++//!
++//! ```text
++//! cargo run --release -p anend-core --features gpu --example gpu_profile [preset] [texts] [bytes each, 0: 20 to 400]
++//! ```
++
++use std::time::Instant;
++
++use anend_core::classifiers::preset;
++use anend_core::classify::device::{Device, Runner};
++use anend_core::classify::gpu::PROFILE;
++use anend_core::classify::{Classifier, HeadSpec, Pool, pool};
++
++fn text(i: usize, fixed: usize) -> String {
++    const W: [&str; 8] = ["river", "stone", "copper", "gear", "heron", "valve", "moss", "lamp"];
++    let mut h = (i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
++    let len = if fixed > 0 { fixed } else { 20 + (h % 380) as usize };
++    let mut s = String::new();
++    while s.len() < len {
++        h ^= h << 13;
++        h ^= h >> 7;
++        h ^= h << 17;
++        s.push_str(W[(h % 8) as usize]);
++        s.push(' ');
++    }
++    s
++}
++
++fn main() {
++    let args: Vec<String> = std::env::args().collect();
++    let size = args.get(1).map(String::as_str).unwrap_or("compact");
++    let n: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(500);
++    let clf = Classifier::new(preset(size).unwrap(), &[HeadSpec::single("p", &["a", "b"])], 3).unwrap();
++    let fixed: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
++    let texts: Vec<String> = (0..n)
++        .map(|i| {
++            let mut t = text(i, fixed);
++            if fixed > 0 {
++                t.truncate(fixed);
++            }
++            t
++        })
++        .collect();
++    let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
++    let p = Pool::new(pool::available());
++    let t = Instant::now();
++    let cpu = clf.predict_many(&refs, &[], &p);
++    let cpu_s = t.elapsed().as_secs_f64();
++    println!("{size}, {n} texts; CPU: {:.0} texts/s", n as f64 / cpu_s);
++    for dev in [Device::Gpu, Device::GpuFast] {
++        let r = match Runner::open(dev, &clf.net) {
++            Ok(Some(r)) => r,
++            Ok(None) | Err(_) => {
++                println!("no GPU");
++                return;
++            }
++        };
++        // a warm-up pass compiles the pipelines
++        let warm: Vec<&[u8]> = refs.iter().take(8).map(|t| t.as_bytes()).collect();
++        let zero = vec![0f32; clf.net.cfg.extra];
++        let ex: Vec<&[f32]> = warm.iter().map(|_| zero.as_slice()).collect();
++        r.text_runs(&clf.net, &warm, &ex, &clf.gains());
++        PROFILE.take();
++        let bytes: Vec<&[u8]> = refs.iter().map(|t| t.as_bytes()).collect();
++        let ex: Vec<&[f32]> = bytes.iter().map(|_| zero.as_slice()).collect();
++        let t = Instant::now();
++        let out = r.text_runs(&clf.net, &bytes, &ex, &clf.gains());
++        let s = t.elapsed().as_secs_f64();
++        let prof = PROFILE.take();
++        let same = out
++            .iter()
++            .zip(&cpu)
++            .filter(|((l, _), c)| clf.read(l)[0].probs == c[0].probs)
++            .count();
++        println!(
++            "{dev:?}: {:.0} texts/s ({:.2}x the CPU), {same}/{n} equal to the CPU's bits",
++            n as f64 / s,
++            cpu_s / s
++        );
++        let get = |k: &str| prof.iter().find(|(n, _)| *n == k).map_or(0, |x| x.1);
++        let ms = |k: &str| get(k) as f64 / 1e6;
++        println!(
++            "  per text: {:.1} dispatches, {:.1} bind groups, {:.2} buffers, {:.3} submits",
++            get("dispatches") as f64 / n as f64,
++            get("bind_groups") as f64 / n as f64,
++            get("buffers") as f64 / n as f64,
++            get("submits") as f64 / n as f64
++        );
++        let total = s * 1000.0;
++        let other = total - ms("ns_encode") - ms("ns_wait") - ms("ns_readback");
++        println!(
++            "  ms: total {total:.0} = encode+submit {:.0}, wait {:.0}, readback {:.0}, the rest (embedding, recording, heads, buffers) {other:.0}",
++            ms("ns_encode"),
++            ms("ns_wait"),
++            ms("ns_readback")
++        );
++        let ops = std::mem::take(&mut *anend_core::classify::gpu::OP_NS.lock().unwrap());
++        if !ops.is_empty() {
++            let all: u64 = ops.values().map(|v| v.1).sum();
++            let mut v: Vec<_> = ops.into_iter().collect();
++            v.sort_by_key(|x| std::cmp::Reverse(x.1.1));
++            for (k, (n, ns)) in v {
++                println!("    {k:<16} {n:>7} dispatches {:>5.1}%", 100.0 * ns as f64 / all as f64);
++            }
++        }
++    }
++}
+diff --git a/core/src/classify/gpu/kernels.wgsl b/core/src/classify/gpu/kernels.wgsl
+index 6195079..2b44e9d 100644
+--- a/core/src/classify/gpu/kernels.wgsl
++++ b/core/src/classify/gpu/kernels.wgsl
+@@ -615,5 +615,14 @@ fn copy(@builtin(workgroup_id) wid: vec3<u32>, @builtin(num_workgroups) nw: vec3
+     let c = i % w;
+     let r = (i / w) % rows;
+     let z = i / (w * rows);
+-    b2[p.u2.x + z * p.u2.y + r * p.u2.z + c] = b1[p.u1.x + z * p.u1.y + r * p.u1.z + c];
++    // rows in blocks of `u0.w` (0: one block): block b, row r within it
++    var sr = r * p.u1.z;
++    var dr = r * p.u2.z;
++    if (p.u0.w > 0u) {
++        let blk = r / p.u0.w;
++        let rr = r % p.u0.w;
++        sr = blk * p.u1.w + rr * p.u1.z;
++        dr = blk * p.u2.w + rr * p.u2.z;
++    }
++    b2[p.u2.x + z * p.u2.y + dr + c] = b1[p.u1.x + z * p.u1.y + sr + c];
+ }
+diff --git a/core/src/classify/gpu/mod.rs b/core/src/classify/gpu/mod.rs
+index 3cf5972..1aad3cc 100644
+--- a/core/src/classify/gpu/mod.rs
++++ b/core/src/classify/gpu/mod.rs
+@@ -39,6 +39,74 @@ pub enum Precision {
+     Fast,
+ }
+ 
++/// counters of what the device was asked to do, for profiling (`gpu_profile`): read
++/// with [`Profile::take`]
++#[derive(Default)]
++pub struct Profile {
++    pub buffers: std::sync::atomic::AtomicU64,
++    pub buffer_bytes: std::sync::atomic::AtomicU64,
++    pub uploads: std::sync::atomic::AtomicU64,
++    pub dispatches: std::sync::atomic::AtomicU64,
++    pub bind_groups: std::sync::atomic::AtomicU64,
++    pub submits: std::sync::atomic::AtomicU64,
++    pub reads: std::sync::atomic::AtomicU64,
++    /// nanoseconds building command buffers (bind groups, passes), waiting for the
++    /// device, and copying results out of mapped memory
++    pub ns_encode: std::sync::atomic::AtomicU64,
++    pub ns_wait: std::sync::atomic::AtomicU64,
++    pub ns_readback: std::sync::atomic::AtomicU64,
++}
++
++pub static PROFILE: Profile = Profile {
++    buffers: std::sync::atomic::AtomicU64::new(0),
++    buffer_bytes: std::sync::atomic::AtomicU64::new(0),
++    uploads: std::sync::atomic::AtomicU64::new(0),
++    dispatches: std::sync::atomic::AtomicU64::new(0),
++    bind_groups: std::sync::atomic::AtomicU64::new(0),
++    submits: std::sync::atomic::AtomicU64::new(0),
++    reads: std::sync::atomic::AtomicU64::new(0),
++    ns_encode: std::sync::atomic::AtomicU64::new(0),
++    ns_wait: std::sync::atomic::AtomicU64::new(0),
++    ns_readback: std::sync::atomic::AtomicU64::new(0),
++};
++
++fn count(c: &std::sync::atomic::AtomicU64, n: u64) {
++    c.fetch_add(n, std::sync::atomic::Ordering::Relaxed);
++}
++
++impl Profile {
++    /// the counts since the last take, as (name, value) pairs; zeroes them
++    pub fn take(&self) -> Vec<(&'static str, u64)> {
++        use std::sync::atomic::Ordering::Relaxed;
++        [
++            ("buffers", &self.buffers),
++            ("buffer_bytes", &self.buffer_bytes),
++            ("uploads", &self.uploads),
++            ("dispatches", &self.dispatches),
++            ("bind_groups", &self.bind_groups),
++            ("submits", &self.submits),
++            ("reads", &self.reads),
++            ("ns_encode", &self.ns_encode),
++            ("ns_wait", &self.ns_wait),
++            ("ns_readback", &self.ns_readback),
++        ]
++        .into_iter()
++        .map(|(n, c)| (n, c.swap(0, Relaxed)))
++        .collect()
++    }
++}
++
++/// per kernel: dispatches and nanoseconds, gathered when `ANEND_GPU_PROFILE_OPS=1` (each
++/// dispatch then runs alone and is waited for, so the totals are slower than a real run
++/// and only their proportions mean anything)
++pub static OP_NS: Mutex<std::collections::BTreeMap<&'static str, (u64, u64)>> =
++    Mutex::new(std::collections::BTreeMap::new());
++
++fn profiling_ops() -> bool {
++    static ON: OnceLock<bool> = OnceLock::new();
++    *ON.get_or_init(|| std::env::var("ANEND_GPU_PROFILE_OPS").is_ok_and(|v| v == "1"))
++}
++
+ /// a place in a buffer: the buffer and an offset in floats
+ pub type At<'a> = (&'a Buf, usize);
+ 
+@@ -317,6 +385,9 @@ impl Gpu {
+         if data.is_empty() {
+             return self.zeros(0);
+         }
++        count(&PROFILE.buffers, 1);
++        count(&PROFILE.uploads, 1);
++        count(&PROFILE.buffer_bytes, (data.len() * 4) as u64);
+         let b = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+             label: None,
+             contents: f32_bytes(data),
+@@ -327,6 +398,8 @@ impl Gpu {
+ 
+     /// a zeroed buffer of n floats (at least one, as bindings cannot be empty)
+     pub fn zeros(&self, n: usize) -> Buf {
++        count(&PROFILE.buffers, 1);
++        count(&PROFILE.buffer_bytes, (n.max(1) * 4) as u64);
+         let b = self.device.create_buffer(&wgpu::BufferDescriptor {
+             label: None,
+             size: (n.max(1) * 4) as u64,
+@@ -369,6 +442,7 @@ fn f32_bytes(v: &[f32]) -> &[u8] {
+ 
+ enum Rec {
+     Dispatch {
++        entry: &'static str,
+         pipe: wgpu::ComputePipeline,
+         bufs: [Option<wgpu::Buffer>; 6],
+         slot: u64,
+@@ -423,6 +497,7 @@ impl<'g> Run<'g> {
+         }
+         let pipe = self.g.pipeline(entry, self.prec);
+         self.recs.push(Rec::Dispatch {
++            entry,
+             pipe,
+             bufs: bs,
+             slot,
+@@ -458,6 +533,13 @@ impl<'g> Run<'g> {
+     /// submits everything and waits for the reads (and only then returns)
+     pub fn submit(self) -> Vec<Vec<f32>> {
+         let g = self.g;
++        let started = std::time::Instant::now();
++        count(&PROFILE.submits, 1);
++        count(&PROFILE.reads, self.reads as u64);
++        count(
++            &PROFILE.dispatches,
++            self.recs.iter().filter(|r| matches!(r, Rec::Dispatch { .. })).count() as u64,
++        );
+         let ub = (!self.params.is_empty()).then(|| {
+             g.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                 label: Some("params"),
+@@ -469,12 +551,16 @@ impl<'g> Run<'g> {
+             .device
+             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+         let mut staging = Vec::new();
++        let by_op = profiling_ops();
+         let mut i = 0;
+         while i < self.recs.len() {
+             if let Rec::Dispatch { .. } = self.recs[i] {
+                 let ub = ub.as_ref().expect("params");
+                 let mut groups = Vec::new();
+                 while let Some(Rec::Dispatch { bufs, .. }) = self.recs.get(i) {
++                    if by_op && !groups.is_empty() {
++                        break;
++                    }
+                     let mut entries = vec![wgpu::BindGroupEntry {
+                         binding: 0,
+                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+@@ -489,6 +575,7 @@ impl<'g> Run<'g> {
+                             resource: b.as_ref().unwrap_or(&g.dummy).as_entire_binding(),
+                         });
+                     }
++                    count(&PROFILE.bind_groups, 1);
+                     groups.push(g.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                         label: None,
+                         layout: &g.layout,
+@@ -508,6 +595,22 @@ impl<'g> Run<'g> {
+                         pass.dispatch_workgroups(groups[0], groups[1], groups[2]);
+                     }
+                 }
++                drop(pass);
++                if by_op && let Rec::Dispatch { entry, .. } = &self.recs[start] {
++                    // this dispatch alone, waited for, its time added to its kernel's
++                    let done = std::mem::replace(
++                        &mut enc,
++                        g.device
++                            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None }),
++                    );
++                    let t = std::time::Instant::now();
++                    g.queue.submit([done.finish()]);
++                    g.device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU poll");
++                    let mut m = OP_NS.lock().unwrap_or_else(|e| e.into_inner());
++                    let e = m.entry(entry).or_default();
++                    e.0 += 1;
++                    e.1 += t.elapsed().as_nanos() as u64;
++                }
+                 continue;
+             }
+             match &self.recs[i] {
+@@ -536,14 +639,18 @@ impl<'g> Run<'g> {
+             i += 1;
+         }
+         g.queue.submit([enc.finish()]);
++        count(&PROFILE.ns_encode, started.elapsed().as_nanos() as u64);
+         if staging.is_empty() {
+             return Vec::new();
+         }
++        let waited = std::time::Instant::now();
+         for (st, _) in &staging {
+             st.map_async(wgpu::MapMode::Read, .., |r| r.expect("GPU read"));
+         }
+         g.device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU poll");
+-        staging
++        count(&PROFILE.ns_wait, waited.elapsed().as_nanos() as u64);
++        let copied = std::time::Instant::now();
++        let out = staging
+             .into_iter()
+             .map(|(st, len)| {
+                 let v = {
+@@ -558,7 +665,9 @@ impl<'g> Run<'g> {
+                 st.unmap();
+                 v
+             })
+-            .collect()
++            .collect();
++        count(&PROFILE.ns_readback, copied.elapsed().as_nanos() as u64);
++        out
+     }
+ 
+     // ------------------------------------------------------------ kernels
+@@ -839,6 +948,35 @@ impl<'g> Run<'g> {
+         ]);
+         self.op("copy", &[src.0, dst.0], p, grid(width * rows * zs, 64));
+     }
++
++    /// `copy_strided` with the rows in blocks of `block` rows, block `b` row `r` at
++    /// `b·src.4 + r·src.3` (and the same in `dst`): heads of several windows at once
++    #[allow(clippy::too_many_arguments)]
++    pub fn copy_blocks(
++        &mut self,
++        src: (&Buf, usize, usize, usize, usize),
++        dst: (&Buf, usize, usize, usize, usize),
++        width: usize,
++        rows: usize,
++        zs: usize,
++        block: usize,
++    ) {
++        let p = Params::new(&[
++            width as u32,
++            rows as u32,
++            zs as u32,
++            block as u32,
++            src.1 as u32,
++            src.2 as u32,
++            src.3 as u32,
++            src.4 as u32,
++            dst.1 as u32,
++            dst.2 as u32,
++            dst.3 as u32,
++            dst.4 as u32,
++        ]);
++        self.op("copy", &[src.0, dst.0], p, grid(width * rows * zs, 64));
++    }
+ }
+ 
+ impl Gpu {
+diff --git a/core/src/classify/gpu/net.rs b/core/src/classify/gpu/net.rs
+index 8ebe91b..613aab7 100644
+--- a/core/src/classify/gpu/net.rs
++++ b/core/src/classify/gpu/net.rs
+@@ -59,6 +59,20 @@ pub struct GpuNet {
+     genh: Option<(Buf, Buf)>,
+     cos: Buf,
+     sin: Buf,
++    /// the buffers of the last pack read, kept for the next
++    pack: std::sync::Mutex<Option<PackBufs>>,
++}
++
++/// a pack's buffers: room for `n` rows whose attention squares add up to `sq`
++struct PackBufs {
++    n: usize,
++    sq: usize,
++    /// activations per distinct block shape, and which one each block uses
++    acts: Vec<Acts>,
++    of_block: Vec<usize>,
++    x0: Buf,
++    x1: Buf,
++    xf: Buf,
+ }
+ 
+ /// one block's activations for a window of n (the training trace keeps one per block)
+@@ -81,6 +95,8 @@ pub(crate) struct Acts {
+     /// attention probabilities [heads × n × n]
+     pub p: Buf,
+     pub ctx: Buf,
++    /// the attention's output per head, [window][head][position][dh], before `ctx`
++    pub ctxh: Buf,
+     pub o: Buf,
+     pub hres: Buf,
+     pub xh2: Buf,
+@@ -152,6 +168,7 @@ impl GpuNet {
+                 .map(|_| (g.upload(&net.gen_w), g.upload(&net.gen_b))),
+             cos: g.upload(cos),
+             sin: g.upload(sin),
++            pack: std::sync::Mutex::new(None),
+         })
+     }
+ 
+@@ -224,6 +241,7 @@ impl GpuNet {
+             krs: g.zeros(qk(kv * n)),
+             p: g.zeros(h * sq),
+             ctx: g.zeros(n * h * dh),
++            ctxh: g.zeros(n * h * dh),
+             o: g.zeros(n * d),
+             hres: g.zeros(n * d),
+             xh2: g.zeros(n * d),
+@@ -271,24 +289,45 @@ impl GpuNet {
+             r.add_rows(&t.qkv, bq, n * w3, w3);
+         }
+         let (qd, kd) = if self.qk_norm { (&t.q0, &t.k0) } else { (&t.q, &t.k) };
+-        // where each window starts: its first row, and its attention square
+-        let mut at = Vec::with_capacity(lens.len());
++        // windows of the same length side by side form a group, whose attention runs as
++        // one batch (z = windows × heads): its first row, attention square and length,
++        // and how many windows
++        let mut groups: Vec<(usize, usize, usize, usize)> = Vec::new();
+         let (mut s, mut sq) = (0, 0);
+         for &m in lens {
+-            at.push((s, sq, m));
++            match groups.last_mut() {
++                Some(g) if g.2 == m => g.3 += 1,
++                _ => groups.push((s, sq, m, 1)),
++            }
+             s += m;
+             sq += m * m;
+         }
+-        for &(s, _, m) in &at {
++        for &(s, _, m, c) in &groups {
+             let (qo, ko) = (h * dh * s, kv * dh * s);
+-            r.copy_strided((&t.qkv, s * w3, dh, w3), (qd, qo, m * dh, dh), dh, m, h);
+-            r.copy_strided((&t.qkv, s * w3 + aw, dh, w3), (kd, ko, m * dh, dh), dh, m, kv);
+-            r.copy_strided(
+-                (&t.qkv, s * w3 + aw + kv * dh, dh, w3),
+-                (&t.v, ko, m * dh, dh),
++            // each window's heads apart: [window][head][position][dh]
++            r.copy_blocks(
++                (&t.qkv, s * w3, dh, w3, m * w3),
++                (qd, qo, m * dh, dh, h * m * dh),
++                dh,
++                c * m,
++                h,
++                m,
++            );
++            r.copy_blocks(
++                (&t.qkv, s * w3 + aw, dh, w3, m * w3),
++                (kd, ko, m * dh, dh, kv * m * dh),
+                 dh,
++                c * m,
++                kv,
+                 m,
++            );
++            r.copy_blocks(
++                (&t.qkv, s * w3 + aw + kv * dh, dh, w3, m * w3),
++                (&t.v, ko, m * dh, dh, kv * m * dh),
++                dh,
++                c * m,
+                 kv,
++                m,
+             );
+         }
+         if self.qk_norm {
+@@ -312,13 +351,14 @@ impl GpuNet {
+                 eps,
+             );
+         }
+-        for &(s, sq, m) in &at {
++        for &(s, sq, m, c) in &groups {
+             let (qo, ko, po) = (h * dh * s, kv * dh * s, h * sq);
+-            r.rope((&t.q, qo), &self.cos, &self.sin, h * m, dh / 2, m, 0, false);
+-            r.rope((&t.k, ko), &self.cos, &self.sin, kv * m, dh / 2, m, 0, false);
++            let zc = c * h;
++            r.rope((&t.q, qo), &self.cos, &self.sin, zc * m, dh / 2, m, 0, false);
++            r.rope((&t.k, ko), &self.cos, &self.sin, c * kv * m, dh / 2, m, 0, false);
+             let pv_a = View::of(&t.p, po, m, 1, m * m);
+             let pv_b = View::of(&t.v, ko, dh, 1, m * dh).per(per);
+-            let pv_y = View::of(&t.ctx, s * aw, aw, 1, dh);
++            let pv_y = View::of(&t.ctxh, qo, dh, 1, m * dh);
+             if self.causal {
+                 r.scores(
+                     (&t.q, qo, m * dh),
+@@ -327,21 +367,30 @@ impl GpuNet {
+                     m,
+                     m,
+                     dh,
+-                    h,
++                    zc,
+                     0,
+                     scale,
+                     per,
+                 );
+-                r.softmax((&t.p, po), h * m, m, Some((m, 0)));
+-                r.gemm(pv_a, pv_b, pv_y, m, m, dh, h, false, Some(0));
++                r.softmax((&t.p, po), zc * m, m, Some((m, 0)));
++                r.gemm(pv_a, pv_b, pv_y, m, m, dh, zc, false, Some(0));
+             } else {
+                 let qa = View::of(&t.q, qo, dh, 1, m * dh);
+                 let kb = View::of(&t.k, ko, 1, dh, m * dh).per(per);
+-                r.gemm(qa, kb, View::of(&t.p, po, m, 1, m * m), m, dh, m, h, false, None);
+-                r.scale((&t.p, po), scale, h * m * m);
+-                r.softmax((&t.p, po), h * m, m, None);
+-                r.gemm(pv_a, pv_b, pv_y, m, m, dh, h, false, None);
++                r.gemm(qa, kb, View::of(&t.p, po, m, 1, m * m), m, dh, m, zc, false, None);
++                r.scale((&t.p, po), scale, zc * m * m);
++                r.softmax((&t.p, po), zc * m, m, None);
++                r.gemm(pv_a, pv_b, pv_y, m, m, dh, zc, false, None);
+             }
++            // the heads back side by side in each position's row of `ctx`
++            r.copy_blocks(
++                (&t.ctxh, qo, m * dh, dh, h * m * dh),
++                (&t.ctx, s * aw, dh, aw, m * aw),
++                dh,
++                c * m,
++                h,
++                m,
++            );
+         }
+         r.gemm(
+             View::rows(&t.ctx, aw),
+@@ -550,12 +599,17 @@ impl GpuNet {
+     /// ([`PACK_FLOATS`] of activations, at most [`PACK_WINDOWS`] windows each): every
+     /// window's final normed rows [n × d], the same values `forward` gives one by one
+     pub fn forward_many(&self, net: &Net, ws: &[&Window], gains: &Gains) -> Vec<Vec<f32>> {
+-        let mut out = Vec::with_capacity(ws.len());
++        // by length, so each pack holds few distinct lengths and each length's attention
++        // is one batch; the results go back to the windows' own order
++        let mut order: Vec<usize> = (0..ws.len()).collect();
++        order.sort_by_key(|&i| ws[i].len());
++        let sorted: Vec<&Window> = order.iter().map(|&i| ws[i]).collect();
++        let mut rows: Vec<Vec<f32>> = Vec::with_capacity(ws.len());
+         let mut i = 0;
+-        while i < ws.len() {
++        while i < sorted.len() {
+             let (mut n, mut sq, mut j) = (0, 0, i);
+-            while j < ws.len() && j - i < PACK_WINDOWS {
+-                let m = ws[j].len();
++            while j < sorted.len() && j - i < PACK_WINDOWS {
++                let m = sorted[j].len();
+                 if j > i && !self.fits_pack(n + m, sq + m * m) {
+                     break;
+                 }
+@@ -563,9 +617,13 @@ impl GpuNet {
+                 sq += m * m;
+                 j += 1;
+             }
+-            out.extend(self.forward_pack(net, &ws[i..j], gains, n, sq));
++            rows.extend(self.forward_pack(net, &sorted[i..j], gains, n, sq));
+             i = j;
+         }
++        let mut out: Vec<Vec<f32>> = vec![Vec::new(); ws.len()];
++        for (k, r) in order.into_iter().zip(rows) {
++            out[k] = r;
++        }
+         out
+     }
+ 
+@@ -578,25 +636,50 @@ impl GpuNet {
+             assert!(w.len() <= self.max_len, "window longer than max_len");
+             emb.extend(net.embed(w, gains));
+         }
+-        let x0 = g.upload(&emb);
+-        let x1 = g.zeros(n * d);
++        // the pack's buffers are kept between calls (made again only when a pack needs
++        // more room), so a call neither allocates nor clears hundreds of MiB
++        let mut kept = self.pack.lock().unwrap_or_else(|e| e.into_inner());
++        if !kept.as_ref().is_some_and(|k| k.n >= n && k.sq >= sq) {
++            // a little room to spare, so packs of about this size reuse them
++            let (cn, csq) = (n + n / 4, sq + sq / 4);
++            let (cn, csq) = if self.fits_pack(cn, csq) { (cn, csq) } else { (n, sq) };
++            let mut shapes: Vec<(usize, usize)> = Vec::new();
++            let mut acts = Vec::new();
++            let mut of_block = Vec::new();
++            for l in 0..self.blocks.len() {
++                let shape = (self.w3(l), self.blocks[l].ff);
++                let i = match shapes.iter().position(|s| *s == shape) {
++                    Some(i) => i,
++                    None => {
++                        shapes.push(shape);
++                        acts.push(self.acts_for(l, cn, csq, false));
++                        acts.len() - 1
++                    }
++                };
++                of_block.push(i);
++            }
++            *kept = Some(PackBufs {
++                n: cn,
++                sq: csq,
++                acts,
++                of_block,
++                x0: g.zeros(cn * d),
++                x1: g.zeros(cn * d),
++                xf: g.zeros(cn * d),
++            });
++        }
++        let k = kept.as_ref().expect("made above");
++        g.write(&k.x0, 0, &emb);
+         let mut r = g.run(self.prec);
+-        let mut acts: Option<Acts> = None;
+-        let (mut xa, mut xb) = (&x0, &x1);
++        let (mut xa, mut xb) = (&k.x0, &k.x1);
+         for l in 0..self.blocks.len() {
+-            let same = acts
+-                .as_ref()
+-                .is_some_and(|a| a.qkv.len == n * self.w3(l) && a.gg.len == n * self.blocks[l].ff);
+-            if !same {
+-                acts = Some(self.acts_for(l, n, sq, false));
+-            }
+-            self.block_fwd_packed(&mut r, l, xa, xb, acts.as_ref().unwrap(), &lens);
++            self.block_fwd_packed(&mut r, l, xa, xb, &k.acts[k.of_block[l]], &lens);
+             std::mem::swap(&mut xa, &mut xb);
+         }
+-        let xf = g.zeros(n * d);
+-        self.top_fwd(&mut r, xa, &xf, None, None, n);
+-        let t0 = r.read(&xf, 0, n * d);
++        self.top_fwd(&mut r, xa, &k.xf, None, None, n);
++        let t0 = r.read(&k.xf, 0, n * d);
+         let all = r.submit().swap_remove(t0);
++        drop(kept);
+         let mut out = Vec::with_capacity(ws.len());
+         let mut at = 0;
+         for m in lens {
+@@ -643,10 +726,11 @@ impl GpuNet {
+     }
+ }
+ 
+-/// most activation floats one packed submission holds (128 MiB)
+-pub const PACK_FLOATS: usize = 32 << 20;
++/// most activation floats one packed submission holds (512 MiB); each buffer also stays
++/// within the device's own limit (`fits_pack`)
++pub const PACK_FLOATS: usize = 128 << 20;
+ /// most windows one packed submission holds
+-pub const PACK_WINDOWS: usize = 256;
++pub const PACK_WINDOWS: usize = 4096;
+ 
+ /// a text's run on the device: what `Classifier::run_bytes` gives on the CPU
+ #[derive(Clone, Debug)]
+diff --git a/core/src/classify/gpu/tests.rs b/core/src/classify/gpu/tests.rs
+index 8b2b14c..27c5f51 100644
+--- a/core/src/classify/gpu/tests.rs
++++ b/core/src/classify/gpu/tests.rs
+@@ -302,3 +302,44 @@ fn packed_texts_match_the_cpu_one_by_one() {
+         }
+     }
+ }
++
++#[test]
++fn kept_pack_buffers_give_the_same_answers_call_after_call() {
++    use crate::classify::Classifier;
++    let Some(g) = device() else { return };
++    let exact = exact_device(g, Precision::Exact);
++    let (name, cfg) = configs().swap_remove(0);
++    let heads = [HeadSpec::single("c", &["a", "b"])];
++    let mut clf = Classifier::new(cfg.clone(), &heads, 9).unwrap();
++    for b in &mut clf.net.blocks {
++        b.wo.iter_mut()
++            .enumerate()
++            .for_each(|(i, v)| *v += ((i % 13) as f32 - 6.0) * 0.003);
++    }
++    let gn = GpuNet::new(g, &clf.net, Precision::Exact).unwrap();
++    let gains = clf.gains();
++    let extra = vec![0.0f32; cfg.extra];
++    // a big call, a small one (reusing the big one's buffers, with stale rows in them),
++    // then a bigger one (new buffers)
++    for count in [30usize, 3, 60] {
++        let texts: Vec<String> = (0..count)
++            .map(|i| {
++                (0..(i * 7 + count) % 90 + 1)
++                    .map(|j| (b'a' + ((i + j * 5) % 26) as u8) as char)
++                    .collect()
++            })
++            .collect();
++        let bytes: Vec<&[u8]> = texts.iter().map(|t| t.as_bytes()).collect();
++        let extras: Vec<&[f32]> = texts.iter().map(|_| extra.as_slice()).collect();
++        let runs = gn.text_runs(&clf.net, &bytes, &extras, &gains);
++        for (t, r) in texts.iter().zip(&runs) {
++            let cpu = clf.run(t, &extra, &gains, None);
++            close(
++                &format!("{name} call of {count}, {} bytes", t.len()),
++                &r.logits[0],
++                &cpu.logits[0],
++                exact,
++            );
++        }
++    }
++}

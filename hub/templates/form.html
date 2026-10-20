@@ -10,6 +10,7 @@
       <label for="{{ f.name }}">{{ f.label }}</label>
       {% if f.kind == "textarea" %}<textarea id="{{ f.name }}" name="{{ f.name }}">{{ f.value }}</textarea>
       {% else if f.kind == "clsfile" %}<input id="{{ f.name }}" name="{{ f.name }}" type="file" accept=".anendcls"{% if f.required %} required{% endif %}>
+      {% else if f.kind == "visibility" %}<span class="seg" role="radiogroup" aria-label="{{ f.label }}">{% for v in crate::web::vis_choices() %}<label class="with-text" data-tip="{{ v.tip }}"><input type="radio" name="{{ f.name }}" value="{{ v.name }}"{% if f.value == v.name %} checked{% endif %}>{{ crate::web::icon(v.icon) }}{{ v.name }}</label>{% endfor %}</span>
       {% else if f.kind == "file" %}<input id="{{ f.name }}" name="{{ f.name }}" type="file" accept=".redb"{% if f.required %} required{% endif %}>
       {% else %}<input id="{{ f.name }}" name="{{ f.name }}" type="{{ f.kind }}" value="{{ f.value }}"{% if f.required %} required{% endif %}>{% endif %}
       {% if !f.hint.is_empty() %}<span class="dim small">{{ f.hint }}</span>{% endif %}

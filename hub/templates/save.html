@@ -7,7 +7,7 @@
       <div>
         <h1>{{ s.name }}</h1>
         <p class="dim small">by <a href="/u/{{ s.author }}">{{ s.author }}</a> · version {{ s.version }} · updated {{ updated }} · {{ size }}
-        {% if s.status_name != "approved" %} · <span class="pill {{ s.status_name }}">{{ s.status_name }}</span>{% endif %}</p>
+        {% if visibility != "public" %} · {% include "vis_pill_v.html" %}{% else if s.status_name != "approved" %} · <span class="pill {{ s.status_name }}">{{ s.status_name }}</span>{% endif %}</p>
       </div>
     </div>
     {% if !s.note.is_empty() %}<div class="flash bad">the admins said: {{ s.note }}</div>{% endif %}
@@ -36,11 +36,18 @@
         <a class="btn primary with-text" href="/saves/{{ s.id }}/download" download>{{ crate::web::icon("download") }}download</a>
         {% if can_star %}<form class="inline" method="post" action="/saves/{{ s.id }}/star"><button class="with-text{% if starred %} on-star{% endif %}" aria-pressed="{% if starred %}true{% else %}false{% endif %}" data-tip="{% if starred %}starred: click to take your star back{% else %}star it: tell its maker you like it{% endif %}">{{ crate::web::icon("star") }}{% if starred %}starred{% else %}star{% endif %}</button></form>{% endif %}
       </div>
-      <p class="dim small">In the app: settings → hub, or put the file in your saves folder and load it.</p>
+      <p class="dim small">{% if app_on %}In <a href="/app/">the app</a>: settings → the hub. {% endif %}On the desktop: put the file in your saves folder and load it.</p>
     </section>
+    {% if own %}
+    <section class="card">
+      <h3>who sees it</h3>
+      {% let vis_action = "/saves/{}/visibility"|format(s.id) %}
+      {% include "vis_control.html" %}
+    </section>
+    {% endif %}
     {% if can_edit %}
     <section class="card">
-      <h3>{% if is_admin %}admin{% else %}yours{% endif %}</h3>
+      <h3>{% if is_admin && !own %}admin{% else %}yours{% endif %}</h3>
       <div class="row">
         <a class="btn small with-text" href="/saves/{{ s.id }}/edit" data-tip="edit it, or send a new version">{{ crate::web::icon("edit") }}edit</a>
         <form class="inline" method="post" action="/saves/{{ s.id }}/delete" onsubmit="return confirm('Delete this save for good?')"><button class="small bad ibtn" data-tip="delete this save for good" aria-label="delete this save for good">{{ crate::web::icon("delete") }}</button></form>

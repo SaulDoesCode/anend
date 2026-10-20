@@ -1,4 +1,5 @@
-//! The web app's side of the hub: its files (hub/web, built into the binary), the
+//! The web app's side of the hub: its files (the Dioxus app's web build, app/web/dist,
+//! built into the binary; `app/web/build.sh` makes it before `cargo build -p anend-hub`), the
 //! WebSocket and the plain posts that reach app.rs, and moving saves between a
 //! workspace, the hub and your computer.
 
@@ -11,14 +12,34 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-use crate::app::{self, owner, workspaces};
+use crate::app::{self, workspaces};
+#[cfg(feature = "hub")]
 use crate::hub::Details;
-use crate::store::Status;
-use crate::web::{hub, me};
+use crate::store::User;
+#[cfg(feature = "hub")]
+use crate::store::{Status, Visibility, may_see};
+use crate::web::{hub, me, mode};
+
+/// whose saves a call works on (`app::owner`), for this request's mode
+fn owner(depot: &Depot, user: Option<&User>) -> Result<String, String> {
+    app::owner(user, mode(depot).local)
+}
+
+/// the status for a refusal: 401 for no one, 403 for an account still waiting
+fn refusal(depot: &Depot) -> StatusCode {
+    if me(depot).is_none() {
+        StatusCode::UNAUTHORIZED
+    } else {
+        StatusCode::FORBIDDEN
+    }
+}
 
 #[derive(RustEmbed)]
-#[folder = "web/"]
+#[folder = "../app/web/dist/"]
 struct Files;
+
+/// the page when the web app wasn't built into this binary
+const NOT_BUILT: &str = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>anend</title></head><body style=\"font: 16px system-ui; padding: 24px\"><p>The web app isn't built into this hub. Run <code>app/web/build.sh</code>, then build the hub again (docs/deploy.md).</p></body></html>";
 
 fn kind(path: &str) -> &'static str {
     match path.rsplit('.').next() {
@@ -29,31 +50,68 @@ fn kind(path: &str) -> &'static str {
         Some("json") => "application/json",
         Some("png") => "image/png",
         Some("woff2") => "font/woff2",
+        Some("wasm") => "application/wasm",
         _ => "application/octet-stream",
     }
 }
 
-/// the web app's files; `/app/` is its page
+/// the web app's files, for signed-in members only (or anyone on a `--local` server);
+/// `/app/` is its page
 #[handler]
-pub async fn files(req: &mut Request, res: &mut Response) {
+pub async fn files(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     let rest = req.param::<String>("rest").unwrap_or_default();
     let path = if rest.is_empty() {
         "index.html".to_string()
     } else {
         rest
     };
-    serve(res, &path);
+    if path == "index.html" {
+        return page(depot, res);
+    }
+    if owner(depot, me(depot)).is_err() {
+        res.status_code(refusal(depot));
+        return res.render(Json(json!({ "ok": false, "error": "log in to use the app here" })));
+    }
+    serve(res, &path, mode(depot));
 }
 
-fn serve(res: &mut Response, path: &str) {
+/// the app's page: signed in and let in, or off to log in (or a page saying it waits)
+fn page(depot: &Depot, res: &mut Response) {
+    match owner(depot, me(depot)) {
+        Ok(_) => serve(res, "index.html", mode(depot)),
+        Err(_) if me(depot).is_none() => res.render(Redirect::other("/login?next=/app/")),
+        Err(e) => crate::web::message(
+            res,
+            depot,
+            StatusCode::FORBIDDEN,
+            "not yet",
+            &format!("{}{}.", e[..1].to_uppercase(), &e[1..]),
+        ),
+    }
+}
+
+fn serve(res: &mut Response, path: &str, m: crate::mode::Mode) {
+    // which server this is: "hub" when the hub is here too; "local" for a --local server
+    // (no accounts, nothing to share on); "app" for the app alone
+    let what = match (m.local, m.hub) {
+        (true, _) => "local",
+        (_, true) => "hub",
+        _ => "app",
+    };
+    if path == "index.html" && Files::get(path).is_none() {
+        res.headers_mut()
+            .insert(CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"));
+        res.headers_mut().insert("x-anend", HeaderValue::from_static(what));
+        res.write_body(NOT_BUILT).ok();
+        return;
+    }
     match Files::get(path) {
         Some(f) => {
             res.headers_mut()
                 .insert(CONTENT_TYPE, HeaderValue::from_static(kind(path)));
             res.headers_mut()
                 .insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-            // how the page knows a hub served it (api.js), and not a static server
-            res.headers_mut().insert("x-anend", HeaderValue::from_static("hub"));
+            res.headers_mut().insert("x-anend", HeaderValue::from_static(what));
             res.write_body(f.data.into_owned()).ok();
         }
         None => {
@@ -66,9 +124,9 @@ fn serve(res: &mut Response, path: &str) {
 /// `/app` goes to `/app/` (so the page's own links resolve), and `/app/` is the page:
 /// the router matches both here
 #[handler]
-pub async fn app_root(req: &mut Request, res: &mut Response) {
+pub async fn app_root(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     if req.uri().path().ends_with('/') {
-        serve(res, "index.html");
+        page(depot, res);
     } else {
         res.render(Redirect::found("/app/"));
     }
@@ -95,7 +153,7 @@ fn gates() -> &'static Gates {
 }
 
 fn gate(owner: &str) -> Arc<Semaphore> {
-    let local = *app::LOCAL.get().unwrap_or(&false);
+    let local = crate::mode::local();
     let mut g = gates().lock().unwrap_or_else(|e| e.into_inner());
     g.entry(owner.to_string())
         .or_insert_with(|| (Arc::new(Semaphore::new(if local { 64 } else { CALLS_AT_ONCE })), 0))
@@ -110,7 +168,7 @@ async fn turn(owner: &str) -> Result<OwnedSemaphorePermit, String> {
 
 /// counts a socket in (false: too many open) or out
 fn socket_count(owner: &str, opened: bool) -> bool {
-    let local = *app::LOCAL.get().unwrap_or(&false);
+    let local = crate::mode::local();
     let mut g = gates().lock().unwrap_or_else(|e| e.into_inner());
     let e = g
         .entry(owner.to_string())
@@ -142,7 +200,11 @@ async fn run(owner: Result<String, String>, op: String, args: Value) -> app::Res
 pub async fn api(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     let op = req.param::<String>("op").unwrap_or_default();
     // who's asking before anything is read: a body from no one isn't parsed at all
-    let who = owner(me(depot));
+    let who = owner(depot, me(depot));
+    if let Err(e) = &who {
+        res.status_code(refusal(depot));
+        return res.render(Json(envelope(&Value::Null, Err(e.clone()))));
+    }
     let r = match &who {
         Ok(o) => match turn(o).await {
             Ok(_permit) => {
@@ -175,7 +237,13 @@ pub async fn socket(req: &mut Request, depot: &mut Depot, res: &mut Response) ->
         return Err(StatusError::forbidden().brief("only the hub's own pages"));
     }
     // no socket for no one (the app posts instead, and hears why)
-    let who = owner(me(depot)).map_err(|e| StatusError::unauthorized().brief(e))?;
+    let who = owner(depot, me(depot)).map_err(|e| {
+        if me(depot).is_none() {
+            StatusError::unauthorized().brief(e)
+        } else {
+            StatusError::forbidden().brief(e)
+        }
+    })?;
     if !socket_count(&who, true) {
         return Err(StatusError::too_many_requests().brief("too many of your app's tabs are open"));
     }
@@ -214,7 +282,7 @@ pub async fn socket(req: &mut Request, depot: &mut Depot, res: &mut Response) ->
 #[handler]
 pub async fn download(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     let name = req.param::<String>("name").unwrap_or_default();
-    let found = owner(me(depot)).and_then(|o| workspaces().get(&o).path(&name));
+    let found = owner(depot, me(depot)).and_then(|o| workspaces().get(&o).path(&name));
     match found {
         Ok(p) if p.exists() => {
             salvo::fs::NamedFile::builder(&p)
@@ -232,7 +300,7 @@ pub async fn download(req: &mut Request, depot: &mut Depot, res: &mut Response) 
 /// `POST /app/saves`: a save from your computer into the workspace (multipart `file`)
 #[handler]
 pub async fn upload(req: &mut Request, depot: &mut Depot, res: &mut Response) {
-    let who = owner(me(depot));
+    let who = owner(depot, me(depot));
     let max = hub().config.max_upload as usize + 64 * 1024;
     let got = async {
         let o = who?;
@@ -266,17 +334,18 @@ pub async fn upload(req: &mut Request, depot: &mut Depot, res: &mut Response) {
 
 /// `POST /app/hub/{id}?merge=1`: a hub save into the workspace, beside the others or
 /// merged into the open one
+#[cfg(feature = "hub")]
 #[handler]
 pub async fn take(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     let id = req.param::<String>("id").unwrap_or_default();
     let merge = req.query::<String>("merge").is_some_and(|m| m == "1" || m == "true");
-    let who = owner(me(depot));
+    let who = owner(depot, me(depot));
     let got = async {
         let o = who?;
         let save = hub()
             .store
             .save(&id)?
-            .filter(|s| s.status == Status::Approved)
+            .filter(|s| may_see(s.visibility, s.status, &s.author, me(depot)))
             .ok_or("no such save on the hub")?;
         let who_took = me(depot)
             .map(|u| u.name.to_lowercase())
@@ -295,21 +364,27 @@ pub async fn take(req: &mut Request, depot: &mut Depot, res: &mut Response) {
 }
 
 /// `POST /app/share`: the open save onto the hub (`name`, `description`, `tags`)
+#[cfg(feature = "hub")]
 #[handler]
 pub async fn share(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     let args: Value = req.parse_json().await.unwrap_or(Value::Null);
     let user = me(depot).cloned();
     let got = async {
         let user = user.ok_or("log in to share on the hub")?;
-        let o = owner(Some(&user))?;
+        let o = owner(depot, Some(&user))?;
         let ws = workspaces().get(&o);
-        let (open, _) = ws.store()?;
+        let (open, _) = ws.graph()?;
         let path = ws.path(&open)?;
         let s = |k: &str| args.get(k).and_then(Value::as_str).unwrap_or("").to_string();
         let name = if s("name").is_empty() { open.clone() } else { s("name") };
-        let details = Details::new(&name, &s("description"), &s("tags"))?;
+        let details = Details::new(&name, &s("description"), &s("tags"))?.seen_by(&s("visibility"))?;
         let saved = hub().accept(&user, details, &path, None).await?;
-        Ok(json!({ "id": saved.id, "status": if saved.status == Status::Approved { "approved" } else { "pending" } }))
+        Ok(json!({
+            "id": saved.id,
+            "status": if saved.status == Status::Approved { "approved" } else { "pending" },
+            "visibility": saved.visibility.name(),
+            "url": format!("/saves/{}", saved.id),
+        }))
     }
     .await;
     if got.is_err() {
@@ -322,11 +397,12 @@ pub async fn share(req: &mut Request, depot: &mut Depot, res: &mut Response) {
 
 /// `POST /app/classifiers/{id}/take`: an approved hub classifier into the open save; its
 /// classes go to lists by name. Optional JSON `{as, lists: {class: key}}`.
+#[cfg(feature = "hub")]
 #[handler]
 pub async fn take_classifier(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     let id = req.param::<String>("id").unwrap_or_default();
     let args: Value = req.parse_json_with_max_size(64 * 1024).await.unwrap_or(Value::Null);
-    let who = owner(me(depot));
+    let who = owner(depot, me(depot));
     let ip = crate::web::client_ip(req);
     let got = async {
         let o = who?;
@@ -336,7 +412,7 @@ pub async fn take_classifier(req: &mut Request, depot: &mut Depot, res: &mut Res
         let c = hub()
             .store
             .classifier(&id)?
-            .filter(|c| c.status == Status::Approved)
+            .filter(|c| may_see(c.visibility, c.status, &c.author, me(depot)))
             .ok_or("no such classifier on the hub")?;
         let file = hub()
             .store
@@ -362,6 +438,7 @@ pub async fn take_classifier(req: &mut Request, depot: &mut Depot, res: &mut Res
 
 /// `POST /app/classifiers/share`: a classifier from the open save onto the hub (`name`
 /// of the classifier in the save; `title`, `description`, `tags` for the hub)
+#[cfg(feature = "hub")]
 #[handler]
 pub async fn share_classifier(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     let args: Value = req.parse_json_with_max_size(64 * 1024).await.unwrap_or(Value::Null);
@@ -369,7 +446,7 @@ pub async fn share_classifier(req: &mut Request, depot: &mut Depot, res: &mut Re
     let ip = crate::web::client_ip(req);
     let got = async {
         let user = user.ok_or("log in to share on the hub")?;
-        let o = owner(Some(&user))?;
+        let o = owner(depot, Some(&user))?;
         if !hub().limiter.allow(ip, "clsupload", 20, 3600) {
             return Err("that's a lot of uploads; try again in a while".to_string());
         }
@@ -389,12 +466,17 @@ pub async fn share_classifier(req: &mut Request, depot: &mut Depot, res: &mut Re
             .map_err(|e| e.to_string())??
         };
         let title = if s("title").trim().is_empty() { name } else { s("title") };
+        let vis = match s("visibility").trim() {
+            "" => None,
+            v => Some(Visibility::parse(v).ok_or("visibility is private, unlisted or public")?),
+        };
         let c = hub()
-            .accept_classifier_bytes(&user, (&title, &description, &s("tags")), bytes, None)
+            .accept_classifier_bytes(&user, (&title, &description, &s("tags")), vis, bytes, None)
             .await?;
         Ok(json!({
             "id": c.id,
             "status": if c.status == Status::Approved { "approved" } else { "pending" },
+            "visibility": c.visibility.name(),
             "url": format!("/classifiers/{}", c.id),
         }))
     }

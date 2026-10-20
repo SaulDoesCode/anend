@@ -1,0 +1,247 @@
+# Feature parity: the Dioxus app against the Bevy app and the old JS web client
+
+This file is the contract. Every user-visible feature, setting, panel, key, visual and
+interaction the earlier apps had is listed here with where it was and where the Dioxus app
+stands, on the desktop (D) and on the web (W, the same code against `anend-hub --mode app`).
+**Nothing is removed without a line here saying why.** Change this file in the same commit
+as any change that adds, moves or drops a feature (docs/next.md's Resuming block says so too).
+
+- Sources: the Bevy app at `cf08139^` (`git show cf08139^:src/<file>`), the JS web client at
+  `49e3930^` (`hub/web/`), retired on 18 Oct 2026.
+- Status words: **has** (as before, or better), **partly** (what's missing follows), **missing**,
+  **dropped** (on purpose, with the reason). "D/W" is given only where the two differ.
+- Guards: `app/src/parity.rs` tests pin the key actions and the settings keys (a removed one fails
+  the test until this file and the expected list are changed together).
+
+Audited 19 Oct 2026 (before the fixes of that day); the status column is kept current as items close.
+
+## The shell (every view)
+
+| feature | was in | status |
+|---|---|---|
+| top bar: the views as icon tabs with tooltips (name + key) | ui.rs `nav` | has |
+| top bar: the app's mark at its left | ui.rs `AppMark` | dropped: the icon is the window's and the tab's (title bar, favicon), as the user asked 19 Oct |
+| top bar: status text, settings button | ui.rs | has |
+| top bar: undo button (latest action) | Dioxus only | has |
+| the window frame: bars and panels as inset rounded cards on the sand window colour (6px margin and gaps) | ui.rs `root` padding 6 / row_gap 6, theme.rs | has (19 Oct); the memory view's black field joins its black bar, the space fills the window behind the bars, as in Bevy |
+| one command bar shared by every view, each view keeping its own text | bar.rs | has |
+| command bar: the view's name at its left | bar.rs `BarMode` | dropped: the user asked 19 Oct for the bar's left side not to name the view |
+| command bar: the view's additions (counts, hints) at its right end | bar.rs `BarSide`, `notes_side` | has (19 Oct): one bar; the notes' count is there |
+| **must keep:** typing in the command bar, the text stays put: the input spans the bar with equal room at both ends and the view's additions sit over its right end, so their changing sizes never move the text (19 Oct, measured under Xvfb: the text's centre stayed at x = 600.5 over four words while the sums changed; guard `parity::tests::the_bar_text_stays_put`) | asked 19 Oct | has |
+| **must keep:** the typing field is never narrower than 15.5 cm (`min-width: 15.5cm`; the room at each end is what's left of the bar's width once the field has its 15.5 cm, at most 520px a side, and depends on nothing else, so the text never shifts); measured: 585.8px of field (15.5 cm at 96 px per inch) in a 1268px bar on the web and the desktop. CSS centimetres are 96 per inch at every scale factor, so the field is 15.5 cm of CSS length on every display (19 Oct, queued 1) | asked 19 Oct | has |
+| **must keep:** the view's items (sums, counts, chips) sit beside the typing field on the bar's line while they fit in the room at its right; those that don't wrap upward into a see-through bar just above it, and in a bar narrower than about 866px all of them go there (19 Oct, queued 2; checked under Xvfb in the memory and space views at 1200 and 820 wide, and on the web) | asked 19 Oct | has |
+| the memory view's and the space's sums and toggles in the bar | bar.rs `BarStrip` | has (19 Oct): in the one bar's right end, not a strip over it (the user asked for one bar) |
+| the bar's undo / redo (Ctrl+Z / Ctrl+Shift+Z in the bar) | Dioxus only | has |
+| toasts | memory_ui.rs, space_ui.rs | has |
+| right-click menu on a text (edit, tag, select, list, candidate, key, forget, kind) | Dioxus only | has |
+| zen: chrome fades while the mouse rests, delay setting | zen.rs | has |
+| hide the top bar until the pointer nears the top | zen.rs | has |
+| bars swapped (top bar at the bottom, command bar at the top) | config `bars_swapped` | has (19 Oct) |
+| sizes: interface scale, top bar height, command bar height, "default sizes" | sizing.rs | has (zoom, text size, both bars' heights) |
+| fonts: interface font and memory view font pickers (system fonts listed) | typeface.rs, settings.rs | partly (19 Oct): a family name for each, with common ones offered; a webview can't list the system's fonts |
+| window icon (desktop title bar) | main.rs | has (19 Oct: it never reached the window before, `Config::with_icon` was undone by `with_window`; now on the window, checked as `_NET_WM_ICON` under Xvfb; a desktop entry is put in place for Wayland desktops) |
+| web tab favicon and title | hub/web/index.html | has |
+| saves the open note when the window closes | ui.rs `on_close` | has (19 Oct): closing the desktop window saves a titled note with changes, then the app ends (tested under Xvfb with a WM_DELETE_WINDOW message: the note was there on the next start); leaving the notes view saves it too |
+| the guide button (opens docs/guide.md) | settings.rs | has |
+
+## Keys
+
+| feature | was in | status |
+|---|---|---|
+| every action rebindable in a keys menu (click a binding, press the key, Esc cancels, swap on clash, reset to defaults), kept in the config | keys.rs, ui.rs `rebuild_remap` | has (19 Oct): app/src/keys.rs, the settings' keys section, `Prefs::keymap`; the page's listener keeps exactly the bound keys |
+| 57 actions: views, save, new note, view/edit, slide the list, focus bar, buckets, toggles, sidecar arrows, flying, roll, level, home, speed, new/edit/delete/copy text, undo, reversed, pin, sliders, pause, settle, side sums, help, hud, export, save map, keys menu | keys.rs `Action` | has: 64 actions (the Bevy ones, the atbash ones dropped with atbash, plus zoom, word types, details, the reader's steps, the note's classifiers and checking); space.js flies on the bound keys. Some actions wait for their feature (see the space and memory rows) |
+| Ctrl+1..9 to the views | keys.rs | has (order differs: Dioxus is memory, space, lists, reader, notes, tags, stats, models, filters; Bevy was editor, reader, memory, stats, space, lists, classifiers, tags, filters) |
+| Ctrl+, settings, Ctrl+K / K the keys menu | keys.rs | has (Ctrl+K opens the settings at the keys) |
+| `/` focuses the command bar | keys.rs `FocusTerm` | has (and Enter outside the bar) |
+| zoom keys (Ctrl+= / Ctrl+− / Ctrl+0, PageUp/PageDown) | Dioxus only | has |
+
+## Theme and visuals
+
+| feature | was in | status |
+|---|---|---|
+| colour roles (13) with presets sand, night, paper, sea; per-role colour; reset | palette.rs, settings.rs | has |
+| the sand preset's exact colours (window hsl(39 30% 44%), bars hsl(0 0% 25%), cards white, pad hsl(39 19% 82%), buttons hsl(39 30% 66%), accent hsl(39 42% 56%), text 18%, dim 42%, link hsl(30 55% 34%), code hsl(39 19% 90%), room #e4d4be, bar text 92%, bar labels 62%) | theme.rs, bar.rs, space.rs | partly: the hex values match, but the window colour only shows as a thin gap, not the frame around inset cards |
+| colour editing with hue / saturation / lightness sliders and a hex box | settings.rs | partly: a colour input per role |
+| Fira Sans / Fira Mono, bundled | typeface.rs (Bevy feathers fonts) | has (19 Oct): subset woff2 in assets/fonts, embedded as @font-face |
+| buttons: sand fill, accent when selected, dark/light text chosen by contrast | theme.rs | has |
+| the editor's markdown highlighting (headings, marks, emphasis, strike, code, links, urls, lists, quotes, tables, tags, rules, composing), colours derived from the palette for contrast | highlight.rs | has (19 Oct): app/src/highlight.rs (its tests ported), a layer under a transparent-glyph textarea; theme.rs `hl_vars`; composing is the textarea's own |
+| setting: highlight on/off | config `highlight` | has (`Prefs::highlight`) |
+
+## Notes (the editor)
+
+| feature | was in | status |
+|---|---|---|
+| note list newest first, new note button, the open one marked, unsaved marker (•) | ui.rs `rebuild_list` | has |
+| `# title` + markdown in the pad, mono font | ui.rs | has |
+| tags as chips with ×, a tag box (Enter or comma adds) | ui.rs `rebuild_meta`, `tag_input_key` | has |
+| view / edit toggle (Ctrl+E) rendering the note | ui.rs | has |
+| save (Ctrl+S), new note (Ctrl+N) | keys.rs | has; a note without a # title isn't saved, as before |
+| delete with a confirmation | ui.rs `confirm_delete` | has (two clicks) |
+| slide the note list away / back (Ctrl+B), list on the right, hide until the pointer nears the edge | ui.rs, config `hide_list`, `list_right` | has (19 Oct): Ctrl+B and the button; the list on the right (settings); slid away, it waits off its edge and slides in while the pointer is within 10 px of that edge or on the list (CSS only; checked under Xvfb: hidden, shown at the edge, kept on the list, gone on leaving) |
+| **must keep:** the notes view opens with its note list shown, never a blank page; sliding the list away holds while a note is open, and comes back when none is (19 Oct, F7; checked under Xvfb with `hide_list` on) | asked 19 Oct | has |
+| the note's classifiers: pick which classifiers index it, each one's class chip and a yes/no | index_panel.rs, JS notecls.js | has (19 Oct): views/judge.rs, every class's probability too (Ctrl+I) |
+| markdown highlighting in the pad | highlight.rs | has |
+| the bar finds notes by words; Enter opens the first; "n of m notes" at the bar's end | bar.rs | has (Enter narrows, Enter again opens the first) |
+| **must keep:** one notes count in the notes view: at the bar's end ("n of m notes" while narrowed); the top line leaves its notes count out there and keeps it in every other view (19 Oct, queued 12) | asked 19 Oct | has |
+| the notes view as the typing view for long texts: smooth with a 1 MB text | asked 19 Oct (queued 12, 6) | partly (19 Oct): above 100 KB the colour layer and the spelling check pause, so a key doesn't re-lay out the whole text twice; measured on the web (headless Chromium): a 526 KB note takes about 100 ms from a key to the second frame after it, a short note 33 ms (two frames); highlighting itself is 6 ms for 526 KB natively (`highlight::timing`). Windowed highlighting and not sending the whole text to Rust on every key come with Stage B's large texts (item 6) |
+| the spelling underlines show with the markdown colours off too | — | has (19 Oct): the layer shows when there are flags, coloured or not |
+| written date and edits count | ui.rs | has |
+| replacements `{{key}}`, `{{filter:name}}`, alternatives from lists | Dioxus only | has |
+| the notes view has no horizontal scrollbar dragging the content off to the left | — | has (19 Oct): the view never scrolls itself; its list and pad do |
+| spelling and word choice: likely errors underlined as one writes (red: not a word; blue: repeated or confused), a click shows what each may be with its probability, a click on one puts it in, Ctrl+Z takes it out; a toggle (the check button, setting `check_spelling`); its measured precision and recall under the pad | asked 19 Oct | has (19 Oct, desktop and web): `core::grammar`, a detector and a separate suggester trained on deterministic corruptions; guard `parity::tests::the_spelling_check_stays` |
+| Ctrl+Z / Ctrl+Shift+Z in the pad | the browser's own | has (19 Oct): the pad keeps its own undo steps (the desktop web view had none: Ctrl+Z did nothing there) |
+
+## Reader
+
+| feature | was in | status |
+|---|---|---|
+| notes as cards with title, date (long date, "edited …" relative), tags, rendered markdown | ui.rs `rebuild_reader` | has: the opened one (19 Oct); the cards show the text |
+| **must keep:** a note's card in the reader shows when it was written (and "edited …" when it was), and the opened note its full dates (19 Oct; guard `parity::tests::reader_cards_keep_their_dates`) | ui.rs `rebuild_reader` | has |
+| a tag chip filters the reader to that tag, "show all" | ui.rs | has (from the opened note's tags; × shows all) |
+| edit button on a card opens the editor | ui.rs | has (on the opened note) |
+| the bar narrows by words | bar.rs | has |
+| notes, texts or everything; pages; expand one to read big, ← → steps | Dioxus only | has |
+| the opened item's dates (created, updated) | asked 19 Oct | has (19 Oct): written and last changed, long and relative, the edits count |
+| classifiers on the opened item: pick classifiers, see each class's probability | asked 19 Oct | has (19 Oct): views/judge.rs, with yes / no |
+
+## Memory view
+
+| feature | was in | status |
+|---|---|---|
+| weum's black field, the results card (#c9ab99), articles #282626, serif | memory_ui.rs | has |
+| Enter / Ctrl+Enter / Shift+Enter / Delete as weum | memory_ui.rs | has |
+| buckets O / R / F (R and F toggle back) | memory_ui.rs | has |
+| the atbash bucket (A, ↑) | memory_ui.rs | dropped: an atbash sum equals the reversed sum letter for letter; the entry graph files ordinal and reversed only (`graph::gematria`) |
+| sidecar (sums, letters), each clickable; ← → | memory_ui.rs | has |
+| ↓ gsearches the letters (frequency) | memory_ui.rs `SideFrequency` | has |
+| toggles: gsearch text (G), saturate (S), white mode (W) | memory_ui.rs | has (white mode back 19 Oct) |
+| list commands Enlist / List / Delist / Unlist; Shift+click list, Ctrl+click candidate | memory_ui.rs | has |
+| click: into the bar; double click: key; hover line (key + gsum) | memory_ui.rs | has |
+| middle click opens a note in the editor | memory_ui.rs | has |
+| Ctrl+right click: forget and re-saturate under a new key | memory_ui.rs | dropped for weum's Ctrl+right click (gsearch ⌊√(s·r)⌋), which the space had too; re-keying is not offered |
+| underlines by shared reversed sum (the gematria colour of a text's reversed-ordinal match group) | memory_ui.rs | has; **must stay**: word-type labels (T) are a separate channel (a coloured label under each word) and never take, replace or recolour the underline (guard: `parity::tests::word_types_keep_the_gematria_underline`) |
+| colouring by a classifier (bar at the left, legend) | tint.rs | has |
+| empty-state hint | memory_ui.rs | has |
+| word types on hover: which types, not only how many (noun, verb, name, number, link…, coloured) | asked 19 Oct | has (19 Oct): core `kinds::tag`, a rule tagger (noun, verb, adjective, adverb, pronoun, determiner, preposition, conjunction, interjection, name, number, date, time, link, email, hashtag); the hover line labels each word in its type's colour; T labels every text, with a legend |
+| search filter panel, buckets strip at the left edge, field width, selection | Dioxus only | has |
+
+## Space
+
+| feature | was in | status |
+|---|---|---|
+| fly: right drag looks, WASD, Space/C, Q/E roll, Shift fast, [ ] / wheel speed, R level, Home | space.rs | has (space.js) |
+| **must keep:** looking round is yaw about the world's up and pitch clamped short of straight up/down, kept apart from roll (Q/E only), eased smoothly onto where the mouse puts it; circling the mouse never spins the view; look sensitivity and smoothness in the physics window's camera group (19 Oct, F5; checked under Xvfb: three right-drag circles left the view where it started, roll 0°) | asked 19 Oct | has |
+| texts as camera-facing labels, sized by distance | space.rs (slug text) | has (19 Oct): one font size, placed and scaled by a sub-pixel transform each frame, so they move smoothly |
+| the spread: physics with damping, gravity, repulsion, ranges, buckets attract/repel/align, anchor, depth, distance, cooling, steps per frame, text size, wrap, hide under px | space.rs `SLIDERS` | has, as a free spread (19 Oct): live physics in space.js; damping, gravity, repulsion, attraction, link length, gap, cooling, speed, depth (by a measure) and flatness, distance, text size, wrap, hide under px. The bucket attract/repel/align and the spiral anchor are gone on purpose: the user asked for no spiral; bucket-ness is the "same bucket" weight |
+| the sliders panel (O), reset all, double-click a name resets it, settle (K), pause (P) | space_ui.rs `build_opts` | has (19 Oct): the physics window, movable; settings kept in `Prefs::space` |
+| a proper free force-directed spread whose attraction and repulsion are weighted by the texts' metrics | asked 19 Oct (not the Archimedean spiral) | has (19 Oct): weights −1..1 for ordinal, reversed, the same bucket, length, kind and word types, shared lists, the colouring classifier's class, time, letters (`space.features` in core) |
+| drag a text to move it (pinned after), wheel on a text pushes/pulls it, pin / unpin (U) | space.rs | has |
+| new text (N, double click empty), edit (Enter), delete, copy (Ctrl+C), undo (Ctrl+Z) | space.rs | has (edits go through the bar; undo covers moves, pins, removals, new texts and edits, then the app's undo) |
+| **must keep:** a right-click menu on every text in the room: edit, pin/unpin, a copy beside it, copy the text, open in notes (a note) or into the memory view's bar, put into the chosen list, make it the list / candidate, tag, gsearch its sum / reversed sum / ⌊√(s·r)⌋, its key into the bar, the details window, take this placement out, forget the entry (19 Oct, F2; chains come with queued item 8; guard `parity::tests::space_texts_have_a_menu_and_safe_copies`) | asked 19 Oct | has |
+| **must keep:** a copy of a text in the room is another placement of the same entry: taking a placement out (Delete, the menu) never touches the entry; forgetting the entry is its own item, confirmed with a second click and undoable, naming how many placements go with it; the menu and the details window say which placement this is (the first or a copy) and how many there are; a double click on the empty room makes an empty new text (Shift: with the bar's text), so it no longer copies the text just clicked (19 Oct, F4; checked under Xvfb: copy, remove the copy, the entry count unchanged) | asked 19 Oct | has |
+| the metrics card (s, r, s+r, s·r, √, ⌊√⌋, s−r, wide, lean, gap, v, c, w, letters; key, bucket colour ×n, pinned; pf line), numbers gsearch | space_ui.rs | has (19 Oct): every number; the bucket's count ×n is not shown |
+| the details panel movable, its close button hidden until hover | asked 19 Oct | has (19 Oct): dragged by its title, where it was left kept; M shows / hides it |
+| **must keep:** the space's windows (details, physics, blocks) stay inside the room: clamped by the layout when the window is resized (and on restore from a saved place), clamped again when a drag ends; dragging them selects no text (19 Oct, F1; checked under Xvfb by shrinking the window to 700×600 and back) | asked 19 Oct | has |
+| position card (I): x y z, speed, roll, texts, spread state | space_ui.rs | has |
+| help card (H) with the keys as bound | space_ui.rs | has |
+| first-time hint | space_ui.rs | has: the empty room says how to start |
+| terminal: Enter, Ctrl+Enter, Shift+Enter, Delete, ↑ ↓ history (kept) | space.rs | has |
+| **must keep:** Enter in the space's bar does what it did and then lets go of the bar, so W A S D and the arrows fly again; typing starts again with a click on the bar or the focus key (19 Oct, F3 / queued 3; checked under Xvfb: Enter, then W moved the camera 6.2 units; guard `parity::tests::the_space_bar_lets_go_after_enter`) | asked 19 Oct | has |
+| `#123`, `#r123`, `#name` addresses; the last address reopened | space.rs `route` | has |
+| space search modes: normal (sums and words), classifier (a class of the colouring classifier, then words: its members, or the likeliest), random (weum's random hashmap search: texts sharing a word with what's typed, `*` any, filtered on several threads and shuffled; `mem.random`) | weum, next.md backlog | has (19 Oct): the select at the bar's right in the space; checked under Xvfb (random “red” found the red fox); `ops::tests::random_search_samples_texts_sharing_a_word` |
+| words: Enlist List Delist Unlist Count Backup Clear ClearAll Settle Maps Save name | space.rs `COMMANDS` | has (and Help) |
+| maps: save (Shift+X / Save name), list (Maps), open (#name); export the texts to a file (X) | space.rs | has: saved as scenes in the save (`scenes.*`, 20 Oct; before that the `space.maps` setting, which moves into scenes when an older save opens); export to the data folder's exports (desktop) or a download (web) |
+| **must keep:** the scenes window (folder chip): every saved scene with its count, a click opens it, rename in place, delete with a second click and an undo, and the room saved under a name (19 Oct, F6; checked under Xvfb: save, rename, delete, undo; guard `parity::tests::scenes_window_stays`) | asked 19 Oct | has |
+| chips: gsearch, reversed (F), saturate, keep | space_ui.rs | has |
+| the search line in the top bar (what, counts with icons, pf chain, the triangle with sides and angles) | space_ui.rs `rebuild_qline` | partly: title, mode, count, triangle |
+| bucket underline colours (seedCLR), class colours from a classifier | space.rs, tint.rs | has |
+| **must keep:** every space text underlined in its gematria grouping colour, the same as the memory view's (the reversed-ordinal match groups), together with the spread and the smooth labels (lost in the 19 Oct spread rewrite, which underlined only texts sharing a bucket in the room; back the same day; guard `parity::tests::space_keeps_the_grouping_underlines`) | space.rs, the earlier Dioxus space.js | has |
+| the solid box in the room | space.rs `SOLIDS` | dropped: a test fixture of remem's, never used for anything |
+| list / candidate marks | Dioxus | has |
+| one bar (the space's strip merged into the command bar) | asked 19 Oct | has (19 Oct) |
+| arrows hop to the nearest text | Dioxus only | has |
+| spatial saves: blocks in the room showing a text, a picture or a colour, kept in the save (since 20 Oct as placements in the room's scene, one packed value per texture and chunk of 64; an older save's `graph blocks` move there when it opens), in its backups, bundles and merges | asked 19 Oct | has (19 Oct, desktop and web; on scenes 20 Oct, checked on the web with a save made by the previous build: its blocks and saved scene came across, copy, delete and undo work): the blocks window (cube chip) makes them from the selected text, a picture or a colour; copy, delete, x y z w h d fields; Ctrl+Z undoes moves, resizes, adds and deletes; `blocks.*` in docs/app-api.md |
+| a translate / scale gizmo on the selected block, the texture tiling with its size (UVs per unit, repeat wrapping) rather than stretching | asked 19 Oct | has (19 Oct): arrows move along an axis, the face knobs resize (the far face stays), the ball moves across the view, Shift snaps to quarter units; guard `parity::tests::blocks_tile_and_have_a_gizmo` |
+
+## Lists
+
+| feature | was in | status |
+|---|---|---|
+| every list with members, figures (members, ordinal, ordinal mean, reversed, reversed mean) | lists_ui.rs | has (19 Oct): a card per list |
+| the list as one text (ordinal, reversed, letters), gsum detail, pf chain | lists_ui.rs | has |
+| its letters as a vector (bars a–z) on each list | lists_ui.rs | has |
+| "how alike": the cosine matrix of every two lists' letter vectors, coloured | lists_ui.rs | has |
+| members as chips with their s·r and × to delist | lists_ui.rs | has (and editable rows on the list's page) |
+| choose a list; the bar's Enter adds to it (saturating new texts); "let go of it"; with none chosen, Enter starts a list | lists_ui.rs `bar_key` | has (and Enter on a list's name chooses it) |
+| unlist from the overview | lists_ui.rs | has (two clicks, Ctrl+Z brings it back) |
+| rename a list, edit members in place, pages, pictures panel, undo | Dioxus only | has |
+
+## Tags, stats
+
+| feature | was in | status |
+|---|---|---|
+| tags with counts, Ctrl/Shift+click multi-pick, all/any, the notes carrying them, open in the editor | tags_ui.rs | has |
+| stats: notes, words, saves/edits, first and latest note, tags with counts opening the tags view | ui.rs `rebuild_stats` | has (19 Oct: a tag opens the tags view with it picked) |
+
+## Classifiers (the models view)
+
+| feature | was in | status |
+|---|---|---|
+| list, new from lists (classes, not-list, builds on, size, one class / several) | classify_ui.rs | has |
+| starter examples (fruit, stones, animals) | classify_ui.rs | has (20 Oct): the starters panel (the models view's "starters" button, and the empty state) makes fruit, stones and animals and seven more (number, gematria, English, spelling, sentence, authors, languages), each with its source and licence; a classifier made from one shows its held-out score (`classify.starter*`) |
+| training: epochs, rounds, from scratch, progress, loss line, cancel, metrics, confusion, growth | classify_ui.rs | has (growth history back 19 Oct); the page has the Bevy tabs again: learn, use, buckets, checks |
+| use: try a text, yes/no per class, "why" (each classifier's part, end to end) | classify_ui.rs, `classify.contributions` | has |
+| steering: bias per class, temperature, threshold, channel gains, the bias it adds (flipped, KL) | classify_ui.rs | has |
+| buckets: every text filed by class and sureness (tenths), index again | classify_ui.rs, `classify.buckets` | has (19 Oct): views/clsmore.rs |
+| near texts by meaning (embedding) or verdict | classify_ui.rs, `classify.near` | has |
+| outputs as a list (write the list) | classify_ui.rs, `classify.enlist` | has |
+| checks: validators, disagreements | cls_more.rs | has |
+| share / take classifiers on the hub | cls_more.rs, JS clsmore.js | has (in the settings' hub section) |
+| export / import `.anendcls` | classify_ui.rs | has |
+| colour views by a classifier | classify_ui.rs | has (picked in the memory strip) |
+| device: CPU / GPU / GPU fast, and which device a job ran on | asked 19 Oct | has (classifier and spec training; falls back to the CPU with a note when there's no adapter or the hub keeps members on its CPU; desktop and `anend-hub` build with `gpu`, a shared hub needs `--gpu`) |
+| classifiers read texts on the GPU too: predicting, classifier search, indexing, buckets, colouring by a classifier and filters by one, every text's windows packed into a few submissions; the settings' GPU section picks auto (the GPU when it is a real one and bit-exact, else the CPU), the CPU, the GPU or the GPU fast, and says where reading runs now and why when it fell back to the CPU | asked 20 Oct (checklist) | has (20 Oct, desktop and web): `classify.device`, `GpuNet::text_runs`; tested against the CPU on the container's software renderer (llvmpipe, bit-exact there); speed and behaviour on real GPU hardware not verified yet |
+| the GPU report: a settings button that writes a JSON file with the adapter and driver, its limits, the exactness probe of every kernel, and timings of a fixed training run and of reading 10 000 texts on the CPU and the GPU | asked 20 Oct (checklist) | has (20 Oct): `gpu.report`, `core/src/classify/report.rs`; to be run by the user on their machine |
+| the gpu build is warning-free (no `recursion_depth_exceeding_limit` on the shared device) | asked 19 Oct (F8) | has (19 Oct): `Gpu` is Send + Sync by an explicit impl, each field checked on its own (`fields_are_send_and_sync`) |
+| spec models (templates, JSON editor, train, run, write) | Dioxus only | has |
+
+## Filters
+
+| feature | was in | status |
+|---|---|---|
+| conditions by classifier verdict, words, lists, tags, kind | filters_ui.rs, `filters.*` | has (19 Oct): views/flt.rs, beside the query filters (words, sum, time, tag, kind) |
+| "all of" / "any of" groups, nested | filters_ui.rs | has, and "not" on any condition or group |
+| presets that include each other | filters_ui.rs | has |
+| write the results out as a list | filters_ui.rs, `filters.enlist` | has |
+| select dropdowns sized so the text sits inside them | — | has (19 Oct): every select draws its own arrow, text centred (style.css) |
+
+## Forge
+
+| feature | was in | status |
+|---|---|---|
+| the forge: saves in, ingredients (+ − ∩), result preview, filters (words, ordinal, reversed), name, forge / pour into the open save | forge_ui.rs, JS forge.js, `forge.*` | has (19 Oct): views/forge.rs, from the settings' head |
+
+## Saves, the hub (settings)
+
+| feature | was in | status |
+|---|---|---|
+| saves: list, open, new, copy, rename, delete, backup, import weum JSON | settings.rs | has |
+| saves folder setting (a folder lists its saves, a .redb path opens one) | settings.rs | missing |
+| save checkpoints: named redb savepoints of the open save, listed under it in the saves settings, gone back to (two clicks; later ones go) and deleted | next.md backlog | has (19 Oct): `graph::checkpoints`, `saves.checkpoint(s)`; checked under Xvfb (a checkpoint, a new text, back: 51 entries to 50, the later checkpoint dropped) |
+| input methods (IME): composing in the bar and the notes pad; Enter while composing picks the candidate and does nothing else | asked (brief) | has on the web (19 Oct): `scripts/ime-check.mjs` drives Chromium's IME path (CDP `imeSetComposition`, Enter with key code 229, `insertText`): にほん → 日本 in the memory bar, the composing Enter searched nothing, a real Enter then remembered it; 漢字 composed into the pad. The desktop (WebKitGTK with IBus/Fcitx) wasn't tried: this container has no input method; the bar's guard (`isComposing` / 229) is the same code |
+| **must keep:** a still space isn't drawn again every frame (nothing flying, turning, easing, dragging or spreading), so typing elsewhere while the space is open keeps every key; it lost keys typed quickly in the desktop's web view before (19 Oct; checked under Xvfb: 25 characters at 40 ms each, all there) | — | has |
+| export / import a bundle (.anend.json) | JS settings.js | has (19 Oct) |
+| the hub: connect with an app token, browse and download shared saves, share this one | hub_ui.rs | has (19 Oct): views/hubui.rs + hubnet.rs (ureq on the desktop, fetch on the web); the web shares saves from the desktop only (no same-origin route for it) |
+| local-only browser saves (IndexedDB) | JS local/ | dropped: the web app runs against the hub's app mode (`anend-hub --mode app --local` for one person) |
+
+## New since the Bevy app (keep)
+
+The Dioxus app adds: the undo stack and button, the right-click menu with kinds, the memory
+view's search filter, bucket strip, field width and selection, pictures, spec models,
+replacements and alternatives in the editor, the reader's pages and big reading, zoom.
+
+## Not yet (planned)
+
+| feature | status |
+|---|---|
+| WebGPU training in the browser (task #24) | not yet |

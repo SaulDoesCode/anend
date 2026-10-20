@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 use crate::classify::compose::{Contribution, Edge, Graph, StackReport};
+use crate::classify::device::{self, Choice, Reading, Runner};
 use crate::classify::grow::{self, Grower};
 use crate::classify::metrics::Metrics;
 use crate::classify::steer::Output;
@@ -38,6 +39,11 @@ use crate::store::{NOTES, Store, StoreResult};
 pub const DEFINITIONS: TableDefinition<&str, &[u8]> = TableDefinition::new("classifiers");
 pub const WEIGHTS: TableDefinition<&str, &[u8]> = TableDefinition::new("classifier weights");
 pub const FEEDBACK: TableDefinition<(&str, u64), &[u8]> = TableDefinition::new("classifier feedback");
+/// (name, n) -> what a yes/no on that classifier changed, to take it back (`Undo`)
+pub const UNDO: TableDefinition<(&str, u64), &[u8]> = TableDefinition::new("classifier undo");
+
+/// how many yes/no answers on a classifier can be taken back
+pub const UNDO_KEPT: u64 = 20;
 
 /// how many history events a definition keeps (oldest dropped first)
 pub const HISTORY_KEPT: usize = 200;
@@ -50,7 +56,16 @@ pub fn create_tables(txn: &WriteTransaction) -> StoreResult<()> {
     txn.open_table(DEFINITIONS).map_err(err)?;
     txn.open_table(WEIGHTS).map_err(err)?;
     txn.open_table(FEEDBACK).map_err(err)?;
+    txn.open_table(UNDO).map_err(err)?;
     Ok(())
+}
+
+/// what one yes/no changed: the feedback it logged, and each classifier it wrote as it
+/// was before (its definition's JSON and its weights in base64)
+#[derive(Serialize, Deserialize)]
+struct Undo {
+    feedback: u64,
+    was: Vec<(String, String, Option<String>)>,
 }
 
 // ---------------------------------------------------------------- what's stored
@@ -108,6 +123,10 @@ pub struct Definition {
     pub head: HeadKind,
     /// "tiny", "compact", "small" or "base" (see `preset`)
     pub preset: String,
+    /// the gematria input channels (letter values, word sums, the side vector): opt-in,
+    /// off for new classifiers; definitions saved before it was optional had them on
+    #[serde(default = "yes")]
+    pub gematria: bool,
     pub steer: Steer,
     #[serde(default)]
     pub inputs: Vec<Input>,
@@ -120,6 +139,9 @@ pub struct Definition {
     /// bumped by every write of the weights
     #[serde(default)]
     pub version: u64,
+    /// the starter it was made from (`starters`), whose held-out texts score it
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub starter: Option<String>,
     pub seed: u64,
     pub created: String,
     pub modified: String,
@@ -143,6 +165,10 @@ pub struct FeedbackEntry {
     /// the class's unsteered probability before and after
     pub before: f32,
     pub after: f32,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// the sizes on offer, smallest first
@@ -252,6 +278,7 @@ impl Definition {
             not,
             head,
             preset: preset_name.into(),
+            gematria: false,
             steer: Steer {
                 gains: Default::default(),
                 heads: vec![],
@@ -261,6 +288,7 @@ impl Definition {
             history: vec![],
             outputs: BTreeMap::new(),
             version: 0,
+            starter: None,
             created: now.clone(),
             modified: now,
         };
@@ -317,7 +345,7 @@ impl Definition {
     /// a fresh, untrained classifier for this definition; `extra` is the width of its
     /// upstream inputs
     pub fn build(&self, extra: usize) -> StoreResult<Classifier> {
-        let mut cfg = preset(&self.preset).ok_or("unknown preset")?;
+        let mut cfg = preset(&self.preset).ok_or("unknown preset")?.gematria(self.gematria);
         cfg.extra = extra;
         let names = self.class_names();
         let names: Vec<&str> = names.iter().map(String::as_str).collect();
@@ -336,6 +364,35 @@ pub struct Stack {
     pub node: usize,
     /// definitions in graph order
     pub defs: Vec<Definition>,
+    /// where its texts are read, decided on first use
+    pub read: Read,
+}
+
+/// where a stack reads texts: the choice it was loaded with, and (on first use) the
+/// device that gives and the nets uploaded to it
+pub struct Read {
+    pub choice: Choice,
+    /// whether the GPU may be used here
+    pub allowed: bool,
+    /// the save's classifiers file, naming the uploaded nets
+    pub origin: String,
+    state: std::sync::OnceLock<(Reading, Vec<Option<std::sync::Arc<Runner>>>)>,
+}
+
+impl Read {
+    pub fn new(choice: Choice, allowed: bool, origin: String) -> Read {
+        Read {
+            choice,
+            allowed,
+            origin,
+            state: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// the CPU, as the reference
+    pub fn cpu() -> Read {
+        Read::new(Choice::Cpu, false, String::new())
+    }
 }
 
 impl Stack {
@@ -351,13 +408,47 @@ impl Stack {
         self.defs.iter().map(|d| d.name.clone()).collect()
     }
 
-    /// head 0's steered output for every text, in parallel
+    /// where this stack reads texts, and the nets on the device for it (opened on first
+    /// use; a net the device can't take sends the whole stack to the CPU, saying why)
+    fn reader(&self) -> &(Reading, Vec<Option<std::sync::Arc<Runner>>>) {
+        self.read.state.get_or_init(|| {
+            let r = device::reading(self.read.choice, self.read.allowed);
+            if !r.device.is_gpu() {
+                return (r, vec![]);
+            }
+            let mut runners = Vec::new();
+            for (d, n) in self.defs.iter().zip(&self.graph.nodes) {
+                let key = format!("{}\u{0}{}\u{0}{}", self.read.origin, d.name, d.version);
+                match device::runner(&key, r.device, &n.clf.net) {
+                    Ok(x) => runners.push(x),
+                    Err(e) => {
+                        let note = format!("{:?} doesn't fit the GPU ({e}): read on the CPU", d.name);
+                        return (Reading::cpu(r.choice, Some(note)), vec![]);
+                    }
+                }
+            }
+            (r, runners)
+        })
+    }
+
+    /// where this stack reads texts
+    pub fn reading(&self) -> &Reading {
+        &self.reader().0
+    }
+
+    /// every node's steered outputs and the judged node's pooled vector for many texts,
+    /// on the stack's device
+    pub fn read_many(&self, texts: &[&str], pool: &Pool) -> Vec<(Vec<Output>, Vec<f32>)> {
+        let runners: Vec<Option<&Runner>> = self.reader().1.iter().map(|r| r.as_deref()).collect();
+        self.graph.read_node_many(self.node, texts, &runners, pool)
+    }
+
+    /// head 0's steered output for every text, on the stack's device (the pool on the CPU)
     pub fn outputs(&self, texts: &[&str], pool: &Pool) -> Vec<Output> {
-        let slots: Vec<std::sync::Mutex<Option<Output>>> = texts.iter().map(|_| Default::default()).collect();
-        pool.run(texts.len(), &|i| {
-            *slots[i].lock().unwrap() = Some(self.graph.predict(self.node, texts[i]).swap_remove(0));
-        });
-        slots.into_iter().map(|s| s.into_inner().unwrap().unwrap()).collect()
+        self.read_many(texts, pool)
+            .into_iter()
+            .map(|(mut o, _)| o.swap_remove(0))
+            .collect()
     }
 
     /// the extra inputs of every text
@@ -407,6 +498,8 @@ pub struct Training {
     pub rounds: usize,
     /// the version of the weights it started from
     pub from_version: u64,
+    /// why it runs on the CPU when a GPU was asked for
+    pub device_note: Option<String>,
 }
 
 /// what a run did
@@ -525,6 +618,9 @@ pub struct TrainArgs {
     pub rounds: Option<usize>,
     /// start from new weights instead of the trained ones
     pub fresh: bool,
+    /// where to train: the CPU (the reference), the GPU exact or fast; a GPU this build
+    /// or machine doesn't have falls back to the CPU, saying why
+    pub device: crate::classify::device::Device,
 }
 
 /// what yes/no feedback is about: a text, and the memory or note it came from
@@ -602,7 +698,8 @@ impl Store {
     }
 
     /// a new classifier over lists (by label): `classes` the lists, `not` an optional
-    /// list of texts that are none of them, `inputs` classifiers it builds on
+    /// list of texts that are none of them, `inputs` classifiers it builds on; no
+    /// gematria channels (see `create_classifier_with`)
     pub fn create_classifier(
         &self,
         name: &str,
@@ -611,6 +708,22 @@ impl Store {
         head: HeadKind,
         preset_name: &str,
         inputs: Vec<Input>,
+    ) -> StoreResult<Definition> {
+        self.create_classifier_with(name, classes, not, head, preset_name, inputs, false)
+    }
+
+    /// `create_classifier`, with the gematria input channels (letter values, word sums,
+    /// the side vector) on when `gematria`
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_classifier_with(
+        &self,
+        name: &str,
+        classes: &[Ref],
+        not: Option<&Ref>,
+        head: HeadKind,
+        preset_name: &str,
+        inputs: Vec<Input>,
+        gematria: bool,
     ) -> StoreResult<Definition> {
         let name = clean_name(name)?;
         if self.classifier(&name).is_ok() {
@@ -626,6 +739,7 @@ impl Store {
         let classes = classes.iter().map(class).collect::<StoreResult<Vec<_>>>()?;
         let not = not.map(class).transpose()?;
         let mut def = Definition::new(&name, classes, not, head, preset_name)?;
+        def.gematria = gematria;
         for i in &inputs {
             if i.from == name {
                 return Err("a classifier can't build on itself".into());
@@ -654,6 +768,8 @@ impl Store {
             txn.open_table(WEIGHTS).map_err(err)?.remove(name).map_err(err)?;
             let mut f = txn.open_table(FEEDBACK).map_err(err)?;
             f.retain_in((name, 0)..=(name, u64::MAX), |_, _| false).map_err(err)?;
+            let mut u = txn.open_table(UNDO).map_err(err)?;
+            u.retain_in((name, 0)..=(name, u64::MAX), |_, _| false).map_err(err)?;
         }
         txn.commit().map_err(err)?;
         self.memo_clear(name)?;
@@ -726,6 +842,11 @@ impl Store {
             node: order.len() - 1,
             graph,
             defs: order,
+            read: Read::new(
+                device::choice(),
+                self.gpu_reads(),
+                self.path().to_string_lossy().into_owned(),
+            ),
         })
     }
 
@@ -733,6 +854,9 @@ impl Store {
 
     /// a list's members as stored
     pub fn list_members(&self, list: &Ref) -> StoreResult<Vec<Ref>> {
+        if let Some(t) = self.texts() {
+            return t.members(list);
+        }
         let txn = self.db.begin_read().map_err(err)?;
         let t = txn.open_multimap_table(LISTS).map_err(err)?;
         let mut out = Vec::new();
@@ -744,6 +868,9 @@ impl Store {
 
     /// what a classifier reads of a memory (its text) or a note (title and markdown)
     pub fn ref_text(&self, r: &Ref) -> StoreResult<Option<String>> {
+        if let Some(t) = self.texts() {
+            return t.text(r);
+        }
         let txn = self.db.begin_read().map_err(err)?;
         Ok(match r {
             Ref::Memory(k) => {
@@ -764,6 +891,9 @@ impl Store {
 
     /// every memory and note a classifier can rank: (ref, what it reads, what's shown)
     pub fn candidates(&self, limit: usize) -> StoreResult<Vec<(Ref, String, String)>> {
+        if let Some(t) = self.texts() {
+            return t.candidates(limit);
+        }
         let mut out: Vec<(Ref, String, String)> = self
             .all_memories()?
             .into_iter()
@@ -860,6 +990,16 @@ impl Store {
         // more threads than the machine has only slows it (and each is a real thread)
         o.threads = a.threads.unwrap_or(o.threads).min(crate::classify::pool::available());
         o.seed = crate::classify::math::key(&[def.seed, def.version]);
+        let device_note = match a.device.check() {
+            Ok(()) => {
+                o.device = a.device;
+                None
+            }
+            Err(e) => {
+                o.device = crate::classify::device::Device::Cpu;
+                Some(format!("no GPU here ({e}): trained on the CPU"))
+            }
+        };
         if stack.node > 0 {
             let pool = o.pool();
             data = stack.graph.with_extras(stack.node, &data, &pool);
@@ -870,6 +1010,7 @@ impl Store {
             opts: o,
             rounds: a.rounds.unwrap_or(1).clamp(1, 50),
             from_version: def.version,
+            device_note,
         })
     }
 
@@ -906,6 +1047,8 @@ impl Store {
             seconds: s.seconds,
         });
         self.put_classifier(&mut def, Some(t.stack.clf()))?;
+        // the yes/no answers before it can't be taken back past new weights
+        self.drop_undo(name)?;
         Ok(def)
     }
 
@@ -938,9 +1081,9 @@ impl Store {
 
     // ---- feedback
 
-    fn log_feedback(&self, e: &FeedbackEntry) -> StoreResult<()> {
+    fn log_feedback(&self, e: &FeedbackEntry) -> StoreResult<u64> {
         let txn = self.db.begin_write().map_err(err)?;
-        {
+        let n = {
             let mut t = txn.open_table(FEEDBACK).map_err(err)?;
             let name = e.classifier.as_str();
             let next = t
@@ -952,8 +1095,113 @@ impl Store {
                 .map_or(0, |(k, _)| k.value().1 + 1);
             let json = serde_json::to_vec(e).map_err(err)?;
             t.insert((name, next), json.as_slice()).map_err(err)?;
+            next
+        };
+        txn.commit().map_err(err)?;
+        Ok(n)
+    }
+
+    /// the classifiers `names` as they are now, for an [`Undo`]
+    fn snapshot(&self, names: &[String]) -> StoreResult<Vec<(String, String, Option<String>)>> {
+        let txn = self.db.begin_read().map_err(err)?;
+        let d = txn.open_table(DEFINITIONS).map_err(err)?;
+        let w = txn.open_table(WEIGHTS).map_err(err)?;
+        let mut out = Vec::new();
+        for n in names {
+            let Some(def) = d.get(n.as_str()).map_err(err)? else {
+                continue;
+            };
+            let def = String::from_utf8_lossy(def.value()).into_owned();
+            let weights = w.get(n.as_str()).map_err(err)?.map(|g| base64(g.value()));
+            out.push((n.clone(), def, weights));
+        }
+        Ok(out)
+    }
+
+    /// keeps what a yes/no on `name` changed, the oldest beyond [`UNDO_KEPT`] dropped
+    fn keep_undo(&self, name: &str, u: &Undo) -> StoreResult<()> {
+        let txn = self.db.begin_write().map_err(err)?;
+        {
+            let mut t = txn.open_table(UNDO).map_err(err)?;
+            let next = t
+                .range((name, 0)..=(name, u64::MAX))
+                .map_err(err)?
+                .next_back()
+                .transpose()
+                .map_err(err)?
+                .map_or(0, |(k, _)| k.value().1 + 1);
+            let json = serde_json::to_vec(u).map_err(err)?;
+            t.insert((name, next), json.as_slice()).map_err(err)?;
+            if next >= UNDO_KEPT {
+                let cut = next - UNDO_KEPT;
+                t.retain_in((name, 0)..=(name, cut), |_, _| false).map_err(err)?;
+            }
         }
         txn.commit().map_err(err)
+    }
+
+    /// forgets what could be taken back on `name`, and every yes/no through a stack
+    /// that wrote it (its weights changed another way)
+    pub fn drop_undo(&self, name: &str) -> StoreResult<()> {
+        let txn = self.db.begin_write().map_err(err)?;
+        txn.open_table(UNDO)
+            .map_err(err)?
+            .retain(|_, v| serde_json::from_slice::<Undo>(v).is_ok_and(|u| u.was.iter().all(|w| w.0 != name)))
+            .map_err(err)?;
+        txn.commit().map_err(err)
+    }
+
+    /// how many yes/no answers on `name` can be taken back
+    pub fn undo_count(&self, name: &str) -> StoreResult<usize> {
+        let txn = self.db.begin_read().map_err(err)?;
+        let t = txn.open_table(UNDO).map_err(err)?;
+        Ok(t.range((name, 0)..=(name, u64::MAX)).map_err(err)?.count())
+    }
+
+    /// takes back the latest yes/no on `name`: every classifier it wrote gets its
+    /// definition and weights back as they were, and the feedback leaves the log
+    /// (so training no longer replays it); the entry taken back
+    pub fn unfeedback(&self, name: &str) -> StoreResult<FeedbackEntry> {
+        self.classifier(name)?;
+        let txn = self.db.begin_write().map_err(err)?;
+        let entry = {
+            let mut t = txn.open_table(UNDO).map_err(err)?;
+            let last = t
+                .range((name, 0)..=(name, u64::MAX))
+                .map_err(err)?
+                .next_back()
+                .transpose()
+                .map_err(err)?
+                .map(|(k, v)| (k.value().1, v.value().to_vec()));
+            let Some((n, bytes)) = last else {
+                return Err(format!("there's no yes or no on {name:?} to take back"));
+            };
+            t.remove((name, n)).map_err(err)?;
+            let u: Undo = serde_json::from_slice(&bytes).map_err(err)?;
+            let mut d = txn.open_table(DEFINITIONS).map_err(err)?;
+            let mut w = txn.open_table(WEIGHTS).map_err(err)?;
+            for (n, def, weights) in &u.was {
+                d.insert(n.as_str(), def.as_bytes()).map_err(err)?;
+                match weights.as_deref().map(unbase64) {
+                    Some(Some(b)) => {
+                        w.insert(n.as_str(), b.as_slice()).map_err(err)?;
+                    }
+                    Some(None) => return Err("a kept copy of the weights doesn't read".into()),
+                    None => {
+                        w.remove(n.as_str()).map_err(err)?;
+                    }
+                }
+            }
+            let mut f = txn.open_table(FEEDBACK).map_err(err)?;
+            let e = f.remove((name, u.feedback)).map_err(err)?.map(|g| g.value().to_vec());
+            match e {
+                Some(e) => serde_json::from_slice::<FeedbackEntry>(&e).map_err(err)?,
+                None => return Err("that yes or no isn't in the log any more".into()),
+            }
+        };
+        txn.commit().map_err(err)?;
+        // the texts it filed under the classifier answer as before, so the memo stays
+        Ok(entry)
     }
 
     /// a classifier's feedback log, oldest first
@@ -1031,8 +1279,10 @@ impl Store {
             before: rep.before[0],
             after: rep.after[0],
         };
+        let was = self.snapshot(std::slice::from_ref(&def.name))?;
         self.put_classifier(&mut def, Some(clf))?;
-        self.log_feedback(&e)?;
+        let feedback = self.log_feedback(&e)?;
+        self.keep_undo(&def.name, &Undo { feedback, was })?;
         Ok(e)
     }
 
@@ -1067,6 +1317,7 @@ impl Store {
             },
         )?;
         let mut touched = Vec::new();
+        let was = self.snapshot(&stack.names())?;
         for (i, d) in stack.defs.iter().enumerate() {
             if rep.grad_norms[i] > 0.0 || i == stack.node {
                 let mut d = self.classifier(&d.name)?;
@@ -1094,7 +1345,9 @@ impl Store {
             before: rep.before,
             after: rep.after,
         };
-        self.log_feedback(&e)?;
+        let feedback = self.log_feedback(&e)?;
+        let was = was.into_iter().filter(|w| touched.contains(&w.0)).collect();
+        self.keep_undo(&def.name, &Undo { feedback, was })?;
         Ok((e, rep, touched))
     }
 
@@ -1261,6 +1514,32 @@ pub fn unbase64(s: &str) -> Option<Vec<u8>> {
 pub(crate) mod tests {
     use super::*;
 
+    /// new definitions build without gematria; ones saved before the field existed
+    /// keep the channels they were made with
+    #[test]
+    fn gematria_is_opt_in_and_old_definitions_keep_it() {
+        let classes = vec![
+            ClassDef {
+                name: "a".into(),
+                list: "a".into(),
+            },
+            ClassDef {
+                name: "b".into(),
+                list: "b".into(),
+            },
+        ];
+        let d = Definition::new("x", classes, None, HeadKind::Single, DEFAULT_PRESET).unwrap();
+        assert!(!d.gematria);
+        let c = d.build(0).unwrap();
+        assert!(!c.net.cfg.letters && !c.net.cfg.words && !c.net.cfg.side);
+        let mut v = serde_json::to_value(&d).unwrap();
+        v.as_object_mut().unwrap().remove("gematria");
+        let old: Definition = serde_json::from_value(v).unwrap();
+        assert!(old.gematria);
+        let c = old.build(0).unwrap();
+        assert!(c.net.cfg.letters && c.net.cfg.words && c.net.cfg.side);
+    }
+
     pub fn temp_store(name: &str) -> (Store, std::path::PathBuf) {
         let path = std::env::temp_dir().join(format!("anend-clf-{}-{name}.redb", std::process::id()));
         let _ = std::fs::remove_file(&path);
@@ -1362,7 +1641,9 @@ pub(crate) mod tests {
             key: None,
             text: "apple granite".into(),
         };
-        let e = s.feedback_classifier("kind", &j, "rocks", true, 1.0).unwrap();
+        // a firm yes: the replayed list members outweigh one feedback of weight 1 on this
+        // byte-only (no gematria) tiny model
+        let e = s.feedback_classifier("kind", &j, "rocks", true, 2.0).unwrap();
         assert!(e.after > e.before, "{e:?}");
         s.feedback_classifier("kind", &j, "rocks", false, 1.0).unwrap();
         let log = s.classifier_feedback("kind").unwrap();
