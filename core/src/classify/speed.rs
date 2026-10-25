@@ -225,13 +225,17 @@ mod on_gpu {
     use super::super::{Classifier, Pool, pool};
     use super::*;
 
+    /// the GPU reading path's revision: raised when a change makes it faster or slower,
+    /// so rates kept from before are measured again
+    pub const READING_REVISION: u32 = 2;
+
     /// this machine, as the rates are kept by: the adapter and driver, the CPU's kernels
-    /// and threads, and this build's version
+    /// and threads, this build's version and the reading path's revision
     pub fn machine() -> Result<String, String> {
         let g = super::super::gpu::shared()?;
         let i = &g.info;
         Ok(format!(
-            "{} ({:?}, {} {}); CPU {} × {}; anend {}{}",
+            "{} ({:?}, {} {}); CPU {} × {}; anend {} reading r{READING_REVISION}{}",
             i.name,
             i.backend,
             i.driver,

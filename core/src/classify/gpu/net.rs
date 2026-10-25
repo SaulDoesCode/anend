@@ -9,7 +9,7 @@
 //! same order, so on a device the probe finds exact the outputs are the CPU's bits
 //! (`tests` check that, and a tolerance everywhere else).
 
-use super::{Buf, Gpu, Precision, Run, View};
+use super::{Buf, Gpu, Packed, Precision, Run, View, packed_table};
 use crate::classify::kernels as k;
 use crate::classify::model::{Gains, Net, Pooling};
 use crate::classify::text::{self, Window};
@@ -59,6 +59,39 @@ pub struct GpuNet {
     genh: Option<(Buf, Buf)>,
     cos: Buf,
     sin: Buf,
+    /// this upload's number, naming whose pack buffers are kept
+    id: u64,
+}
+
+/// the buffers of the last pack read, kept for the next one of the same net: one pack's
+/// worth for the process, so nets kept for reading don't each hold their own
+static KEPT: std::sync::Mutex<Option<PackBufs>> = std::sync::Mutex::new(None);
+
+static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+impl Drop for GpuNet {
+    fn drop(&mut self) {
+        let mut kept = KEPT.lock().unwrap_or_else(|e| e.into_inner());
+        if kept.as_ref().is_some_and(|k| k.owner == self.id) {
+            *kept = None;
+        }
+    }
+}
+
+/// a pack's buffers: room for `n` rows whose attention squares add up to `sq`, in up to
+/// `windows` windows, for the net numbered `owner`
+struct PackBufs {
+    owner: u64,
+    n: usize,
+    sq: usize,
+    windows: usize,
+    /// activations per distinct block shape, and which one each block uses
+    acts: Vec<Acts>,
+    of_block: Vec<usize>,
+    x0: Buf,
+    x1: Buf,
+    xf: Buf,
+    table: Buf,
 }
 
 /// one block's activations for a window of n (the training trace keeps one per block)
@@ -152,6 +185,7 @@ impl GpuNet {
                 .map(|_| (g.upload(&net.gen_w), g.upload(&net.gen_b))),
             cos: g.upload(cos),
             sin: g.upload(sin),
+            id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         })
     }
 
@@ -241,14 +275,26 @@ impl GpuNet {
 
     /// records block `l` over a window of n rows: x → out, its activations into `t`
     pub(crate) fn block_fwd(&self, r: &mut Run, l: usize, x: &Buf, out: &Buf, t: &Acts, n: usize) {
-        self.block_fwd_packed(r, l, x, out, t, &[n]);
+        self.block_fwd_packed(r, l, x, out, t, &[n], None);
     }
 
     /// records block `l` over windows packed one after another (`lens` rows each): the
     /// row-wise work (norms, projections, the feed-forward) runs over all the rows at
-    /// once, attention per window. Each output element is computed by the same chain as
-    /// for its window alone, so packing changes no bits.
-    pub(crate) fn block_fwd_packed(&self, r: &mut Run, l: usize, x: &Buf, out: &Buf, t: &Acts, lens: &[usize]) {
+    /// once; attention runs per window, or with the pack's table (`tab`: the table
+    /// buffer, where its window records start, the longest window) for all windows at
+    /// once, a handful of dispatches whatever their number. Each output element is
+    /// computed by the same chain as for its window alone, so packing changes no bits.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn block_fwd_packed(
+        &self,
+        r: &mut Run,
+        l: usize,
+        x: &Buf,
+        out: &Buf,
+        t: &Acts,
+        lens: &[usize],
+        tab: Option<(&Buf, usize, usize)>,
+    ) {
         let n: usize = lens.iter().sum();
         let b = &self.blocks[l];
         let (d, dh, eps) = (self.d, self.dh, self.eps);
@@ -271,6 +317,15 @@ impl GpuNet {
             r.add_rows(&t.qkv, bq, n * w3, w3);
         }
         let (qd, kd) = if self.qk_norm { (&t.q0, &t.k0) } else { (&t.q, &t.k) };
+        let pk = tab.map(|(table, at, longest)| Packed {
+            table,
+            at,
+            n,
+            longest,
+            heads: h,
+            kv,
+            dh,
+        });
         // where each window starts: its first row, and its attention square
         let mut at = Vec::with_capacity(lens.len());
         let (mut s, mut sq) = (0, 0);
@@ -278,6 +333,10 @@ impl GpuNet {
             at.push((s, sq, m));
             s += m;
             sq += m * m;
+        }
+        if let Some(pk) = &pk {
+            r.split_packed(pk, &t.qkv, qd, kd, &t.v);
+            at.clear();
         }
         for &(s, _, m) in &at {
             let (qo, ko) = (h * dh * s, kv * dh * s);
@@ -311,6 +370,13 @@ impl GpuNet {
                 dh,
                 eps,
             );
+        }
+        if let Some(pk) = &pk {
+            r.rope_packed(pk, &t.q, &self.cos, &self.sin, h);
+            r.rope_packed(pk, &t.k, &self.cos, &self.sin, kv);
+            r.qk_packed(pk, &t.q, &t.k, &t.p, self.causal, scale);
+            r.softmax_packed(pk, &t.p, self.causal);
+            r.pv_packed(pk, &t.p, &t.v, &t.ctx, self.causal);
         }
         for &(s, sq, m) in &at {
             let (qo, ko, po) = (h * dh * s, kv * dh * s, h * sq);
@@ -528,6 +594,10 @@ impl GpuNet {
 
     /// whether `n` packed rows whose attention squares add up to `sq` fit one submission
     fn fits_pack(&self, n: usize, sq: usize) -> bool {
+        // the pack's table holds rows and squares as f32 integers
+        if n >= 1 << 24 || sq >= 1 << 24 {
+            return false;
+        }
         let max = self.g.max_floats();
         let mut total = 3 * n * self.d;
         for b in &self.blocks {
@@ -550,12 +620,17 @@ impl GpuNet {
     /// ([`PACK_FLOATS`] of activations, at most [`PACK_WINDOWS`] windows each): every
     /// window's final normed rows [n × d], the same values `forward` gives one by one
     pub fn forward_many(&self, net: &Net, ws: &[&Window], gains: &Gains) -> Vec<Vec<f32>> {
-        let mut out = Vec::with_capacity(ws.len());
+        // by length, so a pack's windows are of similar lengths (the packed scores
+        // kernel spans the longest); the results go back to the windows' own order
+        let mut order: Vec<usize> = (0..ws.len()).collect();
+        order.sort_by_key(|&i| ws[i].len());
+        let sorted: Vec<&Window> = order.iter().map(|&i| ws[i]).collect();
+        let mut rows: Vec<Vec<f32>> = Vec::with_capacity(ws.len());
         let mut i = 0;
-        while i < ws.len() {
+        while i < sorted.len() {
             let (mut n, mut sq, mut j) = (0, 0, i);
-            while j < ws.len() && j - i < PACK_WINDOWS {
-                let m = ws[j].len();
+            while j < sorted.len() && j - i < PACK_WINDOWS {
+                let m = sorted[j].len();
                 if j > i && !self.fits_pack(n + m, sq + m * m) {
                     break;
                 }
@@ -563,8 +638,12 @@ impl GpuNet {
                 sq += m * m;
                 j += 1;
             }
-            out.extend(self.forward_pack(net, &ws[i..j], gains, n, sq));
+            rows.extend(self.forward_pack(net, &sorted[i..j], gains, n, sq));
             i = j;
+        }
+        let mut out: Vec<Vec<f32>> = vec![Vec::new(); ws.len()];
+        for (k, r) in order.into_iter().zip(rows) {
+            out[k] = r;
         }
         out
     }
@@ -578,25 +657,62 @@ impl GpuNet {
             assert!(w.len() <= self.max_len, "window longer than max_len");
             emb.extend(net.embed(w, gains));
         }
-        let x0 = g.upload(&emb);
-        let x1 = g.zeros(n * d);
-        let mut r = g.run(self.prec);
-        let mut acts: Option<Acts> = None;
-        let (mut xa, mut xb) = (&x0, &x1);
-        for l in 0..self.blocks.len() {
-            let same = acts
-                .as_ref()
-                .is_some_and(|a| a.qkv.len == n * self.w3(l) && a.gg.len == n * self.blocks[l].ff);
-            if !same {
-                acts = Some(self.acts_for(l, n, sq, false));
+        let table = packed_table(&lens);
+        let longest = lens.iter().copied().max().unwrap_or(0);
+        // the pack's buffers are kept between calls and made again only when a pack
+        // needs more room, so a call neither allocates nor clears its activations
+        let mut kept = KEPT.lock().unwrap_or_else(|e| e.into_inner());
+        if !kept
+            .as_ref()
+            .is_some_and(|k| k.owner == self.id && k.n >= n && k.sq >= sq && k.windows >= ws.len())
+        {
+            // a little room to spare, so packs of about this size reuse them
+            let (cn, csq) = (n + n / 4, sq + sq / 4);
+            let (cn, csq) = if self.fits_pack(cn, csq) { (cn, csq) } else { (n, sq) };
+            let cw = (ws.len() + ws.len() / 4).max(1);
+            let mut shapes: Vec<(usize, usize)> = Vec::new();
+            let mut acts = Vec::new();
+            let mut of_block = Vec::new();
+            for l in 0..self.blocks.len() {
+                let shape = (self.w3(l), self.blocks[l].ff);
+                let i = match shapes.iter().position(|s| *s == shape) {
+                    Some(i) => i,
+                    None => {
+                        shapes.push(shape);
+                        acts.push(self.acts_for(l, cn, csq, false));
+                        acts.len() - 1
+                    }
+                };
+                of_block.push(i);
             }
-            self.block_fwd_packed(&mut r, l, xa, xb, acts.as_ref().unwrap(), &lens);
+            *kept = None;
+            *kept = Some(PackBufs {
+                owner: self.id,
+                n: cn,
+                sq: csq,
+                windows: cw,
+                acts,
+                of_block,
+                x0: g.zeros(cn * d),
+                x1: g.zeros(cn * d),
+                xf: g.zeros(cn * d),
+                table: g.zeros(cn + 3 * cw),
+            });
+        }
+        let k = kept.as_ref().expect("made above");
+        g.write(&k.x0, 0, &emb);
+        g.write(&k.table, 0, &table);
+        let mut r = g.run(self.prec);
+        let (mut xa, mut xb) = (&k.x0, &k.x1);
+        for l in 0..self.blocks.len() {
+            let tab = Some((&k.table, n, longest));
+            self.block_fwd_packed(&mut r, l, xa, xb, &k.acts[k.of_block[l]], &lens, tab);
             std::mem::swap(&mut xa, &mut xb);
         }
-        let xf = g.zeros(n * d);
-        self.top_fwd(&mut r, xa, &xf, None, None, n);
-        let t0 = r.read(&xf, 0, n * d);
+        self.top_fwd(&mut r, xa, &k.xf, None, None, n);
+        let t0 = r.read(&k.xf, 0, n * d);
         let all = r.submit().swap_remove(t0);
+        drop(kept);
         let mut out = Vec::with_capacity(ws.len());
         let mut at = 0;
         for m in lens {
@@ -643,10 +759,11 @@ impl GpuNet {
     }
 }
 
-/// most activation floats one packed submission holds (128 MiB)
-pub const PACK_FLOATS: usize = 32 << 20;
+/// most activation floats one packed submission holds (512 MiB); each buffer also stays
+/// within the device's own limit (`fits_pack`)
+pub const PACK_FLOATS: usize = 128 << 20;
 /// most windows one packed submission holds
-pub const PACK_WINDOWS: usize = 256;
+pub const PACK_WINDOWS: usize = 4096;
 
 /// a text's run on the device: what `Classifier::run_bytes` gives on the CPU
 #[derive(Clone, Debug)]

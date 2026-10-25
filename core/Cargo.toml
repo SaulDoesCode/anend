@@ -28,6 +28,10 @@ fetch = ["dep:ureq"]
 name = "gpu_bench"
 required-features = ["gpu"]
 
+[[example]]
+name = "gpu_profile"
+required-features = ["gpu"]
+
 # pictures (`ops::pictures`): decoding, checking and thumbnails of PNG and JPEG; not in
 # the browser build, which reaches pictures through the hub
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

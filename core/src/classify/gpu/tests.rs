@@ -302,3 +302,45 @@ fn packed_texts_match_the_cpu_one_by_one() {
         }
     }
 }
+
+#[test]
+fn kept_pack_buffers_give_the_same_answers_call_after_call() {
+    use crate::classify::Classifier;
+    let Some(g) = device() else { return };
+    let exact = exact_device(g, Precision::Exact);
+    for (name, cfg) in configs() {
+        let heads = [HeadSpec::single("c", &["a", "b"])];
+        let mut clf = Classifier::new(cfg.clone(), &heads, 9).unwrap();
+        for b in &mut clf.net.blocks {
+            b.wo.iter_mut()
+                .enumerate()
+                .for_each(|(i, v)| *v += ((i % 13) as f32 - 6.0) * 0.003);
+        }
+        let gn = GpuNet::new(g, &clf.net, Precision::Exact).unwrap();
+        let gains = clf.gains();
+        let extra = vec![0.0f32; cfg.extra];
+        // a big call, a small one (reusing the big one's buffers, with stale rows in
+        // them), then a bigger one (new buffers)
+        for count in [30usize, 3, 60] {
+            let texts: Vec<String> = (0..count)
+                .map(|i| {
+                    (0..(i * 7 + count) % 90 + 1)
+                        .map(|j| (b'a' + ((i + j * 5) % 26) as u8) as char)
+                        .collect()
+                })
+                .collect();
+            let bytes: Vec<&[u8]> = texts.iter().map(|t| t.as_bytes()).collect();
+            let extras: Vec<&[f32]> = texts.iter().map(|_| extra.as_slice()).collect();
+            let runs = gn.text_runs(&clf.net, &bytes, &extras, &gains);
+            for (t, r) in texts.iter().zip(&runs) {
+                let cpu = clf.run(t, &extra, &gains, None);
+                close(
+                    &format!("{name} call of {count}, {} bytes", t.len()),
+                    &r.logits[0],
+                    &cpu.logits[0],
+                    exact,
+                );
+            }
+        }
+    }
+}

@@ -617,3 +617,221 @@ fn copy(@builtin(workgroup_id) wid: vec3<u32>, @builtin(num_workgroups) nw: vec3
     let z = i / (w * rows);
     b2[p.u2.x + z * p.u2.y + r * p.u2.z + c] = b1[p.u1.x + z * p.u1.y + r * p.u1.z + c];
 }
+
+// ---------------------------------------------------------------- packed windows of any length
+//
+// Attention over many windows of different lengths, packed one after another, in one
+// dispatch per step. b6 is the pack's table, integers held as f32 (all below 2^24): at
+// [row] the window a packed row is in, and at [u4.x + 3w] window w's first row, length
+// and the sum of the squared lengths before it. A window's queries are [head][pos][dh]
+// from H·dh·start, its keys and values [kv head][pos][dh] from KV·dh·start, its scores
+// [head][t][s] from H·(that sum); the same places the per-window dispatches use. Every
+// value is computed by the same chain as the per-window kernels (`copy`, `rope`, `gemm`
+// then `ew` scale or `scores`, `softmax`, `gemm`), so packing changes no bits.
+// u4 (table offset, H, KV, ·) everywhere below.
+
+fn w_of(row: u32) -> u32 {
+    return u32(b6[row]);
+}
+
+fn w_start(w: u32) -> u32 {
+    return u32(b6[p.u4.x + 3u * w]);
+}
+
+fn w_len(w: u32) -> u32 {
+    return u32(b6[p.u4.x + 3u * w + 1u]);
+}
+
+fn w_sq(w: u32) -> u32 {
+    return u32(b6[p.u4.x + 3u * w + 2u]);
+}
+
+// queries, keys and values out of the projected rows [n][(H + 2KV)·dh].
+// u0 (n, w3, dh, ·); b1 qkv, b2 q, b3 k, b4 v
+@compute @workgroup_size(64)
+fn split_v(@builtin(workgroup_id) wid: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>, @builtin(local_invocation_index) li: u32) {
+    let w3 = p.u0.y;
+    let dh = p.u0.z;
+    let i = flat(wid, nw, li, 64u);
+    if (i >= p.u0.x * w3) {
+        return;
+    }
+    let hh = p.u4.y;
+    let kv = p.u4.z;
+    let r = i / w3;
+    let c = i % w3;
+    let w = w_of(r);
+    let s = w_start(w);
+    let m = w_len(w);
+    let t = r - s;
+    if (c < hh * dh) {
+        b2[hh * dh * s + (c / dh) * m * dh + t * dh + c % dh] = b1[i];
+    } else if (c < (hh + kv) * dh) {
+        let c2 = c - hh * dh;
+        b3[kv * dh * s + (c2 / dh) * m * dh + t * dh + c2 % dh] = b1[i];
+    } else {
+        let c2 = c - (hh + kv) * dh;
+        b4[kv * dh * s + (c2 / dh) * m * dh + t * dh + c2 % dh] = b1[i];
+    }
+}
+
+// rotary positions on [heads][pos][dh] rows of every window (heads = u0.z: H for queries,
+// KV for keys); a row's position is its place in its window. u0 (n, half, heads, ·);
+// b1 x, b2 cos, b3 sin
+@compute @workgroup_size(64)
+fn rope_v(@builtin(workgroup_id) wid: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>, @builtin(local_invocation_index) li: u32) {
+    let half = p.u0.y;
+    let heads = p.u0.z;
+    let i = flat(wid, nw, li, 64u);
+    if (i >= p.u0.x * heads * half) {
+        return;
+    }
+    let r = i / half;
+    let j = i % half;
+    let w = w_of(r / heads);
+    let t = (r - heads * w_start(w)) % w_len(w);
+    let xb = r * 2u * half;
+    let c = b2[t * half + j];
+    let s = b3[t * half + j];
+    let a = b1[xb + j];
+    let b = b1[xb + j + half];
+    b1[xb + j] = mul(a, c) - mul(b, s);
+    b1[xb + j + half] = mul(a, s) + mul(b, c);
+}
+
+// scores of every window: S[h][t][s] for s < its length (u0.w = L, the longest). Not
+// causal (u0.y = 0): the product chain in ascending c, then × scale, as `gemm` then `ew`
+// 3; causal (u0.y = 1): dot8 × scale for s ≤ t, else 0, as `scores`.
+// u0 (n, causal, dh, L) u1 (per, ·, ·, ·) f0.x scale; b1 q, b2 k, b3 S
+@compute @workgroup_size(64)
+fn qk_v(@builtin(workgroup_id) wid: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>, @builtin(local_invocation_index) li: u32) {
+    let dh = p.u0.z;
+    let ll = p.u0.w;
+    let hh = p.u4.y;
+    let kv = p.u4.z;
+    let i = flat(wid, nw, li, 64u);
+    if (i >= p.u0.x * hh * ll) {
+        return;
+    }
+    let r = i / ll;
+    let u = i % ll;
+    let w = w_of(r / hh);
+    let m = w_len(w);
+    if (u >= m) {
+        return;
+    }
+    let s0 = w_start(w);
+    let local = r - hh * s0;
+    let head = local / m;
+    let t = local % m;
+    let qb = r * dh;
+    let kb = kv * dh * s0 + (head / max(p.u1.x, 1u)) * m * dh + u * dh;
+    let out = hh * w_sq(w) + local * m + u;
+    if (p.u0.y == 0u) {
+        var v = 0.0;
+        for (var c = 0u; c < dh; c = c + 1u) {
+            v = v + mul(b1[qb + c], b2[kb + c]);
+        }
+        b3[out] = v * p.f0.x;
+    } else {
+        var v = 0.0;
+        if (u <= t) {
+            var l: array<f32, 8>;
+            for (var j = 0u; j < 8u; j = j + 1u) {
+                l[j] = 0.0;
+            }
+            for (var c = 0u; c < dh; c = c + 1u) {
+                l[c % 8u] = l[c % 8u] + mul(b1[qb + c], b2[kb + c]);
+            }
+            v = fold8(l) * p.f0.x;
+        }
+        b3[out] = v;
+    }
+}
+
+// softmax of every window's score rows (H·n rows), as `softmax`; causal (u0.y = 1) rows
+// stop at t + 1. u0 (n, causal, ·, ·); b1 S
+@compute @workgroup_size(64)
+fn softmax_v(@builtin(workgroup_id) wid: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>, @builtin(local_invocation_index) li: u32) {
+    let hh = p.u4.y;
+    let rows = p.u0.x * hh;
+    let row = (wid.x + wid.y * nw.x) * 8u + li / 8u;
+    let lane = li % 8u;
+    let ok = row < rows;
+    var len = 0u;
+    var base = 0u;
+    if (ok) {
+        let w = w_of(row / hh);
+        let m = w_len(w);
+        let local = row - hh * w_start(w);
+        len = m;
+        if (p.u0.y == 1u) {
+            len = min(local % m + 1u, m);
+        }
+        base = hh * w_sq(w) + local * m;
+    }
+    var mx = neg_inf();
+    if (ok) {
+        for (var i = lane; i < len; i = i + 8u) {
+            mx = max(mx, b1[base + i]);
+        }
+    }
+    red[li] = mx;
+    workgroupBarrier();
+    let r8 = (li / 8u) * 8u;
+    var m = red[r8];
+    for (var j = 1u; j < 8u; j = j + 1u) {
+        m = max(m, red[r8 + j]);
+    }
+    workgroupBarrier();
+    var a = 0.0;
+    if (ok) {
+        for (var i = lane; i < len; i = i + 8u) {
+            let e = expf(b1[base + i] - m);
+            b1[base + i] = e;
+            a = a + e;
+        }
+    }
+    red[li] = a;
+    workgroupBarrier();
+    let s = fold_red(li);
+    if (ok) {
+        for (var i = lane; i < len; i = i + 8u) {
+            b1[base + i] = div(b1[base + i], s);
+        }
+    }
+}
+
+// every window's probabilities times its values, into the packed rows of ctx [n][H·dh]:
+// one chain per output in ascending s (causal: s ≤ t), as `gemm`.
+// u0 (n, causal, dh, ·) u1 (per, ·, ·, ·); b1 S, b2 v, b3 ctx
+@compute @workgroup_size(64)
+fn pv_v(@builtin(workgroup_id) wid: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>, @builtin(local_invocation_index) li: u32) {
+    let dh = p.u0.z;
+    let hh = p.u4.y;
+    let kv = p.u4.z;
+    let aw = hh * dh;
+    let i = flat(wid, nw, li, 64u);
+    if (i >= p.u0.x * aw) {
+        return;
+    }
+    let r = i / aw;
+    let col = i % aw;
+    let head = col / dh;
+    let j = col % dh;
+    let w = w_of(r);
+    let s0 = w_start(w);
+    let m = w_len(w);
+    let t = r - s0;
+    let pb = hh * w_sq(w) + head * m * m + t * m;
+    let vb = kv * dh * s0 + (head / max(p.u1.x, 1u)) * m * dh + j;
+    var kk = m;
+    if (p.u0.y == 1u) {
+        kk = min(m, t + 1u);
+    }
+    var v = 0.0;
+    for (var u = 0u; u < kk; u = u + 1u) {
+        v = v + mul(b1[pb + u], b2[vb + u * dh]);
+    }
+    b3[i] = v;
+}

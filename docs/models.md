@@ -287,6 +287,14 @@ wgpu in.
   and reports per kernel how many values differ and by how many ulps. On llvmpipe
   (lavapipe Vulkan) every kernel, whole forward passes, decoding and training steps match
   the CPU bit for bit (`cargo test -p anend-core --features gpu gpu::`).
+- Reading many texts packs every window of a call into as few submissions as fit (512
+  MiB of activations, or less where the device's largest buffer is smaller), sorted by
+  length. Attention runs over all of a pack's windows at once with kernels that read a
+  table of where each window starts and how long it is (`split_v`, `rope_v`, `qk_v`,
+  `softmax_v`, `pv_v`), each value computed by the same chain as for its window alone, so
+  a block is about a dozen dispatches whatever the number of windows. A pack's buffers
+  are kept for the next call (one pack's worth for the process). Training still runs
+  each example as its own two submissions.
 - `"gpu_fast"` uses the plain operators: faster on real GPUs, within about 1e-4 relative
   of the CPU per kernel, so results are close but not the CPU's bits.
 - Saved models answer on the CPU (the reference) unless a run asks for the GPU; a model

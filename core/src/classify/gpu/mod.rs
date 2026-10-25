@@ -39,6 +39,78 @@ pub enum Precision {
     Fast,
 }
 
+/// counters of what the device was asked to do, for profiling (`gpu_profile`): read
+/// with [`Profile::take`]
+#[derive(Default)]
+pub struct Profile {
+    pub buffers: std::sync::atomic::AtomicU64,
+    pub buffer_bytes: std::sync::atomic::AtomicU64,
+    pub uploads: std::sync::atomic::AtomicU64,
+    pub dispatches: std::sync::atomic::AtomicU64,
+    pub bind_groups: std::sync::atomic::AtomicU64,
+    pub submits: std::sync::atomic::AtomicU64,
+    pub reads: std::sync::atomic::AtomicU64,
+    /// nanoseconds building command buffers (bind groups, passes), waiting for the
+    /// device, and copying results out of mapped memory
+    pub ns_encode: std::sync::atomic::AtomicU64,
+    /// nanoseconds making buffers and writing into them
+    pub ns_upload: std::sync::atomic::AtomicU64,
+    pub ns_wait: std::sync::atomic::AtomicU64,
+    pub ns_readback: std::sync::atomic::AtomicU64,
+}
+
+pub static PROFILE: Profile = Profile {
+    buffers: std::sync::atomic::AtomicU64::new(0),
+    buffer_bytes: std::sync::atomic::AtomicU64::new(0),
+    uploads: std::sync::atomic::AtomicU64::new(0),
+    dispatches: std::sync::atomic::AtomicU64::new(0),
+    bind_groups: std::sync::atomic::AtomicU64::new(0),
+    submits: std::sync::atomic::AtomicU64::new(0),
+    reads: std::sync::atomic::AtomicU64::new(0),
+    ns_encode: std::sync::atomic::AtomicU64::new(0),
+    ns_upload: std::sync::atomic::AtomicU64::new(0),
+    ns_wait: std::sync::atomic::AtomicU64::new(0),
+    ns_readback: std::sync::atomic::AtomicU64::new(0),
+};
+
+fn count(c: &std::sync::atomic::AtomicU64, n: u64) {
+    c.fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+}
+
+impl Profile {
+    /// the counts since the last take, as (name, value) pairs; zeroes them
+    pub fn take(&self) -> Vec<(&'static str, u64)> {
+        use std::sync::atomic::Ordering::Relaxed;
+        [
+            ("buffers", &self.buffers),
+            ("buffer_bytes", &self.buffer_bytes),
+            ("uploads", &self.uploads),
+            ("dispatches", &self.dispatches),
+            ("bind_groups", &self.bind_groups),
+            ("submits", &self.submits),
+            ("reads", &self.reads),
+            ("ns_encode", &self.ns_encode),
+            ("ns_upload", &self.ns_upload),
+            ("ns_wait", &self.ns_wait),
+            ("ns_readback", &self.ns_readback),
+        ]
+        .into_iter()
+        .map(|(n, c)| (n, c.swap(0, Relaxed)))
+        .collect()
+    }
+}
+
+/// per kernel: dispatches and nanoseconds, gathered when `ANEND_GPU_PROFILE_OPS=1` (each
+/// dispatch then runs alone and is waited for, so the totals are slower than a real run
+/// and only their proportions mean anything)
+pub static OP_NS: Mutex<std::collections::BTreeMap<&'static str, (u64, u64)>> =
+    Mutex::new(std::collections::BTreeMap::new());
+
+fn profiling_ops() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("ANEND_GPU_PROFILE_OPS").is_ok_and(|v| v == "1"))
+}
+
 /// a place in a buffer: the buffer and an offset in floats
 pub type At<'a> = (&'a Buf, usize);
 
@@ -317,30 +389,42 @@ impl Gpu {
         if data.is_empty() {
             return self.zeros(0);
         }
+        let t = std::time::Instant::now();
+        count(&PROFILE.buffers, 1);
+        count(&PROFILE.uploads, 1);
+        count(&PROFILE.buffer_bytes, (data.len() * 4) as u64);
         let b = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
             contents: f32_bytes(data),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
         });
+        count(&PROFILE.ns_upload, t.elapsed().as_nanos() as u64);
         Buf { b, len: data.len() }
     }
 
     /// a zeroed buffer of n floats (at least one, as bindings cannot be empty)
     pub fn zeros(&self, n: usize) -> Buf {
+        let t = std::time::Instant::now();
+        count(&PROFILE.buffers, 1);
+        count(&PROFILE.buffer_bytes, (n.max(1) * 4) as u64);
         let b = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
             size: (n.max(1) * 4) as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        count(&PROFILE.ns_upload, t.elapsed().as_nanos() as u64);
         Buf { b, len: n }
     }
 
     /// overwrites floats from `off` (lands before the next submitted run)
     pub fn write(&self, buf: &Buf, off: usize, data: &[f32]) {
         if !data.is_empty() {
+            let t = std::time::Instant::now();
             debug_assert!(off + data.len() <= buf.len.max(1));
+            count(&PROFILE.uploads, 1);
             self.queue.write_buffer(&buf.b, (off * 4) as u64, f32_bytes(data));
+            count(&PROFILE.ns_upload, t.elapsed().as_nanos() as u64);
         }
     }
 
@@ -369,6 +453,7 @@ fn f32_bytes(v: &[f32]) -> &[u8] {
 
 enum Rec {
     Dispatch {
+        entry: &'static str,
         pipe: wgpu::ComputePipeline,
         bufs: [Option<wgpu::Buffer>; 6],
         slot: u64,
@@ -423,6 +508,7 @@ impl<'g> Run<'g> {
         }
         let pipe = self.g.pipeline(entry, self.prec);
         self.recs.push(Rec::Dispatch {
+            entry,
             pipe,
             bufs: bs,
             slot,
@@ -458,6 +544,13 @@ impl<'g> Run<'g> {
     /// submits everything and waits for the reads (and only then returns)
     pub fn submit(self) -> Vec<Vec<f32>> {
         let g = self.g;
+        let started = std::time::Instant::now();
+        count(&PROFILE.submits, 1);
+        count(&PROFILE.reads, self.reads as u64);
+        count(
+            &PROFILE.dispatches,
+            self.recs.iter().filter(|r| matches!(r, Rec::Dispatch { .. })).count() as u64,
+        );
         let ub = (!self.params.is_empty()).then(|| {
             g.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("params"),
@@ -469,12 +562,16 @@ impl<'g> Run<'g> {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         let mut staging = Vec::new();
+        let by_op = profiling_ops();
         let mut i = 0;
         while i < self.recs.len() {
             if let Rec::Dispatch { .. } = self.recs[i] {
                 let ub = ub.as_ref().expect("params");
                 let mut groups = Vec::new();
                 while let Some(Rec::Dispatch { bufs, .. }) = self.recs.get(i) {
+                    if by_op && !groups.is_empty() {
+                        break;
+                    }
                     let mut entries = vec![wgpu::BindGroupEntry {
                         binding: 0,
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
@@ -489,6 +586,7 @@ impl<'g> Run<'g> {
                             resource: b.as_ref().unwrap_or(&g.dummy).as_entire_binding(),
                         });
                     }
+                    count(&PROFILE.bind_groups, 1);
                     groups.push(g.device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: None,
                         layout: &g.layout,
@@ -507,6 +605,22 @@ impl<'g> Run<'g> {
                         pass.set_bind_group(0, bg, &[*slot as u32]);
                         pass.dispatch_workgroups(groups[0], groups[1], groups[2]);
                     }
+                }
+                drop(pass);
+                if by_op && let Rec::Dispatch { entry, .. } = &self.recs[start] {
+                    // this dispatch alone, waited for, its time added to its kernel's
+                    let done = std::mem::replace(
+                        &mut enc,
+                        g.device
+                            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None }),
+                    );
+                    let t = std::time::Instant::now();
+                    g.queue.submit([done.finish()]);
+                    g.device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU poll");
+                    let mut m = OP_NS.lock().unwrap_or_else(|e| e.into_inner());
+                    let e = m.entry(entry).or_default();
+                    e.0 += 1;
+                    e.1 += t.elapsed().as_nanos() as u64;
                 }
                 continue;
             }
@@ -536,14 +650,18 @@ impl<'g> Run<'g> {
             i += 1;
         }
         g.queue.submit([enc.finish()]);
+        count(&PROFILE.ns_encode, started.elapsed().as_nanos() as u64);
         if staging.is_empty() {
             return Vec::new();
         }
+        let waited = std::time::Instant::now();
         for (st, _) in &staging {
             st.map_async(wgpu::MapMode::Read, .., |r| r.expect("GPU read"));
         }
         g.device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU poll");
-        staging
+        count(&PROFILE.ns_wait, waited.elapsed().as_nanos() as u64);
+        let copied = std::time::Instant::now();
+        let out = staging
             .into_iter()
             .map(|(st, len)| {
                 let v = {
@@ -558,7 +676,9 @@ impl<'g> Run<'g> {
                 st.unmap();
                 v
             })
-            .collect()
+            .collect();
+        count(&PROFILE.ns_readback, copied.elapsed().as_nanos() as u64);
+        out
     }
 
     // ------------------------------------------------------------ kernels
@@ -839,6 +959,94 @@ impl<'g> Run<'g> {
         ]);
         self.op("copy", &[src.0, dst.0], p, grid(width * rows * zs, 64));
     }
+
+    // ------------------------------------------------------------ packed windows
+
+    /// a kernel over packed windows: its buffers, then the pack's table at binding 6
+    fn op_packed(&mut self, entry: &'static str, bufs: &[&Buf], pk: &Packed, mut p: Params, groups: [u32; 3]) {
+        let dummy = self.g.dummy_buf();
+        let mut all: Vec<&Buf> = bufs.to_vec();
+        while all.len() < 5 {
+            all.push(&dummy);
+        }
+        all.push(pk.table);
+        p.u[16] = pk.at as u32;
+        p.u[17] = pk.heads as u32;
+        p.u[18] = pk.kv as u32;
+        self.op(entry, &all, p, groups);
+    }
+
+    /// queries, keys and values of every window out of the projected rows `qkv`
+    /// [n][(H + 2KV)·dh], each window's heads apart (`copy_strided` per window)
+    pub fn split_packed(&mut self, pk: &Packed, qkv: &Buf, q: &Buf, k: &Buf, v: &Buf) {
+        let w3 = (pk.heads + 2 * pk.kv) * pk.dh;
+        let p = Params::new(&[pk.n as u32, w3 as u32, pk.dh as u32]);
+        self.op_packed("split_v", &[qkv, q, k, v], pk, p, grid(pk.n * w3, 64));
+    }
+
+    /// rotary positions on every window's [heads][pos][dh] rows (`rope` per window)
+    pub fn rope_packed(&mut self, pk: &Packed, x: &Buf, cos: &Buf, sin: &Buf, heads: usize) {
+        let half = pk.dh / 2;
+        let p = Params::new(&[pk.n as u32, half as u32, heads as u32]);
+        self.op_packed("rope_v", &[x, cos, sin], pk, p, grid(pk.n * heads * half, 64));
+    }
+
+    /// every window's scaled scores (`gemm` then `scale`, or causal `scores`)
+    pub fn qk_packed(&mut self, pk: &Packed, q: &Buf, k: &Buf, s: &Buf, causal: bool, scale: f32) {
+        let p = Params::new(&[
+            pk.n as u32,
+            causal as u32,
+            pk.dh as u32,
+            pk.longest as u32,
+            (pk.heads / pk.kv) as u32,
+        ])
+        .f(&[scale]);
+        self.op_packed("qk_v", &[q, k, s], pk, p, grid(pk.n * pk.heads * pk.longest, 64));
+    }
+
+    /// softmax of every window's score rows (`softmax` per window)
+    pub fn softmax_packed(&mut self, pk: &Packed, s: &Buf, causal: bool) {
+        let p = Params::new(&[pk.n as u32, causal as u32]);
+        self.op_packed("softmax_v", &[s], pk, p, grid(pk.n * pk.heads, 8));
+    }
+
+    /// every window's probabilities times its values into the packed rows of `ctx`
+    /// [n][H·dh] (`gemm` per window)
+    pub fn pv_packed(&mut self, pk: &Packed, s: &Buf, v: &Buf, ctx: &Buf, causal: bool) {
+        let p = Params::new(&[pk.n as u32, causal as u32, pk.dh as u32, 0, (pk.heads / pk.kv) as u32]);
+        self.op_packed("pv_v", &[s, v, ctx], pk, p, grid(pk.n * pk.heads * pk.dh, 64));
+    }
+}
+
+/// windows packed one after another, as the packed attention kernels see them: `n` rows
+/// in all, the longest window `longest` rows, and the table (at [row] the row's window;
+/// from `at`, per window its first row, length and the sum of the squared lengths
+/// before it, all as f32 integers)
+pub struct Packed<'a> {
+    pub table: &'a Buf,
+    pub at: usize,
+    pub n: usize,
+    pub longest: usize,
+    pub heads: usize,
+    pub kv: usize,
+    pub dh: usize,
+}
+
+/// the table of `Packed` for windows of these lengths
+pub fn packed_table(lens: &[usize]) -> Vec<f32> {
+    let n: usize = lens.iter().sum();
+    let mut t = Vec::with_capacity(n + 3 * lens.len());
+    for (w, &m) in lens.iter().enumerate() {
+        t.extend(std::iter::repeat_n(w as f32, m));
+    }
+    let (mut s, mut sq) = (0usize, 0usize);
+    for &m in lens {
+        assert!(s < 1 << 24 && sq < 1 << 24, "a pack's table holds integers below 2^24");
+        t.extend([s as f32, m as f32, sq as f32]);
+        s += m;
+        sq += m * m;
+    }
+    t
 }
 
 impl Gpu {
