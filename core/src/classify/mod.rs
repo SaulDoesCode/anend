@@ -45,6 +45,7 @@ pub mod pretrained;
 pub mod report;
 pub mod safetensors;
 pub mod spec;
+pub mod speed;
 pub mod steer;
 pub mod text;
 pub mod train;

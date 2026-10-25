@@ -260,9 +260,10 @@ impl Runner {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Choice {
-    /// the GPU in exact precision when there is one that isn't a software renderer and
-    /// the probe finds it bit-exact on every kernel (so the results are the CPU's), else
-    /// the CPU
+    /// the GPU in exact precision when there is one that isn't a software renderer, the
+    /// probe finds it bit-exact on every kernel (so the results are the CPU's), and it
+    /// reads faster than the CPU with a model of the size at hand (measured on first use
+    /// of each size, `speed`); else the CPU
     #[default]
     Auto,
     Cpu,
@@ -324,6 +325,9 @@ pub struct Reading {
     /// why it runs somewhere else than asked, or why auto chose the CPU
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// the measured rates auto chose by (`speed`), for the model it reads with
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speed: Option<Box<super::speed::Speed>>,
 }
 
 impl Reading {
@@ -334,6 +338,7 @@ impl Reading {
             exact: true,
             gpu: None,
             note,
+            speed: None,
         }
     }
 }
@@ -345,6 +350,44 @@ pub fn probe_exact() -> Result<bool, String> {
     static EXACT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     let g = super::gpu::shared()?;
     Ok(*EXACT.get_or_init(|| super::gpu::probe::probe(g, super::gpu::Precision::Exact).exact()))
+}
+
+/// where a stack of nets reads for `choice`: `reading`, and for auto on a GPU, the rates
+/// measured for the stack's largest net decide (the GPU only where it's faster)
+pub fn reading_for(choice: Choice, allowed: bool, nets: &[&super::Classifier]) -> Reading {
+    let r = reading(choice, allowed);
+    if choice != Choice::Auto || !r.device.is_gpu() {
+        return r;
+    }
+    #[cfg(feature = "gpu")]
+    {
+        let Some(big) = nets
+            .iter()
+            .max_by_key(|c| c.net.params().iter().map(|(_, p)| p.len()).sum::<usize>())
+        else {
+            return r;
+        };
+        match super::speed::of(big, r.device) {
+            Ok(s) if s.gpu_faster() => Reading {
+                speed: Some(Box::new(s)),
+                ..r
+            },
+            Ok(s) => Reading {
+                note: Some(s.words()),
+                speed: Some(Box::new(s)),
+                ..Reading::cpu(choice, None)
+            },
+            Err(e) => Reading::cpu(
+                choice,
+                Some(format!("measuring the GPU failed ({e}), so the CPU reads")),
+            ),
+        }
+    }
+    #[cfg(not(feature = "gpu"))]
+    {
+        let _ = nets;
+        r
+    }
 }
 
 /// where reading runs for `choice`; `allowed` is false where the GPU isn't to be used (a
@@ -377,7 +420,10 @@ pub fn reading(choice: Choice, allowed: bool) -> Reading {
         let name = g.describe();
         let exact = want == Device::Gpu && probe_exact().unwrap_or(false);
         if choice == Choice::Auto {
-            if g.info.device_type == wgpu::DeviceType::Cpu {
+            // a software renderer runs on the CPU and is always the slower; measuring it
+            // would only cost time (`ANEND_AUTO_SOFTWARE_GPU=1` measures it anyway)
+            let software_ok = std::env::var("ANEND_AUTO_SOFTWARE_GPU").is_ok_and(|v| v == "1");
+            if g.info.device_type == wgpu::DeviceType::Cpu && !software_ok {
                 return Reading::cpu(
                     choice,
                     Some(format!("the only GPU is a software renderer, {name}, so the CPU reads")),
@@ -398,6 +444,7 @@ pub fn reading(choice: Choice, allowed: bool) -> Reading {
             exact,
             gpu: Some(name),
             note: None,
+            speed: None,
         }
     }
     #[cfg(not(feature = "gpu"))]

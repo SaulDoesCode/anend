@@ -412,7 +412,8 @@ impl Stack {
     /// use; a net the device can't take sends the whole stack to the CPU, saying why)
     fn reader(&self) -> &(Reading, Vec<Option<std::sync::Arc<Runner>>>) {
         self.read.state.get_or_init(|| {
-            let r = device::reading(self.read.choice, self.read.allowed);
+            let nets: Vec<&Classifier> = self.graph.nodes.iter().map(|n| &n.clf).collect();
+            let r = device::reading_for(self.read.choice, self.read.allowed, &nets);
             if !r.device.is_gpu() {
                 return (r, vec![]);
             }

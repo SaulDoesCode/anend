@@ -68,3 +68,18 @@ The answers left these open. Each is written into the design as its default.
 16. **Starters train longer than a hand-made classifier** (at least 40 epochs, patience
     10). With the defaults (14 epochs, patience 4) early stopping on a few dozen held-back
     texts ended training within a second and left several starters near chance.
+
+## Auto by measured speed (25 Oct, after the GTX 1070 Ti's report)
+
+17. **Auto now also needs the GPU to be faster** (this narrows answer 10). On the first
+    reading with each model size, it reads 192 fixed texts on the CPU and 32 on the GPU
+    (all 192 when the 32 came within a factor of 2 of the CPU's rate), and uses whichever
+    was faster. The rates are kept per machine and model size in the user's cache folder
+    (`gpu-speed.json`), and the machine includes the build's version, so a new build
+    measures again. The measuring costs about a second on a real GPU; it is skipped for a
+    software renderer, which is always the slower. Other reasonable choices: measure on a
+    larger batch (closer to a search over thousands of texts, where the GPU gains most),
+    or let the user decide from the report alone.
+18. **A stack reads on one device, chosen by its largest net.** A classifier that builds
+    on others reads them all on the device its largest net is faster on, rather than
+    choosing per net.

@@ -19,7 +19,7 @@
 pub mod net;
 pub mod probe;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 pub mod train;
 
 use std::collections::HashMap;

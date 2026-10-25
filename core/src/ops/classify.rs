@@ -546,7 +546,9 @@ fn inputs_arg(args: &Value) -> Result<Vec<Input>, String> {
 // ---------------------------------------------------------------- the calls
 
 /// `classify.device`: where classifiers read texts (predict, search, indexing, buckets,
-/// tints), for this process; `{device}` sets it (auto, cpu, gpu, gpu_fast)
+/// tints), for this process; `{device}` sets it (auto, cpu, gpu, gpu_fast). `speeds` are
+/// the rates auto measured on this machine, per model size; `{measure_again: true}`
+/// forgets them, so each size is measured again on its next use
 fn device_call(args: &Value, limits: &Limits) -> Res {
     use crate::classify::device::{self, Choice};
     if let Some(d) = args.get("device").and_then(Value::as_str) {
@@ -556,11 +558,35 @@ fn device_call(args: &Value, limits: &Limits) -> Res {
         let c = Choice::parse(d).ok_or_else(|| format!("{d:?} isn't auto, cpu, gpu or gpu_fast"))?;
         device::set_choice(c);
     }
+    #[cfg(feature = "gpu")]
+    let machine = crate::classify::speed::machine().ok();
+    #[cfg(not(feature = "gpu"))]
+    let machine: Option<String> = None;
+    if args.get("measure_again").and_then(Value::as_bool) == Some(true) {
+        if limits.shared {
+            return Err("a shared hub decides where it reads texts".into());
+        }
+        if let Some(m) = &machine {
+            crate::classify::speed::forget(m);
+        }
+    }
     let c = device::choice();
+    let speeds: Vec<Value> = machine
+        .as_deref()
+        .map(crate::classify::speed::known)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| {
+            let mut v = json!(s);
+            v["words"] = json!(s.words());
+            v
+        })
+        .collect();
     Ok(json!({
         "device": c.name(),
         "reading": device::reading(c, limits.gpu),
         "choices": ["auto", "cpu", "gpu", "gpu_fast"],
+        "speeds": speeds,
     }))
 }
 

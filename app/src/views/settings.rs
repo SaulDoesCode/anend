@@ -633,7 +633,40 @@ fn GpuSettings() -> Element {
         });
     }
     let choice = ui.prefs.read().read_device.clone();
-    let now = reading_words(&state.read()["reading"]);
+    let mut now = reading_words(&state.read()["reading"]);
+    if choice == "auto" && state.read()["reading"]["device"] == "gpu" {
+        // auto's answer depends on the model's size, measured on its first reading
+        now = format!(
+            "the GPU here, {}, gives the CPU's results bit for bit; auto reads on it with the model sizes it is faster for, measured on each size's first reading",
+            state.read()["reading"]["gpu"].as_str().unwrap_or("")
+        );
+    }
+    let speeds: Vec<String> = state.read()["speeds"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|s| s["words"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let again = {
+        let api = api.clone();
+        move |_| {
+            let api = api.clone();
+            spawn(async move {
+                match api
+                    .call("classify.device", serde_json::json!({ "measure_again": true }))
+                    .await
+                {
+                    Ok(r) => {
+                        state.set(r);
+                        ui.say("each model size is measured again the next time it reads");
+                    }
+                    Err(e) => ui.fail(e),
+                }
+            });
+        }
+    };
     let set = {
         let api = api.clone();
         move |e: Event<FormData>| {
@@ -687,12 +720,24 @@ fn GpuSettings() -> Element {
             label { r#for: "readdev", "classifiers read texts on" }
             div { class: "row",
                 select { id: "readdev", onchange: set,
-                    option { value: "auto", selected: choice == "auto", "auto: the GPU when it gives the CPU's results" }
+                    option { value: "auto", selected: choice == "auto", "auto: the GPU when it gives the CPU's results and is faster" }
                     option { value: "cpu", selected: choice == "cpu", "the CPU" }
                     option { value: "gpu", selected: choice == "gpu", "the GPU" }
                     option { value: "gpu_fast", selected: choice == "gpu_fast", "the GPU, fast" }
                 }
                 span { class: "dim small", "{now}" }
+            }
+            if !speeds.is_empty() {
+                label { "measured on this machine" }
+                div { class: "wide small",
+                    for w in speeds.iter() {
+                        div { "{w}" }
+                    }
+                }
+                div { class: "row",
+                    button { onclick: again, Icon { name: "refresh" } "measure again" }
+                    span { class: "dim small", "forgets these rates; each model size is measured again on its next reading" }
+                }
             }
             div { class: "wide dim small",
                 "Predicting, classifier search, indexing, buckets, colouring by a classifier and filters by one. Training picks its device on the classifier's page."

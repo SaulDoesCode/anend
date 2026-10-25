@@ -292,6 +292,17 @@ wgpu in.
 - Saved models answer on the CPU (the reference) unless a run asks for the GPU; a model
   trained on a device the probe did not find exact is a different (equally valid) set of
   weights from the CPU's.
+- Reading texts (predict, search, indexing, buckets, tints) has its own choice,
+  `classify.device`: auto, cpu, gpu, gpu_fast. Auto uses the GPU only when it isn't a
+  software renderer, the probe finds it exact, and it reads faster than the CPU with a
+  model of the size at hand. That last part is measured on the first reading with each
+  model size (`classify::speed`: 192 fixed texts on the CPU, then 32 on the GPU, and all
+  192 when those 32 came within a factor of 2 of the CPU), and the two rates are kept
+  per machine (adapter, driver, CPU kernels and threads, the build's version) and size
+  in `gpu-speed.json` in the user's cache folder (`ANEND_SPEED_FILE` elsewhere). The
+  settings show the rates and why auto chose as it did; "measure again" forgets them.
+  `ANEND_AUTO_SOFTWARE_GPU=1` lets auto measure a software renderer too (for checking
+  the measuring; such a renderer runs on the CPU and is always the slower).
 - `ANEND_GPU=off` turns the GPU off; `WGPU_BACKEND` (vulkan, metal, dx12, gl) and
   `WGPU_ADAPTER_NAME` choose among several. Sizes are bounded by the device: the largest
   buffer the adapter allows (all its limits are requested).
