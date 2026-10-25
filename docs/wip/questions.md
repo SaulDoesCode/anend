@@ -97,3 +97,12 @@ The answers left these open. Each is written into the design as its default.
 22. **A size click is 0.1 units (5 steps of 0.02).** Single steps are too small to see;
     the stored value still has the full 0.02 resolution. The first click from "default"
     starts at the default's value (the "text size" slider).
+
+## Long texts (checklist: long texts, 25 Oct, first part)
+
+23. **Typing segments are cut at blank lines outside code fences, in one text box.**
+    The user's approach (each segment updated on its own, only it sent and highlighted)
+    is kept for what crosses to Rust and what is coloured; the editing stays one native
+    text box, so selection across segments, the pad's undo, find and input methods work
+    as before. Separate text boxes per segment would also be possible, at the cost of
+    those.

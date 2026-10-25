@@ -228,7 +228,7 @@ mod tests {
         let rs = include_str!("views/notes.rs");
         for needle in [
             "\"grammar.check\"",
-            "highlight::to_html(&text(), colour, &shown_flags)",
+            "l.layer.full(&t, colour, &flags_now)",
             "fn SpellPick(",
             "__anendPadSnap(p, true)",
             "check_spelling",

@@ -45,8 +45,12 @@ departure says why in its commit).
   after `59e2656`.
 - Done: "Inheritance" (texts: inheriting, own text, detached; prefabs come with #19).
 - Done: the u8 font size (per-placement size controls in the space).
-- Next: the user's priority is what makes the app good to use: long texts with
-  segments, chains, merging; then parity.md's gaps; then block features.
+- In progress: "Long texts". Done: typing in segments in the notes view (deltas to
+  Rust, the colour layer patched per segment; 90 KB note 171 -> 36 ms a key on the web
+  here). Left: storage in pieces (`graph long`), `text.window`, visual splitting at word
+  boundaries (80 characters, six lines) in the memory view and the space, the limits as
+  settings.
+- Then: chains, merging; then parity.md's gaps; then block features.
 
 **After Stage A (19 Oct, late evening UTC), while the user tries it:**
 - `b5b6b22` docs/format.md "One model for a definition and its placed instances": Stage B's

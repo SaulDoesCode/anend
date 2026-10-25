@@ -403,7 +403,147 @@ fn escape(s: &str, out: &mut String) {
 /// the text as HTML: runs of one class in a span each (plain text bare), flagged
 /// stretches inside a `mark`; a trailing newline gets a space after it so the layer is as
 /// tall as the textarea's content
+/// a text cut into typing segments for the colour layer: each ends after a blank line
+/// that is outside a code fence, so a segment highlights the same on its own as inside
+/// the whole text (a fence is the only state that carries from line to line). The
+/// segments joined are the text.
+pub fn segments(text: &str) -> Vec<&str> {
+    segments_open(text).0
+}
+
+/// `segments`, and whether the text ends inside a code fence (so text after it would be
+/// code too)
+pub fn segments_open(text: &str) -> (Vec<&str>, bool) {
+    let mut out = Vec::new();
+    let mut fence: Option<(u8, usize)> = None;
+    let (mut start, mut at) = (0, 0);
+    let mut prev_blank = false;
+    for line in text.split_inclusive('\n') {
+        let body = line.trim_end_matches(['\n', '\r']);
+        let blank = body.trim().is_empty();
+        // a segment starts at the first non-blank line after blank ones
+        if !blank && prev_blank && fence.is_none() && at > start {
+            out.push(&text[start..at]);
+            start = at;
+        }
+        match fence {
+            Some((ch, n)) => {
+                if let Some((c2, n2)) = fence_of(body)
+                    && c2 == ch
+                    && n2 >= n
+                    && body.trim().bytes().all(|b| b == ch)
+                {
+                    fence = None;
+                }
+            }
+            None => {
+                if let Some(f) = fence_of(body)
+                    && !(f.0 == b'`' && body.trim_start()[f.1..].contains('`'))
+                {
+                    fence = Some(f);
+                }
+            }
+        }
+        prev_blank = blank;
+        at += line.len();
+    }
+    if start < text.len() || out.is_empty() {
+        out.push(&text[start..]);
+    }
+    (out, fence.is_some())
+}
+
+/// the colour layer of a text kept as its typing segments, so an edit re-colours only
+/// the segments around it. Every segment starts outside a code fence, so cutting again
+/// from a segment's start is exact; an edit that leaves a fence open runs to the end.
+#[derive(Default)]
+pub struct Layer {
+    pub segs: Vec<String>,
+}
+
+impl Layer {
+    /// every segment's html, for a whole new text
+    pub fn full(&mut self, text: &str, colour: bool, flags: &[Flag]) -> Vec<String> {
+        self.segs = segments(text).into_iter().map(str::to_string).collect();
+        let mut at = 0;
+        self.segs
+            .iter()
+            .map(|seg| {
+                let end = at + seg.len();
+                let fl: Vec<Flag> = flags
+                    .iter()
+                    .filter(|f| f.start >= at && f.end <= end)
+                    .map(|f| Flag {
+                        start: f.start - at,
+                        end: f.end - at,
+                        ..f.clone()
+                    })
+                    .collect();
+                at = end;
+                part_html(seg, colour, &fl)
+            })
+            .collect()
+    }
+
+    /// bytes `a..b` of the text replaced by `ins`: the segments that changed, as (first
+    /// index, how many went, the new ones' html); None when there's no layer to edit
+    pub fn edit(&mut self, a: usize, b: usize, ins: &str, colour: bool) -> Option<(usize, usize, Vec<String>)> {
+        if self.segs.is_empty() {
+            return None;
+        }
+        let n = self.segs.len();
+        let mut starts = Vec::with_capacity(n);
+        let mut acc = 0;
+        for s in &self.segs {
+            starts.push(acc);
+            acc += s.len();
+        }
+        if b > acc || a > b {
+            return None;
+        }
+        let within = |x: usize| starts.iter().rposition(|&st| st <= x).unwrap_or(0);
+        let i0 = within(a).saturating_sub(1);
+        let mut j1 = (within(b) + 1).min(n - 1);
+        let base = starts[i0];
+        let mut local = self.segs[i0..=j1].concat();
+        if a - base > local.len() || b - base > local.len() {
+            return None;
+        }
+        local.replace_range(a - base..b - base, ins);
+        let (mut cut, open) = segments_open(&local);
+        let mut owned: Vec<String>;
+        if open && j1 < n - 1 {
+            // a fence left open swallows the rest: cut again to the end
+            local.push_str(&self.segs[j1 + 1..].concat());
+            j1 = n - 1;
+            cut = segments_open(&local).0;
+        }
+        owned = cut.into_iter().map(str::to_string).collect();
+        let html: Vec<String> = owned.iter().map(|s| part_html(s, colour, &[])).collect();
+        let went = j1 - i0 + 1;
+        self.segs.splice(i0..=j1, owned.drain(..));
+        Some((i0, went, html))
+    }
+
+    #[cfg(test)]
+    pub fn text(&self) -> String {
+        self.segs.concat()
+    }
+}
+
+#[cfg(test)]
 pub fn to_html(text: &str, colour: bool, flags: &[Flag]) -> String {
+    let mut out = part_html(text, colour, flags);
+    // a last empty line keeps its height in the layer
+    if text.ends_with('\n') || text.is_empty() {
+        out.push(' ');
+    }
+    out
+}
+
+/// `to_html` of one segment of a text (`segments`): the same, without the space a whole
+/// text's empty last line gets
+pub fn part_html(text: &str, colour: bool, flags: &[Flag]) -> String {
     let classes = if colour {
         classify(text)
     } else {
@@ -452,10 +592,69 @@ pub fn to_html(text: &str, colour: bool, flags: &[Flag]) -> String {
             out.push_str("</mark>");
         }
     }
-    if text.ends_with('\n') || text.is_empty() {
-        out.push(' ');
-    }
     out
+}
+
+#[cfg(test)]
+mod segment_tests {
+    use super::*;
+
+    #[test]
+    fn segments_join_to_the_text_and_colour_it_the_same() {
+        let texts = [
+            "# Title\n\nA *line* with `code`.\n\n- a list\n- more\n\n\n```rust\nfn x() {}\n\nlet y = 1;\n```\n\nafter **the** fence\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n    indented\n\n> quote\n",
+            "",
+            "one line",
+            "\n\n\nstarts blank\n\nends blank\n\n",
+            "~~~\nopen fence\n\nnever closed\n\nstill code",
+        ];
+        for t in texts {
+            let segs = segments(t);
+            assert_eq!(segs.concat(), t);
+            let mut joined: String = segs.iter().map(|s| part_html(s, true, &[])).collect();
+            if t.ends_with('\n') || t.is_empty() {
+                joined.push(' ');
+            }
+            assert_eq!(joined, to_html(t, true, &[]), "{t:?} in {} segments", segs.len());
+        }
+        assert!(segments(texts[0]).len() >= 6);
+    }
+
+    #[test]
+    fn edits_recolour_only_around_them_and_match_a_whole_colouring() {
+        let mut t = String::from("# T\n\npara one\n\npara two\n\n- list\n\n```\ncode\n```\n\nend *here*\n");
+        let mut l = Layer::default();
+        l.full(&t, true, &[]);
+        // (at, delete, insert): typing, a blank line splitting a paragraph, joining two,
+        // opening a fence that runs to the end, closing it, deleting everything
+        let edits: Vec<(usize, usize, &str)> = vec![
+            (9, 0, "x"),
+            (12, 0, "\n\nnew para "),
+            (8, 3, ""),
+            (2, 0, "\n```\n"),
+            (0, 0, "```\n\n"),
+            (0, 0, "intro\n\n"),
+        ];
+        for (at, del, ins) in edits {
+            let at = at.min(t.len());
+            let b = (at + del).min(t.len());
+            let (i, went, html) = l.edit(at, b, ins, true).expect("an edit");
+            t.replace_range(at..b, ins);
+            assert_eq!(l.text(), t);
+            assert!(went >= 1 && i < l.segs.len());
+            // the layer's segments are exactly a fresh cut of the text, coloured the same
+            let fresh: Vec<&str> = segments(&t);
+            assert_eq!(
+                l.segs.iter().map(String::as_str).collect::<Vec<_>>(),
+                fresh,
+                "after {ins:?}"
+            );
+            let _ = html;
+        }
+        let all = t.len();
+        l.edit(0, all, "", true).unwrap();
+        assert_eq!(l.text(), "");
+    }
 }
 
 #[cfg(test)]

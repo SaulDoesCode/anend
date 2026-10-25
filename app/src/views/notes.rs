@@ -19,6 +19,31 @@ fn when(iso: &str) -> String {
 
 /// keeps the highlighting layer scrolled with the pad (once per page)
 const PAD_JS: &str = r#"
+// the colour layer's segments, kept by Rust (`highlight::Layer`): set them all, or
+// replace a run of them; a last span keeps an empty last line's height
+window.__anendHl = window.__anendHl || {
+  mk(html) { const s = document.createElement('span'); s.innerHTML = html; return s; },
+  tail(h, end) {
+    let t = h.lastElementChild;
+    if (!t || !t.classList.contains('hl-end')) { t = document.createElement('span'); t.className = 'hl-end'; h.append(t); }
+    t.textContent = end ? ' ' : '';
+  },
+  set(htmls, end) {
+    const h = document.getElementById('note-hl');
+    if (!h) return;
+    h.replaceChildren(...htmls.map((x) => this.mk(x)));
+    this.tail(h, end);
+  },
+  patch(from, count, htmls, end) {
+    const h = document.getElementById('note-hl');
+    if (!h) return;
+    const kids = h.children;
+    const before = kids[from + count] || null;
+    for (let i = 0; i < count && kids[from]; i++) kids[from].remove();
+    for (const x of htmls) h.insertBefore(this.mk(x), before && before.isConnected ? before : h.lastElementChild);
+    this.tail(h, end);
+  },
+};
 if (!window.__anendPad) {
   window.__anendPad = true;
   document.addEventListener('scroll', (e) => {
@@ -67,6 +92,91 @@ if (!window.__anendPad) {
 }
 "#;
 
+/// typing in segments (the user's approach for long texts, docs/format.md "Long texts"):
+/// each change to the pad goes to Rust as the range it replaced and what went in
+/// (UTF-16 units), so a key sends a few characters rather than the whole text. A pad
+/// whose last value isn't known (just opened) sends its whole text once.
+const PAD_SYNC_JS: &str = r#"
+window.__anendPadSend = (m) => dioxus.send(m);
+if (!window.__anendPadSync) {
+  window.__anendPadSync = true;
+  document.addEventListener('input', (e) => {
+    const p = e.target;
+    if (!p || p.id !== 'note-pad' || !window.__anendPadSend) return;
+    const v = p.value, prev = p.__prev;
+    p.__prev = v;
+    if (typeof prev !== 'string') { window.__anendPadSend({ full: v }); return; }
+    const n = Math.min(prev.length, v.length);
+    let a = 0;
+    while (a < n && prev.charCodeAt(a) === v.charCodeAt(a)) a++;
+    let b = 0;
+    while (b < n - a && prev.charCodeAt(prev.length - 1 - b) === v.charCodeAt(v.length - 1 - b)) b++;
+    window.__anendPadSend({ at: a, del: prev.length - a - b, ins: v.slice(a, v.length - b), len: v.length });
+  }, true);
+}
+await new Promise(() => {});
+"#;
+
+/// a change sent by `PAD_SYNC_JS`, applied to the text; false when it doesn't fit (the
+/// pad's whole text is asked for then)
+fn apply_delta(t: &mut String, m: &serde_json::Value) -> Delta {
+    if let Some(full) = m["full"].as_str() {
+        *t = full.to_string();
+        return Delta::Whole;
+    }
+    match splice(t, m) {
+        Some(e) => Delta::Edit(e),
+        None => Delta::Lost,
+    }
+}
+
+/// the notes view's colour layer: its segments, and whether it shows spelling flags
+#[derive(Default)]
+struct PadLayer {
+    layer: crate::highlight::Layer,
+    flagged: bool,
+}
+
+/// what a pad change did to the text
+enum Delta {
+    /// the whole text came
+    Whole,
+    /// bytes `a..b` were replaced by `ins`
+    Edit((usize, usize, String)),
+    /// it didn't fit: the pad's whole text is asked for
+    Lost,
+}
+
+fn splice(t: &mut String, m: &serde_json::Value) -> Option<(usize, usize, String)> {
+    let (Some(at), Some(del), Some(ins), Some(len)) = (
+        m["at"].as_u64(),
+        m["del"].as_u64(),
+        m["ins"].as_str(),
+        m["len"].as_u64(),
+    ) else {
+        return None;
+    };
+    // UTF-16 offsets to byte offsets
+    let byte_of = |t: &str, u: usize| -> Option<usize> {
+        let mut units = 0;
+        for (i, c) in t.char_indices() {
+            if units == u {
+                return Some(i);
+            }
+            units += c.len_utf16();
+            if units > u {
+                return None;
+            }
+        }
+        (units == u).then_some(t.len())
+    };
+    let a = byte_of(t, at as usize)?;
+    let b = byte_of(&t[a..], del as usize).map(|x| a + x)?;
+    t.replace_range(a..b, ins);
+    // the length check: a pad changed without an input event would drift
+    (t.encode_utf16().count() == len as usize).then(|| (a, b, ins.to_string()))
+}
+
 /// puts a replacement in the pad as one undo step of its own (Ctrl+Z takes it back);
 /// `from`..`to` in UTF-16 units
 fn replace_in_pad(from: usize, to: usize, with: &str) {
@@ -94,8 +204,8 @@ struct Pick {
     y: f64,
 }
 
-/// a note longer than this (bytes) is typed without the colour layer and the spelling
-/// check (queued items 6 and 12 bring windowed highlighting for long texts)
+/// a note longer than this (bytes) is typed without the spelling check (which reads the
+/// whole text); the colours stay on at any length, as the layer is coloured in segments
 const BIG: usize = 100_000;
 
 fn split_tags(t: &str) -> Vec<String> {
@@ -125,8 +235,58 @@ pub fn Notes() -> Element {
     let mut check_gen = use_signal(|| 0u64);
     let mut report: Signal<Option<serde_json::Value>> = use_signal(|| None);
     let mut pick: Signal<Option<Pick>> = use_signal(|| None);
+    // the colour layer, kept in typing segments (`highlight::Layer`); `layer_gen` asks for
+    // it whole (a note opened, a text put in, the colours or the flags changed)
+    let layer: std::rc::Rc<std::cell::RefCell<PadLayer>> = use_hook(Default::default);
+    let mut layer_gen = use_signal(|| 0u64);
     use_hook(|| {
         document::eval(PAD_JS);
+    });
+    // the pad's changes, as deltas (`PAD_SYNC_JS`)
+    let layer_d = layer.clone();
+    use_hook(move || {
+        let layer = layer_d.clone();
+        spawn(async move {
+            let mut ev = document::eval(PAD_SYNC_JS);
+            while let Ok(m) = ev.recv::<serde_json::Value>().await {
+                let d = text.with_mut(|t| apply_delta(t, &m));
+                match d {
+                    Delta::Lost => {
+                        // out of step: the whole text once, then deltas again
+                        document::eval(
+                            "const p = document.getElementById('note-pad'); if (p) { p.__prev = undefined; p.dispatchEvent(new Event('input', { bubbles: true })); }",
+                        );
+                        continue;
+                    }
+                    Delta::Whole => layer_gen += 1,
+                    Delta::Edit((a, b, ins)) => {
+                        // only the segments around the edit are coloured again; a layer
+                        // showing spelling flags (now stale) is made again whole
+                        let colour = ui.prefs.peek().highlight;
+                        let patched = {
+                            let mut l = layer.borrow_mut();
+                            if l.flagged {
+                                None
+                            } else {
+                                l.layer.edit(a, b, &ins, colour)
+                            }
+                        };
+                        match patched {
+                            Some((from, went, html)) => {
+                                let end = text.peek().ends_with('\n') || text.peek().is_empty();
+                                document::eval(&format!(
+                                    "window.__anendHl && window.__anendHl.patch({from}, {went}, {}, {end});",
+                                    serde_json::to_string(&html).unwrap_or_default()
+                                ));
+                            }
+                            None => layer_gen += 1,
+                        }
+                    }
+                }
+                dirty.set(true);
+                pick.set(None);
+            }
+        });
     });
     let api_r = api.clone();
     let list = use_resource(move || {
@@ -292,9 +452,12 @@ pub fn Notes() -> Element {
     {
         let api = api.clone();
         use_effect(move || {
-            let t = text();
             let on = ui.prefs.read().check_spelling;
-            if !on || t.trim().is_empty() || t.len() > BIG {
+            if !on || text.read().len() > BIG {
+                return;
+            }
+            let t = text();
+            if t.trim().is_empty() {
                 return;
             }
             let g = *check_gen.peek() + 1;
@@ -334,9 +497,11 @@ pub fn Notes() -> Element {
         Some(n) if !dirty() && !n.key.is_empty() => {
             anend_core::note::compose(&n.title, n.rendered.as_deref().unwrap_or(&n.markdown))
         }
-        _ => text(),
+        // only read mode shows it: no copy of a long text on every key
+        _ if reading() => text(),
+        _ => String::new(),
     };
-    let shown_title = anend_core::note::split(&text()).0;
+    let shown_title = anend_core::note::split(&text.read()).0;
     let (hide_list, list_right, colour) = {
         let p = ui.prefs.read();
         (p.hide_list, p.list_right, p.highlight)
@@ -347,7 +512,7 @@ pub fn Notes() -> Element {
     let check = ui.prefs.read().check_spelling;
     let shown_flags: Vec<crate::highlight::Flag> = {
         let (t, fl) = &*flags.read();
-        if check && *t == text() {
+        if check && *t == *text.read() {
             fl.iter()
                 .map(|f| {
                     let sug: Vec<String> = f["suggestions"]
@@ -371,15 +536,33 @@ pub fn Notes() -> Element {
             vec![]
         }
     };
-    // a long note types as plain text: the colour layer (the whole text again, re-laid
-    // out on every key) and the spelling check pause, so each key stays quick
-    let big = text().len() > BIG;
-    let layered = !big && (colour || !shown_flags.is_empty());
-    let layer = if layered {
-        crate::highlight::to_html(&text(), colour, &shown_flags)
-    } else {
-        String::new()
-    };
+    // the colour layer, kept in typing segments by `layer` (made whole here when asked;
+    // each typed change patches only its segments, in the pad's delta loop). The spelling
+    // check still pauses on long notes.
+    let big = text.read().len() > BIG;
+    let layered = colour || !shown_flags.is_empty();
+    {
+        let layer = layer.clone();
+        let flags_now = shown_flags.clone();
+        use_effect(use_reactive!(|layered, colour, flags_now| {
+            let _ = layer_gen();
+            let mut l = layer.borrow_mut();
+            if !layered {
+                l.layer = Default::default();
+                l.flagged = false;
+                document::eval("window.__anendHl && window.__anendHl.set([], false);");
+                return;
+            }
+            let t = text.peek();
+            let html = l.layer.full(&t, colour, &flags_now);
+            l.flagged = !flags_now.is_empty();
+            let end = t.ends_with('\n') || t.is_empty();
+            document::eval(&format!(
+                "window.__anendHl && window.__anendHl.set({}, {end});",
+                serde_json::to_string(&html).unwrap_or_default()
+            ));
+        }));
+    }
     let api_d = api.clone();
     let mut class = String::from("notes");
     if hide_list {
@@ -542,7 +725,10 @@ pub fn Notes() -> Element {
                     for pad in [format!("{}-{}", cur_key, seq())].into_iter().filter(|_| !reading()) {
                         div { key: "{pad}", class: if layered { "pad hl-on" } else { "pad" },
                             // the colours, painted under the textarea's transparent glyphs
-                            pre { id: "note-hl", class: "hl", "aria-hidden": "true", dangerous_inner_html: "{layer}" }
+                            // its segments are put in by `layer` (not by the render)
+                            pre { id: "note-hl", class: "hl", "aria-hidden": "true",
+                                onmounted: move |_| layer_gen += 1,
+                            }
                             // not bound to the signal while typing (a round trip per key would
                             // drop letters typed fast); its text is put in when a note opens
                             textarea {
@@ -551,12 +737,11 @@ pub fn Notes() -> Element {
                                 spellcheck: "false",
                                 onmounted: move |_| {
                                     let js = format!(
-                                        "const p = document.getElementById('note-pad'); if (p) {{ p.value = {}; }}",
+                                        "const p = document.getElementById('note-pad'); if (p) {{ p.value = {}; p.__prev = p.value; }}",
                                         serde_json::to_string(&*text.peek()).unwrap_or_default()
                                     );
                                     document::eval(&js);
                                 },
-                                oninput: move |e| { text.set(e.value()); dirty.set(true); pick.set(None); },
                                 onclick: move |e: MouseEvent| {
                                     if !ui.prefs.peek().check_spelling || flags.peek().1.is_empty() {
                                         return;
@@ -585,7 +770,7 @@ pub fn Notes() -> Element {
                             }
                         }
                         if big {
-                            div { class: "spell-note dim small", {format!("a long note ({} KB): the colours and the spelling check pause above {} KB, so typing stays quick", text().len() / 1000, BIG / 1000)} }
+                            div { class: "spell-note dim small", {format!("a long note ({} KB): the spelling check pauses above {} KB, so typing stays quick", text.read().len() / 1000, BIG / 1000)} }
                         }
                         if check && !big {
                             if let Some(r) = report() {
@@ -682,7 +867,7 @@ fn Replace(text: Signal<String>, dirty: Signal<bool>, seq: Signal<u64>) -> Eleme
         text.set(t.clone());
         dirty.set(true);
         let js = format!(
-            "const p = document.getElementById('note-pad'); if (p) {{ p.value = {}; p.focus(); }}",
+            "const p = document.getElementById('note-pad'); if (p) {{ p.value = {}; p.__prev = undefined; p.dispatchEvent(new Event('input', {{ bubbles: true }})); p.focus(); }}",
             serde_json::to_string(&t).unwrap_or_default()
         );
         document::eval(&js);

@@ -423,6 +423,10 @@ button.plain.on { background: var(--accent); color: var(--on-button); }
 .pad.hl-on textarea { color: transparent; caret-color: var(--text); }
 .pad.hl-on textarea::selection { background: color-mix(in srgb, var(--accent) 45%, transparent); color: transparent; }
 .pad pre.hl { color: var(--text); pointer-events: none; z-index: 0; background: none; }
+/* the layer's typing segments are blocks, so a changed one lays out on its own (a
+   block's last line break draws no line, and the next block starts a new one: the lines
+   are the same as the text's) */
+.pad pre.hl > span { display: block; contain: layout style; }
 .pad:not(.hl-on) pre.hl { visibility: hidden; }
 .hl .h-m { color: var(--hl-mark); }
 .hl .h-h { color: var(--hl-heading); font-weight: 700; }
