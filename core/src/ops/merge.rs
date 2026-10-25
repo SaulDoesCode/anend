@@ -383,17 +383,29 @@ pub fn assets(target: &crate::graph::Graph, src: &crate::graph::Graph) -> GResul
             name = format!("{} {k}", sc.name);
             k += 1;
         }
-        let mut texts: Vec<(u64, Vec<crate::graph::scenes::Placement>)> = Vec::new();
-        for p in src.placements(sc.id, false)? {
+        // a detached text comes in as the text it shows, detached at that text's version
+        // in the target (where the source's history isn't)
+        let mut texts: Vec<crate::graph::scenes::SceneTexts> = Vec::new();
+        for p in [src.placements(sc.id, false)?, src.placements(sc.id, true)?].concat() {
             let (SKind::Text, Def::Entry(id)) = (p.kind, p.def) else {
                 continue;
             };
             let Ok(e) = src.entry(id) else { continue };
-            let text = src.render(id)?;
+            let text = match p.version {
+                Some(at) => src.text_at(id, at)?,
+                None => src.render(id)?,
+            };
             let to = target.save_text(&text, e.record.mime)?.0;
-            match texts.iter_mut().find(|(i, _)| *i == to) {
-                Some((_, ps)) => ps.push(p.place),
-                None => texts.push((to, vec![p.place])),
+            let version = match p.version {
+                Some(_) => Some(target.entry(to)?.record.edited),
+                None => None,
+            };
+            crate::graph::scenes::push(&mut texts, to, version, p.place);
+        }
+        // two source texts can be one text in the target: number its placements afresh
+        for st in texts.iter_mut() {
+            for (i, q) in st.places.iter_mut().enumerate() {
+                q.n = i as u64 + 1;
             }
         }
         let id = target.add_scene(&name, 0)?;

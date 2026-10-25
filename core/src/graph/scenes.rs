@@ -205,7 +205,41 @@ pub struct Placement {
     pub extra: Option<Vec<u8>>,
 }
 
+/// the flag saying a placement's extra holds its own values, which shadow its
+/// definition's (an inheriting copy's overrides, as a JSON object: `text` for a text)
+pub const OWN: u64 = 128;
+
 impl Placement {
+    /// an inheriting copy's own values (overrides), when it has any
+    pub fn own(&self) -> Option<serde_json::Map<String, serde_json::Value>> {
+        if self.flags.unwrap_or(0) & OWN == 0 {
+            return None;
+        }
+        serde_json::from_slice(self.extra.as_deref()?).ok()
+    }
+
+    /// sets or clears its own values; an empty map clears them
+    pub fn set_own(&mut self, own: Option<serde_json::Map<String, serde_json::Value>>) {
+        let rest = self.flags.unwrap_or(0) & !OWN;
+        match own.filter(|m| !m.is_empty()) {
+            Some(m) => {
+                self.flags = Some(rest | OWN);
+                self.extra = Some(serde_json::to_vec(&m).expect("a JSON map"));
+            }
+            None => {
+                if self.flags.unwrap_or(0) & OWN != 0 {
+                    self.extra = None;
+                }
+                self.flags = Some(rest).filter(|f| *f != 0);
+            }
+        }
+    }
+
+    /// its own text, shadowing its entry's
+    pub fn own_text(&self) -> Option<String> {
+        self.own()?.get("text")?.as_str().map(str::to_string)
+    }
+
     pub fn at(n: u64, pos: [f32; 3]) -> Placement {
         Placement {
             n,
@@ -797,21 +831,32 @@ impl Graph {
         Ok(before - self.placements(scene, detached)?.len())
     }
 
-    /// replaces every inheriting text placement of a scene with these, in one write
-    pub fn set_texts(&self, scene: u64, texts: Vec<(u64, Vec<Placement>)>) -> GResult<()> {
+    /// replaces every text placement of a scene, inheriting and detached, with these, in
+    /// one write: per entry, the version it was detached at (None: inheriting) and its
+    /// placements
+    pub fn set_texts(&self, scene: u64, texts: Vec<SceneTexts>) -> GResult<()> {
         let txn = self.db().begin_write().map_err(err)?;
         {
             if txn.open_table(SCENES).map_err(err)?.get(scene).map_err(err)?.is_none() {
                 return Err(format!("no scene {scene}"));
             }
-            let mut t = txn.open_multimap_table(INSTANCES).map_err(err)?;
-            for (b, ch) in values(&t, scene, false)? {
-                if ch.kind == Kind::Text {
-                    t.remove(scene, b.as_slice()).map_err(err)?;
+            for d in [false, true] {
+                let mut t = txn.open_multimap_table(table(d)).map_err(err)?;
+                for (b, ch) in values(&t, scene, d)? {
+                    if ch.kind == Kind::Text {
+                        t.remove(scene, b.as_slice()).map_err(err)?;
+                    }
                 }
-            }
-            for (id, places) in texts {
-                write_chunks(&mut t, scene, Kind::Text, Def::Entry(id), None, places)?;
+                for st in texts.iter().filter(|st| st.version.is_some() == d) {
+                    write_chunks(
+                        &mut t,
+                        scene,
+                        Kind::Text,
+                        Def::Entry(st.id),
+                        st.version,
+                        st.places.clone(),
+                    )?;
+                }
             }
             let mut st = txn.open_table(SCENES).map_err(err)?;
             let mut s: Scene =
@@ -866,11 +911,14 @@ pub fn size_of(font: u8) -> Option<f64> {
 pub const MAPS_BEFORE: &str = "space.maps (before scenes)";
 
 impl Graph {
-    /// a saved scene's rows as the space keeps them, `[text, x, y, z, {key?, size?}]`,
-    /// into a scene's text placements: a row with a key places that entry (a note's key
-    /// is `note:<label>`), one without becomes a memory entry first (format.md answer 1)
-    pub fn rows_to_texts(&self, rows: &[serde_json::Value]) -> GResult<Vec<(u64, Vec<Placement>)>> {
-        let mut out: Vec<(u64, Vec<Placement>)> = Vec::new();
+    /// a saved scene's rows as the space keeps them, `[text, x, y, z, {key?, size?,
+    /// detached?, own?}]`, into a scene's text placements: a row with a key places that
+    /// entry (a note's key is `note:<label>`; a room copy's `<label>~2` is the same
+    /// entry), one without becomes a memory entry first (format.md answer 1). `detached`
+    /// (the entry's edited time, ms) makes it a detached copy showing that version;
+    /// `own` is an inheriting copy's own text, shadowing the entry's
+    pub fn rows_to_texts(&self, rows: &[serde_json::Value]) -> GResult<Vec<SceneTexts>> {
+        let mut out: Vec<SceneTexts> = Vec::new();
         let mut keyless = Vec::new();
         for r in rows {
             let Some(a) = r.as_array().filter(|a| a.len() >= 4) else {
@@ -884,9 +932,18 @@ impl Graph {
                 p.font = font_of(s);
             }
             let key = o.get("key").and_then(serde_json::Value::as_str).unwrap_or("");
+            let key = key.split('~').next().unwrap_or(key);
             let id = super::record::parse_label(key.strip_prefix("note:").unwrap_or(key));
+            let version = o.get("detached").and_then(serde_json::Value::as_u64);
+            if version.is_none()
+                && let Some(t) = o.get("own").and_then(serde_json::Value::as_str)
+            {
+                let mut m = serde_json::Map::new();
+                m.insert("text".into(), serde_json::json!(t));
+                p.set_own(Some(m));
+            }
             match id {
-                Some(id) => push(&mut out, id, p),
+                Some(id) => push(&mut out, id, version, p),
                 None => {
                     let text = a[0].as_str().unwrap_or("").trim().to_string();
                     if !text.is_empty() {
@@ -903,16 +960,25 @@ impl Graph {
                     .collect::<GResult<Vec<u64>>>()
             })?;
             for (id, (_, p)) in ids.into_iter().zip(keyless) {
-                push(&mut out, id, p);
+                push(&mut out, id, None, p);
             }
         }
-        // each entry's placements numbered in row order, from 1
-        for (_, ps) in out.iter_mut() {
-            for (i, p) in ps.iter_mut().enumerate() {
+        // each (entry, version)'s placements numbered in row order, from 1
+        for st in out.iter_mut() {
+            for (i, p) in st.places.iter_mut().enumerate() {
                 p.n = i as u64 + 1;
             }
         }
         Ok(out)
+    }
+
+    /// an entry's text as it read at `version` (an edited time, ms): the newest version
+    /// written at or before it, from `graph history`; the oldest kept when none is
+    pub fn text_at(&self, id: u64, version: u64) -> GResult<String> {
+        use super::Reader;
+        let vs = self.view()?.versions(id)?;
+        let found = vs.iter().find(|v| v.at <= version).or(vs.last());
+        Ok(found.map(|v| v.text.clone()).unwrap_or_default())
     }
 
     /// saves made before scenes: the space's saved scenes (`space.maps`, name → rows) and
@@ -1001,10 +1067,23 @@ impl Graph {
     }
 }
 
-fn push(out: &mut Vec<(u64, Vec<Placement>)>, id: u64, p: Placement) {
-    match out.iter_mut().find(|(i, _)| *i == id) {
-        Some((_, ps)) => ps.push(p),
-        None => out.push((id, vec![p])),
+/// one entry's text placements in a scene, for `set_texts`: inheriting (`version`
+/// None) or detached at that version
+#[derive(Clone, Debug, PartialEq)]
+pub struct SceneTexts {
+    pub id: u64,
+    pub version: Option<u64>,
+    pub places: Vec<Placement>,
+}
+
+pub(crate) fn push(out: &mut Vec<SceneTexts>, id: u64, version: Option<u64>, p: Placement) {
+    match out.iter_mut().find(|st| st.id == id && st.version == version) {
+        Some(st) => st.places.push(p),
+        None => out.push(SceneTexts {
+            id,
+            version,
+            places: vec![p],
+        }),
     }
 }
 

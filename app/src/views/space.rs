@@ -210,6 +210,50 @@ struct SpaceEvent {
     copies: u32,
     #[serde(default)]
     primary: bool,
+    /// a detached placement: the entry's version it keeps (its edited time, ms)
+    #[serde(default)]
+    det: u64,
+    /// an inheriting placement's own text, shadowing its entry's
+    #[serde(default)]
+    own: Option<String>,
+    /// the entry's text (what an inheriting placement shows without its own)
+    #[serde(default)]
+    entry_text: String,
+}
+
+impl SpaceEvent {
+    /// how this placement relates to its entry, in words
+    fn relation(&self) -> String {
+        if self.free {
+            return String::new();
+        }
+        if self.det > 0 {
+            let when = chrono_date(self.det);
+            return format!("detached on {when}: keeps the text as it read then");
+        }
+        if self.own.is_some() {
+            return "its own text over the entry's".into();
+        }
+        "inherits: shows the entry's text as it is now".into()
+    }
+}
+
+/// a date from ms since 1970, as "2026-10-25 14:03 UTC"
+fn chrono_date(ms: u64) -> String {
+    let secs = (ms / 1000) as i64;
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    // days since 1970-01-01 to a civil date (Howard Hinnant's algorithm)
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y}-{m:02}-{d:02} {:02}:{:02} UTC", rem / 3600, rem % 3600 / 60)
 }
 
 fn boot_js() -> String {
@@ -257,7 +301,8 @@ try {{
     else if (c.cmd === 'blockspot') dioxus.send({{ kind: 'spot', data: {{ ...sp.blockSpot(), want: c.want }} }});
     else if (c.cmd === 'blockfields') sp.setBlockFields(c.id, c.t);
     else if (c.cmd === 'pickblock') sp.pickBlock(c.id);
-    else if (c.cmd === 'dup') {{ const k = sp.duplicate(c.node); dioxus.send({{ kind: 'toast', text: k ? 'a copy: another placement of the same entry · Ctrl+Z takes it away' : 'select a text first' }}); }}
+    else if (c.cmd === 'dup') {{ const k = sp.duplicate(c.node, c.det || 0); dioxus.send({{ kind: 'toast', text: !k ? 'select a text first' : c.det ? 'a detached copy: it keeps the text as it reads now · Ctrl+Z takes it away' : 'a copy that inherits: it shows the entry as it changes · Ctrl+Z takes it away' }}); }}
+    else if (c.cmd === 'own') {{ const k = sp.setOwn(c.node, c.text); dioxus.send({{ kind: 'toast', text: !k ? 'that placement can\'t have its own text' : c.text ? 'this placement has its own text now; the entry is unchanged · Ctrl+Z undoes it' : 'it follows the entry again · Ctrl+Z undoes it' }}); }}
     else if (c.cmd === 'removenode') {{ const k = sp.removeNode(c.node); dioxus.send({{ kind: 'toast', text: k ? 'taken out of the room (the entry stays) · Ctrl+Z puts it back' : 'gone already' }}); }}
     else if (c.cmd === 'pinnode') dioxus.send({{ kind: 'toast', text: sp.pinNode(c.node) || 'gone already' }});
   }}
@@ -719,6 +764,14 @@ async fn enter(mut ui: Ui, api: Api, sp: Sp, raw: String, ctrl: bool, shift: boo
     let t = raw.trim().to_string();
     // an edit started from the right-click menu or Enter on a text
     let pending = ui.pending.peek().clone();
+    if let Pending::EditOwn { node, .. } = &pending {
+        ui.pending.set(Pending::None);
+        if !t.is_empty() {
+            sp.send(json!({ "cmd": "own", "node": node, "text": t }));
+        }
+        ui.set_bar("");
+        return;
+    }
     if let Pending::Edit(h) = pending {
         ui.pending.set(Pending::None);
         if t.is_empty() {
@@ -1660,12 +1713,13 @@ fn SpaceMenu(
         "a free text (in this room only)".to_string()
     } else if copies > 1 {
         format!(
-            "{} · {} placements in the room",
+            "{} · {} placements in the room · {}",
             if ev.primary { "the first placement" } else { "a copy" },
-            copies
+            copies,
+            ev.relation()
         )
     } else {
-        "its only placement in the room".to_string()
+        format!("its only placement in the room · {}", ev.relation())
     };
     rsx! {
         div { class: "backdrop", onclick: move |_| close(), oncontextmenu: move |e| { e.prevent_default(); close() } }
@@ -1683,11 +1737,43 @@ fn SpaceMenu(
                         ui.say("edit it in the bar; Enter puts it back under the same key, Esc leaves it");
                     }
                     close();
-                } }, Icon { name: "edit" } "edit" kbd { "{ui.key_of(Action::EditText)}" } }
+                } }, Icon { name: "edit" } "edit"
+                if !ev.free && ev.det > 0 { span { class: "dim small", " the entry (this copy keeps its text)" } }
+                else if !ev.free && copies > 1 { span { class: "dim small", " the entry (inheriting copies follow)" } }
+                kbd { "{ui.key_of(Action::EditText)}" } }
             button { role: "menuitem", onclick: { let n = node.clone(); move |_| { on_send.call(json!({ "cmd": "pinnode", "node": n })); close(); } },
                 Icon { name: "pin" } if ev.pinned { "unpin" } else { "pin" } kbd { "{ui.key_of(Action::Pin)}" } }
             button { role: "menuitem", onclick: { let n = node.clone(); move |_| { on_send.call(json!({ "cmd": "dup", "node": n })); close(); } },
-                Icon { name: "copy" } "a copy beside it" span { class: "dim small", " (same entry)" } }
+                Icon { name: "copy" } "a copy that inherits" span { class: "dim small", " (follows the entry)" } }
+            if !ev.free {
+                button { role: "menuitem", onclick: { let n = node.clone(); let k = ev.key.clone(); let api = api.clone(); move |_| {
+                        let (n, k, api) = (n.clone(), k.clone(), api.clone());
+                        // the menu stays until the answer is in: its handler goes with it
+                        let mut sm = sp_menu;
+                        spawn(async move {
+                            match api.call("entries.info", json!({ "key": k })).await {
+                                Ok(i) => on_send.call(json!({ "cmd": "dup", "node": n, "det": i["edited_ms"] })),
+                                Err(e) => ui.fail(e),
+                            }
+                            sm.set(None);
+                        });
+                    } },
+                    Icon { name: "copy" } "a detached copy" span { class: "dim small", " (keeps the text as it reads now)" } }
+                if ev.det == 0 {
+                    button { role: "menuitem", onclick: { let n = node.clone(); let t = ev.text.clone(); move |_| {
+                            ui.set_bar(&t);
+                            let mut p = ui.pending; p.set(Pending::EditOwn { node: n.clone(), text: t.clone() });
+                            ui.focus_bar();
+                            ui.say("this placement's own text: Enter sets it, Esc leaves it; the entry and its other placements stay");
+                            close();
+                        } },
+                        Icon { name: "edit" } "edit this placement only" }
+                }
+                if ev.own.is_some() {
+                    button { role: "menuitem", onclick: { let n = node.clone(); move |_| { on_send.call(json!({ "cmd": "own", "node": n, "text": Value::Null })); close(); } },
+                        Icon { name: "undo" } "follow the entry again" span { class: "dim small", " (drops its own text)" } }
+                }
+            }
             button { role: "menuitem", onclick: { let t = ev.text.clone(); move |_| { copy_text(ui, &t); close(); } },
                 Icon { name: "copy" } "copy the text" kbd { "{ui.key_of(Action::CopyText)}" } }
             if !ev.free {
@@ -2025,6 +2111,7 @@ fn Details(ev: SpaceEvent, on_gsearch: EventHandler<(u64, Mode)>) -> Element {
                     if ev.pinned { " · pinned" }
                     if ev.copies > 1 { {format!(" · {} of {} placements", if ev.primary { "the first" } else { "a copy" }, ev.copies)} }
                 }
+                div { class: "dim small", "{ev.relation()}" }
             } else {
                 div { class: "dim small",
                     "a free text: double click or Enter edits it"

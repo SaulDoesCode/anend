@@ -132,6 +132,9 @@ pub enum Pending {
     None,
     /// the bar holds the text; Enter puts it back under the same key
     Edit(Hit),
+    /// the bar holds a placement's text in the space; Enter makes it that placement's
+    /// own text (the entry and its other placements stay as they are)
+    EditOwn { node: String, text: String },
     /// the next text typed tags these
     Tag(Vec<Hit>),
 }

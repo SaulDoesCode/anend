@@ -498,6 +498,10 @@ button.plain.on { background: var(--accent); color: var(--on-button); }
 .slabel.picked { background: color-mix(in srgb, var(--accent) 40%, transparent); }
 .slabel.pinned::after { content: "•"; font-size: .5em; vertical-align: super; color: var(--accent); margin-left: 2px; }
 .slabel.free { font-style: italic; }
+/* a detached copy (keeps the text it was copied with) and a copy with its own text */
+.slabel.det::before, .slabel.own::before { font-size: .5em; vertical-align: super; color: var(--accent); margin-right: 2px; }
+.slabel.det::before { content: "◇"; }
+.slabel.own::before { content: "◆"; }
 .poscard { position: absolute; top: calc(var(--over-top) + 2px); left: calc(var(--frame) + 2px); z-index: 2; pointer-events: none; white-space: pre; background: color-mix(in srgb, var(--cards) 92%, transparent); color: var(--text); font: 12px var(--mono); padding: 2px 8px; border-radius: var(--radius); }
 /* the space's windows: moved by their title bar, their close button showing on hover */
 .space { --win-w: min(320px, calc(100vw - 16px)); }

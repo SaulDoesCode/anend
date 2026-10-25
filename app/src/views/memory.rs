@@ -229,6 +229,8 @@ async fn enter(mut ui: Ui, api: Api, m: Mem, raw: String, ctrl: bool, shift: boo
             ui.touched();
             return;
         }
+        // a space placement's own text, left pending when the view changed: dropped
+        Pending::EditOwn { .. } => ui.pending.set(Pending::None),
         Pending::None => {}
     }
     if list_command(ui, api.clone(), m, &t).await {

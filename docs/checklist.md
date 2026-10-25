@@ -99,8 +99,10 @@ docs/architecture.md (the whole).
       (20 Oct: the scene table, packed placements, blocks in the room's scene, saved scenes
       on scenes, the migration, backups and whole-scene merges. Copies made in the live room
       stay page-only until the room is saved; see docs/wip/questions.md 7.)
-- [ ] Inheritance: placements follow their entry or prefab, kept in two tables, inheriting
+- [x] Inheritance: placements follow their entry or prefab, kept in two tables, inheriting
       and detached; detach or modify chosen up front (answers 3, 8).
+      (25 Oct: texts. A copy is made inheriting or detached from the menu; an inheriting
+      copy can have its own text. Prefabs inherit when they exist, #19.)
 - [ ] Text placements carry a `u8` font size, 0 for the default (answer 6).
 - [ ] Long texts with no length limit:
   - pieces as a storage detail;
@@ -150,6 +152,9 @@ docs/architecture.md (the whole).
       texts (#9).
 - [ ] Placing prefabs in first-person mode (#19).
 - [ ] ▶ **usable:** walking through what has been built.
+- [ ] GPU: reading above the CPU at classifier-search batch sizes; training overhead (one
+      submission per step, kept buffers, AdamW on the device). Back burner (user, 25 Oct):
+      CPU training is fine for now.
 - [ ] The rest of parity.md's missing and partial rows: the saves folder setting, system
       fonts on the desktop, the window frame colour, HSL colour editing, the space's full
       search line, WebGPU training in the browser (#24 of the old task list).

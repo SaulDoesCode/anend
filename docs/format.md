@@ -160,7 +160,7 @@ docs/wip/questions.md.
 **Built so far (20 Oct):** the tables and the packed placements (`core/src/graph/scenes.rs`);
 the migration of `graph blocks`, `PLACE` edges and `space.maps`; the room's blocks and
 the saved scenes' texts on scenes (`blocks.*`, `scenes.*`); backups and whole-scene
-merges. Not yet: inheritance (detach or modify, with overrides), prefabs, chains, font
+merges; inheritance for texts (25 Oct: inheriting, own text, detached). Not yet: prefabs, chains, font
 sizes in the space beyond a saved text's size, physics settling overlaps on merge, long
 texts. The rest of this section is the design; "today" below means before scenes.
 
@@ -280,7 +280,7 @@ Every record starts with:
 |---|---|---|
 | gap | varint | `n − previous n − 1` (the first: `n − 64c`) |
 | position | 96 | x, y, z as f32, 32 bits each, exactly as given |
-| F | 1 | flags present: a varint (1 pinned, 2 hidden, 4 spread, 8–64 a block's shape as `place::Kind`, the rest kept) |
+| F | 1 | flags present: a varint (1 pinned, 2 hidden, 4 spread, 8–64 a block's shape as `place::Kind`, 128 the extra holds this copy's own values, the rest kept) |
 | X | 1 | extra present: a varint length, then that many bytes (an asset id, a prefab copy's overrides, later a block's program; unknown extras are kept as they are) |
 
 Then, by kind:
@@ -295,6 +295,12 @@ Then, by kind:
 position (96 bits), 2 bits and a font size of 0 (5 bits): 108 bits, 13.5 bytes. A block
 with no rotation, unit scale and no colour costs the same: its R, S and C take the 5 bits
 the font size takes in a text.
+
+**An inheriting text with its own text** (25 Oct) keeps it in X as a JSON object,
+`{"text": "…"}`, with flag 128 set; it shows that text instead of its entry's until the
+override is dropped. A saved scene's rows carry it as `own`, and a detached text as
+`detached` (the entry's edited time it keeps), `[text, x, y, z, {key, size?, own?,
+detached?}]`.
 
 **A prefab copy that modifies** keeps its overrides in X: a list of (inner address, field,
 value) that replace the prototype's values for that copy only. A part the prefab later

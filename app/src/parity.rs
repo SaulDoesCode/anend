@@ -259,13 +259,18 @@ mod tests {
             "\"cmd\": \"removenode\"",
             "forget the entry",
             "e.shift && !t.is_empty()",
+            "a copy that inherits",
+            "a detached copy",
+            "edit this placement only",
+            "follow the entry again",
         ] {
             assert!(rs.contains(needle), "space.rs lost {needle}");
         }
         let js = include_str!("space.js");
         for needle in [
             "placements(entry)",
-            "duplicate(node)",
+            "duplicate(node, det)",
+            "setOwn(node, text)",
             "removeNode(node)",
             "copyKey(entry)",
         ] {

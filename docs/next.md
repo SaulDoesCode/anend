@@ -38,7 +38,14 @@ departure says why in its commit).
   revision). Training on the GPU is unchanged: two submissions and syncs per example
   (5.0k tokens/s against the CPU's 143k on the user's machine for compact); batching
   it while keeping the CPU's bits needs per-example gradient chains, not done.
-- Next: "Inheritance" on the checklist.
+- 25 Oct, later: the user's second report (docs/gpu-reports/2026-10-25-gtx1070ti.md):
+  reading 828 vs 1434 texts/s (compact) and 118 vs 181 (small), still below the CPU, so
+  auto reads on the CPU there. The further GPU round was cancelled by the user: GPU work
+  is on the back burner (a checklist line near the end). No GPU changes were started
+  after `59e2656`.
+- Done: "Inheritance" (texts: inheriting, own text, detached; prefabs come with #19).
+- Next: the user's priority is what makes the app good to use: the u8 font size, long
+  texts with segments, chains, merging; then parity.md's gaps; then block features.
 
 **After Stage A (19 Oct, late evening UTC), while the user tries it:**
 - `b5b6b22` docs/format.md "One model for a definition and its placed instances": Stage B's

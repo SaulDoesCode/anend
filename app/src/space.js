@@ -212,7 +212,10 @@ export class Space {
     for (const t of texts) {
       let n = this.nodes.get(String(t.key));
       if (n) {
+        // a detached placement keeps the text it was detached with
+        const kept = n.f.text;
         Object.assign(n.f, t);
+        if (n.det) n.f.text = kept;
         n.el.style.borderBottomColor = t.under || 'transparent';
         continue;
       }
@@ -226,7 +229,10 @@ export class Space {
     return this.order.length - before;
   }
 
-  make(t, free, nodeKey) {
+  // a placement of a text: `free` is the room's own text (no entry); `how` says how a
+  // copy relates to its entry: { det } detached at that version (it keeps the text it was
+  // copied with), { own } an inheriting copy's own text, shadowing the entry's
+  make(t, free, nodeKey, how) {
     const el = document.createElement('div');
     el.className = 'slabel' + (free ? ' free' : '') + (t.note ? ' note' : '');
     el.textContent = t.note ? `✎ ${t.text}` : t.text;
@@ -234,7 +240,10 @@ export class Space {
     el.style.borderBottomColor = t.under || 'transparent';
     if (t.colour) el.style.color = t.colour;
     el.tabIndex = -1;
-    const n = { key: nodeKey || String(t.key), f: t, el, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, hw: 1, hh: 0.4, pinned: false, free };
+    const n = { key: nodeKey || String(t.key), f: t, el, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, hw: 1, hh: 0.4, pinned: false, free, det: 0, own: null };
+    if (how && how.det) n.det = how.det;
+    if (how && how.own != null) n.own = how.own;
+    this.showText(n);
     this.overlay.append(el);
     this.nodes.set(n.key, n);
     this.order.push(n);
@@ -481,6 +490,10 @@ export class Space {
       this.drop(u.n);
     } else if (u.kind === 'text') {
       this.setText(u.n, u.from);
+    } else if (u.kind === 'own') {
+      u.n.own = u.from;
+      this.showText(u.n);
+      this.measure(u.n);
     } else if (u.kind === 'blockadd') {
       for (const id of u.ids) this.dropBlock(id);
       this.send({ ...this.ev('blockgone', null), data: u.ids });
@@ -528,14 +541,30 @@ export class Space {
     return `${entry}~${i}`;
   }
 
+  // what a placement shows: its own text, else the text it was detached with or its
+  // entry's (both in f.text), and its marks
+  showText(n) {
+    const t = n.own != null ? n.own : n.f.text;
+    n.el.textContent = n.f.note ? `✎ ${t}` : t;
+    n.el.classList.toggle('det', !!n.det);
+    n.el.classList.toggle('own', n.own != null);
+  }
+
   // another placement of the selected (or named) text beside it: the same entry, not a
-  // new one; Ctrl+Z takes it away
-  duplicate(node) {
+  // new one; Ctrl+Z takes it away. `det` (the entry's edited time now, ms) makes a
+  // detached copy, which keeps the text as it reads now; without it the copy inherits
+  // (and keeps the original's own text, if it has one)
+  duplicate(node, det) {
     const n = node ? this.nodes.get(node) : this.selected;
     if (!n) return null;
-    const c = this.make({ ...n.f }, n.free, n.free ? `t:${Date.now().toString(36)}${this.freeN++}` : this.copyKey(n.f.key));
+    const how = n.free ? null : det ? { det } : n.det ? { det: n.det } : { own: n.own };
+    const f = { ...n.f };
+    const c = this.make(f, n.free, n.free ? `t:${Date.now().toString(36)}${this.freeN++}` : this.copyKey(n.f.key), how);
     if (n.size) { c.size = n.size; this.measure(c); }
     c.x = n.x + n.hw * 2 + 0.6; c.y = n.y; c.z = n.z;
+    // below any copy already beside it, so copies don't land on each other
+    const near = (x) => x !== c && Math.abs(x.x - c.x) < c.hw && Math.abs(x.y - c.y) < c.hh * 2 && Math.abs(x.z - c.z) < 0.5;
+    for (let i = 0; i < 50 && this.order.some(near); i++) c.y -= c.hh * 2 + 0.25;
     c.pinned = true;
     c.el.classList.add('pinned');
     this.record({ kind: 'add', n: c });
@@ -579,28 +608,52 @@ export class Space {
 
   setText(n, text) {
     n.f.text = text;
-    n.el.textContent = n.f.note ? `✎ ${text}` : text;
+    this.showText(n);
     this.measure(n);
     this.wake(0.3);
   }
 
+  // a text edited: a free text's own, or an entry's, which every placement inheriting
+  // from it shows (a detached copy keeps its text)
   editFree(key, text) {
     const n = this.nodes.get(key);
-    if (!n) return;
-    this.record({ kind: 'text', n, from: n.f.text });
-    this.setText(n, text);
+    if (n && n.free) {
+      this.record({ kind: 'text', n, from: n.f.text });
+      this.setText(n, text);
+    } else {
+      for (const x of this.order) {
+        if (!x.free && !x.det && String(x.f.key) === String(key)) this.setText(x, text);
+      }
+    }
     this.render();
   }
 
-  // a map: every text with its place, as the Bevy app kept them: [text, x, y, z, {size, key}]
+  // an inheriting copy's own text (null: it follows its entry again); Ctrl+Z undoes it
+  setOwn(node, text) {
+    const n = this.nodes.get(node);
+    if (!n || n.free || n.det) return null;
+    this.record({ kind: 'own', n, from: n.own });
+    n.own = text == null || text === '' ? null : text;
+    this.showText(n);
+    this.measure(n);
+    this.wake(0.3);
+    this.render();
+    return n.key;
+  }
+
+  // a map: every text with its place, as the Bevy app kept them, [text, x, y, z, {size,
+  // key}], with how a copy relates to its entry (detached: the version it keeps; own: its
+  // own text)
   rows() {
     const w = new THREE.Vector3();
     return this.order.map((n) => {
       this.world(n, w);
       const o = {};
-      if (!n.free) o.key = n.key;
+      if (!n.free) o.key = String(n.f.key);
       if (n.size) o.size = n.size;
-      return [n.f.text, +w.x.toFixed(2), +w.y.toFixed(2), +w.z.toFixed(2), o];
+      if (!n.free && n.det) o.detached = n.det;
+      if (!n.free && n.own != null) o.own = n.own;
+      return [n.own != null ? n.own : n.f.text, +w.x.toFixed(2), +w.y.toFixed(2), +w.z.toFixed(2), o];
     });
   }
 
@@ -611,8 +664,11 @@ export class Space {
     for (const [text, x, y, z, o] of rows) {
       const key = o && o.key ? String(o.key) : `t:${Date.now().toString(36)}${this.freeN++}`;
       const f = { ...((o && o.key && feats[o.key]) || { key, text, note: false }) };
-      f.text = text;
-      const n = this.make(f, !(o && o.key), this.nodes.has(key) ? this.copyKey(key) : null);
+      const how = o && o.key ? { det: o.detached || 0, own: o.own != null ? o.own : null } : null;
+      // an own text shadows the entry's, which the features carry; a detached copy keeps
+      // the text the row has
+      if (!(how && how.own != null && f.text != null)) f.text = text;
+      const n = this.make(f, !(o && o.key), this.nodes.has(key) ? this.copyKey(key) : null, how);
       if (o && o.size) { n.size = o.size; this.measure(n); }
       this.local(w.set(x, y, z), n);
       n.pinned = true;
@@ -958,7 +1014,8 @@ export class Space {
     const same = n && !n.free ? this.placements(n.f.key) : [];
     return {
       kind, key: n ? (n.free ? n.key : String(n.f.key)) : '', node: n ? n.key : '',
-      copies: same.length, primary: !!(n && !n.free && same[0] === n), text: n ? n.f.text : '', note: !!(n && n.f.note), free: !!(n && n.free),
+      copies: same.length, primary: !!(n && !n.free && same[0] === n), text: n ? (n.own != null ? n.own : n.f.text) : '', note: !!(n && n.f.note), free: !!(n && n.free),
+      det: n ? n.det || 0 : 0, own: n ? n.own : null, entry_text: n ? n.f.text : '',
       x: e ? e.clientX : 0, y: e ? e.clientY : 0, ctrl: !!(e && (e.ctrlKey || e.metaKey)), shift: !!(e && e.shiftKey), alt: !!(e && e.altKey),
       q: n ? n.f.q || 0 : 0, hue: n ? n.f.hue || 0 : 0, pinned: !!(n && n.pinned), data: extra || '',
     };

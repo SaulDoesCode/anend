@@ -23,23 +23,39 @@ fn name_arg(args: &Value, k: &str) -> Result<String, String> {
     Ok(n)
 }
 
-/// a scene's text placements as the space's rows, in (entry, number) order
+/// a scene's text placements as the space's rows, `[text, x, y, z, {key, size?,
+/// detached?, own?}]`: the inheriting ones in (entry, number) order showing their entry's
+/// text now (or their own text, `own`), then the detached ones showing the text as it read
+/// when they were detached (`detached`: that version's edited time, ms)
 pub fn rows(g: &Graph, scene: u64) -> Result<Vec<Value>, String> {
     let v = g.view()?;
     let mut out = Vec::new();
-    for p in g.placements(scene, false)? {
-        let (Kind::Text, Def::Entry(id)) = (p.kind, p.def) else {
-            continue;
-        };
-        let Ok(text) = v.render(id) else { continue };
-        let note = is_note(&v, id);
-        let shown = if note { crate::note::split(&text).0 } else { text };
-        let mut o = json!({ "key": if note { format!("note:{}", record::label(id)) } else { record::label(id) } });
-        if let Some(sz) = size_of(p.place.font) {
-            o["size"] = json!(sz);
+    for detached in [false, true] {
+        for p in g.placements(scene, detached)? {
+            let (Kind::Text, Def::Entry(id)) = (p.kind, p.def) else {
+                continue;
+            };
+            let text = match p.version {
+                Some(at) => g.text_at(id, at),
+                None => v.render(id),
+            };
+            let Ok(text) = text else { continue };
+            let note = is_note(&v, id);
+            let shown = if note { crate::note::split(&text).0 } else { text };
+            let mut o = json!({ "key": if note { format!("note:{}", record::label(id)) } else { record::label(id) } });
+            if let Some(sz) = size_of(p.place.font) {
+                o["size"] = json!(sz);
+            }
+            if let Some(at) = p.version {
+                o["detached"] = json!(at);
+            }
+            let own = p.place.own_text();
+            if let Some(t) = &own {
+                o["own"] = json!(t);
+            }
+            let [x, y, z] = p.place.pos;
+            out.push(json!([own.unwrap_or(shown), x, y, z, o]));
         }
-        let [x, y, z] = p.place.pos;
-        out.push(json!([shown, x, y, z, o]));
     }
     Ok(out)
 }
@@ -50,7 +66,7 @@ pub fn call(g: &Graph, op: &str, args: &Value) -> Res {
         "scenes.list" => {
             let mut out = Vec::new();
             for sc in g.scenes()? {
-                let ps = g.placements(sc.id, false)?;
+                let ps = [g.placements(sc.id, false)?, g.placements(sc.id, true)?].concat();
                 let texts = ps.iter().filter(|p| p.kind == Kind::Text).count();
                 let blocks = ps.iter().filter(|p| p.kind == Kind::Block).count();
                 out.push(json!({
@@ -90,7 +106,7 @@ pub fn call(g: &Graph, op: &str, args: &Value) -> Res {
                 None => g.add_scene(&n, 0)?,
             };
             let texts = g.rows_to_texts(&given)?;
-            let count: usize = texts.iter().map(|t| t.1.len()).sum();
+            let count: usize = texts.iter().map(|t| t.places.len()).sum();
             g.set_texts(id, texts)?;
             Ok(json!({ "id": id, "name": n, "texts": count }))
         }
@@ -213,6 +229,65 @@ mod tests {
         assert_eq!(m["here"], json!([]));
         assert_eq!(m["here 2"].as_array().unwrap().len(), 2);
         assert_eq!(m["here 2"][0][0], "listen");
+    }
+
+    #[test]
+    fn copies_inherit_or_are_detached() {
+        let g = Graph::in_memory().unwrap();
+        let (id, _) = g.save_text("a ripe plum", record::mime::TEXT).unwrap();
+        let key = record::label(id);
+        let then = g.view().unwrap().record(id).unwrap().unwrap().edited;
+        let c = |op: &str, a: Value| call(&g, op, &a);
+        // the room's rows: the first placement, an inheriting copy (its node key
+        // `<label>~2`), one with its own text, and one detached at the version as now
+        let rows = json!([
+            ["a ripe plum", 0, 0, 0, { "key": key }],
+            ["a ripe plum", 1, 0, 0, { "key": format!("{key}~2") }],
+            ["my plum", 2, 0, 0, { "key": format!("{key}~3"), "own": "my plum" }],
+            ["a ripe plum", 3, 0, 0, { "key": format!("{key}~4"), "detached": then }],
+        ]);
+        assert_eq!(
+            c("scenes.save", json!({ "name": "orchard", "rows": rows })).unwrap()["texts"],
+            4
+        );
+        let sc = g.scene_named("orchard").unwrap().unwrap();
+        assert_eq!(g.placements(sc.id, false).unwrap().len(), 3, "three inherit");
+        assert_eq!(g.placements(sc.id, true).unwrap().len(), 1, "one is detached");
+        // the entry is edited: the inheriting copies follow, the own text and the detached
+        // copy don't
+        std::thread::sleep(std::time::Duration::from_millis(3));
+        g.write(|tx| tx.edit_text(id, "a dried prune")).unwrap();
+        let back = c("scenes.get", json!({ "name": "orchard" })).unwrap()["rows"].clone();
+        let shown: Vec<&str> = back
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r[0].as_str().unwrap())
+            .collect();
+        assert_eq!(shown, ["a dried prune", "a dried prune", "my plum", "a ripe plum"]);
+        assert_eq!(back[2][4]["own"], "my plum");
+        assert_eq!(back[3][4]["detached"], then);
+        assert!(back.as_array().unwrap().iter().all(|r| r[4]["key"] == key), "one entry");
+        // saved again as loaded, nothing changes
+        c("scenes.save", json!({ "name": "orchard", "rows": back })).unwrap();
+        assert_eq!(c("scenes.get", json!({ "name": "orchard" })).unwrap()["rows"], back);
+        // backups keep both tables
+        let (texts, other) = g.backup().unwrap();
+        let restored = Graph::in_memory().unwrap();
+        restored.restore(&texts, &other).unwrap();
+        assert_eq!(
+            call(&restored, "scenes.get", &json!({ "name": "orchard" })).unwrap()["rows"],
+            back
+        );
+        // a merge brings the detached copy in as the text it shows
+        let target = Graph::in_memory().unwrap();
+        let v = g.view().unwrap();
+        target.write(|tx| crate::ops::merge::merge(tx, &v)).unwrap();
+        crate::ops::merge::assets(&target, &g).unwrap();
+        let m = call(&target, "scenes.get", &json!({ "name": "orchard" })).unwrap()["rows"].clone();
+        let shown: Vec<&str> = m.as_array().unwrap().iter().map(|r| r[0].as_str().unwrap()).collect();
+        assert_eq!(shown, ["a dried prune", "a dried prune", "my plum", "a ripe plum"]);
+        assert!(m[3][4]["detached"].is_u64());
     }
 
     #[test]

@@ -83,3 +83,14 @@ The answers left these open. Each is written into the design as its default.
 18. **A stack reads on one device, chosen by its largest net.** A classifier that builds
     on others reads them all on the device its largest net is faster on, rather than
     choosing per net.
+
+## Inheritance (checklist: inheritance, 25 Oct)
+
+19. **A text's override is its text.** A text placement has no rotation or scale, so the
+    one value an inheriting copy can shadow is the text it shows ("edit this placement
+    only"); position and size were already each placement's own. Prefab copies will
+    shadow their parts' fields when prefabs exist.
+20. **Both kinds of copy are menu items side by side,** with no dialog in between. A
+    detached copy of a copy with its own text keeps the entry's text, not the own text.
+21. **A detached text keeps the entry's version by its edited time** and is shown from
+    `graph history`. If that history were removed, it would show the oldest version kept.

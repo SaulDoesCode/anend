@@ -857,6 +857,7 @@ pub fn call(g: &Graph, removed: &Removed, op: &str, args: &Value) -> Res {
                 "mime": v.mime_name(rec.mime)?,
                 "created": iso(rec.created),
                 "edited": iso(rec.edited),
+                "edited_ms": rec.edited,
                 "kind": fixed.as_deref().unwrap_or(detected),
                 "detected": detected,
                 "fixed": fixed.is_some(),

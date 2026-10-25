@@ -454,6 +454,7 @@ fn Dock() -> Element {
     // never names the view (the tabs say which one is open)
     let badge = match &pending {
         Pending::Edit(h) => Some(format!("editing {}", h.key)),
+        Pending::EditOwn { .. } => Some("this placement's own text".to_string()),
         Pending::Tag(hs) => Some(format!(
             "tag {} with…",
             if hs.len() == 1 {
