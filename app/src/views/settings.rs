@@ -45,6 +45,8 @@ pub fn Settings() -> Element {
                 hr {}
                 GpuSettings {}
                 hr {}
+                LimitSettings {}
+                hr {}
                 Keys {}
                 if cfg!(feature = "hub") {
                     hr {}
@@ -621,6 +623,64 @@ fn reading_words(r: &serde_json::Value) -> String {
         s += &format!(": {n}");
     }
     s
+}
+
+/// the limits the open save sets for itself (`limits.*`), each a number with its default;
+/// none caps how long a text can be
+#[component]
+fn LimitSettings() -> Element {
+    let ui = ui();
+    let api = api();
+    let mut rows = use_signal(Vec::<serde_json::Value>::new);
+    {
+        let api = api.clone();
+        use_hook(move || {
+            spawn(async move {
+                if let Ok(v) = api.call("limits.list", serde_json::json!({})).await {
+                    rows.set(v.as_array().cloned().unwrap_or_default());
+                }
+            });
+        });
+    }
+    rsx! {
+        Fold { name: "limits", title: "limits of this save",
+            div { class: "wide dim small", "Limits the save sets for itself, with their defaults. Empty puts a default back. None of them limits how long a text can be." }
+            for r in rows() {
+                {
+                    let name = r["name"].as_str().unwrap_or("").to_string();
+                    let label = name.trim_start_matches("limits.").trim_start_matches("graph.").replace('_', " ");
+                    let id = format!("lim-{}", name.replace('.', "-"));
+                    let api = api.clone();
+                    let n2 = name.clone();
+                    let value = r["value"].to_string();
+                    rsx! {
+                        label { key: "{name}", r#for: "{id}", "{label}" }
+                        div { class: "row",
+                            input { id: "{id}", r#type: "number", min: "0", step: "1", style: "width: 9em;",
+                                value: "{value}",
+                                onchange: move |e| {
+                                    let (api, n) = (api.clone(), n2.clone());
+                                    let v = e.value();
+                                    spawn(async move {
+                                        match api.call("limits.set", serde_json::json!({ "name": n, "value": v })).await {
+                                            Ok(_) => {
+                                                if let Ok(v) = api.call("limits.list", serde_json::json!({})).await {
+                                                    rows.set(v.as_array().cloned().unwrap_or_default());
+                                                }
+                                                ui.say(format!("{n} set"));
+                                            }
+                                            Err(e) => ui.fail(e),
+                                        }
+                                    });
+                                }
+                            }
+                            span { class: "dim small", {format!("{} (default {})", r["about"].as_str().unwrap_or(""), r["default"])} }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// the GPU: where classifiers read texts (predict, search, indexing, buckets, tints),

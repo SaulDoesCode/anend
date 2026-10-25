@@ -205,8 +205,9 @@ struct Pick {
 }
 
 /// a note longer than this (bytes) is typed without the spelling check (which reads the
-/// whole text); the colours stay on at any length, as the layer is coloured in segments
-const BIG: usize = 100_000;
+/// whole text), unless the save's `limits.grammar_check_bytes` says otherwise; the
+/// colours stay on at any length, as the layer is coloured in segments
+const BIG: usize = 200_000;
 
 fn split_tags(t: &str) -> Vec<String> {
     t.split(',')
@@ -235,6 +236,26 @@ pub fn Notes() -> Element {
     let mut check_gen = use_signal(|| 0u64);
     let mut report: Signal<Option<serde_json::Value>> = use_signal(|| None);
     let mut pick: Signal<Option<Pick>> = use_signal(|| None);
+    // how long a note the spelling check reads (the save's limit)
+    let mut big_at = use_signal(|| BIG);
+    {
+        let api = api.clone();
+        use_hook(move || {
+            spawn(async move {
+                if let Ok(v) = api.call("limits.list", serde_json::json!({})).await {
+                    let n = v
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .find(|l| l["name"] == "limits.grammar_check_bytes")
+                        .and_then(|l| l["value"].as_u64());
+                    if let Some(n) = n {
+                        big_at.set(n as usize);
+                    }
+                }
+            });
+        });
+    }
     // the colour layer, kept in typing segments (`highlight::Layer`); `layer_gen` asks for
     // it whole (a note opened, a text put in, the colours or the flags changed)
     let layer: std::rc::Rc<std::cell::RefCell<PadLayer>> = use_hook(Default::default);
@@ -453,7 +474,7 @@ pub fn Notes() -> Element {
         let api = api.clone();
         use_effect(move || {
             let on = ui.prefs.read().check_spelling;
-            if !on || text.read().len() > BIG {
+            if !on || text.read().len() > big_at() {
                 return;
             }
             let t = text();
@@ -539,7 +560,7 @@ pub fn Notes() -> Element {
     // the colour layer, kept in typing segments by `layer` (made whole here when asked;
     // each typed change patches only its segments, in the pad's delta loop). The spelling
     // check still pauses on long notes.
-    let big = text.read().len() > BIG;
+    let big = text.read().len() > big_at();
     let layered = colour || !shown_flags.is_empty();
     {
         let layer = layer.clone();
@@ -770,7 +791,7 @@ pub fn Notes() -> Element {
                             }
                         }
                         if big {
-                            div { class: "spell-note dim small", {format!("a long note ({} KB): the spelling check pauses above {} KB, so typing stays quick", text.read().len() / 1000, BIG / 1000)} }
+                            div { class: "spell-note dim small", {format!("a long note ({} KB): the spelling check pauses above {} KB, so typing stays quick", text.read().len() / 1000, big_at() / 1000)} }
                         }
                         if check && !big {
                             if let Some(r) = report() {

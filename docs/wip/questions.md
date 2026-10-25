@@ -110,3 +110,12 @@ The answers left these open. Each is written into the design as its default.
     "all" lays out every piece (slow for a megabyte), so it's a click of its own. The
     space's label shows the first piece and how many more; opening the rest there is
     left to the reader and the details window.
+25. **A rendered text has no size cap by default** (`limits.render_output_bytes` = 0), as
+    answer 9 asks; before, rendering a text with refs or calls failed past 4 MiB. A program
+    that doubles a string in a loop can now use a lot of memory before its step budget
+    (10 million steps) stops it; setting the limit brings a cap back.
+26. **The notes view's spelling check pauses at the save's spelling limit** (200 000
+    bytes by default; it was 100 000 before typing in segments).
+27. **The model input ceiling (`classify::io::MAX_LEN`) and the hub's 64 MiB message size
+    stay as they are:** the first is a file-safety bound on a model's window, the second
+    the hub's own limit, not a save's; neither limits how long a text can be.

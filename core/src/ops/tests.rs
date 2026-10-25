@@ -181,3 +181,29 @@ fn random_search_samples_texts_sharing_a_word() {
     drop(sv);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn limits_are_settings_with_defaults() {
+    let dir = temp("limits");
+    let sv = Saves::new(&dir, "notes");
+    let c = |op: &str, a: Value| sv.call(op, &a);
+    let all = c("limits.list", json!({})).unwrap();
+    let get = |all: &Value, n: &str| all.as_array().unwrap().iter().find(|l| l["name"] == n).unwrap()["value"].clone();
+    assert_eq!(get(&all, "limits.texts_per_call"), 2000);
+    assert_eq!(get(&all, "limits.render_output_bytes"), 0, "no cap by default");
+    // a smaller spelling-check limit bites, and empty puts the default back
+    c("limits.set", json!({"name": "limits.grammar_check_bytes", "value": 10})).unwrap();
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let e = c("grammar.check", json!({"text": "a text longer than ten bytes"})).unwrap_err();
+        assert!(e.contains("limits.grammar_check_bytes"), "{e}");
+    }
+    c("limits.set", json!({"name": "limits.grammar_check_bytes", "value": ""})).unwrap();
+    assert_eq!(
+        get(&c("limits.list", json!({})).unwrap(), "limits.grammar_check_bytes"),
+        200_000
+    );
+    assert!(c("limits.set", json!({"name": "limits.nothing", "value": 1})).is_err());
+    assert!(c("limits.set", json!({"name": "limits.texts_per_call", "value": "lots"})).is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}

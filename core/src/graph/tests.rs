@@ -430,3 +430,52 @@ fn file_store_and_compaction() {
     drop(g);
     std::fs::remove_file(path).ok();
 }
+
+#[test]
+fn long_records_live_in_pieces_and_read_back_whole() {
+    use redb::{ReadableDatabase, ReadableTableMetadata};
+    let (g, clock) = store();
+    // small pieces, so a few KB is "long"
+    g.write(|tx| tx.set_setting("graph.piece_bytes", b"1024")).unwrap();
+    let pieces = |g: &Graph| {
+        let txn = g.db().begin_read().unwrap();
+        txn.open_table(super::store::LONG).unwrap().len().unwrap()
+    };
+    let (near, _) = g.save_text("a short neighbour", mime::TEXT).unwrap();
+    let long: String = (0..400).map(|i| format!("line {i} of a long text\n")).collect();
+    let (id, _) = g.save_text(&long, mime::TEXT).unwrap();
+    assert!(long.len() > 8 * 1024);
+    let first = pieces(&g);
+    assert!(first >= 4, "{first} pieces");
+    assert_eq!(g.render(id).unwrap(), long);
+    assert_eq!(g.render(near).unwrap(), "a short neighbour");
+    assert_eq!(g.view().unwrap().find_text(&long, None).unwrap(), vec![id]);
+    // edited short: the pieces go; long again: they come back; history has every version
+    clock.fetch_add(10, Ordering::SeqCst);
+    g.write(|tx| tx.edit_text(id, "now short")).unwrap();
+    assert_eq!(pieces(&g), 0);
+    clock.fetch_add(10, Ordering::SeqCst);
+    let longer = format!("{long}{long}");
+    g.write(|tx| tx.edit_text(id, &longer)).unwrap();
+    assert!(pieces(&g) > first);
+    let vs: Vec<String> = g
+        .view()
+        .unwrap()
+        .versions(id)
+        .unwrap()
+        .into_iter()
+        .map(|v| v.text)
+        .collect();
+    assert_eq!(vs, vec![longer.clone(), "now short".to_string(), long.clone()]);
+    // every entry, backups and restores see the whole text
+    assert!(g.view().unwrap().all().unwrap().iter().any(|e| e.id == id));
+    let (t, o) = g.backup().unwrap();
+    let back = Graph::in_memory().unwrap();
+    back.restore(&t, &o).unwrap();
+    let bid = back.view().unwrap().find_text(&longer, None).unwrap()[0];
+    assert_eq!(back.render(bid).unwrap(), longer);
+    // forgetting it takes its pieces
+    g.delete(id).unwrap();
+    assert_eq!(pieces(&g), 0);
+    assert_eq!(g.render(near).unwrap(), "a short neighbour");
+}

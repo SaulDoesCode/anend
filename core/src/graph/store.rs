@@ -36,10 +36,73 @@ pub const FREE: TableDefinition<u64, ()> = TableDefinition::new("graph free ids"
 pub const META: TableDefinition<&str, &[u8]> = TableDefinition::new("graph meta");
 pub const SETTINGS: TableDefinition<&str, &[u8]> = TableDefinition::new("graph settings");
 pub const MIMES: TableDefinition<&str, u16> = TableDefinition::new("graph mimes");
+/// records too long for their row (docs/format.md "Long texts"): (id, piece) → a piece
+/// of the record's bytes; the row keeps a stub (`record::long_stub`)
+pub const LONG: TableDefinition<(u64, u32), &[u8]> = TableDefinition::new("graph long");
+
+/// the piece size for long records, in bytes, unless the save's setting
+/// `graph.piece_bytes` says otherwise
+pub const PIECE_BYTES: usize = 64 << 10;
+
+/// the limits a save sets for itself (docs/format.md "Long texts", answer 9): each a
+/// setting of the save with a default, as (name, default, what it limits). None caps how
+/// long a text can be.
+pub const LIMITS: &[(&str, u64, &str)] = &[
+    (
+        "limits.render_output_bytes",
+        0,
+        "bytes a rendered text with refs or calls may grow to (0: no cap; a program that runs forever is stopped by its step budget)",
+    ),
+    (
+        "graph.piece_bytes",
+        PIECE_BYTES as u64,
+        "a text stored longer than this goes into pieces of this size (at least 1024)",
+    ),
+    (
+        "limits.borrow_min_bytes",
+        12,
+        "texts shorter than this aren't tried for borrowing from others (stored whole)",
+    ),
+    (
+        "limits.borrow_max_bytes",
+        1 << 20,
+        "texts longer than this aren't tried for borrowing (stored whole)",
+    ),
+    (
+        "limits.texts_per_call",
+        2000,
+        "texts one call reads, spreads or lists at once",
+    ),
+    (
+        "limits.grammar_check_bytes",
+        200_000,
+        "bytes the spelling check reads in one call",
+    ),
+];
+
+/// a slot's bytes as a record's: a long record's stub is replaced by its pieces
+fn resolve<T: ReadableTable<(u64, u32), &'static [u8]>>(long: &T, id: u64, slot: Vec<u8>) -> GResult<Vec<u8>> {
+    let Some((total, pieces)) = rec::long_stub(&slot) else {
+        return Ok(slot);
+    };
+    let mut out = Vec::with_capacity(total);
+    for i in 0..pieces {
+        let p = long
+            .get((id, i))
+            .map_err(err)?
+            .ok_or_else(|| format!("entry {} is missing piece {i} of {pieces}", rec::label(id)))?;
+        out.extend_from_slice(p.value());
+    }
+    if out.len() != total {
+        return Err(format!("entry {}'s pieces don't add up", rec::label(id)));
+    }
+    Ok(out)
+}
 
 /// the names of every table, for stats
-pub const TABLE_NAMES: [&str; 20] = [
+pub const TABLE_NAMES: [&str; 21] = [
     "graph entries",
+    "graph long",
     "graph edges",
     "graph edges in",
     "graph history",
@@ -367,7 +430,7 @@ pub trait Reader {
             return codec::unpack_text(&r.body).map_err(err);
         }
         let src = Src(self);
-        Interp::with_limits(&src, self.graph().limits).render(id).map_err(err)
+        Interp::with_limits(&src, self.interp_limits()).render(id).map_err(err)
     }
 
     /// several entries' rendered texts, sharing one interpreter (and its caches)
@@ -376,7 +439,7 @@ pub trait Reader {
         Self: Sized,
     {
         let src = Src(self);
-        let mut i = Interp::with_limits(&src, self.graph().limits);
+        let mut i = Interp::with_limits(&src, self.interp_limits());
         ids.iter()
             .map(|&id| {
                 let r = self.entry(id)?.record;
@@ -394,7 +457,7 @@ pub trait Reader {
         Self: Sized,
     {
         let src = Src(self);
-        Interp::with_limits(&src, self.graph().limits)
+        Interp::with_limits(&src, self.interp_limits())
             .call(f, args)
             .map_err(err)
     }
@@ -435,7 +498,9 @@ pub trait Reader {
                     let t = if r.has_refs() {
                         let src = Src(self);
                         let run = codec::unpack(&r.body).map_err(err)?;
-                        Interp::with_limits(&src, self.graph().limits).eval(&run).map_err(err)?
+                        Interp::with_limits(&src, self.interp_limits())
+                            .eval(&run)
+                            .map_err(err)?
                     } else {
                         codec::unpack_text(&r.body).map_err(err)?
                     };
@@ -530,6 +595,26 @@ pub trait Reader {
     }
 
     fn setting(&self, name: &str) -> GResult<Option<Vec<u8>>>;
+
+    /// the interpreter's limits, with the save's cap on a rendered text's size
+    fn interp_limits(&self) -> Limits {
+        let mut l = self.graph().limits;
+        l.output = match self.limit("limits.render_output_bytes") {
+            0 => usize::MAX,
+            n => n as usize,
+        };
+        l
+    }
+
+    /// a limit's value: the save's setting, else its default in [`LIMITS`]
+    fn limit(&self, name: &str) -> u64 {
+        self.setting(name)
+            .ok()
+            .flatten()
+            .and_then(|v| std::str::from_utf8(&v).ok()?.trim().parse().ok())
+            .or_else(|| LIMITS.iter().find(|l| l.0 == name).map(|l| l.1))
+            .unwrap_or(0)
+    }
     fn mime_name(&self, id: u16) -> GResult<String>;
 }
 
@@ -558,6 +643,7 @@ type RoPostings = PostingTables<
 pub struct View<'g> {
     g: &'g Graph,
     entries: ReadOnlyTable<u64, &'static [u8]>,
+    long: ReadOnlyTable<(u64, u32), &'static [u8]>,
     edges: ReadOnlyMultimapTable<(u64, u16), &'static [u8]>,
     edges_in: ReadOnlyMultimapTable<(u64, u16), u64>,
     history: ReadOnlyTable<(u64, u64), &'static [u8]>,
@@ -648,10 +734,12 @@ impl Reader for View<'_> {
             let row = self.entries.get(b).map_err(err)?.map(|g| g.value().to_vec());
             cache.insert(b, row);
         }
-        Ok(cache[&b]
+        let slot = cache[&b]
             .as_deref()
             .and_then(|row| rec::block_slot(row, rec::slot_of(id)))
-            .map(<[u8]>::to_vec))
+            .map(<[u8]>::to_vec);
+        drop(cache);
+        slot.map(|s| resolve(&self.long, id, s)).transpose()
     }
 
     fn postings(&self, t: &Term) -> GResult<Vec<u64>> {
@@ -755,12 +843,11 @@ impl View<'_> {
         for item in self.entries.iter().map_err(err)? {
             let (k, v) = item.map_err(err)?;
             let b = Block::decode(v.value());
-            for (i, s) in b.slots.iter().enumerate() {
-                if let Some(r) = s.as_ref().and_then(|s| Record::decode(s)) {
-                    out.push(Entry {
-                        id: (k.value() << rec::BLOCK_BITS) + i as u64,
-                        record: r,
-                    });
+            for (i, s) in b.slots.into_iter().enumerate() {
+                let id = (k.value() << rec::BLOCK_BITS) + i as u64;
+                let Some(s) = s else { continue };
+                if let Some(r) = Record::decode(&resolve(&self.long, id, s)?) {
+                    out.push(Entry { id, record: r });
                 }
             }
         }
@@ -895,6 +982,7 @@ pub struct Tx<'t> {
     g: &'t Graph,
     pub now: u64,
     entries: Table<'t, u64, &'static [u8]>,
+    long: Table<'t, (u64, u32), &'static [u8]>,
     edges: MultimapTable<'t, (u64, u16), &'static [u8]>,
     edges_in: MultimapTable<'t, (u64, u16), u64>,
     history: Table<'t, (u64, u64), &'static [u8]>,
@@ -916,11 +1004,14 @@ impl Reader for Tx<'_> {
 
     fn raw(&self, id: u64) -> GResult<Option<Vec<u8>>> {
         let b = rec::block_of(id);
-        if let Some(block) = self.blocks.borrow().get(&b) {
-            return Ok(block.slots[rec::slot_of(id)].clone());
-        }
-        let row = self.entries.get(b).map_err(err)?;
-        Ok(row.and_then(|g| rec::block_slot(g.value(), rec::slot_of(id)).map(<[u8]>::to_vec)))
+        let slot = match self.blocks.borrow().get(&b) {
+            Some(block) => block.slots[rec::slot_of(id)].clone(),
+            None => {
+                let row = self.entries.get(b).map_err(err)?;
+                row.and_then(|g| rec::block_slot(g.value(), rec::slot_of(id)).map(<[u8]>::to_vec))
+            }
+        };
+        slot.map(|s| resolve(&self.long, id, s)).transpose()
     }
 
     fn postings(&self, t: &Term) -> GResult<Vec<u64>> {
@@ -998,6 +1089,7 @@ impl<'t> Tx<'t> {
             g,
             now: (g.clock)(),
             entries: txn.open_table(ENTRIES).map_err(err)?,
+            long: txn.open_table(LONG).map_err(err)?,
             edges: txn.open_multimap_table(EDGES).map_err(err)?,
             edges_in: txn.open_multimap_table(EDGES_IN).map_err(err)?,
             history: txn.open_table(HISTORY).map_err(err)?,
@@ -1031,8 +1123,29 @@ impl<'t> Tx<'t> {
         Ok(f(&mut blocks.get_mut(&b).unwrap().slots[rec::slot_of(id)]))
     }
 
-    fn write_record(&self, id: u64, r: Option<&Record>) -> GResult<()> {
-        self.block_mut(id, |slot| *slot = r.map(Record::encode))
+    /// a record into its row's slot; one longer than the piece size goes into `graph long`
+    /// in pieces, its slot keeping a stub (so its row's neighbours stay small to read and
+    /// write, and no single stored value has to hold the whole text)
+    fn write_record(&mut self, id: u64, r: Option<&Record>) -> GResult<()> {
+        let bytes = r.map(Record::encode);
+        let piece = (self.limit("graph.piece_bytes") as usize).max(1024);
+        let old = self.block_mut(id, |slot| slot.clone())?;
+        if let Some((_, n)) = old.as_deref().and_then(rec::long_stub) {
+            for i in 0..n {
+                self.long.remove((id, i)).map_err(err)?;
+            }
+        }
+        let slot = match bytes {
+            Some(b) if b.len() > piece => {
+                let n = b.len().div_ceil(piece) as u32;
+                for (i, c) in b.chunks(piece).enumerate() {
+                    self.long.insert((id, i as u32), c).map_err(err)?;
+                }
+                Some(rec::make_long_stub(b.len(), n))
+            }
+            b => b,
+        };
+        self.block_mut(id, |s| *s = slot)
     }
 
     fn index(&mut self, id: u64, terms: Vec<Term>, add: bool) {
@@ -1168,7 +1281,11 @@ impl<'t> Tx<'t> {
             flags: rec::PLAIN,
         };
         let o = self.borrow;
-        if !o.enabled || text.len() < 12 || text.len() > 1 << 20 {
+        let (lo, hi) = (
+            self.limit("limits.borrow_min_bytes") as usize,
+            self.limit("limits.borrow_max_bytes") as usize,
+        );
+        if !o.enabled || text.len() < lo || text.len() > hi {
             return Ok(plain);
         }
         let bytes = text.as_bytes();
@@ -1782,6 +1899,7 @@ enum Content<'a> {
 
 fn ensure_tables(txn: &WriteTransaction) -> GResult<()> {
     txn.open_table(ENTRIES).map_err(err)?;
+    txn.open_table(LONG).map_err(err)?;
     txn.open_multimap_table(EDGES).map_err(err)?;
     txn.open_multimap_table(EDGES_IN).map_err(err)?;
     txn.open_table(HISTORY).map_err(err)?;
@@ -1909,6 +2027,7 @@ impl Graph {
         Ok(View {
             g: self,
             entries: txn.open_table(ENTRIES).map_err(err)?,
+            long: txn.open_table(LONG).map_err(err)?,
             edges: txn.open_multimap_table(EDGES).map_err(err)?,
             edges_in: txn.open_multimap_table(EDGES_IN).map_err(err)?,
             history: txn.open_table(HISTORY).map_err(err)?,
@@ -2100,6 +2219,7 @@ impl Graph {
             }};
         }
         plain!(ENTRIES, "entries");
+        plain!(LONG, "long");
         multi!(EDGES, "edges");
         multi!(EDGES_IN, "edges in");
         plain!(HISTORY, "history");

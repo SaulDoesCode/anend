@@ -106,12 +106,17 @@ docs/architecture.md (the whole).
 - [x] Text placements carry a `u8` font size, 0 for the default (answer 6).
       (25 Oct: stored since the instances line; now set per placement from the menu and
       the details window.)
-- [ ] Long texts with no length limit:
+- [x] Long texts with no length limit:
   - pieces as a storage detail;
   - the user's approach: separate typing segments, each updated on its own and stitched
     back, so only the segment being typed in is sent and re-highlighted;
   - visual splitting at word boundaries, 80 characters a line and six lines a piece;
   - every such limit a setting (#6, #12, answers 7, 9).
+
+  (25 Oct: typing segments in the notes view; pieces shown in the memory view and the
+  space; records over 64 KiB stored in pieces; the limits as the save's settings. Simpler
+  than format.md's design: pieces cut by bytes, edits rewrite a record's pieces whole,
+  no `text.window` yet; see format.md "Long texts".)
 - [ ] Chains as their own entries (a title plus ordered members); a note placed in a scene
       shows as a chain of two (#8, answer 4).
 - [ ] Merging works on whole things, with overlapping placements settled by deterministic

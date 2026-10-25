@@ -353,6 +353,17 @@ and an old backup imports through the same path:
 There is no limit on how long a text can be. Every limit below is a setting with a
 default, as the hub's limits are.
 
+**Built (25 Oct), simpler than the design below in two ways:** a record whose encoded
+bytes are over the piece size (the save's setting `graph.piece_bytes`, 64 KiB) keeps a
+stub in its row (`0xF5`, its length, its piece count) and its bytes go to `graph long`,
+`(id, piece)` → up to a piece of bytes. The pieces are cut by bytes, not at newlines, and
+the stub has no sums of its own; an edit writes the record's pieces again whole (history
+still keeps deltas). Reading in windows (`text.window`) isn't built: the views get the
+whole text and show it piece by piece (`anend_core::pieces`, the settings `piece_line`
+and `piece_lines`). The notes view types in segments (only the changed range crosses to
+Rust; the colour layer is patched per segment). The limits are the save's settings
+`limits.*` (`graph::store::LIMITS`, the settings' "limits of this save").
+
 **Storing in pieces, as a storage detail.** Entries live 32 to a row (`record.rs`,
 `BLOCK_BITS`). With a 10 MB text in a row, reading any of its 31 neighbours would read
 10 MB, and editing one would rewrite 10 MB. So a record whose packed body is over the

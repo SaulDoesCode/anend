@@ -408,6 +408,28 @@ mod tests {
 
 // ---------------------------------------------------------------- blocks
 
+/// the first byte of a long record's stub (never a record's version)
+pub const LONG_STUB: u8 = 0xF5;
+
+/// a stub for a record kept in `graph long`: its length in bytes and how many pieces
+pub fn make_long_stub(total: usize, pieces: u32) -> Vec<u8> {
+    let mut out = vec![LONG_STUB];
+    put_varint(&mut out, total as u64);
+    put_varint(&mut out, pieces as u64);
+    out
+}
+
+/// a stub's (length, pieces), when a slot holds one
+pub fn long_stub(b: &[u8]) -> Option<(usize, u32)> {
+    if b.first() != Some(&LONG_STUB) {
+        return None;
+    }
+    let mut at = 1;
+    let total = get_varint(b, &mut at)? as usize;
+    let pieces = u32::try_from(get_varint(b, &mut at)?).ok()?;
+    Some((total, pieces))
+}
+
 /// entries are stored 32 to a row: block `id >> BLOCK_BITS`, slot `id & 31`
 pub const BLOCK_BITS: u32 = 5;
 pub const SLOTS: usize = 1 << BLOCK_BITS;

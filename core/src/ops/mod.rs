@@ -210,8 +210,11 @@ fn tag_counts(v: &View) -> Result<Vec<(String, u64)>, String> {
 /// length, kind, word types, when it was written and the lists it is in
 fn space_features(v: &View, args: &Value) -> Res {
     let keys = strings(args, "keys");
-    if keys.len() > 2000 {
-        return Err("at most 2000 texts at once".into());
+    let most = v.limit("limits.texts_per_call") as usize;
+    if keys.len() > most {
+        return Err(format!(
+            "at most {most} texts at once (the setting limits.texts_per_call)"
+        ));
     }
     // every list a text is in: the heads of the member edges pointing at it
     let mut lists: HashMap<u64, Vec<String>> = HashMap::new();
@@ -293,15 +296,17 @@ fn list_stats(v: &View) -> Res {
     Ok(json!({ "lists": lists, "dot": dot }))
 }
 
-fn spread_layout(args: &Value) -> Res {
+fn spread_layout(args: &Value, most: usize) -> Res {
     let p = Params {
         reversed: args.get("reversed").and_then(Value::as_bool).unwrap_or(false),
         ..Params::default()
     };
     let mut sp = Spread::new(p);
     let items = args.get("texts").and_then(Value::as_array).cloned().unwrap_or_default();
-    if items.len() > 2000 {
-        return Err("at most 2000 texts in a spread".into());
+    if items.len() > most {
+        return Err(format!(
+            "at most {most} texts in a spread (the setting limits.texts_per_call)"
+        ));
     }
     for it in &items {
         let text = s(it, "text");
@@ -457,7 +462,7 @@ pub fn call(g: &Graph, removed: &Removed, op: &str, args: &Value) -> Res {
                 let first = it.next().unwrap_or_default();
                 it.fold(first, |acc, s| acc.into_iter().filter(|x| s.contains(x)).collect())
             };
-            ids.truncate(2000);
+            ids.truncate(v.limit("limits.texts_per_call") as usize);
             Ok(hits(&v, &ids))
         }
         "tags.add" | "tags.remove" => {
@@ -608,7 +613,11 @@ pub fn call(g: &Graph, removed: &Removed, op: &str, args: &Value) -> Res {
         // shuffled by `seed` (a new one each time when it's left out)
         "mem.random" => {
             let v = g.view()?;
-            let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(60).clamp(1, 2000) as usize;
+            let limit = args
+                .get("limit")
+                .and_then(Value::as_u64)
+                .unwrap_or(60)
+                .clamp(1, v.limit("limits.texts_per_call").max(1)) as usize;
             let seed = args.get("seed").and_then(Value::as_u64).unwrap_or_else(|| {
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -742,7 +751,7 @@ pub fn call(g: &Graph, removed: &Removed, op: &str, args: &Value) -> Res {
         }
 
         // ---- the space
-        "space.spread" => spread_layout(args),
+        "space.spread" => spread_layout(args, g.view()?.limit("limits.texts_per_call") as usize),
         "space.features" => space_features(&g.view()?, args),
 
         // ---- spelling and word choice (`crate::grammar`): the flagged words with
@@ -750,8 +759,11 @@ pub fn call(g: &Graph, removed: &Removed, op: &str, args: &Value) -> Res {
         #[cfg(not(target_arch = "wasm32"))]
         "grammar.check" => {
             let text = s(args, "text");
-            if text.len() > 200_000 {
-                return Err("at most 200 000 bytes at once".into());
+            let most = g.view()?.limit("limits.grammar_check_bytes") as usize;
+            if text.len() > most {
+                return Err(format!(
+                    "at most {most} bytes at once (the setting limits.grammar_check_bytes)"
+                ));
             }
             let threshold = args
                 .get("threshold")
@@ -883,6 +895,36 @@ pub fn call(g: &Graph, removed: &Removed, op: &str, args: &Value) -> Res {
                 }
             })?;
             Ok(Value::Null)
+        }
+        // the limits the save sets for itself, each with its default (`graph::store::LIMITS`)
+        "limits.list" => {
+            let v = g.view()?;
+            Ok(Value::Array(
+                crate::graph::store::LIMITS
+                    .iter()
+                    .map(|(name, default, about)| {
+                        json!({ "name": name, "value": v.limit(name), "default": default, "about": about })
+                    })
+                    .collect(),
+            ))
+        }
+        // sets one (a whole number; empty puts back the default)
+        "limits.set" => {
+            let name = s(args, "name");
+            if !crate::graph::store::LIMITS.iter().any(|l| l.0 == name) {
+                return Err(format!("there's no limit {name:?}"));
+            }
+            let raw = match &args["value"] {
+                Value::Number(n) => n.to_string(),
+                v => v.as_str().unwrap_or("").trim().to_string(),
+            };
+            if raw.is_empty() {
+                g.write(|tx| tx.remove_setting(name))?;
+            } else {
+                let n: u64 = raw.parse().map_err(|_| format!("{raw:?} isn't a whole number"))?;
+                g.write(|tx| tx.set_setting(name, n.to_string().as_bytes()))?;
+            }
+            Ok(json!({ "name": name, "value": g.view()?.limit(name) }))
         }
         "settings.get" => {
             let v = g.view()?;
