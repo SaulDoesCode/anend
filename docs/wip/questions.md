@@ -106,3 +106,7 @@ The answers left these open. Each is written into the design as its default.
     text box, so selection across segments, the pad's undo, find and input methods work
     as before. Separate text boxes per segment would also be possible, at the cost of
     those.
+24. **Showing pieces in the memory view: the first piece, then four more a click.**
+    "all" lays out every piece (slow for a megabyte), so it's a click of its own. The
+    space's label shows the first piece and how many more; opening the rest there is
+    left to the reader and the details window.

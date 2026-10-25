@@ -149,6 +149,16 @@ fn MemorySettings() -> Element {
                     oninput: move |e| set_pref(ui, |p| p.memory_font = e.value().parse().unwrap_or(20.0)) }
                 span { "{p.memory_font}px" }
             }
+            label { r#for: "pline", "long texts, shown piece by piece" }
+            div { class: "row",
+                input { id: "pline", r#type: "number", min: "10", max: "400", step: "1", value: "{p.piece_line}", style: "width: 5em;",
+                    onchange: move |e| set_pref(ui, |p| p.piece_line = e.value().parse::<usize>().unwrap_or(80).clamp(10, 400)) }
+                span { "characters a line," }
+                input { r#type: "number", "aria-label": "lines a piece", min: "1", max: "200", step: "1", value: "{p.piece_lines}", style: "width: 4em;",
+                    onchange: move |e| set_pref(ui, |p| p.piece_lines = e.value().parse::<usize>().unwrap_or(6).clamp(1, 200)) }
+                span { "lines a piece" }
+                span { class: "dim small", "a longer text shows its first piece, and opens into the rest" }
+            }
             label { r#for: "msp", "space between texts" }
             div { class: "row",
                 input { id: "msp", r#type: "range", min: "0", max: "24", step: "1", value: "{p.spacing}",

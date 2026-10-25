@@ -47,6 +47,8 @@ pub const SETTINGS: &[&str] = &[
     "bars_swapped",
     "hub_token",
     "read_device",
+    "piece_line",
+    "piece_lines",
 ];
 
 /// the views, in their tab order

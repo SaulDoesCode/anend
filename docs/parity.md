@@ -124,6 +124,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | empty-state hint | memory_ui.rs | has |
 | word types on hover: which types, not only how many (noun, verb, name, number, link…, coloured) | asked 19 Oct | has (19 Oct): core `kinds::tag`, a rule tagger (noun, verb, adjective, adverb, pronoun, determiner, preposition, conjunction, interjection, name, number, date, time, link, email, hashtag); the hover line labels each word in its type's colour; T labels every text, with a legend |
 | search filter panel, buckets strip at the left edge, field width, selection | Dioxus only | has |
+| a long text shows piece by piece: its first piece (lines of at most 80 characters broken at word boundaries, six lines a piece, both settings in "the memory view and the space"), then "more" (four pieces more), "all" and "less", with how many pieces and KB; the words' types strip shows its first piece. Before 25 Oct a long text's card held the whole text, clipped, and opened whole on hover (checked on the desktop under Xvfb with word types on, and on the web: a 10 KB text in 21 pieces) | asked 19 Oct (answer 7) | has; the space shows a long text's first piece and how many more (its label); the reader and storage in pieces still to come |
 
 ## Space
 

@@ -1091,7 +1091,20 @@ fn Art(hit: Hit, under: Option<String>, is_list: bool, is_cand: bool, selected: 
     let api = api();
     let m = use_context::<Mem>();
     let title = format!("{} {}", hit.key, gem::gsum_line(&hit.text));
-    let long = hit.text.chars().count() > 220;
+    // a long text shows piece by piece (lines at word boundaries, a few lines a piece)
+    let (pw, pl) = {
+        let p = ui.prefs.read();
+        (p.piece_line, p.piece_lines)
+    };
+    let n_pieces = anend_core::pieces::count(&hit.text, pw, pl);
+    let long = n_pieces > 1;
+    let mut shown = use_signal(|| 1usize);
+    let shown_n = shown().min(n_pieces);
+    let shown_text: String = if long {
+        anend_core::pieces::pieces(&hit.text, pw, pl)[..shown_n].concat()
+    } else {
+        String::new()
+    };
     let mut class = String::from("art");
     for (on, c) in [
         (is_list, " is-list"),
@@ -1104,12 +1117,20 @@ fn Art(hit: Hit, under: Option<String>, is_list: bool, is_cand: bool, selected: 
             class.push_str(c);
         }
     }
-    let mut style = match &under {
+    let under_style = match &under {
         Some(c) => format!("text-decoration: underline; text-decoration-color: {c};"),
         None => String::new(),
     };
+    // a long text underlines its piece, not the controls under it
+    let mut style = if long { String::new() } else { under_style.clone() };
     if let Some(t) = &tint {
         style.push_str(&format!(" border-left: 5px solid {t};"));
+    }
+    if long {
+        style.push_str(&format!(" --piece-ch: {pw}ch;"));
+        if shown_n > 1 {
+            class.push_str(" open");
+        }
     }
     let (h1, h2, h3, h4) = (hit.clone(), hit.clone(), hit.clone(), hit.clone());
     // the hover line: the title, the text's kind and its words' types (kinds.rs)
@@ -1121,7 +1142,12 @@ fn Art(hit: Hit, under: Option<String>, is_list: bool, is_cand: bool, selected: 
     };
     let mut hover = m.hover;
     let mut hover_text = m.hover_text;
-    let ht = hit.text.clone();
+    // the words' types strip shows a long text's first piece, not all of it
+    let ht = if long {
+        anend_core::pieces::pieces(&hit.text, pw, pl)[0].to_string()
+    } else {
+        hit.text.clone()
+    };
     let tagged = ui.prefs.read().word_types;
     // the tooltip has the word types on a line of their own
     let tip = if words.is_empty() {
@@ -1192,7 +1218,24 @@ fn Art(hit: Hit, under: Option<String>, is_list: bool, is_cand: bool, selected: 
                     ui.menu.set(Some(Menu { hit: h3.clone(), x: p.x, y: p.y }));
                 }
             },
-            if tagged { TaggedText { text: hit.text.clone(), labels: true, ruby: true } } else { "{hit.text}" }
+            if long {
+                div { class: "piece", style: "{under_style}",
+                    if tagged { TaggedText { text: shown_text.clone(), labels: true, ruby: true } } else { "{shown_text}" }
+                }
+                div { class: "pieces-more",
+                    span { class: "dim", {format!("{} of {} pieces · {} KB", shown_n, n_pieces, hit.text.len().div_ceil(1000))} }
+                    if shown_n < n_pieces {
+                        button { class: "plain", title: "the next pieces",
+                            onclick: move |e| { e.stop_propagation(); shown.set((shown_n + 4).min(n_pieces)); }, "more" }
+                        button { class: "plain", title: "every piece (a long text takes a while to lay out)",
+                            onclick: move |e| { e.stop_propagation(); shown.set(n_pieces); }, "all" }
+                    }
+                    if shown_n > 1 {
+                        button { class: "plain", title: "back to the first piece",
+                            onclick: move |e| { e.stop_propagation(); shown.set(1); }, "less" }
+                    }
+                }
+            } else if tagged { TaggedText { text: hit.text.clone(), labels: true, ruby: true } } else { "{hit.text}" }
         }
     }
 }

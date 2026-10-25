@@ -216,6 +216,7 @@ export class Space {
         const kept = n.f.text;
         Object.assign(n.f, t);
         if (n.det) n.f.text = kept;
+        this.showText(n);
         n.el.style.borderBottomColor = t.under || 'transparent';
         continue;
       }
@@ -548,7 +549,8 @@ export class Space {
   // what a placement shows: its own text, else the text it was detached with or its
   // entry's (both in f.text), and its marks
   showText(n) {
-    const t = n.own != null ? n.own : n.f.text;
+    // a long text shows its first piece (`shown`, made by Rust); its whole text stays in f.text
+    const t = n.own != null ? n.own : n.det ? n.f.text : n.f.shown || n.f.text;
     n.el.textContent = n.f.note ? `✎ ${t}` : t;
     n.el.classList.toggle('det', !!n.det);
     n.el.classList.toggle('own', n.own != null);
@@ -612,6 +614,8 @@ export class Space {
 
   setText(n, text) {
     n.f.text = text;
+    // the first piece Rust made was of the old text
+    n.f.shown = null;
     this.showText(n);
     this.measure(n);
     this.wake(0.3);

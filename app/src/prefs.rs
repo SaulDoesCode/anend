@@ -92,6 +92,10 @@ pub struct Prefs {
     pub hub_token: String,
     /// where classifiers read texts: auto, cpu, gpu or gpu_fast (`classify.device`)
     pub read_device: String,
+    /// a long text is shown piece by piece (`anend_core::pieces`): characters a line and
+    /// lines a piece
+    pub piece_line: usize,
+    pub piece_lines: usize,
 }
 
 /// the space's own settings
@@ -204,6 +208,8 @@ impl Default for Prefs {
             bars_swapped: false,
             hub_token: String::new(),
             read_device: "auto".into(),
+            piece_line: anend_core::pieces::LINE,
+            piece_lines: anend_core::pieces::LINES,
         }
     }
 }

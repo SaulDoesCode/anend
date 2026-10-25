@@ -474,7 +474,7 @@ fn show(ui: Ui, api: Api, sp: Sp, hits: Vec<Hit>) {
                 let (s, r) = gem::sums(&h.text);
                 let q = if reversed { s } else { r };
                 let mut v = json!({
-                    "key": h.key, "text": h.text, "note": h.note,
+                    "key": h.key, "text": h.text, "note": h.note, "shown": first_piece(ui, &h.text),
                     "s": s, "r": r, "q": q, "hue": anend_core::spread::seed_hue(q as i64),
                     "shared": count.get(&q).copied().unwrap_or(0) >= 2,
                     // the gematria grouping underline, the memory view's colour for it
@@ -602,6 +602,7 @@ async fn route(ui: Ui, api: Api, sp: Sp, addr: &str) {
             &text,
             if reversed { Mode::Reversed } else { Mode::Ordinal }
         ));
+        f["shown"] = json!(first_piece(ui, &text));
         fm.insert(k, f);
     }
     let hits: Vec<Hit> = rows
@@ -774,6 +775,20 @@ async fn command(ui: Ui, api: Api, sp: Sp, word: &str, rest: &str) {
         }
         _ => {}
     }
+}
+
+/// what a text's label in the space shows: a long text's first piece (lines at word
+/// boundaries, `anend_core::pieces`) and how many more there are; None for a short text
+fn first_piece(ui: Ui, text: &str) -> Option<String> {
+    let (w, l) = {
+        let p = ui.prefs.peek();
+        (p.piece_line, p.piece_lines)
+    };
+    let n = anend_core::pieces::count(text, w, l);
+    (n > 1).then(|| {
+        let first = anend_core::pieces::pieces(text, w, l)[0].trim_end();
+        format!("{first} … ({} more pieces, {} KB)", n - 1, text.len().div_ceil(1000))
+    })
 }
 
 fn default_map_name(ui: Ui) -> String {

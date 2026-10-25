@@ -19,6 +19,7 @@ pub mod memo;
 pub mod memory;
 pub mod note;
 pub mod ops;
+pub mod pieces;
 pub mod simd;
 pub mod specs;
 pub mod spread;

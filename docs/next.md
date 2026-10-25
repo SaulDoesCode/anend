@@ -47,9 +47,9 @@ departure says why in its commit).
 - Done: the u8 font size (per-placement size controls in the space).
 - In progress: "Long texts". Done: typing in segments in the notes view (deltas to
   Rust, the colour layer patched per segment; 90 KB note 171 -> 36 ms a key on the web
-  here). Left: storage in pieces (`graph long`), `text.window`, visual splitting at word
-  boundaries (80 characters, six lines) in the memory view and the space, the limits as
-  settings.
+  here); visual pieces (`anend_core::pieces`: 80 characters, six lines, both settings)
+  in the memory view and the space's labels. Left: storage in pieces (`graph long`),
+  `text.window`, the core limits (interp output, grammar.check, counts) as settings.
 - Then: chains, merging; then parity.md's gaps; then block features.
 
 **After Stage A (19 Oct, late evening UTC), while the user tries it:**

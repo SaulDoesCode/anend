@@ -209,6 +209,12 @@ button.tchip.on { color: var(--bar-text); opacity: 1; }
 /* crisp emphasis on hover: brighter, outlined, on top; no scaling */
 .art:hover { background: #3d3838; box-shadow: 0 0 0 1px #c9ab99, 0 4px 16px rgb(0 0 0 / .8); z-index: 5; max-height: none; overflow: visible; }
 .art.long:hover { position: relative; }
+/* a long text: its first piece (lines at word boundaries), "more" opens the next ones */
+.art.long { max-height: none; max-width: min(100%, calc(var(--piece-ch, 80ch) + 20px)); }
+.art.long .piece { white-space: pre-wrap; }
+.art.long.open .piece { max-height: 60vh; overflow-y: auto; }
+.art .pieces-more { display: flex; gap: 8px; align-items: center; font-size: 12px; margin-top: 2px; }
+.art .pieces-more button.plain { color: #c9ab99; height: auto; padding: 0 4px; }
 .art.is-list { background: #5a4636; }
 .art.is-candidate { outline: 2px dashed #c9ab99; outline-offset: -2px; }
 .art.selected { background: #2f4a5a; box-shadow: inset 0 0 0 2px #7fb0cf; }
