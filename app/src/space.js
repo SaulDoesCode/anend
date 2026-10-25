@@ -490,6 +490,10 @@ export class Space {
       this.drop(u.n);
     } else if (u.kind === 'text') {
       this.setText(u.n, u.from);
+    } else if (u.kind === 'size') {
+      u.n.size = u.from;
+      this.measure(u.n);
+      this.send(this.ev('select', u.n));
     } else if (u.kind === 'own') {
       u.n.own = u.from;
       this.showText(u.n);
@@ -626,6 +630,25 @@ export class Space {
       }
     }
     this.render();
+  }
+
+  // a placement's font size in steps of 1/50 of a unit per em (format.md: a u8, 0 the
+  // default, which is the "text size" slider); `by` steps it, `to` sets it (0: default);
+  // Ctrl+Z undoes it
+  setSize(node, by, to) {
+    const n = node ? this.nodes.get(node) : this.selected;
+    if (!n) return null;
+    const now = n.size ? Math.round(n.size * 50) : 0;
+    const base = now || Math.round(this.p.size * 50);
+    const step = to != null ? to : Math.max(1, Math.min(255, base + by));
+    this.record({ kind: 'size', n, from: n.size });
+    n.size = step ? step / 50 : undefined;
+    this.measure(n);
+    this.sim = null;
+    this.wake(0.3);
+    this.render();
+    this.send(this.ev('select', n));
+    return step;
   }
 
   // an inheriting copy's own text (null: it follows its entry again); Ctrl+Z undoes it
@@ -1015,7 +1038,7 @@ export class Space {
     return {
       kind, key: n ? (n.free ? n.key : String(n.f.key)) : '', node: n ? n.key : '',
       copies: same.length, primary: !!(n && !n.free && same[0] === n), text: n ? (n.own != null ? n.own : n.f.text) : '', note: !!(n && n.f.note), free: !!(n && n.free),
-      det: n ? n.det || 0 : 0, own: n ? n.own : null, entry_text: n ? n.f.text : '',
+      det: n ? n.det || 0 : 0, font: n && n.size ? Math.round(n.size * 50) : 0, font_default: Math.round(this.p.size * 50), own: n ? n.own : null, entry_text: n ? n.f.text : '',
       x: e ? e.clientX : 0, y: e ? e.clientY : 0, ctrl: !!(e && (e.ctrlKey || e.metaKey)), shift: !!(e && e.shiftKey), alt: !!(e && e.altKey),
       q: n ? n.f.q || 0 : 0, hue: n ? n.f.hue || 0 : 0, pinned: !!(n && n.pinned), data: extra || '',
     };

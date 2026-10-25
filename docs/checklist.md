@@ -103,7 +103,9 @@ docs/architecture.md (the whole).
       and detached; detach or modify chosen up front (answers 3, 8).
       (25 Oct: texts. A copy is made inheriting or detached from the menu; an inheriting
       copy can have its own text. Prefabs inherit when they exist, #19.)
-- [ ] Text placements carry a `u8` font size, 0 for the default (answer 6).
+- [x] Text placements carry a `u8` font size, 0 for the default (answer 6).
+      (25 Oct: stored since the instances line; now set per placement from the menu and
+      the details window.)
 - [ ] Long texts with no length limit:
   - pieces as a storage detail;
   - the user's approach: separate typing segments, each updated on its own and stitched

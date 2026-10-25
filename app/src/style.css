@@ -515,7 +515,8 @@ button.plain.on { background: var(--accent); color: var(--on-button); }
 .win-head .win-title, .win-head .win-title * { pointer-events: none; }
 .win-head .close { opacity: 0; transition: opacity .15s; height: 20px; width: 22px; }
 .win:hover .win-head .close, .win-head .close:focus-visible { opacity: 1; }
-.win-body { padding: 6px 10px 8px; overflow: auto; min-height: 0; }
+.win-body { padding: 6px 10px 8px; overflow: hidden auto; min-height: 0; }
+.scene-open { min-width: 0; }
 .blocks-add { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
 .blocks-add .row, .blocks-sel .row { display: inline-flex; gap: 4px; align-items: center; }
 .blocks-add select { max-width: 120px; }
@@ -730,3 +731,9 @@ a.btn { text-decoration: none; }
 .checkpoints { display: flex; flex-direction: column; gap: 3px; padding: 2px 0 6px 12px; border-left: 2px solid color-mix(in srgb, var(--accent) 50%, transparent); }
 .checkpoints .checkpoint { gap: 8px; align-items: center; }
 .checkpoints .grow { flex: 1; }
+/* a placement's size: − value + (the space's menu and details window) */
+.size-row { flex-wrap: nowrap; gap: 4px; padding: 2px 0; }
+.size-row > * { flex: none; }
+.smenu .size-row { padding: 4px 12px; }
+.size-row .num { white-space: nowrap; width: 14ch; text-align: center; }
+.size-row button.btn.small { width: auto; min-width: 26px; padding: 1px 8px; justify-content: center; }

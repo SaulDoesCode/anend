@@ -219,6 +219,39 @@ struct SpaceEvent {
     /// the entry's text (what an inheriting placement shows without its own)
     #[serde(default)]
     entry_text: String,
+    /// its font size in steps of 1/50 unit (0: the default), and the default's step
+    #[serde(default)]
+    font: u32,
+    #[serde(default)]
+    font_default: u32,
+}
+
+/// a placement's size, − and + a step, and back to the default (the details window and
+/// the menu)
+#[component]
+fn SizeRow(ev: SpaceEvent, on_send: EventHandler<Value>) -> Element {
+    let shown = if ev.font == 0 {
+        format!("default ({:.2})", ev.font_default as f64 / 50.0)
+    } else {
+        format!("{:.2}", ev.font as f64 / 50.0)
+    };
+    let node = ev.node.clone();
+    let step = move |by: i32| {
+        let n = node.clone();
+        move |_| on_send.call(json!({ "cmd": "size", "node": n, "by": by }))
+    };
+    let n0 = ev.node.clone();
+    rsx! {
+        div { class: "row size-row",
+            span { class: "dim small", "size " }
+            button { class: "btn small", title: "smaller by 0.1 (sizes go in steps of 0.02)", onclick: step(-5), "−" }
+            span { class: "num", title: "units per em; the default is the physics window's text size", "{shown}" }
+            button { class: "btn small", title: "larger by 0.1", onclick: step(5), "+" }
+            if ev.font != 0 {
+                button { class: "btn small", title: "back to the default size", onclick: move |_| on_send.call(json!({ "cmd": "size", "node": n0, "to": 0 })), "default" }
+            }
+        }
+    }
 }
 
 impl SpaceEvent {
@@ -302,6 +335,7 @@ try {{
     else if (c.cmd === 'blockfields') sp.setBlockFields(c.id, c.t);
     else if (c.cmd === 'pickblock') sp.pickBlock(c.id);
     else if (c.cmd === 'dup') {{ const k = sp.duplicate(c.node, c.det || 0); dioxus.send({{ kind: 'toast', text: !k ? 'select a text first' : c.det ? 'a detached copy: it keeps the text as it reads now · Ctrl+Z takes it away' : 'a copy that inherits: it shows the entry as it changes · Ctrl+Z takes it away' }}); }}
+    else if (c.cmd === 'size') sp.setSize(c.node, c.by || 0, c.to);
     else if (c.cmd === 'own') {{ const k = sp.setOwn(c.node, c.text); dioxus.send({{ kind: 'toast', text: !k ? 'that placement can\'t have its own text' : c.text ? 'this placement has its own text now; the entry is unchanged · Ctrl+Z undoes it' : 'it follows the entry again · Ctrl+Z undoes it' }}); }}
     else if (c.cmd === 'removenode') {{ const k = sp.removeNode(c.node); dioxus.send({{ kind: 'toast', text: k ? 'taken out of the room (the entry stays) · Ctrl+Z puts it back' : 'gone already' }}); }}
     else if (c.cmd === 'pinnode') dioxus.send({{ kind: 'toast', text: sp.pinNode(c.node) || 'gone already' }});
@@ -1266,7 +1300,7 @@ pub fn Space() -> Element {
             }
             if p.space.show_details {
                 if let Some(c) = card {
-                    Details { ev: c, on_gsearch: move |(n, m): (u64, Mode)| envale(ui, api_g.clone(), sp, n, m) }
+                    Details { ev: c, on_gsearch: move |(n, m): (u64, Mode)| envale(ui, api_g.clone(), sp, n, m), on_send: move |v: Value| sp.send(v) }
                 }
             }
         }
@@ -1300,7 +1334,31 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
         "error" => ui.fail(format!("the space couldn't start: {}", e.text)),
         "toast" => ui.say(e.text),
         "hover" | "focus" => card.set(Some(e.clone())),
-        "select" => selected.set((!e.key.is_empty()).then(|| e.clone())),
+        "select" => {
+            // an open menu on the same placement shows its new values (its size)
+            let mut m = sp.menu;
+            let open = m
+                .peek()
+                .as_ref()
+                .filter(|o| o.node == e.node && !e.node.is_empty())
+                .cloned();
+            if let Some(o) = open {
+                m.set(Some(SpaceEvent {
+                    x: o.x,
+                    y: o.y,
+                    ..e.clone()
+                }));
+            }
+            // and so does the details window
+            if card
+                .peek()
+                .as_ref()
+                .is_some_and(|c| c.node == e.node && !e.node.is_empty())
+            {
+                card.set(Some(e.clone()));
+            }
+            selected.set((!e.key.is_empty()).then(|| e.clone()))
+        }
         "settled" => ui.say(format!("settled in {} steps", e.data)),
         "block" => {
             let mut b = sp.block;
@@ -1729,6 +1787,7 @@ fn SpaceMenu(
             style: "left: min({x}px, calc(100vw - 330px)); top: max(8px, min({y}px, calc(100vh - 560px)));",
             div { class: "title", "{ev.text}" }
             div { class: "title dim small", "{which}" }
+            SizeRow { ev: ev.clone(), on_send: move |v: Value| on_send.call(v) }
             button { role: "menuitem", onclick: { let ev = ev.clone(); let h = hit.clone(); move |_| {
                     if ev.free { start_edit(ui, &ev); } else {
                         ui.set_bar(&h.text);
@@ -2046,7 +2105,7 @@ fn Win(id: String, title: Element, at: (f64, f64), on_close: EventHandler<()>, c
 /// the numbers of a hovered or clicked text (the Bevy app's metrics card), each gsearching
 /// itself; its key, bucket and whether it's pinned
 #[component]
-fn Details(ev: SpaceEvent, on_gsearch: EventHandler<(u64, Mode)>) -> Element {
+fn Details(ev: SpaceEvent, on_gsearch: EventHandler<(u64, Mode)>, on_send: EventHandler<Value>) -> Element {
     let ui = ui();
     let m = anend_core::spread::metrics(&ev.text);
     let rev = ui.prefs.read().space_reversed;
@@ -2112,6 +2171,7 @@ fn Details(ev: SpaceEvent, on_gsearch: EventHandler<(u64, Mode)>) -> Element {
                     if ev.copies > 1 { {format!(" · {} of {} placements", if ev.primary { "the first" } else { "a copy" }, ev.copies)} }
                 }
                 div { class: "dim small", "{ev.relation()}" }
+                SizeRow { ev: ev.clone(), on_send: move |v: Value| on_send.call(v) }
             } else {
                 div { class: "dim small",
                     "a free text: double click or Enter edits it"

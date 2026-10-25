@@ -44,8 +44,9 @@ departure says why in its commit).
   is on the back burner (a checklist line near the end). No GPU changes were started
   after `59e2656`.
 - Done: "Inheritance" (texts: inheriting, own text, detached; prefabs come with #19).
-- Next: the user's priority is what makes the app good to use: the u8 font size, long
-  texts with segments, chains, merging; then parity.md's gaps; then block features.
+- Done: the u8 font size (per-placement size controls in the space).
+- Next: the user's priority is what makes the app good to use: long texts with
+  segments, chains, merging; then parity.md's gaps; then block features.
 
 **After Stage A (19 Oct, late evening UTC), while the user tries it:**
 - `b5b6b22` docs/format.md "One model for a definition and its placed instances": Stage B's

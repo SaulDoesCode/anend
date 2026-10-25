@@ -94,3 +94,6 @@ The answers left these open. Each is written into the design as its default.
     detached copy of a copy with its own text keeps the entry's text, not the own text.
 21. **A detached text keeps the entry's version by its edited time** and is shown from
     `graph history`. If that history were removed, it would show the oldest version kept.
+22. **A size click is 0.1 units (5 steps of 0.02).** Single steps are too small to see;
+    the stored value still has the full 0.02 resolution. The first click from "default"
+    starts at the default's value (the "text size" slider).
