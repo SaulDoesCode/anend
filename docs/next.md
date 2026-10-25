@@ -14,7 +14,7 @@ goes away without a line there saying why.
 nothing waits on the user). Pick up at its first unticked line. The notes below are history;
 where they speak of stages, the checklist replaces them.
 
-**Now (20 Oct):** working down docs/checklist.md (its order is a sensible default; a
+**Now (25 Oct):** working down docs/checklist.md (its order is a sensible default; a
 departure says why in its commit).
 - Done: the instance design's body rewritten (`9e7566f`); the GPU for classifying with
   `classify.device` and `gpu.report` (`f5310df`, `3eb3904`); the starters (`faaa1b3`,
@@ -25,9 +25,20 @@ departure says why in its commit).
   against gutenberg.org (the container's network refuses it).
 - Done: "Instances" (scenes in the save; blocks and saved scenes on them; migration
   checked by hand on a save made by the previous build, web and desktop).
-- Next: the GPU report's findings (the user's GTX 1070 Ti: exact, but reading 0.12x to
-  0.38x the CPU's speed): auto chooses by measured speed, then the GPU overhead work.
-  After that, "Inheritance" on the checklist.
+- Done (25 Oct): the GPU report's findings (the user's GTX 1070 Ti: exact, but reading
+  0.12x to 0.38x the CPU's speed). Auto now measures each model size on first use and
+  reads where it's faster (`5728d67`, `classify::speed`; the settings list the rates).
+  Reading's overhead cut (`59e2656`): attention over all of a pack's windows in one
+  dispatch per step. On llvmpipe (gpu_profile, release): compact dispatches per text
+  72.9 -> 0.4, submits 0.025 -> 0.010, 27 -> 47 texts/s; small 52.9 -> 1.2 dispatches
+  per text, 5 -> 6 texts/s; every result equal to the CPU's bits. llvmpipe's remaining
+  time is its own compute on the CPU, so **the speed on real hardware is unverified:
+  the user should run "write a GPU report" again** (settings, the GPU) and paste it;
+  auto will measure again by itself (the cache key carries the reading path's
+  revision). Training on the GPU is unchanged: two submissions and syncs per example
+  (5.0k tokens/s against the CPU's 143k on the user's machine for compact); batching
+  it while keeping the CPU's bits needs per-example gradient chains, not done.
+- Next: "Inheritance" on the checklist.
 
 **After Stage A (19 Oct, late evening UTC), while the user tries it:**
 - `b5b6b22` docs/format.md "One model for a definition and its placed instances": Stage B's
