@@ -73,7 +73,9 @@ departure says why in its commit).
   the codec's s mode, programs as notes tagged `s` run from the notes view (▶), which
   shows them right-aligned and coloured by word class. The code-editor line stays open
   for outline, go to definition, inline results, step debugging and completion.
-- Next: rays and programs (#15, #28); prefabs (#19).
+- Done (26 Oct): rays and programs (#15, #28): wirings as entries, `wiring.fire` runs a
+  cause and what it sets off in core; the wiring window, playing, timers, zone events.
+- Next: subassemblies and the prefab menu (#19), then the switch and gate prefabs (#27).
   Open further up: the language lines (s, the standard library), taxonomies and pipes,
   the wgpu renderer and culling.
 

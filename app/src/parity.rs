@@ -237,6 +237,34 @@ mod tests {
         assert!(include_str!("style.css").contains(".pad.code textarea"));
     }
 
+    /// wiring: blocks that cast rays and run programs, the window, playing in the room
+    #[test]
+    fn wiring_stays() {
+        let js = include_str!("space.js");
+        for needle in [
+            "setWires(list, live)",
+            "wireTimers(now)",
+            "wireZone(zone, text, event)",
+            "showRays(rays)",
+            "this.wireFire(id, 'click')",
+        ] {
+            assert!(js.contains(needle), "space.js lost {needle}");
+        }
+        let rs = include_str!("views/space/wirewin.rs");
+        for needle in [
+            "fn Wires(",
+            "\"wiring.fire\"",
+            "\"wiring.set\"",
+            "pick targets in the room",
+            "▶ play",
+            "try it",
+        ] {
+            assert!(rs.contains(needle), "wirewin.rs lost {needle}");
+        }
+        let sp = include_str!("views/space.rs");
+        assert!(sp.contains("show_wiring") && sp.contains("\"blockfire\""));
+    }
+
     /// keyframe animations: the window, the room posing blocks
     #[test]
     fn animations_stay() {

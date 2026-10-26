@@ -167,7 +167,9 @@ bottom, front, back). A block's shape is in its placement's flags (bits 3–6,
 byte with a bit per setting given (repel, attract, link, gravity, damping), then those as
 f32s. An animation it plays is `A` 1, the animation entry's id (u64), then its delay and
 speed (f32s). Animations are entries of mime 9 (`application/x-anend-animation`), their
-text the animation's JSON (`core/src/graph/anims.rs`). `graph lights` (`core/src/graph/lights.rs`): the
+text the animation's JSON (`core/src/graph/anims.rs`). A block's wiring is `W` 1 and the
+wiring entry's id (u64); wirings are entries of mime 10 (`application/x-anend-wiring`),
+their text the wiring's JSON (`core/src/graph/wiring.rs`). `graph lights` (`core/src/graph/lights.rs`): the
 room's lights, light id (u64) → `{kind, colour, intensity, x, y, z, dir, range, angle,
 softness}` JSON.
 

@@ -158,6 +158,14 @@ text for its menu.
   (or *linear*, *ease*, *ease-in-out*...). Select a block, scrub to a moment, *a key
   here*, set its pose with sliders, *play* to see it, *keep*, then *the selected block
   plays it* (with a delay and a speed). One animation can play on many blocks.
+- **Wiring.** The wiring window (the bolt chip) makes a block act: pick what it listens
+  for (a click, another block's ray, a text coming into or leaving its zone, a timer, a
+  signal), the s program it runs (a note tagged `s`) and its ray: *fixed* out of one of
+  its faces, registering the *first*, *last*, *nth* or *all* of the blocks it crosses,
+  or *sticky* to blocks you pick. *keep*, then *▶ play*: clicks on wired blocks fire
+  them, timers run, and each block a ray registers is hit in turn, so blocks set each
+  other off like dominos. A program acts by printing lines such as `move 0 1 0`,
+  `colour #ff0000`, `signal open`, `cast` or `keep 3` (what its next run reads).
 - **Lights.** The lights window (the sun chip) adds an *ambient* light, a *sun*, a
   *point* or a *cone* ahead of you. Pick one to set its colour, strength, reach,
   direction and cone with sliders, or *move it here*. The light is worked out onto the

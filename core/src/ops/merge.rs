@@ -396,6 +396,21 @@ pub fn assets(target: &crate::graph::Graph, src: &crate::graph::Graph) -> GResul
                 Err(_) => b.t.anim = None,
             }
         }
+        // and so is a wiring (its sticky targets name the source's blocks, which come
+        // in under new addresses, so they are dropped)
+        if let Some(wr) = b.t.wire.as_mut() {
+            let text = src.render(wr.entry).ok().and_then(|t| {
+                let mut w: crate::graph::wiring::Wiring = serde_json::from_str(&t).ok()?;
+                if let Some(r) = w.ray.as_mut() {
+                    r.targets.clear();
+                }
+                serde_json::to_string(&w).ok()
+            });
+            match text {
+                Some(text) => wr.entry = target.save_text(&text, crate::graph::record::mime::WIRING)?.0,
+                None => b.t.wire = None,
+            }
+        }
         if let Some(f) = b.t.faces.as_mut() {
             for slot in f.0.iter_mut() {
                 *slot = slot.and_then(|h| recipes.get(&hex(&h))).and_then(|id| {

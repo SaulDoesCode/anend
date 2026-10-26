@@ -104,6 +104,9 @@ pub struct Transform {
     /// the animation it plays (`graph::anims`)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anim: Option<super::anims::AnimRef>,
+    /// what it does when something happens to it (`graph::wiring`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wire: Option<super::wiring::WireRef>,
 }
 
 /// a block's shape, kept in its placement's flags (bits 3–6, `place::Kind`)
@@ -226,36 +229,46 @@ fn extra_bytes(t: &Transform) -> Option<Vec<u8>> {
     if let Some(a) = t.anim {
         a.write(&mut out);
     }
+    if let Some(w) = t.wire {
+        w.write(&mut out);
+    }
     (!out.is_empty()).then_some(out)
 }
 
 /// the bend, faces and zone in a block placement's extra (what doesn't read is left out)
 fn read_extra(b: &[u8]) -> Extra {
-    let (mut bend, mut faces, mut zone, mut anim) = (None, None, None, None);
+    let mut x = Extra::default();
     let mut at = 0;
     while at < b.len() {
         match b[at] {
             b'B' if b.len() >= at + 38 => {
-                bend = Bend::from_bytes(&b[at..at + 38]);
+                x.bend = Bend::from_bytes(&b[at..at + 38]);
                 at += 38;
             }
             b'F' => match Faces::read(&b[at..]) {
                 Some((f, n)) => {
-                    faces = Some(f);
+                    x.faces = Some(f);
                     at += n;
                 }
                 None => break,
             },
             b'Z' => match Zone::read(&b[at..]) {
                 Some((z, n)) => {
-                    zone = Some(z);
+                    x.zone = Some(z);
                     at += n;
                 }
                 None => break,
             },
             b'A' => match super::anims::AnimRef::read(&b[at..]) {
                 Some((a, n)) => {
-                    anim = Some(a);
+                    x.anim = Some(a);
+                    at += n;
+                }
+                None => break,
+            },
+            b'W' => match super::wiring::WireRef::read(&b[at..]) {
+                Some((w, n)) => {
+                    x.wire = Some(w);
                     at += n;
                 }
                 None => break,
@@ -263,11 +276,18 @@ fn read_extra(b: &[u8]) -> Extra {
             _ => break,
         }
     }
-    (bend, faces, zone, anim)
+    x
 }
 
 /// what a block placement's extra holds
-type Extra = (Option<Bend>, Option<Faces>, Option<Zone>, Option<super::anims::AnimRef>);
+#[derive(Default)]
+struct Extra {
+    bend: Option<Bend>,
+    faces: Option<Faces>,
+    zone: Option<Zone>,
+    anim: Option<super::anims::AnimRef>,
+    wire: Option<super::wiring::WireRef>,
+}
 
 /// a staging zone: a block whose texts spread among themselves inside it, under physics
 /// of its own (each setting left out follows the room's). Zones nest: a text belongs to
@@ -363,6 +383,7 @@ impl Default for Transform {
             shape: Shape::Box,
             zone: None,
             anim: None,
+            wire: None,
         }
     }
 }
@@ -609,6 +630,7 @@ impl Transform {
             faces: self.faces.filter(|f| !f.is_empty() && self.shape.is_box()),
             zone: self.zone.map(Zone::checked),
             anim: self.anim.map(super::anims::AnimRef::checked),
+            wire: self.wire,
             ..self
         })
     }
@@ -744,7 +766,13 @@ pub fn transform_of(p: &Placement) -> Transform {
 }
 
 fn transform(p: &Placement) -> Transform {
-    let (bend, faces, zone, anim) = p.extra.as_deref().map(read_extra).unwrap_or((None, None, None, None));
+    let Extra {
+        bend,
+        faces,
+        zone,
+        anim,
+        wire,
+    } = p.extra.as_deref().map(read_extra).unwrap_or_default();
     let [w, h, d] = match p.scale {
         Scale::One => [1.0; 3],
         Scale::Uniform(v) => [v; 3],
@@ -766,6 +794,7 @@ fn transform(p: &Placement) -> Transform {
         shape: Shape::of_flags(p.flags),
         zone,
         anim,
+        wire,
     }
 }
 

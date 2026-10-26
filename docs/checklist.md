@@ -168,7 +168,9 @@ docs/architecture.md (the whole).
       recipes, faces, the sky, spheres, baked lights, staging zones and the spec builder;
       README and guide written up, offered on PR #8. The wgpu renderer and culling lines
       above stay open.)
-- [ ] Blocks that cast rays and run programs (#15), with ray modes including last hit (#28).
+- [x] Blocks that cast rays and run programs (#15), with ray modes including last hit (#28).
+      (26 Oct: `graph::wiring`, `ops::wiring`, the wiring window and playing. Not yet:
+      texts as targets, rays from where an animation shows a block, undo of a cause.)
 - [x] Keyframes with a bezier timing editor (#16). (26 Oct: animations as entries, the
       animations window with its curve, timeline and scrubber; blocks play them.)
 - [ ] Subassemblies and the prefab menu (#19).

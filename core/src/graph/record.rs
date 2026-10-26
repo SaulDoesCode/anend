@@ -27,8 +27,15 @@ pub mod mime {
     pub const CHAIN: u16 = 8;
     /// an animation: its text the animation's JSON (`graph::anims`)
     pub const ANIMATION: u16 = 9;
+    /// a block's wiring: its text the wiring's JSON (`graph::wiring`)
+    pub const WIRING: u16 = 10;
 
-    pub const NAMES: [&str; 10] = [
+    /// entries that are a block's data rather than texts: left out of search and counts
+    pub fn hidden(m: u16) -> bool {
+        m == ANIMATION || m == WIRING
+    }
+
+    pub const NAMES: [&str; 11] = [
         "text/plain",
         "text/markdown",
         "application/x-anend-fn",
@@ -39,6 +46,7 @@ pub mod mime {
         "application/json",
         "application/x-anend-chain",
         "application/x-anend-animation",
+        "application/x-anend-wiring",
     ];
 
     pub fn builtin(name: &str) -> Option<u16> {

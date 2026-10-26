@@ -549,7 +549,12 @@ export class Space {
     for (const n of this.order) {
       const f = n.zone && byId.get(n.zone);
       if (f && !n.pinned) this.keepIn(n, f);
+      const was = n.zone;
       n.zone = frames.length ? this.zoneOf(n, frames) : null;
+      if (was !== n.zone && this.live) {
+        if (was) this.wireZone(was, n.key, 'leave');
+        if (n.zone) this.wireZone(n.zone, n.key, 'enter');
+      }
     }
   }
 
@@ -1239,6 +1244,82 @@ export class Space {
     if (on) this.animT0 = performance.now();
     else for (const o of this.blocks.values()) this.unpose(o);
     this.dirty = true;
+  }
+
+  // ------------------------------------------------------------------ wiring
+  //
+  // Blocks that cast rays and run programs (core's `ops::wiring`). The room only knows
+  // which blocks listen for what; core runs the programs and casts the rays. Playing
+  // (`live`), a click on a block listening for clicks fires it instead of selecting it,
+  // timers fire their blocks, and a zone listening for texts coming or going is told.
+  // The rays a cause casts show for a moment.
+  setWires(list, live) {
+    this.wires = new Map((list || []).map((w) => [w.id, w]));
+    // timers keep their beat across a reload of the list (a cause reloads it)
+    const was = this.live;
+    this.live = !!live;
+    const old = (was && this.live && this.wireT) || new Map();
+    this.wireT = new Map([...old].filter(([k]) => this.wires.has(k)));
+    this.dirty = true;
+  }
+
+  wireFire(id, event, from) {
+    this.send({ ...this.ev('blockfire', null), data: { id, event, from: from || '' } });
+  }
+
+  // the timers of wired blocks, on the frame's clock (playing only)
+  wireTimers(now) {
+    if (!this.live || !this.wires || !this.wires.size) return false;
+    let any = false;
+    for (const [id, w] of this.wires) {
+      if (!(w.on || []).includes('timer')) continue;
+      any = true;
+      const every = Math.max(0.2, w.every || 1) * 1000;
+      const last = this.wireT.get(id);
+      if (last == null) this.wireT.set(id, now);
+      else if (now - last >= every) {
+        this.wireT.set(id, now);
+        this.wireFire(id, 'timer');
+      }
+    }
+    return any;
+  }
+
+  // a text came into or left a zone: the zone's block is told, when it listens
+  wireZone(zone, text, event) {
+    if (!this.live || !zone || !this.wires) return;
+    const w = this.wires.get(zone);
+    if (w && (w.on || []).includes(event)) this.wireFire(zone, event, text);
+  }
+
+  // the rays a cause cast, drawn for a moment
+  showRays(rays) {
+    if (!rays || !rays.length) return;
+    const pts = [];
+    for (const r of rays) pts.push(new THREE.Vector3(...r.from), new THREE.Vector3(...r.to));
+    const g = new THREE.BufferGeometry().setFromPoints(pts);
+    const line = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xffcc33, transparent: true, opacity: 0.95, depthTest: false }));
+    line.renderOrder = 10;
+    this.scene.add(line);
+    this.rayLines = (this.rayLines || []).concat([{ line, t0: performance.now() }]);
+    this.dirty = true;
+  }
+
+  // fades the rays out over 0.8 s; whether any are left
+  fadeRays(now) {
+    if (!this.rayLines || !this.rayLines.length) return false;
+    this.rayLines = this.rayLines.filter((r) => {
+      const a = 1 - (now - r.t0) / 800;
+      if (a <= 0) {
+        this.scene.remove(r.line);
+        r.line.geometry.dispose();
+        r.line.material.dispose();
+        return false;
+      }
+      r.line.material.opacity = 0.95 * a;
+      return true;
+    });
+    return true;
   }
 
   // the animations window shows one on a block: at a phase (scrubbing), or playing
@@ -1960,6 +2041,16 @@ export class Space {
       if (e.target.closest('.slabel')) return;
       if (e.button === 0) {
         // a block's gizmo, or a block: select it (and drag it in the view's plane)
+        // playing, a click on a block listening for clicks fires it (through the gizmo)
+        if (this.live && this.wires && this.wires.size) {
+          const m = this.rayFrom(e).intersectObjects([...this.blocks.values()].map((o) => o.mesh), false)[0];
+          const id = m && m.object.userData.block;
+          const w = id != null && this.wires.get(id);
+          if (w && (w.on || []).includes('click')) {
+            this.wireFire(id, 'click');
+            return;
+          }
+        }
         const hit = this.blocks.size ? this.blockHit(e) : null;
         if (hit) {
           if (hit.block != null && hit.block !== this.selBlock) this.pickBlock(hit.block);
@@ -2087,7 +2178,9 @@ export class Space {
     const turning = Math.abs(this.tyaw - this.yaw) > 1e-5 || Math.abs(this.tpitch - this.pitch) > 1e-5;
     const animated = this.blocks.size && this.animating();
     if (animated) this.applyAnims(now);
-    if (moving || turning || this.keys.size || this.ease || this.looking || this.drag || this.bdrag || this.dirty || animated) {
+    this.wireTimers(now);
+    const rays = this.fadeRays(now);
+    if (moving || turning || this.keys.size || this.ease || this.looking || this.drag || this.bdrag || this.dirty || animated || rays) {
       this.dirty = false;
       this.render();
       this.info(false);

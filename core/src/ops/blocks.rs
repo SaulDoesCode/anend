@@ -81,6 +81,8 @@ fn transform(v: &Value, base: Transform) -> Transform {
             Some(Value::Null) => None,
             Some(a) => serde_json::from_value(a.clone()).ok().or(base.anim),
         },
+        // the wiring is set with `wiring.set`
+        wire: base.wire,
     }
 }
 
@@ -114,7 +116,7 @@ fn ids(args: &Value) -> Result<Vec<String>, String> {
 
 /// what a block shows, checked against the save: a text that's there (by its label, a
 /// note's `note:` prefix taken off), a picture that's there, or a `#rrggbb` colour
-fn texture(g: &Graph, kind: Kind, t: &str) -> Result<String, String> {
+pub(super) fn texture(g: &Graph, kind: Kind, t: &str) -> Result<String, String> {
     let t = t.trim();
     match kind {
         Kind::Text => {
@@ -167,7 +169,7 @@ fn recipe_about(g: &Graph, v: &crate::graph::View, id: &str) -> Result<Value, St
 
 /// blocks as JSON, with what their textures are: each text once (however many blocks
 /// show it), each picture's size and name
-fn listed(g: &Graph, blocks: &[Block]) -> Res {
+pub(super) fn listed(g: &Graph, blocks: &[Block]) -> Res {
     let mut textures: BTreeMap<String, Value> = BTreeMap::new();
     let v = g.view()?;
     for b in blocks {

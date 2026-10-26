@@ -29,6 +29,7 @@ use crate::views::{TChip, use_keys};
 mod animwin;
 mod lightwin;
 mod texwin;
+mod wirewin;
 
 const THREE: &str = include_str!("../../vendor/three.module.min.js");
 const ENGINE: &str = include_str!("../space.js");
@@ -525,6 +526,8 @@ try {{
     else if (c.cmd === 'sky') sp.setSky(c.about || null);
     else if (c.cmd === 'anims') sp.setAnims(c.anims || [], c.textures || {{}});
     else if (c.cmd === 'playanims') sp.playAnims(!!c.on);
+    else if (c.cmd === 'wires') sp.setWires(c.wires || [], !!c.live);
+    else if (c.cmd === 'rays') sp.showRays(c.rays || []);
     else if (c.cmd === 'animpreview') sp.previewAnim(c.id, c.anim || null, c.p);
     else if (c.cmd === 'lights') sp.setLights(c.lights || [], c.changed || null);
     else if (c.cmd === 'showlights') sp.showLights(!!c.on, c.picked);
@@ -579,6 +582,10 @@ struct Sp {
     bmenu: Signal<Option<(f64, f64)>>,
     /// the blocks window shows the selected block's bend editor open
     bend_open: Signal<bool>,
+    /// the room is live: clicks fire wired blocks, timers run (the wiring window's play)
+    live: Signal<bool>,
+    /// what the last cause set off (`wiring.fire`'s events)
+    fired: Signal<Vec<Value>>,
 }
 
 impl Sp {
@@ -1300,6 +1307,8 @@ pub fn Space() -> Element {
         scenes_rev: use_signal(|| 0),
         bmenu: use_signal(|| None),
         bend_open: use_signal(|| false),
+        live: use_signal(|| false),
+        fired: use_signal(Vec::new),
     };
     // the engine and its channel
     {
@@ -1553,6 +1562,9 @@ pub fn Space() -> Element {
             if p.space.show_anims {
                 animwin::Anims { sp, block: (sp.block)(), on_changed: { let api = api_b.clone(); move |_| { let api = api.clone(); dioxus::dioxus_core::spawn_forever(count_blocks(api, sp)); } } }
             }
+            if p.space.show_wiring {
+                wirewin::Wires { sp }
+            }
             if p.space.show_lights {
                 lightwin::Lights { sp }
             }
@@ -1667,6 +1679,19 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
         }
         // an undo took back blocks just added, or put back blocks just deleted
         "lightspot" => lightwin::light_spot(ui, api, sp, e.data.clone()),
+        // a wired block fired in the room (a click while playing, a timer, a zone)
+        "blockfire" => {
+            let ev = match e.data["event"].as_str().unwrap_or("") {
+                "click" => "click",
+                "timer" => "timer",
+                "enter" => "enter",
+                "leave" => "leave",
+                _ => return,
+            };
+            let id = e.data["id"].as_str().unwrap_or("").to_string();
+            let from = e.data["from"].as_str().unwrap_or("").to_string();
+            wirewin::fire(ui, api.clone(), sp, id, ev, from);
+        }
         "blockmenu" => {
             let mut m = sp.bmenu;
             m.set(Some((e.x, e.y)));
@@ -1840,6 +1865,7 @@ async fn load_blocks(ui: Ui, api: Api, sp: Sp) {
             texwin::load_sky(ui, &api, EventHandler::new(move |v: Value| sp.send(v))).await;
             lightwin::load_lights(&api, sp).await;
             animwin::load_anims(ui, &api, sp).await;
+            wirewin::load_wires(&api, sp).await;
             count_blocks(api, sp).await;
         }
         // a hub from before blocks: the room has none
@@ -3250,6 +3276,12 @@ pub fn SpaceStrip() -> Element {
                 icon: "play",
                 on: p.space.show_anims,
                 onclick: move |_| set_pref(ui, |p| p.space.show_anims = !p.space.show_anims),
+            }
+            TChip {
+                label: "wiring: blocks that cast rays and run programs",
+                icon: "bolt",
+                on: p.space.show_wiring,
+                onclick: move |_| set_pref(ui, |p| p.space.show_wiring = !p.space.show_wiring),
             }
             TChip {
                 label: "lights: ambient, sun, point and cone lights, baked onto the blocks",

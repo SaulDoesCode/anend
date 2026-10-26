@@ -23,6 +23,8 @@ pub mod scenes;
 pub mod script;
 pub mod templates;
 pub mod texts;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod wiring;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use saves::{Open, Saves, clean, graph_at};
@@ -101,8 +103,8 @@ pub fn hits<R: Reader>(v: &R, ids: &[u64]) -> Value {
     let mut out = Vec::with_capacity(ids.len());
     for (id, t) in ids.iter().zip(texts) {
         let Ok(text) = t else { continue };
-        // an animation's JSON isn't a text to show
-        if v.record(*id).ok().flatten().is_some_and(|r| r.mime == mime::ANIMATION) {
+        // an animation's or a wiring's JSON isn't a text to show
+        if v.record(*id).ok().flatten().is_some_and(|r| mime::hidden(r.mime)) {
             continue;
         }
         let note = is_note(v, *id);
@@ -194,7 +196,7 @@ pub fn counts(v: &View) -> Result<(u64, u64), String> {
     };
     let notes = of(mime::MARKDOWN)?;
     let tags = of(mime::TAG)?;
-    let anims = of(mime::ANIMATION)?;
+    let anims = of(mime::ANIMATION)? + of(mime::WIRING)?;
     Ok((notes, all.saturating_sub(notes + tags + anims)))
 }
 

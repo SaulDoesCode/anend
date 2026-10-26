@@ -124,6 +124,8 @@ pub struct SpaceUi {
     pub show_lights: bool,
     /// the animations window
     pub show_anims: bool,
+    /// the wiring window (blocks that cast rays and run programs)
+    pub show_wiring: bool,
     /// where each movable window was left (`details`, `physics`): its left and top
     pub wins: BTreeMap<String, (f64, f64)>,
 }
@@ -144,6 +146,7 @@ impl Default for SpaceUi {
             show_textures: false,
             show_lights: false,
             show_anims: false,
+            show_wiring: false,
             wins: BTreeMap::new(),
         }
     }

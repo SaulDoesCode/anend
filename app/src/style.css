@@ -912,3 +912,12 @@ a.btn { text-decoration: none; }
 .s-run .row { display: flex; align-items: center; gap: 6px; }
 .s-out { font: 13px/1.45 var(--mono); white-space: pre-wrap; margin: 4px 0 0; max-height: 240px; overflow: auto; }
 .s-err { font: 13px/1.45 var(--mono); color: var(--bad); white-space: pre-wrap; margin: 4px 0 0; }
+
+/* the wiring window: blocks that cast rays and run programs */
+.wire-sec { display: flex; flex-direction: column; gap: 4px; padding: 6px 0; border-top: 1px solid color-mix(in srgb, var(--dim) 25%, transparent); }
+.wire-sec .check { display: inline-flex; align-items: center; gap: 3px; margin-right: 6px; cursor: pointer; }
+.wire-sec select, .wire-sec input[type="text"], .wire-sec input[type="number"] { min-width: 0; flex: 1; }
+.wire-targets { display: flex; flex-wrap: wrap; gap: 4px; }
+.wire-targets .chip button { padding: 0 2px; }
+.wire-log { display: flex; flex-direction: column; gap: 3px; padding-top: 6px; border-top: 1px solid color-mix(in srgb, var(--dim) 25%, transparent); max-height: 180px; overflow: auto; }
+.wire-log pre { margin: 2px 0 0; }

@@ -199,3 +199,28 @@ The answers left these open. Each is written into the design as its default.
     literals, numbers, library words, escapes, `:` locals). It doesn't follow
     definitions, so a word a program defines with `$` stays plain where it's used; that
     comes with the outline and go to definition (the rest of the code-editor line).
+
+## Rays and programs (26 Oct)
+
+48. **A program acts on its block by printing lines:** `move`, `place`, `turn`, `size`,
+    `colour`, `texture`, `play`, `stop`, `signal`, `cast`, `keep` and `say`, each a word
+    at the line's start. Other lines are its output. s itself gets no new words for this.
+49. **A block with no program casts its ray when an event reaches it;** one with a
+    program casts only when the program prints `cast`.
+50. **Rays and causes run in core, against the blocks as kept** (boxes and spheres,
+    turned; not their bends nor where an animation shows them), so a cause does the same
+    thing on the desktop and the web. Texts aren't targets yet; their places come from
+    the room's physics, which runs in the page.
+51. **One cause sets off at most 200 events, sharing one budget of steps** (2 million on a
+    shared hub, 50 million on one's own machine), so blocks that hit each other stop.
+    Events run in the order they were set off (first in, first out); a ray's hits go
+    nearest first.
+52. **What a cause changes is kept in the save** (a lifted block stays lifted after a
+    reload), and Ctrl+Z doesn't take it back yet. A program's state is the `keep` text
+    in its block's wiring.
+53. **Sticky targets are block addresses,** so a target retextured (by hand or by
+    `colour`) drops out of them, as its address changes. A merge drops sticky targets,
+    since the merged blocks come in under new addresses.
+54. **A wiring is shared by copies of a block until one is changed,** like an animation.
+    Changing it from one block gives that block its own entry.
+55. **Playing is a state of the room, not the save:** it starts off each time.

@@ -469,6 +469,11 @@ impl Saves {
             let limits = self.models.unwrap_or(super::classify::Limits::NONE);
             return super::blocks::call(&g, op, args, &limits);
         }
+        if super::wiring::routed(op) {
+            let (_, g) = self.current()?;
+            let shared = self.models.is_some_and(|l| l.shared);
+            return super::wiring::call(&g, op, args, shared);
+        }
         if super::script::routed(op) {
             let (_, g) = self.current()?;
             let shared = self.models.is_some_and(|l| l.shared);

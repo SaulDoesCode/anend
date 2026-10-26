@@ -18,6 +18,7 @@ pub mod scenes;
 pub mod settle;
 pub mod store;
 pub mod textures;
+pub mod wiring;
 
 pub use store::{GResult, Graph, Reader, Tx, View};
 
