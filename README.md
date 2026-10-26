@@ -25,6 +25,8 @@ It comes as:
 | the reader, night colours | a list's page (web) |
 | ![stats](app/docs/shots/web-stats.png) | ![filters](app/docs/shots/web-filters.png) |
 | stats (web) | filters (web) |
+| ![a chain](app/docs/shots/web-space-chain.png) | ![a bent block](app/docs/shots/web-block-bend.png) |
+| a chain of texts under its title (web) | a block bent by a ripple and a fold (web) |
 
 ## The views
 
@@ -34,10 +36,10 @@ Every view has the command bar at the bottom, and each view keeps its own text t
 | | |
 |---|---|
 | **memory** (Ctrl+1) | weum's memory view. **Enter** on text gsearches its sum and saves it when it's new. **Enter** on a number gsearches that bucket. **Ctrl+Enter** saves, **Shift+Enter** shows a key, **Delete** forgets. `Enlist` `List` `Delist` `Unlist` work on lists. **r / o / f** pick the bucket (reversed, ordinal, frequency), and **← →** gsearch the term's sums. Hover shows the gsum line, and texts that share a sum are underlined in its colour. The circles at the left edge are the buckets. **Alt+click** selects several texts to put in a list or tag. Right-click opens the menu: edit, tag, select, list, candidate, key, forget. |
-| **space** (Ctrl+2) | memory texts floating in a room ([three.js](https://threejs.org)), laid out by their sums. Clicking a text puts its triangle in the top bar: sides s (ordinal), r (reversed) and ⌊√(s·r)⌋. The arrow keys glide to the nearest text in that direction, and its card opens on the right. |
+| **space** (Ctrl+2) | memory texts floating in a room ([three.js](https://threejs.org)), laid out by their sums. Clicking a text puts its triangle in the top bar: sides s (ordinal), r (reversed) and ⌊√(s·r)⌋. The arrow keys glide to the nearest text in that direction, and its card opens on the right. It's also where you build: copies that inherit, have their own text or are detached; each placement's size; chains of texts that hang under their title; saved scenes, combined with overlaps settled; and blocks showing texts, pictures or colours, which move, resize, turn and bend. |
 | **lists** (Ctrl+3) | every list as a tile. A list's page has an editable name and members, and figures for the whole list: its sums, means, gsum and pfR chain. |
 | **reader** (Ctrl+4) | everything that matches, in pages. Short texts appear as a tiny grid, and notes appear as markdown. |
-| **notes** (Ctrl+5) | markdown notes, in a list by date, with tags and a read mode. A note can be attached to any entry. |
+| **notes** (Ctrl+5) | markdown notes, in a list by date, with tags and a read mode. A note can be attached to any entry. Typing stays quick in a note of any length. |
 | **tags** (Ctrl+6) | tags on any entry: pick tags (all or any) and see the entries that have them. |
 | **stats** (Ctrl+7) | figures for the whole save |
 | **models** (Ctrl+8) | the outline of a model spec (inputs, heads, data, critics). For now it says "not yet": classifiers are being moved onto the spec. |
@@ -66,6 +68,10 @@ entries. Identical texts are stored once, and an entry can borrow another's text
 save's `backups/` folder. **Import from weum** reads weum's `all-of-it.json` (made by
 `memory.backup` in weum), and the texts keep their keys. Saves from older anend versions
 aren't read.
+
+There's no limit on how long a text can be: one over 64 KiB is stored in pieces, and the
+views show long texts piece by piece. The limits a save does set (how much a call reads,
+the spelling check's size, and so on) are its own settings, under "limits of this save".
 
 Gematria modes are **ordinal** (a=1 … z=26), **reversed** (a=26 … z=1) and **frequency**
 (the letters sorted, so anagrams share a bucket). Byte sums (bytes valued 1–256) are a

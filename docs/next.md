@@ -54,8 +54,10 @@ departure says why in its commit).
 - Done (26 Oct): blocks turn (gizmo rings, quarter turns, packed rotation) and bend (a
   curtain ripple and a fold, bezier-shaped, edited on drawn curves; the block's menu).
 - Done: "Merging" (ticked: settling in `graph::settle`, scenes combine, merged blocks settle).
-- Next: the ▶ usable point (scenes in saves, safe copies, smooth long texts: README,
-  guide, PR offer); parity.md's gaps; the texture pipeline and the skybox; then parity.md's gaps; then block features.
+- Done: the ▶ usable point (README, guide "Building in the space", offered on PR #8).
+- Next: parity.md's gaps (saves folder setting, system fonts on the desktop, window frame
+  colour, HSL editing, the space's full search line); then the texture pipeline and the
+  skybox; then the scene-building lines. then parity.md's gaps; then block features.
 
 **After Stage A (19 Oct, late evening UTC), while the user tries it:**
 - `b5b6b22` docs/format.md "One model for a definition and its placed instances": Stage B's

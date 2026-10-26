@@ -125,7 +125,8 @@ docs/architecture.md (the whole).
       physics (answer 5).
       (26 Oct: `graph::settle`; a merged save's blocks settle in the room; scenes combine
       from the scenes window. Merges already worked on wholes: entries, scenes, models.)
-- [ ] ▶ **usable:** scenes in saves, copies that are safe, long texts that are smooth.
+- [x] ▶ **usable:** scenes in saves, copies that are safe, long texts that are smooth.
+      (26 Oct: README and guide written up; offered as an update on pull request #8.)
 - [ ] The language: s (docs/s.md, the user's spec) as the high-level form of the 5-bit
       format. Allocate the 5-bit format's unused escape space efficiently for s's tokens
       and suffix forms, and document the mapping in docs/format.md. Tail calls run in

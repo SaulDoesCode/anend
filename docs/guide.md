@@ -110,6 +110,42 @@ Hover a text for its card of numbers; click puts it in the bar and its triangle 
 ordinal, reversed and ⌊√(s·r)⌋) in the top bar. Shift+click and Ctrl+click pick the list
 and candidate. The room's colour is a setting.
 
+### Building in the space
+
+Texts in the space are placements of memory entries: the same entry can stand in many
+places, and taking a placement out of the room never touches the entry. Right-click a
+text for its menu.
+
+- **Copies.** *A copy that inherits* shows its entry's text as it changes: edit the
+  entry and every inheriting copy follows. *Edit this placement only* gives one copy its
+  own text over the entry's (◆), and *follow the entry again* drops it. *A detached copy*
+  keeps the text as it read when you made it (◇), whatever happens to the entry later.
+- **Sizes.** Each placement has its own size: − and + in its menu or its details window,
+  *default* to follow the physics window's text size.
+- **Chains.** A chain is a title with texts hanging under it in order, like the
+  paragraphs of a piece. *Start a chain with this as its title*, then right-click other
+  texts and *add it to the chain*. Drag any part and the chain comes along. A member's
+  menu moves it earlier or later, cuts the chain before it (it heads a new chain), or
+  takes it out; the title's menu *breaks the chain*, leaving its texts in the room. A
+  note in the space shows as a chain of two: its title, and its body under it.
+- **Scenes.** *Save* (or the scenes window, the folder chip) keeps the room's texts as a
+  scene of the save; `#name` opens one. *Combine into…* copies one scene into another:
+  whatever lands on what's there is moved out of the way, the same way every time.
+- **Blocks.** The blocks window (the cube chip) makes a block of the selected text, a
+  picture or a colour. Click a block for its gizmo: the arrows move it, the knobs on its
+  faces resize it (the texture tiles, it doesn't stretch), the rings turn it, the ball
+  moves it across the view; Shift snaps to quarter units and 15° turns. Right-click a
+  block for its menu. *Bend it…* opens two curves in the blocks window: a *curtain
+  ripple* (waves across its width) and a *fold* (a curve from a fold line to the edges).
+  Drag the dots on each curve to shape it and the sliders to set how much, how many
+  waves and where; the texture follows the bend, and clicks hit the bent shape.
+- **Long texts** show their first piece (80 characters a line, six lines a piece, both
+  settings) with how many more there are.
+
+![a chain under its title](guide/chain.png)
+
+![a block bent by a ripple and a fold](guide/bend.png)
+
 ## Lists
 
 ![a list's page](guide/lists.png)
@@ -132,7 +168,9 @@ Lists are how you tell anend what goes together, and what models learn from.
 
 - **Notes** (**Ctrl+5**): newest first on the left, the editor on the right. The first
   line, `# like this`, is the title; the rest is markdown; tags go in their box.
-  **Ctrl+S** saves. The bar narrows the list by words. Deleting takes two clicks.
+  **Ctrl+S** saves. The bar narrows the list by words. Deleting takes two clicks. Long
+  notes stay quick to type in at any length: only the part you're typing in is sent and
+  coloured again.
 - **The reader** (**Ctrl+4**): notes and texts as cards, a page at a time. Click one (or
   Enter on it) to read it big; **← →** step through, **Esc** goes back.
 - **Tags** (**Ctrl+6**): every tag with its count. Click picks one, Ctrl or Shift+click
