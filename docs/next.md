@@ -51,8 +51,10 @@ departure says why in its commit).
   in the memory view and the space's labels; records over 64 KiB in `graph long`; the
   limits as the save's settings. Later, if wanted: `text.window` and per-piece edits.
 - Done: "Chains" (ticked; blocks in chains not yet).
-- Next (the user, 25 Oct): block rotation together with the bending shader, one schema
-  change (#5 rotation, #21 curved blocks; a new save, no migration). Then merging; then parity.md's gaps; then block features.
+- Done (26 Oct): blocks turn (gizmo rings, quarter turns, packed rotation) and bend (a
+  curtain ripple and a fold, bezier-shaped, edited on drawn curves; the block's menu).
+- Next: merging; then the ▶ usable point; parity.md's gaps; the texture pipeline and the
+  skybox; then parity.md's gaps; then block features.
 
 **After Stage A (19 Oct, late evening UTC), while the user tries it:**
 - `b5b6b22` docs/format.md "One model for a definition and its placed instances": Stage B's

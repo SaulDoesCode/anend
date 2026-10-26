@@ -561,6 +561,10 @@ struct Sp {
     menu: Signal<Option<SpaceEvent>>,
     /// bumped when a scene is saved, so the scenes window reads them again
     scenes_rev: Signal<u64>,
+    /// the right-click menu on a block: where
+    bmenu: Signal<Option<(f64, f64)>>,
+    /// the blocks window shows the selected block's bend editor open
+    bend_open: Signal<bool>,
 }
 
 impl Sp {
@@ -1263,6 +1267,8 @@ pub fn Space() -> Element {
         block_use: use_signal(|| (0, 0)),
         menu: use_signal(|| None),
         scenes_rev: use_signal(|| 0),
+        bmenu: use_signal(|| None),
+        bend_open: use_signal(|| false),
     };
     // the engine and its channel
     {
@@ -1484,6 +1490,13 @@ pub fn Space() -> Element {
                     },
                 }
             }
+            if let (Some((x, y)), Some(b)) = ((sp.bmenu)(), (sp.block)()) {
+                BlockMenu { b, x, y, sp_bmenu: sp.bmenu, bend_open: sp.bend_open,
+                    on_send: move |v: Value| sp.send(v),
+                    on_duplicate: { let api = api_b.clone(); move |b: Value| duplicate_block(ui, api.clone(), sp, b) },
+                    on_delete: { let api = api_b.clone(); move |id: String| delete_block(ui, api.clone(), sp, id) },
+                }
+            }
             if let Some(m) = (sp.menu)() {
                 SpaceMenu { ev: m, sp_menu: sp.menu, on_send: move |v: Value| sp.send(v), on_gsearch: { let api = api_b.clone(); move |(n, md): (u64, Mode)| envale(ui, api.clone(), sp, n, md) } }
             }
@@ -1502,6 +1515,7 @@ pub fn Space() -> Element {
                     on_send: move |v: Value| sp.send(v),
                     on_duplicate: { let api = api_b.clone(); move |b: Value| duplicate_block(ui, api.clone(), sp, b) },
                     on_delete: { let api = api_b.clone(); move |id: String| delete_block(ui, api.clone(), sp, id) },
+                    bend_open: sp.bend_open,
                 }
             }
             if p.space.show_details {
@@ -1595,7 +1609,7 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
             dioxus::dioxus_core::spawn_forever(async move {
                 match api.call("blocks.add", args).await {
                     Ok(r) => {
-                        let id = r["ids"][0].as_u64();
+                        let id = r["ids"][0].clone();
                         let textures = dress(ui, &api, r["textures"].clone()).await;
                         sp.send(json!({ "cmd": "blocks", "blocks": r["blocks"], "textures": textures, "added": r["ids"], "select": id }));
                         count_blocks(api, sp).await;
@@ -1606,6 +1620,10 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
             });
         }
         // an undo took back blocks just added, or put back blocks just deleted
+        "blockmenu" => {
+            let mut m = sp.bmenu;
+            m.set(Some((e.x, e.y)));
+        }
         "blockgone" => {
             let ids = e.data.clone();
             dioxus::dioxus_core::spawn_forever(async move {
@@ -1811,6 +1829,7 @@ fn Blocks(
     on_send: EventHandler<Value>,
     on_duplicate: EventHandler<Value>,
     on_delete: EventHandler<String>,
+    bend_open: Signal<bool>,
 ) -> Element {
     let ui = ui();
     let api = api();
@@ -1930,14 +1949,292 @@ fn Blocks(
                         {field(b.clone(), "h")}
                         {field(b.clone(), "d")}
                     }
+                    TurnRow { b: b.clone(), on_send }
+                    details { class: "bend", open: bend_open(),
+                        summary { onclick: move |e| { e.prevent_default(); let o = bend_open(); let mut bo = bend_open; bo.set(!o); }, "bend" span { class: "dim small", {bend_words(&b["bend"])} } }
+                        if bend_open() {
+                            BendEditor { b: b.clone(), on_send }
+                        }
+                    }
                     div { class: "row",
                         button { class: "btn small", title: "a copy beside it (the texture is stored once)", onclick: { let b = b.clone(); move |_| on_duplicate.call(b.clone()) }, Icon { name: "copy" } "copy" }
                         button { class: "btn small", title: "{ui.key_of(Action::DeleteText)}", onclick: { let id = b["id"].as_str().unwrap_or("").to_string(); move |_| on_delete.call(id.clone()) }, Icon { name: "delete" } "delete" }
                     }
                 }
             } else {
-                p { class: "dim small", "Click a block to select it: its arrows move it, the knobs on its faces resize it (the texture tiles, it doesn't stretch), the ball moves it across the view. Shift snaps to quarter units." }
+                p { class: "dim small", "Click a block to select it: its arrows move it, the knobs on its faces resize it (the texture tiles, it doesn't stretch), the rings turn it, the ball moves it across the view. Shift snaps to quarter units and 15° turns. Right-click a block for its menu (bend, straighten, turn)." }
             }
+        }
+    }
+}
+
+/// a block's turn in words: the angle and the axis
+fn turn_words(rot: &Value) -> String {
+    let q: Vec<f64> = rot
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_f64).collect())
+        .unwrap_or_default();
+    if q.len() != 4 || (q[3] - 1.0).abs() < 1e-6 {
+        return "not turned".into();
+    }
+    let angle = 2.0 * q[3].clamp(-1.0, 1.0).acos();
+    let s = (1.0 - q[3] * q[3]).sqrt().max(1e-9);
+    format!(
+        "turned {:.0}° about ({:.2}, {:.2}, {:.2})",
+        angle.to_degrees(),
+        q[0] / s,
+        q[1] / s,
+        q[2] / s
+    )
+}
+
+/// the quaternion product a·b, as [x, y, z, w]
+fn qmul(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
+    [
+        a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+        a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+        a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+        a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+    ]
+}
+
+fn rot_of(b: &Value) -> [f64; 4] {
+    let q: Vec<f64> = b["rot"]
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_f64).collect())
+        .unwrap_or_default();
+    if q.len() == 4 {
+        [q[0], q[1], q[2], q[3]]
+    } else {
+        [0.0, 0.0, 0.0, 1.0]
+    }
+}
+
+/// a block's turn and buttons to turn it a quarter about each axis or not at all (the
+/// rings on the gizmo turn it freely)
+#[component]
+fn TurnRow(b: Value, on_send: EventHandler<Value>) -> Element {
+    let id = b["id"].as_str().unwrap_or("").to_string();
+    let q = rot_of(&b);
+    let quarter = move |axis: usize| {
+        let h = std::f64::consts::FRAC_PI_4;
+        let mut r = [0.0, 0.0, 0.0, h.cos()];
+        r[axis] = h.sin();
+        qmul(r, q)
+    };
+    let turn = |r: [f64; 4]| json!({ "rot": r });
+    rsx! {
+        div { class: "row turn-row",
+            span { class: "dim small", "{turn_words(&b[\"rot\"])}" }
+            for (i, name) in ["x", "y", "z"].into_iter().enumerate() {
+                button { key: "{name}", class: "btn small", title: "a quarter turn about {name} (the rings turn it freely)",
+                    onclick: { let id = id.clone(); move |_| on_send.call(json!({ "cmd": "blockfields", "id": id, "t": turn(quarter(i)) })) },
+                    "↻ {name}" }
+            }
+            button { class: "btn small", title: "back to not turned",
+                onclick: { let id = id.clone(); move |_| on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "rot": [0, 0, 0, 1] } })) },
+                "no turn" }
+        }
+    }
+}
+
+/// a bend in words
+fn bend_words(b: &Value) -> String {
+    let r = b["ripple"]["amount"].as_f64().unwrap_or(0.0);
+    let f = b["fold"]["amount"].as_f64().unwrap_or(0.0);
+    match (r != 0.0, f != 0.0) {
+        (false, false) => " · straight".into(),
+        (true, false) => format!(" · a ripple of {r:.2}"),
+        (false, true) => format!(" · a fold of {f:.2}"),
+        (true, true) => format!(" · a ripple of {r:.2} and a fold of {f:.2}"),
+    }
+}
+
+/// a bend with its defaults filled in (the block's, or straight)
+fn bend_of(b: &Value) -> Value {
+    let d = json!({
+        "ripple": { "amount": 0.0, "freq": 2.0, "phase": 0.0, "c1": 1.0, "c2": -1.0 },
+        "fold": { "amount": 0.0, "at": 0.0, "c1": 0.0, "c2": 1.0 },
+    });
+    let mut out = d.clone();
+    for part in ["ripple", "fold"] {
+        if let Some(o) = b["bend"][part].as_object() {
+            for (k, v) in o {
+                out[part][k] = v.clone();
+            }
+        }
+    }
+    out
+}
+
+/// the bend editor: each shape's curve drawn with its two control points to drag up and
+/// down (the cubic bezier's c1 and c2), and sliders for how much, how often and where;
+/// every change shows on the block as it's made
+#[component]
+fn BendEditor(b: Value, on_send: EventHandler<Value>) -> Element {
+    let id = b["id"].as_str().unwrap_or("").to_string();
+    let bend = bend_of(&b);
+    // which control point is being dragged: (shape, 1 or 2)
+    let mut dragging: Signal<Option<(&'static str, u8)>> = use_signal(|| None);
+    let send = {
+        let id = id.clone();
+        move |nb: Value| on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "bend": nb } }))
+    };
+    let set = {
+        let bend = bend.clone();
+        let send = send.clone();
+        move |part: &'static str, key: &'static str, v: f64| {
+            let mut nb = bend.clone();
+            nb[part][key] = json!(v);
+            send(nb);
+        }
+    };
+    let slider = {
+        let bend = bend.clone();
+        let set = set.clone();
+        move |part: &'static str, key: &'static str, label: &'static str, lo: f64, hi: f64, step: f64| {
+            let v = bend[part][key].as_f64().unwrap_or(0.0);
+            let set = set.clone();
+            rsx! {
+                label { class: "bend-slider",
+                    span { "{label}" }
+                    input { r#type: "range", min: "{lo}", max: "{hi}", step: "{step}", value: "{v}",
+                        oninput: move |e| { if let Ok(x) = e.value().parse::<f64>() { set(part, key, x) } } }
+                    span { class: "num", "{v:.2}" }
+                }
+            }
+        }
+    };
+    // the curves: (x, y) points of a cubic bezier with ends p0, p3 and controls c1, c2
+    let (w, h) = (220.0f64, 90.0f64);
+    let ry = |v: f64| h / 2.0 - v * 28.0;
+    let fy = |v: f64| h - 12.0 - v * 56.0;
+    let path = |p0: f64, c1: f64, c2: f64, p3: f64, y: &dyn Fn(f64) -> f64| {
+        let mut d = String::new();
+        for i in 0..=40 {
+            let t = i as f64 / 40.0;
+            let v = (1.0 - t).powi(3) * p0
+                + 3.0 * (1.0 - t).powi(2) * t * c1
+                + 3.0 * (1.0 - t) * t * t * c2
+                + t.powi(3) * p3;
+            d += &format!(
+                "{}{:.1},{:.1} ",
+                if i == 0 { "M" } else { "L" },
+                10.0 + t * (w - 20.0),
+                y(v)
+            );
+        }
+        d
+    };
+    let r = &bend["ripple"];
+    let f = &bend["fold"];
+    let (rc1, rc2) = (r["c1"].as_f64().unwrap_or(1.0), r["c2"].as_f64().unwrap_or(-1.0));
+    let (fc1, fc2) = (f["c1"].as_f64().unwrap_or(0.0), f["c2"].as_f64().unwrap_or(1.0));
+    let ripple_path = path(0.0, rc1, rc2, 0.0, &ry);
+    let fold_path = path(0.0, fc1, fc2, 1.0, &fy);
+    let x1 = 10.0 + (w - 20.0) / 3.0;
+    let x2 = 10.0 + 2.0 * (w - 20.0) / 3.0;
+    // a drag moves the dragged control point to the pointer's height
+    let drag_to = {
+        let set = set.clone();
+        move |y: f64| {
+            if let Some((part, n)) = dragging() {
+                let v = if part == "ripple" {
+                    (h / 2.0 - y) / 28.0
+                } else {
+                    (h - 12.0 - y) / 56.0
+                };
+                let v = (v.clamp(-3.0, 3.0) * 100.0).round() / 100.0;
+                set(part, if n == 1 { "c1" } else { "c2" }, v);
+            }
+        }
+    };
+    let curve = |part: &'static str, d: String, c1: f64, c2: f64, y: &dyn Fn(f64) -> f64, base: f64| {
+        let drag_to = drag_to.clone();
+        let (y1, y2, yb) = (y(c1), y(c2), base);
+        let y_end = y(if part == "fold" { 1.0 } else { 0.0 });
+        rsx! {
+            svg { class: "bend-curve", width: "{w}", height: "{h}", view_box: "0 0 {w} {h}",
+                line { x1: "10", y1: "{yb}", x2: "{w - 10.0}", y2: "{yb}", class: "axis" }
+                line { x1: "10", y1: "{yb}", x2: "{x1}", y2: "{y1}", class: "handle" }
+                line { x1: "{w - 10.0}", y1: "{y_end}", x2: "{x2}", y2: "{y2}", class: "handle" }
+                path { d: "{d}", class: "curve" }
+                circle { cx: "{x1}", cy: "{y1}", r: "7", class: "ctl", onmousedown: move |e| { e.prevent_default(); dragging.set(Some((part, 1))) } }
+                circle { cx: "{x2}", cy: "{y2}", r: "7", class: "ctl", onmousedown: move |e| { e.prevent_default(); dragging.set(Some((part, 2))) } }
+                if dragging().is_some_and(|(p, _)| p == part) {
+                    rect { x: "0", y: "0", width: "{w}", height: "{h}", class: "catch",
+                        onmousemove: move |e| drag_to(e.element_coordinates().y),
+                        onmouseup: move |_| dragging.set(None),
+                        onmouseleave: move |_| dragging.set(None),
+                    }
+                }
+            }
+        }
+    };
+    rsx! {
+        div { class: "bend-editor",
+            div { class: "bend-part",
+                b { "curtain ripple" } span { class: "dim small", " a wave across its width; drag the dots to shape one period" }
+                {curve("ripple", ripple_path, rc1, rc2, &ry, h / 2.0)}
+                {slider("ripple", "amount", "how much", -2.0, 2.0, 0.01)}
+                {slider("ripple", "freq", "how many waves", 0.5, 16.0, 0.5)}
+                {slider("ripple", "phase", "shifted by", 0.0, 1.0, 0.01)}
+            }
+            div { class: "bend-part",
+                b { "fold" } span { class: "dim small", " a curve across the middle, from the fold line to the edges" }
+                {curve("fold", fold_path, fc1, fc2, &fy, h - 12.0)}
+                {slider("fold", "amount", "how much", -3.0, 3.0, 0.01)}
+                {slider("fold", "at", "fold line", -1.0, 1.0, 0.01)}
+            }
+            button { class: "btn small", onclick: { let id = id.clone(); move |_| on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "bend": Value::Null } })) }, "straighten" }
+        }
+    }
+}
+
+/// the right-click menu on a block: bend it (the blocks window's bend editor), straighten
+/// it, turn it, copy, delete
+#[component]
+fn BlockMenu(
+    b: Value,
+    x: f64,
+    y: f64,
+    sp_bmenu: Signal<Option<(f64, f64)>>,
+    bend_open: Signal<bool>,
+    on_send: EventHandler<Value>,
+    on_duplicate: EventHandler<Value>,
+    on_delete: EventHandler<String>,
+) -> Element {
+    let ui = ui();
+    let mut close = move || sp_bmenu.set(None);
+    let id = b["id"].as_str().unwrap_or("").to_string();
+    let title = match b["kind"].as_str().unwrap_or("") {
+        "text" => format!("a block of “{}”", b["about"]["text"].as_str().unwrap_or("a text")),
+        "picture" => "a picture block".to_string(),
+        _ => format!("a block of colour {}", b["texture"].as_str().unwrap_or("")),
+    };
+    let q = rot_of(&b);
+    let quarter_y = {
+        let h = std::f64::consts::FRAC_PI_4;
+        qmul([0.0, h.sin(), 0.0, h.cos()], q)
+    };
+    rsx! {
+        div { class: "backdrop", onclick: move |_| close(), oncontextmenu: move |e| { e.prevent_default(); close() } }
+        div { class: "menu smenu", role: "menu",
+            style: "left: min({x}px, calc(100vw - 330px)); top: max(8px, min({y}px, calc(100vh - 300px)));",
+            div { class: "title", "{title}" }
+            div { class: "title dim small", {format!("{}{}", turn_words(&b["rot"]), bend_words(&b["bend"]))} }
+            button { role: "menuitem", onclick: move |_| { set_pref(ui, |p| p.space.show_blocks = true); let mut bo = bend_open; bo.set(true); close(); },
+                Icon { name: "edit" } "bend it…" span { class: "dim small", " (the curves in the blocks window)" } }
+            button { role: "menuitem", onclick: { let id = id.clone(); move |_| { on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "bend": Value::Null } })); close(); } },
+                Icon { name: "close" } "straighten" }
+            button { role: "menuitem", onclick: { let id = id.clone(); move |_| { on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "rot": quarter_y } })); close(); } },
+                Icon { name: "refresh" } "a quarter turn about the upright" }
+            button { role: "menuitem", onclick: { let id = id.clone(); move |_| { on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "rot": [0, 0, 0, 1] } })); close(); } },
+                Icon { name: "undo" } "no turn" }
+            button { role: "menuitem", onclick: { let b = b.clone(); move |_| { on_duplicate.call(b.clone()); close(); } },
+                Icon { name: "copy" } "a copy beside it" }
+            button { role: "menuitem", onclick: { let id = id.clone(); move |_| { on_delete.call(id.clone()); close(); } },
+                Icon { name: "delete" } "delete it" kbd { "{ui.key_of(Action::DeleteText)}" } }
         }
     }
 }
@@ -2270,7 +2567,9 @@ fn Win(id: String, title: Element, at: (f64, f64), on_close: EventHandler<()>, c
         // layout itself, so a window left far right comes back when the room narrows
         div {
             class: "win",
-            style: "left: clamp(0px, {x:.0}px, max(0px, calc(100% - var(--win-w)))); top: clamp(0px, {y:.0}px, max(0px, calc(100% - var(--over-bottom, 40px) - 44px)));",
+            // never past the bottom: its height is what's left below where it starts (it
+            // scrolls inside); a tall one moves up when there isn't room for 320 px
+            style: "left: clamp(0px, {x:.0}px, max(0px, calc(100% - var(--win-w)))); top: clamp(0px, min({y:.0}px, calc(100% - var(--over-bottom, 40px) - 320px)), max(0px, calc(100% - var(--over-bottom, 40px) - 44px))); max-height: calc(100% - var(--over-bottom, 40px) - 8px - clamp(0px, min({y:.0}px, calc(100% - var(--over-bottom, 40px) - 320px)), max(0px, calc(100% - var(--over-bottom, 40px) - 44px))));",
             role: "dialog",
             div {
                 class: "win-head",

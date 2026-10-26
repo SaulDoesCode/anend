@@ -36,6 +36,25 @@ fn transform(v: &Value, base: Transform) -> Transform {
         w: num(v, "w").unwrap_or(base.w),
         h: num(v, "h").unwrap_or(base.h),
         d: num(v, "d").unwrap_or(base.d),
+        rot: v
+            .get("rot")
+            .and_then(Value::as_array)
+            .filter(|a| a.len() == 4)
+            .and_then(|a| {
+                Some([
+                    a[0].as_f64()? as f32,
+                    a[1].as_f64()? as f32,
+                    a[2].as_f64()? as f32,
+                    a[3].as_f64()? as f32,
+                ])
+            })
+            .unwrap_or(base.rot),
+        // `bend: null` straightens it
+        bend: match v.get("bend") {
+            None => base.bend,
+            Some(Value::Null) => None,
+            Some(b) => serde_json::from_value(b.clone()).ok().or(base.bend),
+        },
     }
 }
 

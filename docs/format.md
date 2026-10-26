@@ -297,6 +297,11 @@ position (96 bits), 2 bits and a font size of 0 (5 bits): 108 bits, 13.5 bytes. 
 with no rotation, unit scale and no colour costs the same: its R, S and C take the 5 bits
 the font size takes in a text.
 
+**A block's bend** (26 Oct) is kept in X: `B`, version 1, then nine little endian f32s
+(the ripple's amount, frequency, phase, c1, c2; the fold's amount, line, c1, c2), left
+out when the block is straight (`graph::blocks::Bend`). Its turn is R's packed rotation,
+left out for no turn.
+
 **An inheriting text with its own text** (25 Oct) keeps it in X as a JSON object,
 `{"text": "…"}`, with flag 128 set; it shows that text instead of its entry's until the
 override is dropped. A saved scene's rows carry it as `own`, and a detached text as

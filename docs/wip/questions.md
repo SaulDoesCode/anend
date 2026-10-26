@@ -129,3 +129,15 @@ The answers left these open. Each is written into the design as its default.
 29. **Adding a text to a chain takes that placement out of the room** (it now hangs in
     the chain); the entry is unchanged.
 30. **Breaking a chain keeps its members in the room** as texts where they hung.
+
+## Turning and bending blocks (26 Oct)
+
+31. **Both bends move the block through its depth (its own z), as a curtain or a folded
+    page does,** and stack by adding. A ripple's amount is its peak; its period's shape is
+    a cubic bezier with ends at 0 (default controls 1 and -1, near a sine). The fold bends
+    both sides of its line back by the same profile (default controls 0 and 1, a smooth
+    rise); it could instead bend each side its own way.
+32. **The bend is made on the geometry, not in a GPU shader,** so picking and ray hits
+    follow it exactly with no second copy of the maths; a bent block has up to 512 slices.
+33. **The gizmo's arrows still move along the world's axes; its knobs resize along the
+    block's own.** Moving along the block's axes would be the other choice.

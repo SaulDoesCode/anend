@@ -58,6 +58,37 @@ const cosine = (a, b) => {
 
 const TYPES = ['word', 'name', 'number', 'date', 'time', 'link', 'email', 'hashtag', 'noun', 'verb', 'adjective', 'adverb', 'pronoun', 'determiner', 'preposition', 'conjunction', 'interjection'];
 
+// a block's bend at u across its width (0 the left edge, 1 the right): how far that
+// slice moves along the block's depth. The same as core's `Bend::offset`: a ripple whose
+// one-period profile is the cubic bezier 0, c1, c2, 0 scaled to peak at its amount, plus
+// a fold about the line `at`, each side the bezier 0, c1, c2, 1 times its amount.
+export function bendAt(bend, u) {
+  let z = 0;
+  const r = bend && bend.ripple;
+  if (r && r.amount && r.freq > 0) {
+    const s = (((u * r.freq + (r.phase || 0)) % 1) + 1) % 1;
+    z += (r.amount * wave(s, r.c1, r.c2)) / wavePeak(r.c1, r.c2);
+  }
+  const f = bend && bend.fold;
+  if (f && f.amount) {
+    const line = 0.5 + (f.at || 0) * 0.5;
+    let t = u >= line ? (u - line) / Math.max(1e-6, 1 - line) : (line - u) / Math.max(1e-6, line);
+    t = Math.min(1, Math.max(0, t));
+    z += f.amount * (3 * (1 - t) * (1 - t) * t * f.c1 + 3 * (1 - t) * t * t * f.c2 + t * t * t);
+  }
+  return z;
+}
+function wave(s, c1, c2) { return 3 * (1 - s) * (1 - s) * s * c1 + 3 * (1 - s) * s * s * c2; }
+function wavePeak(c1, c2) {
+  let m = 0;
+  for (let i = 0; i <= 64; i++) m = Math.max(m, Math.abs(wave(i / 64, c1, c2)));
+  return m > 1e-6 ? m : 1;
+}
+// what a block's geometry depends on (its sides and bend)
+function shapeKey(t) { return JSON.stringify([t.w, t.h, t.d, t.bend || null]); }
+function localAxis(i) { const a = new THREE.Vector3(); a.setComponent(i, 1); return a; }
+function turnOf(b) { const r = b.rot || [0, 0, 0, 1]; return new THREE.Quaternion(r[0], r[1], r[2], r[3]); }
+
 export class Space {
   constructor(host, send) {
     this.host = host;
@@ -877,24 +908,38 @@ export class Space {
     return m;
   }
 
-  // a box whose UVs count tiles: each face's u and v run over its sides in units
+  // a box whose UVs count tiles: each face's u and v run over its sides in units. A bent
+  // block (`bend`, core's `graph::blocks::Bend`) is cut into slices across its width
+  // and each slice moved along its depth by `bendAt`, so its texture, picking and ray
+  // hits all follow the bent shape exactly. Faces are shaded by their direction (the top
+  // brightest, the bottom darkest), so a box and a curve both read.
   boxGeometry(t) {
-    const g = new THREE.BoxGeometry(t.w, t.h, t.d);
-    const uv = g.attributes.uv;
-    // BoxGeometry's faces: +x, -x, +y, -y, +z, -z, four corners each
-    const spans = [[t.d, t.h], [t.d, t.h], [t.w, t.d], [t.w, t.d], [t.w, t.h], [t.w, t.h]];
-    for (let f = 0; f < 6; f++) {
-      for (let i = 0; i < 4; i++) {
-        const k = f * 4 + i;
-        uv.setXY(k, uv.getX(k) * spans[f][0] / BLOCK_TILE, uv.getY(k) * spans[f][1] / BLOCK_TILE);
-      }
+    const bent = !!(t.bend && ((t.bend.ripple && t.bend.ripple.amount) || (t.bend.fold && t.bend.fold.amount)));
+    const freq = bent && t.bend.ripple && t.bend.ripple.amount ? Math.max(1, t.bend.ripple.freq || 0) : 1;
+    const seg = bent ? Math.min(512, Math.max(16, Math.ceil(freq * 24))) : 1;
+    const g = new THREE.BoxGeometry(t.w, t.h, t.d, seg, 1, 1);
+    const uv = g.attributes.uv, pos = g.attributes.position, nor = g.attributes.normal;
+    for (let i = 0; i < uv.count; i++) {
+      const ax = Math.abs(nor.getX(i)), ay = Math.abs(nor.getY(i));
+      const span = ax > 0.5 ? [t.d, t.h] : ay > 0.5 ? [t.w, t.d] : [t.w, t.h];
+      uv.setXY(i, uv.getX(i) * span[0] / BLOCK_TILE, uv.getY(i) * span[1] / BLOCK_TILE);
     }
     uv.needsUpdate = true;
-    // each face a shade: the top brightest, the bottom darkest, so the box reads
-    const shade = [0.86, 0.86, 1, 0.72, 0.94, 0.94];
-    const col = new Float32Array(24 * 3);
-    for (let f = 0; f < 6; f++) for (let i = 0; i < 4; i++) col.set([shade[f], shade[f], shade[f]], (f * 4 + i) * 3);
+    if (bent) {
+      for (let i = 0; i < pos.count; i++) {
+        const u = (pos.getX(i) + t.w / 2) / t.w;
+        pos.setZ(i, pos.getZ(i) + bendAt(t.bend, u));
+      }
+      pos.needsUpdate = true;
+      g.computeVertexNormals();
+    }
+    const col = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) {
+      const v = 0.86 + 0.14 * nor.getY(i) + 0.08 * Math.abs(nor.getZ(i));
+      col.set([v, v, v], i * 3);
+    }
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.userData.shape = shapeKey(t);
     return g;
   }
 
@@ -924,12 +969,13 @@ export class Space {
 
   shapeBlock(o) {
     const { b, mesh } = o;
-    const p = mesh.geometry.parameters;
-    if (p.width !== b.w || p.height !== b.h || p.depth !== b.d) {
+    if (mesh.geometry.userData.shape !== shapeKey(b)) {
       mesh.geometry.dispose();
       mesh.geometry = this.boxGeometry(b);
     }
     mesh.position.set(b.x, b.y, b.z);
+    const r = b.rot || [0, 0, 0, 1];
+    mesh.quaternion.set(r[0], r[1], r[2], r[3]);
     if (this.selBlock === b.id) this.placeGizmo();
   }
 
@@ -943,8 +989,8 @@ export class Space {
   }
 
   blockOut(o) {
-    const { id, kind, texture, x, y, z, w, h, d } = o.b;
-    return { id, kind, texture, x, y, z, w, h, d };
+    const { id, kind, texture, x, y, z, w, h, d, rot, bend } = o.b;
+    return { id, kind, texture, x, y, z, w, h, d, rot: rot || [0, 0, 0, 1], bend: bend || null };
   }
 
   pickBlock(id) {
@@ -996,6 +1042,17 @@ export class Space {
       this.gizmoKnobs.push(knob);
       this.scene.add(knob);
     });
+    // the rotation rings: one about each axis, dragged around the block's centre
+    const flat = new THREE.Vector3(0, 0, 1);
+    axes.forEach((a, i) => {
+      const q = new THREE.Quaternion().setFromUnitVectors(flat, a);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(1.25, 0.018, 8, 72), mat(colours[i]));
+      ring.material.opacity = 0.75;
+      ring.quaternion.copy(q);
+      const grip = new THREE.Mesh(new THREE.TorusGeometry(1.25, 0.09, 6, 48), new THREE.MeshBasicMaterial({ visible: false }));
+      grip.quaternion.copy(q);
+      for (const m of [ring, grip]) { m.userData.handle = { mode: 'rotate', axis: i }; m.renderOrder = 999; g.add(m); }
+    });
     const ball = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 12), mat(0xf0e6d0));
     ball.userData.handle = { mode: 'plane', axis: -1 };
     ball.renderOrder = 1002;
@@ -1019,9 +1076,11 @@ export class Space {
     this.gizmo.position.copy(c);
     this.gizmo.scale.setScalar(s);
     const half = [b.w / 2, b.h / 2, b.d / 2];
+    const q = turnOf(b);
     this.gizmoKnobs.forEach((k, i) => {
-      k.position.copy(c);
-      k.position.setComponent(i, c.getComponent(i) + half[i]);
+      // on the block's own faces, turned with it
+      k.position.copy(c).add(localAxis(i).applyQuaternion(q).multiplyScalar(half[i]));
+      k.quaternion.copy(q);
       k.scale.setScalar(s);
     });
   }
@@ -1046,14 +1105,14 @@ export class Space {
   }
 
   // pixels on screen per unit along a world axis at a point
-  screenAxis(at, axis) {
-    const toPx = (v) => {
-      const p = v.clone().project(this.camera);
-      return new THREE.Vector2((p.x * 0.5 + 0.5) * this.size.w, (-p.y * 0.5 + 0.5) * this.size.h);
-    };
-    const a = new THREE.Vector3();
-    a.setComponent(axis, 1);
-    return toPx(at.clone().add(a)).sub(toPx(at));
+  screenAxis(at, axis, along) {
+    const a = along || localAxis(axis);
+    return this.toPx(at.clone().add(a)).sub(this.toPx(at));
+  }
+
+  toPx(v) {
+    const p = v.clone().project(this.camera);
+    return new THREE.Vector2((p.x * 0.5 + 0.5) * this.size.w, (-p.y * 0.5 + 0.5) * this.size.h);
   }
 
   startBlockDrag(e, hit) {
@@ -1063,11 +1122,18 @@ export class Space {
     const at = new THREE.Vector3(b.x, b.y, b.z);
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
     const depth = at.clone().sub(this.camera.position).dot(fwd);
+    const mode = hit.handle ? hit.handle.mode : 'plane', axis = hit.handle ? hit.handle.axis : -1;
+    // a side's knob pulls along the block's own (turned) axis
+    const along = mode === 'scale' ? localAxis(axis).applyQuaternion(turnOf(b)) : null;
+    const c = this.toPx(at);
     this.bdrag = {
-      o, mode: hit.handle ? hit.handle.mode : 'plane', axis: hit.handle ? hit.handle.axis : -1,
-      x0: e.clientX, y0: e.clientY, from: { ...b }, depth, moved: false,
-      sdir: hit.handle && hit.handle.axis >= 0 ? this.screenAxis(at, hit.handle.axis) : null,
+      o, mode, axis, along,
+      x0: e.clientX, y0: e.clientY, from: { ...b, rot: [...(b.rot || [0, 0, 0, 1])] }, depth, moved: false,
+      sdir: axis >= 0 && mode !== 'rotate' ? this.screenAxis(at, axis, along) : null,
       off: at.clone().sub(this.rayAt(e.clientX, e.clientY, depth)),
+      centre: c, a0: Math.atan2(e.clientY - c.y, e.clientX - c.x),
+      // turning about an axis that points at the viewer turns the other way on screen
+      toward: localAxis(Math.max(0, axis)).dot(this.camera.position.clone().sub(at)) > 0,
     };
     try { this.host.setPointerCapture(e.pointerId); } catch { /* fine without */ }
     return true;
@@ -1086,6 +1152,13 @@ export class Space {
     if (d.mode === 'plane') {
       const w = this.rayAt(e.clientX, e.clientY, d.depth).add(d.off);
       b.x = snap(w.x); b.y = snap(w.y); b.z = snap(w.z);
+    } else if (d.mode === 'rotate') {
+      let ang = Math.atan2(e.clientY - d.centre.y, e.clientX - d.centre.x) - d.a0;
+      if (d.toward) ang = -ang;
+      // Shift: steps of 15°
+      if (e.shiftKey) ang = Math.round(ang / (Math.PI / 12)) * (Math.PI / 12);
+      const q = new THREE.Quaternion().setFromAxisAngle(localAxis(d.axis), ang).multiply(turnOf(d.from)).normalize();
+      b.rot = [q.x, q.y, q.z, q.w];
     } else {
       const m = new THREE.Vector2(e.clientX - d.x0, e.clientY - d.y0);
       const len2 = Math.max(1e-6, d.sdir.lengthSq());
@@ -1096,8 +1169,9 @@ export class Space {
         const s = sides[d.axis];
         const size = Math.max(0.05, snap(f[s] + units));
         b[s] = size;
-        // the opposite face stays put
-        b[k] = f[k] + (size - f[s]) / 2;
+        // the opposite face stays put, along the block's own axis
+        const shift = (size - f[s]) / 2;
+        b.x = f.x + d.along.x * shift; b.y = f.y + d.along.y * shift; b.z = f.z + d.along.z * shift;
       }
     }
     this.shapeBlock(d.o);
@@ -1342,6 +1416,7 @@ export class Space {
       }
       if (e.button !== 2) return;
       e.preventDefault();
+      this.rdown = { x: e.clientX, y: e.clientY };
       this.looking = true;
       if (this.ease) { this.ease = null; this.syncTurn(); }
       h.classList.add('looking');
@@ -1359,6 +1434,16 @@ export class Space {
       if (e.button === 2 || e.type === 'lostpointercapture') {
         this.looking = false;
         h.classList.remove('looking');
+        // a right click that didn't look around, on a block: its menu
+        const r = this.rdown;
+        this.rdown = null;
+        if (e.button === 2 && r && Math.hypot(e.clientX - r.x, e.clientY - r.y) < 4 && this.blocks.size) {
+          const hit = this.blockHit(e);
+          if (hit && hit.block != null) {
+            this.pickBlock(hit.block);
+            this.send({ ...this.ev('blockmenu', null, e), data: hit.block });
+          }
+        }
       }
     };
     h.addEventListener('pointerup', up);

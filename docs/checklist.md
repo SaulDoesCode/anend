@@ -147,7 +147,11 @@ docs/architecture.md (the whole).
 - [ ] Culling (#24); far billboards with deterministic fall-off (#22).
 - [ ] Block rotation and packed storage (#5); the picture-to-texture pipeline (#7); the skybox
       (#23).
+      (26 Oct: rotation done, with the gizmo's rings, stored packed; the texture pipeline
+      and the skybox still to come.)
 - [ ] Spheres and curved blocks (#21); lights baked onto blocks (#20).
+      (26 Oct: curved blocks as bends, a curtain ripple and a fold, each shaped by a bezier;
+      spheres and lights still to come.)
 - [ ] Local spreads inside staging blocks (#14).
 - [ ] The visual spec builder, with no JSON typing needed (#4).
 - [ ] ▶ **usable:** building scenes that look the way they are meant to.

@@ -752,3 +752,17 @@ a.btn { text-decoration: none; }
 .slabel.chain-head { font-weight: 600; }
 .menu .rot-up { transform: rotate(-90deg); }
 .menu .rot-down { transform: rotate(90deg); }
+/* a block's turn and bend (the blocks window) */
+.turn-row { gap: 4px; margin: 4px 0; }
+.blocks-sel details.bend { margin: 4px 0 6px; }
+.blocks-sel details.bend summary { cursor: pointer; font-weight: 600; }
+.bend-editor { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.bend-part { display: flex; flex-direction: column; gap: 2px; }
+.bend-curve { background: color-mix(in srgb, var(--pad, #ddd) 70%, transparent); border-radius: var(--radius); touch-action: none; }
+.bend-curve .axis { stroke: color-mix(in srgb, var(--dim) 50%, transparent); stroke-dasharray: 3 3; }
+.bend-curve .handle { stroke: color-mix(in srgb, var(--accent) 70%, transparent); }
+.bend-curve .curve { fill: none; stroke: var(--text); stroke-width: 2; }
+.bend-curve .ctl { fill: var(--accent); stroke: var(--text); cursor: ns-resize; }
+.bend-curve .catch { fill: transparent; cursor: ns-resize; }
+.bend-slider { display: grid; grid-template-columns: 9em 1fr 3.5em; gap: 6px; align-items: center; font-size: 12px; }
+.bend-slider .num { width: auto; }

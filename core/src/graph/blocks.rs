@@ -74,7 +74,8 @@ pub fn split_key(k: &str) -> Option<(Kind, &str)> {
     Some((Kind::parse(a)?, b))
 }
 
-/// where a block is and how big: its centre and its sides
+/// where a block is, how big and how turned: its centre, its sides, its rotation (a unit
+/// quaternion x, y, z, w; the identity costs nothing in the save) and its bend
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Transform {
     pub x: f32,
@@ -83,6 +84,18 @@ pub struct Transform {
     pub w: f32,
     pub h: f32,
     pub d: f32,
+    #[serde(default = "identity", skip_serializing_if = "is_identity")]
+    pub rot: [f32; 4],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bend: Option<Bend>,
+}
+
+fn identity() -> [f32; 4] {
+    super::place::IDENTITY
+}
+
+fn is_identity(q: &[f32; 4]) -> bool {
+    *q == super::place::IDENTITY
 }
 
 impl Default for Transform {
@@ -94,8 +107,183 @@ impl Default for Transform {
             w: 1.0,
             h: 1.0,
             d: 1.0,
+            rot: super::place::IDENTITY,
+            bend: None,
         }
     }
+}
+
+/// how a block bends, in its own frame (x across its width, z through its depth): two
+/// shapes added together, each moving the block's slices along z by an amount that
+/// depends on where across the width they are. Both profiles are cubic bezier curves in
+/// one dimension, with their ends fixed and two control values (c1, c2) shaping them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Bend {
+    pub ripple: Ripple,
+    pub fold: Fold,
+}
+
+/// a curtain ripple: a wave across the width, `freq` periods of it, shifted by `phase`
+/// (a fraction of a period); one period's profile is the bezier from 0 through c1, c2
+/// back to 0, scaled so its peak is `amount` units
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Ripple {
+    pub amount: f32,
+    pub freq: f32,
+    pub phase: f32,
+    pub c1: f32,
+    pub c2: f32,
+}
+
+/// a fold across the middle: about the vertical line at `at` (-1 the left edge, 1 the
+/// right), each side bent back by the bezier from 0 at the line through c1, c2 to 1 at the
+/// far edge, times `amount` units
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Fold {
+    pub amount: f32,
+    pub at: f32,
+    pub c1: f32,
+    pub c2: f32,
+}
+
+impl Default for Ripple {
+    fn default() -> Self {
+        Ripple {
+            amount: 0.0,
+            freq: 2.0,
+            phase: 0.0,
+            c1: 1.0,
+            c2: -1.0,
+        }
+    }
+}
+
+impl Default for Fold {
+    fn default() -> Self {
+        Fold {
+            amount: 0.0,
+            at: 0.0,
+            c1: 0.0,
+            c2: 1.0,
+        }
+    }
+}
+
+/// a bezier's control values, an amount and a fold line kept within bounds
+const BEND_MAX: f32 = 50.0;
+
+impl Bend {
+    pub fn straight(&self) -> bool {
+        self.ripple.amount == 0.0 && self.fold.amount == 0.0
+    }
+
+    fn floats(&self) -> [f32; 9] {
+        let (r, f) = (self.ripple, self.fold);
+        [r.amount, r.freq, r.phase, r.c1, r.c2, f.amount, f.at, f.c1, f.c2]
+    }
+
+    /// the bytes a placement keeps: `B`, version 1, nine little endian f32s
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = vec![b'B', 1];
+        for v in self.floats() {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        out
+    }
+
+    pub fn from_bytes(b: &[u8]) -> Option<Bend> {
+        if b.len() != 2 + 36 || b[0] != b'B' || b[1] != 1 {
+            return None;
+        }
+        let f = |i: usize| f32::from_le_bytes(b[2 + i * 4..6 + i * 4].try_into().unwrap_or([0; 4]));
+        Some(Bend {
+            ripple: Ripple {
+                amount: f(0),
+                freq: f(1),
+                phase: f(2),
+                c1: f(3),
+                c2: f(4),
+            },
+            fold: Fold {
+                amount: f(5),
+                at: f(6),
+                c1: f(7),
+                c2: f(8),
+            },
+        })
+    }
+
+    /// finite and within bounds (None when straight)
+    pub fn checked(self) -> Result<Option<Bend>, String> {
+        if self.floats().iter().any(|v| !v.is_finite()) {
+            return Err("a bend's values are numbers".into());
+        }
+        let c = |v: f32, lo: f32, hi: f32| v.clamp(lo, hi);
+        let b = Bend {
+            ripple: Ripple {
+                amount: c(self.ripple.amount, -BEND_MAX, BEND_MAX),
+                freq: c(self.ripple.freq, 0.0, 64.0),
+                phase: self.ripple.phase.rem_euclid(1.0),
+                c1: c(self.ripple.c1, -3.0, 3.0),
+                c2: c(self.ripple.c2, -3.0, 3.0),
+            },
+            fold: Fold {
+                amount: c(self.fold.amount, -BEND_MAX, BEND_MAX),
+                at: c(self.fold.at, -1.0, 1.0),
+                c1: c(self.fold.c1, -3.0, 3.0),
+                c2: c(self.fold.c2, -3.0, 3.0),
+            },
+        };
+        Ok((!b.straight()).then_some(b))
+    }
+
+    /// how far it moves the block's slice at `u` across its width (0 the left edge, 1 the
+    /// right) along z; the space draws the same (`space.js` `bendAt`)
+    pub fn offset(&self, u: f32) -> f32 {
+        let r = self.ripple;
+        let mut z = 0.0;
+        if r.amount != 0.0 && r.freq > 0.0 {
+            let s = (u * r.freq + r.phase).rem_euclid(1.0);
+            z += r.amount * wave(s, r.c1, r.c2) / wave_peak(r.c1, r.c2);
+        }
+        let f = self.fold;
+        if f.amount != 0.0 {
+            let line = 0.5 + f.at * 0.5;
+            let t = if u >= line {
+                (u - line) / (1.0 - line).max(1e-6)
+            } else {
+                (line - u) / line.max(1e-6)
+            };
+            z += f.amount * rise(t.clamp(0.0, 1.0), f.c1, f.c2);
+        }
+        z
+    }
+
+    /// the most it moves any slice either way (for regions)
+    pub fn reach(&self) -> f32 {
+        self.ripple.amount.abs() + self.fold.amount.abs()
+    }
+}
+
+/// a period's profile: the cubic bezier 0, c1, c2, 0 at s
+fn wave(s: f32, c1: f32, c2: f32) -> f32 {
+    3.0 * (1.0 - s) * (1.0 - s) * s * c1 + 3.0 * (1.0 - s) * s * s * c2
+}
+
+/// the largest |wave| over a period, so `amount` is the peak (1 when it's flat)
+fn wave_peak(c1: f32, c2: f32) -> f32 {
+    let m = (0..=64)
+        .map(|i| wave(i as f32 / 64.0, c1, c2).abs())
+        .fold(0.0, f32::max);
+    if m > 1e-6 { m } else { 1.0 }
+}
+
+/// a fold's profile: the cubic bezier 0, c1, c2, 1 at t
+fn rise(t: f32, c1: f32, c2: f32) -> f32 {
+    3.0 * (1.0 - t) * (1.0 - t) * t * c1 + 3.0 * (1.0 - t) * t * t * c2 + t * t * t
 }
 
 impl Transform {
@@ -123,6 +311,7 @@ impl Transform {
                 w: f(3),
                 h: f(4),
                 d: f(5),
+                ..Transform::default()
             },
         ))
     }
@@ -137,18 +326,65 @@ impl Transform {
             return Err(format!("a block stays within {MAX_COORD} of the origin"));
         }
         let side = |v: f32| v.clamp(MIN_SIDE, MAX_SIDE);
+        // a unit quaternion (a zero or broken one is no turn)
+        let q = self.rot;
+        let n = q.iter().map(|v| v * v).sum::<f32>().sqrt();
+        let rot = if !n.is_finite() || n < 1e-6 {
+            super::place::IDENTITY
+        } else {
+            let u = q.map(|v| v / n);
+            // the same turn with w ≥ 0, and the identity exactly when it's no turn
+            let u = if u[3] < 0.0 { u.map(|v| -v) } else { u };
+            if (u[3] - 1.0).abs() < 1e-7 {
+                super::place::IDENTITY
+            } else {
+                u
+            }
+        };
+        let bend = match self.bend {
+            Some(b) => b.checked()?,
+            None => None,
+        };
         Ok(Transform {
             w: side(self.w),
             h: side(self.h),
             d: side(self.d),
+            rot,
+            bend,
             ..self
         })
+    }
+
+    /// half the sides of the box around it as it's turned and bent (for regions)
+    pub fn half_extent(&self) -> [f32; 3] {
+        let reach = self.bend.map_or(0.0, |b| b.reach());
+        let half = [self.w / 2.0, self.h / 2.0, self.d / 2.0 + reach];
+        let [x, y, z, w] = self.rot;
+        // the rotation matrix's columns, by absolute value
+        let m = [
+            [
+                1.0 - 2.0 * (y * y + z * z),
+                2.0 * (x * y - z * w),
+                2.0 * (x * z + y * w),
+            ],
+            [
+                2.0 * (x * y + z * w),
+                1.0 - 2.0 * (x * x + z * z),
+                2.0 * (y * z - x * w),
+            ],
+            [
+                2.0 * (x * z - y * w),
+                2.0 * (y * z + x * w),
+                1.0 - 2.0 * (x * x + y * y),
+            ],
+        ];
+        [0, 1, 2].map(|r| (0..3).map(|c| m[r][c].abs() * half[c]).sum())
     }
 
     /// whether the block's box meets the box from `lo` to `hi`
     pub fn meets(&self, lo: [f32; 3], hi: [f32; 3]) -> bool {
         let c = [self.x, self.y, self.z];
-        let half = [self.w / 2.0, self.h / 2.0, self.d / 2.0];
+        let half = self.half_extent();
         (0..3).all(|i| c[i] + half[i] >= lo[i] && c[i] - half[i] <= hi[i])
     }
 
@@ -236,6 +472,8 @@ const CUBE: u64 = (super::place::Kind::Cube as u64) << 3;
 fn placement(t: &Transform, n: u64) -> Placement {
     let mut p = Placement::at(n, [t.x, t.y, t.z]);
     p.scale = Scale::Axes([t.w, t.h, t.d]).canonical();
+    p.rot = (t.rot != super::place::IDENTITY).then(|| super::place::pack_rotation(t.rot));
+    p.extra = t.bend.filter(|b| !b.straight()).map(|b| b.to_bytes());
     p.flags = Some(CUBE);
     p
 }
@@ -253,6 +491,11 @@ fn transform(p: &Placement) -> Transform {
         w,
         h,
         d,
+        rot: p
+            .rot
+            .map(super::place::unpack_rotation)
+            .unwrap_or(super::place::IDENTITY),
+        bend: p.extra.as_deref().and_then(Bend::from_bytes),
     }
 }
 
@@ -518,6 +761,7 @@ mod tests {
             w: 4.0,
             h: 0.5,
             d: 2.0,
+            ..Transform::default()
         };
         assert_eq!(Transform::from_bytes(&a.to_bytes(7)), Some((7, a)));
         assert!(Transform::from_bytes(&[0; 31]).is_none());
@@ -610,5 +854,97 @@ mod tests {
         // the old tables are gone, so opening again moves nothing twice
         let txn = g.db().begin_read().unwrap();
         assert!(!txn.list_multimap_tables().unwrap().any(|h| h.name() == "graph blocks"));
+    }
+}
+
+#[cfg(test)]
+mod turn_and_bend_tests {
+    use super::*;
+
+    #[test]
+    fn rotation_and_bend_are_kept_and_cost_nothing_when_absent() {
+        let g = Graph::in_memory().unwrap();
+        let plain = g.add_block(Kind::Plain, "#123456", Transform::default()).unwrap();
+        let s = (0.3f32).sin();
+        let turned = Transform {
+            x: 1.0,
+            w: 3.0,
+            rot: [0.0, s, 0.0, (0.3f32).cos()],
+            bend: Some(Bend {
+                ripple: Ripple {
+                    amount: 0.4,
+                    freq: 3.0,
+                    phase: 1.25,
+                    ..Ripple::default()
+                },
+                fold: Fold {
+                    amount: -0.5,
+                    at: 0.2,
+                    ..Fold::default()
+                },
+            }),
+            ..Transform::default()
+        };
+        let id = g.add_block(Kind::Plain, "#123456", turned).unwrap();
+        let b = g.block(&id).unwrap().unwrap();
+        // the rotation comes back as packed (smallest three, 32 bits), the bend exactly
+        assert!(
+            (b.t.rot[1] - s).abs() < 1e-3 && b.t.rot[0].abs() < 1e-3,
+            "{:?}",
+            b.t.rot
+        );
+        let bend = b.t.bend.unwrap();
+        assert_eq!(bend.ripple.phase, 0.25, "phase wraps");
+        assert_eq!(bend.fold.at, 0.2);
+        // stored again, the same bytes (canonical)
+        assert_eq!(placement(&b.t, 2), placement(&transform(&placement(&b.t, 2)), 2));
+        // a plain block has no rotation and no extra in its placement
+        let p = g.block(&plain).unwrap().unwrap();
+        let pl = placement(&p.t, 1);
+        assert!(pl.rot.is_none() && pl.extra.is_none());
+        assert_eq!(serde_json::to_value(p.t).unwrap().get("rot"), None);
+        // straightened, the bend goes; a turned block's region grows with its turn
+        let straight = g
+            .set_blocks(&[(
+                id.clone(),
+                Transform {
+                    bend: Some(Bend::default()),
+                    ..b.t
+                },
+            )])
+            .unwrap();
+        assert_eq!(straight[0].t.bend, None);
+        let tall = Transform {
+            w: 4.0,
+            h: 0.1,
+            d: 0.1,
+            rot: [
+                0.0,
+                0.0,
+                (std::f32::consts::FRAC_PI_4).sin(),
+                (std::f32::consts::FRAC_PI_4).cos(),
+            ],
+            ..Transform::default()
+        };
+        assert!(tall.half_extent()[1] > 1.4, "turned 90° about z, its width stands up");
+        // the bend's profile: the fold is 0 at its line and `amount` at the edges
+        let f = Bend {
+            fold: Fold {
+                amount: 2.0,
+                ..Fold::default()
+            },
+            ..Bend::default()
+        };
+        assert_eq!(f.offset(0.5), 0.0);
+        assert!((f.offset(0.0) - 2.0).abs() < 1e-6 && (f.offset(1.0) - 2.0).abs() < 1e-6);
+        let r = Bend {
+            ripple: Ripple {
+                amount: 1.0,
+                ..Ripple::default()
+            },
+            ..Bend::default()
+        };
+        let peak = (0..=200).map(|i| r.offset(i as f32 / 200.0).abs()).fold(0.0, f32::max);
+        assert!((peak - 1.0).abs() < 0.02, "{peak}");
     }
 }
