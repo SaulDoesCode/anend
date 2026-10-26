@@ -13,6 +13,7 @@ pub mod postings;
 pub mod query;
 pub mod record;
 pub mod scenes;
+pub mod settle;
 pub mod store;
 
 pub use store::{GResult, Graph, Reader, Tx, View};

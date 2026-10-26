@@ -8,6 +8,7 @@ use serde_json::{Map, Value, json};
 use super::{Res, is_note, s};
 use crate::graph::record;
 use crate::graph::scenes::{Def, Kind, size_of};
+use crate::graph::settle::{Body, settle, text_body};
 use crate::graph::{Graph, Reader};
 
 pub fn routed(op: &str) -> bool {
@@ -134,8 +135,81 @@ pub fn call(g: &Graph, op: &str, args: &Value) -> Res {
             g.delete_scene(sc.id)?;
             Ok(json!({ "name": n, "rows": rows }))
         }
+        // scene `from`'s placements copied into scene `into` (the room by default), settled
+        // out of what `into` has and out of each other (answer 5); `from` stays as it was
+        "scenes.combine" => {
+            let from = name_arg(args, "from")?;
+            let src = g
+                .scene_named(&from)?
+                .ok_or_else(|| format!("there's no scene named {from}"))?;
+            let into = match s(args, "into").trim() {
+                "" => room.ok_or("the room has no scene yet: save it first")?,
+                n => {
+                    g.scene_named(n)?
+                        .ok_or_else(|| format!("there's no scene named {n}"))?
+                        .id
+                }
+            };
+            if into == src.id {
+                return Err("a scene can't be combined with itself".into());
+            }
+            let (placed, settled) = combine(g, src.id, into)?;
+            Ok(json!({ "from": from, "into": into, "placements": placed, "settled": settled }))
+        }
         _ => Err(format!("unknown op {op:?}")),
     }
+}
+
+/// a placement's box for settling: a text's from its length and size, a block's from
+/// its sides, turn and bend
+fn body_of(v: &impl Reader, p: &crate::graph::scenes::Placed) -> Body {
+    match p.kind {
+        Kind::Block => {
+            let t = crate::graph::blocks::transform_of(&p.place);
+            Body {
+                at: p.place.pos,
+                half: t.half_extent(),
+            }
+        }
+        _ => {
+            let chars = match p.def {
+                Def::Entry(id) => v.render(id).map(|t| t.chars().count().min(200)).unwrap_or(10),
+                _ => 10,
+            };
+            text_body(p.place.pos, chars, size_of(p.place.font).unwrap_or(0.5) as f32)
+        }
+    }
+}
+
+/// copies `from`'s placements into `into`, settled; (how many, how many moved)
+pub fn combine(g: &Graph, from: u64, into: u64) -> Result<(usize, usize), String> {
+    let v = g.view()?;
+    let have = [g.placements(into, false)?, g.placements(into, true)?].concat();
+    let mut came = [g.placements(from, false)?, g.placements(from, true)?].concat();
+    let fixed: Vec<Body> = have.iter().map(|p| body_of(&v, p)).collect();
+    let mut bodies: Vec<Body> = came.iter().map(|p| body_of(&v, p)).collect();
+    drop(v);
+    let settled = settle(&fixed, &mut bodies);
+    for (p, b) in came.iter_mut().zip(&bodies) {
+        p.place.pos = b.at;
+        // new numbers in `into`
+        p.place.n = 0;
+    }
+    // one write per (kind, definition, version)
+    let mut groups: Vec<(Kind, Def, Option<u64>, Vec<crate::graph::scenes::Placement>)> = Vec::new();
+    for p in &came {
+        match groups
+            .iter_mut()
+            .find(|x| x.0 == p.kind && x.1 == p.def && x.2 == p.version)
+        {
+            Some(x) => x.3.push(p.place.clone()),
+            None => groups.push((p.kind, p.def, p.version, vec![p.place.clone()])),
+        }
+    }
+    for (kind, def, version, places) in groups {
+        g.place(into, version.is_some(), kind, def, version, places)?;
+    }
+    Ok((came.len(), settled))
 }
 
 #[cfg(test)]
@@ -288,6 +362,75 @@ mod tests {
         let shown: Vec<&str> = m.as_array().unwrap().iter().map(|r| r[0].as_str().unwrap()).collect();
         assert_eq!(shown, ["a dried prune", "a dried prune", "my plum", "a ripe plum"]);
         assert!(m[3][4]["detached"].is_u64());
+    }
+
+    #[test]
+    fn combined_scenes_settle_their_overlaps() {
+        let g = Graph::in_memory().unwrap();
+        let (id, _) = g.save_text("plum", record::mime::TEXT).unwrap();
+        let key = record::label(id);
+        let c = |op: &str, a: Value| call(&g, op, &a);
+        c(
+            "scenes.save",
+            json!({ "name": "a", "rows": [["plum", 0, 0, 0, { "key": key }]] }),
+        )
+        .unwrap();
+        c(
+            "scenes.save",
+            json!({ "name": "b", "rows": [["plum", 0, 0, 0, { "key": key }], ["far", 50, 0, 0, {}]] }),
+        )
+        .unwrap();
+        let r = c("scenes.combine", json!({ "from": "b", "into": "a" })).unwrap();
+        assert_eq!(r["placements"], 2);
+        assert_eq!(r["settled"], 1, "the one on top of a's moved; the far one didn't");
+        let rows = c("scenes.get", json!({ "name": "a" })).unwrap()["rows"].clone();
+        let rows = rows.as_array().unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            (rows[0][1].as_f64(), rows[0][2].as_f64()),
+            (Some(0.0), Some(0.0)),
+            "a's own stays put"
+        );
+        let moved = rows.iter().filter(|r| r[0] == "plum").nth(1).unwrap();
+        assert!(moved[1].as_f64() != Some(0.0) || moved[2].as_f64() != Some(0.0));
+        // b is unchanged; a scene can't combine with itself
+        assert_eq!(
+            c("scenes.get", json!({ "name": "b" })).unwrap()["rows"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(c("scenes.combine", json!({ "from": "a", "into": "a" })).is_err());
+    }
+
+    #[test]
+    fn a_merge_settles_blocks_that_land_on_the_rooms_own() {
+        use crate::graph::blocks::{Kind as BKind, Transform};
+        let target = Graph::in_memory().unwrap();
+        target.add_block(BKind::Plain, "#112233", Transform::default()).unwrap();
+        let src = Graph::in_memory().unwrap();
+        src.add_block(BKind::Plain, "#445566", Transform::default()).unwrap();
+        src.add_block(
+            BKind::Plain,
+            "#445566",
+            Transform {
+                x: 40.0,
+                ..Transform::default()
+            },
+        )
+        .unwrap();
+        let w = crate::ops::merge::assets(&target, &src).unwrap();
+        assert_eq!((w.blocks, w.settled), (2, 1));
+        let bs = target.blocks(None).unwrap();
+        let mine = bs.iter().find(|b| b.texture == "#112233").unwrap();
+        assert_eq!((mine.t.x, mine.t.y, mine.t.z), (0.0, 0.0, 0.0), "the room's own stays");
+        let came = bs.iter().find(|b| b.texture == "#445566" && b.t.x < 20.0).unwrap();
+        assert!(
+            came.t.x.abs() >= 1.0 || came.t.y.abs() >= 1.0 || came.t.z.abs() >= 1.0,
+            "{:?}",
+            came.t
+        );
     }
 
     #[test]

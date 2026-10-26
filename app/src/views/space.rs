@@ -2429,6 +2429,9 @@ fn Scenes(rev: Signal<u64>, on_open: EventHandler<String>, on_save: EventHandler
     let mut renaming: Signal<Option<String>> = use_signal(|| None);
     let mut armed: Signal<Option<String>> = use_signal(|| None);
     let mut gone: Signal<Option<(String, Value)>> = use_signal(|| None);
+    // the scene being combined into another, and which
+    let mut combining: Signal<Option<String>> = use_signal(|| None);
+    let mut into = use_signal(String::new);
     let mut name = use_signal(|| default_map_name(ui));
     let api_r = api.clone();
     let all = use_resource(move || {
@@ -2500,6 +2503,13 @@ fn Scenes(rev: Signal<u64>, on_open: EventHandler<String>, on_save: EventHandler
                                 b { "{n}" } span { class: "dim small", " {rows.as_array().map(|a| a.len()).unwrap_or(0)} texts" } }
                         }
                         button { class: "plain ibtn", "data-tip": "rename it", "aria-label": "rename", onclick: { let n = n.clone(); move |_| renaming.set(Some(n.clone())) }, Icon { name: "rename" } }
+                        if all.len() > 1 {
+                            button { class: "plain ibtn", "data-tip": "combine it into another scene (overlaps settle)", "aria-label": "combine",
+                                onclick: { let n = n.clone(); let first = all.keys().find(|k| **k != n).cloned().unwrap_or_default(); move |_| {
+                                    if combining().as_deref() == Some(n.as_str()) { combining.set(None); } else { combining.set(Some(n.clone())); into.set(first.clone()); }
+                                } },
+                                Icon { name: "merge" } }
+                        }
                         button {
                             class: if armed().as_deref() == Some(n.as_str()) { "armed" } else { "plain ibtn" },
                             "data-tip": "delete it (click twice; it can be undone)",
@@ -2517,6 +2527,25 @@ fn Scenes(rev: Signal<u64>, on_open: EventHandler<String>, on_save: EventHandler
                             Icon { name: "delete" }
                             if armed().as_deref() == Some(n.as_str()) { "delete?" }
                         }
+                    }
+                }
+                if let Some(from) = combining() {
+                    div { class: "row scene-combine",
+                        span { class: "dim small", "combine {from} into" }
+                        select { "aria-label": "the scene to combine it into", value: "{into}", onchange: move |e| into.set(e.value()),
+                            for k in all.keys().filter(|k| **k != from) {
+                                option { key: "{k}", value: "{k}", selected: *k == into(), "{k}" }
+                            }
+                        }
+                        button { class: "btn small",
+                            onclick: { let store = store.clone(); let from = from.clone(); move |_| {
+                                let to = into();
+                                let open = Callback::new({ let to = to.clone(); move |_: Value| on_open.call(to.clone()) });
+                                store("scenes.combine", json!({ "from": from, "into": to }), format!("combined {from} into {to}: what overlapped was moved out of the way"), Some(open));
+                                combining.set(None);
+                            } },
+                            "combine" }
+                        span { class: "dim small", "(it stays as it is; its copies settle out of what's there)" }
                     }
                 }
                 if let Some((n, v)) = gone() {
@@ -3051,7 +3080,7 @@ pub fn SpaceStrip() -> Element {
                 onclick: move |_| set_pref(ui, |p| p.space.show_details = !p.space.show_details),
             }
             TChip {
-                label: "scenes: the saved rooms, to open, rename and delete",
+                label: "scenes: the saved rooms, to open, combine, rename and delete",
                 icon: "folder",
                 on: p.space.show_scenes,
                 onclick: move |_| set_pref(ui, |p| p.space.show_scenes = !p.space.show_scenes),

@@ -478,6 +478,11 @@ fn placement(t: &Transform, n: u64) -> Placement {
     p
 }
 
+/// a block placement's transform (its place, sides, turn and bend)
+pub fn transform_of(p: &Placement) -> Transform {
+    transform(p)
+}
+
 fn transform(p: &Placement) -> Transform {
     let [w, h, d] = match p.scale {
         Scale::One => [1.0; 3],

@@ -306,6 +306,8 @@ pub struct AssetsWritten {
     pub blocks: usize,
     /// saved scenes brought in whole
     pub scenes: usize,
+    /// incoming blocks moved out of ones already in the room
+    pub settled: usize,
 }
 
 /// a save's spec models, pictures and blocks into another (a merge's second half; the entries
@@ -365,6 +367,19 @@ pub fn assets(target: &crate::graph::Graph, src: &crate::graph::Graph) -> GResul
         new.push((b.kind, texture, b.t));
     }
     if !new.is_empty() {
+        // the target's room keeps its blocks where they are; the incoming ones settle out of
+        // them and out of each other (answer 5)
+        use crate::graph::settle::{Body, settle};
+        let body = |t: &crate::graph::blocks::Transform| Body {
+            at: [t.x, t.y, t.z],
+            half: t.half_extent(),
+        };
+        let fixed: Vec<Body> = target.blocks(None)?.iter().map(|b| body(&b.t)).collect();
+        let mut came: Vec<Body> = new.iter().map(|(_, _, t)| body(t)).collect();
+        w.settled = settle(&fixed, &mut came);
+        for ((_, _, t), b) in new.iter_mut().zip(came) {
+            [t.x, t.y, t.z] = b.at;
+        }
         w.blocks = target.add_blocks(&new)?.len();
     }
     // saved scenes come in whole (format.md answer 5): each is included as it is, named

@@ -121,8 +121,10 @@ docs/architecture.md (the whole).
       shows as a chain of two (#8, answer 4).
       (25 Oct: `graph::chains`, `chains.*`, the space's chains and their menu. Blocks in
       chains not yet.)
-- [ ] Merging works on whole things, with overlapping placements settled by deterministic
+- [x] Merging works on whole things, with overlapping placements settled by deterministic
       physics (answer 5).
+      (26 Oct: `graph::settle`; a merged save's blocks settle in the room; scenes combine
+      from the scenes window. Merges already worked on wholes: entries, scenes, models.)
 - [ ] ▶ **usable:** scenes in saves, copies that are safe, long texts that are smooth.
 - [ ] The language: s (docs/s.md, the user's spec) as the high-level form of the 5-bit
       format. Allocate the 5-bit format's unused escape space efficiently for s's tokens

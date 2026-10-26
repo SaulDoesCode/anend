@@ -141,3 +141,13 @@ The answers left these open. Each is written into the design as its default.
     follow it exactly with no second copy of the maths; a bent block has up to 512 slices.
 33. **The gizmo's arrows still move along the world's axes; its knobs resize along the
     block's own.** Moving along the block's axes would be the other choice.
+
+## Merging (26 Oct)
+
+34. **Settling keeps what was there and moves only what comes in,** each incoming thing in
+    turn along the axis it overlaps least (keep semantics, done once at the merge). A
+    spread-like relaxation that moves both would also be deterministic, but would move
+    the user's own things.
+35. **Combining scenes copies:** the combined scene stays as it was. A merge of two saves
+    still brings a same-named scene in beside the target's as `<name> 2`; combining them
+    is then one click.
