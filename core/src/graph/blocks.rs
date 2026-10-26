@@ -95,6 +95,39 @@ pub struct Transform {
     /// texture recipes on single faces, in place of the block's own texture there
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub faces: Option<Faces>,
+    /// a box or a sphere (an ellipsoid with the sides as its diameters)
+    #[serde(default, skip_serializing_if = "Shape::is_box")]
+    pub shape: Shape,
+}
+
+/// a block's shape, kept in its placement's flags (bits 3–6, `place::Kind`)
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Shape {
+    #[default]
+    Box,
+    /// a sphere: one face (faces don't apply) and no bend; regions use its box
+    Sphere,
+}
+
+impl Shape {
+    pub fn is_box(&self) -> bool {
+        *self == Shape::Box
+    }
+
+    fn kind(self) -> super::place::Kind {
+        match self {
+            Shape::Box => super::place::Kind::Cube,
+            Shape::Sphere => super::place::Kind::Sphere,
+        }
+    }
+
+    fn of_flags(flags: Option<u64>) -> Shape {
+        match super::place::Kind::from_u8(((flags.unwrap_or(0) >> 3) & 15) as u8) {
+            Some(super::place::Kind::Sphere) => Shape::Sphere,
+            _ => Shape::Box,
+        }
+    }
 }
 
 /// the faces' names, in the order [`Faces`] keeps them (three.js's box order)
@@ -227,6 +260,7 @@ impl Default for Transform {
             rot: super::place::IDENTITY,
             bend: None,
             faces: None,
+            shape: Shape::Box,
         }
     }
 }
@@ -459,9 +493,10 @@ impl Transform {
                 u
             }
         };
+        // a sphere doesn't bend, and has no faces of its own
         let bend = match self.bend {
-            Some(b) => b.checked()?,
-            None => None,
+            Some(b) if self.shape.is_box() => b.checked()?,
+            _ => None,
         };
         Ok(Transform {
             w: side(self.w),
@@ -469,7 +504,7 @@ impl Transform {
             d: side(self.d),
             rot,
             bend,
-            faces: self.faces.filter(|f| !f.is_empty()),
+            faces: self.faces.filter(|f| !f.is_empty() && self.shape.is_box()),
             ..self
         })
     }
@@ -589,15 +624,13 @@ pub fn texture_of(def: &Def) -> Option<(Kind, String)> {
     })
 }
 
-/// the shape flag every block has for now (`place::Kind::Cube`, bits 3–6)
-const CUBE: u64 = (super::place::Kind::Cube as u64) << 3;
-
 fn placement(t: &Transform, n: u64) -> Placement {
     let mut p = Placement::at(n, [t.x, t.y, t.z]);
     p.scale = Scale::Axes([t.w, t.h, t.d]).canonical();
     p.rot = (t.rot != super::place::IDENTITY).then(|| super::place::pack_rotation(t.rot));
     p.extra = extra_bytes(t.bend, t.faces);
-    p.flags = Some(CUBE);
+    // its shape (`place::Kind`) in bits 3–6
+    p.flags = Some((t.shape.kind() as u64) << 3);
     p
 }
 
@@ -626,6 +659,7 @@ fn transform(p: &Placement) -> Transform {
             .unwrap_or(super::place::IDENTITY),
         bend,
         faces,
+        shape: Shape::of_flags(p.flags),
     }
 }
 

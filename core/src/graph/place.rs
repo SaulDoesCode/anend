@@ -7,7 +7,7 @@
 //! | bytes | field |
 //! |---|---|
 //! | 0 | version, 2 (an unknown version doesn't unpack) |
-//! | 1 | kind: 0 text, 1 cube, 2 long block, 3 brick, 4 model (glTF; reserved) |
+//! | 1 | kind: 0 text, 1 cube, 2 long block, 3 brick, 4 model (glTF; reserved), 5 sphere |
 //! | 2 | flags: 1 pinned, 2 hidden, 4 spread (laid out by its sums when not pinned); the rest kept as they are |
 //! | 3 | reserved, 0 |
 //! | 4–15 | position, 3 × f32 |
@@ -51,6 +51,8 @@ pub enum Kind {
     Brick = 3,
     /// a glTF model (reserved)
     Model = 4,
+    /// a sphere (an ellipsoid when its sides differ)
+    Sphere = 5,
 }
 
 impl Kind {
@@ -61,6 +63,7 @@ impl Kind {
             2 => Kind::LongBlock,
             3 => Kind::Brick,
             4 => Kind::Model,
+            5 => Kind::Sphere,
             _ => return None,
         })
     }

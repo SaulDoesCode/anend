@@ -64,6 +64,10 @@ fn transform(v: &Value, base: Transform) -> Transform {
             Some(Value::Null) => None,
             Some(f) => serde_json::from_value::<Faces>(f.clone()).ok().or(base.faces),
         },
+        shape: v
+            .get("shape")
+            .and_then(|s| serde_json::from_value(s.clone()).ok())
+            .unwrap_or(base.shape),
     }
 }
 
@@ -530,6 +534,37 @@ mod tests {
         h.restore(&texts, &other).unwrap();
         assert_eq!(h.textures().unwrap().len(), 2);
         assert_eq!(h.blocks(None).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn spheres_are_blocks_too() {
+        let g = Graph::in_memory().unwrap();
+        let c = |op: &str, a: Value| call(&g, op, &a, &Limits::NONE);
+        let a = c(
+            "blocks.add",
+            json!({ "kind": "plain", "texture": "#ffcc00", "shape": "sphere", "w": 2, "h": 1 }),
+        )
+        .unwrap();
+        let id = a["ids"][0].as_str().unwrap().to_string();
+        assert_eq!(a["blocks"][0]["shape"], "sphere");
+        // a sphere neither bends nor has faces
+        let s = c(
+            "blocks.set",
+            json!({ "id": id, "bend": { "ripple": { "amount": 1 } }, "faces": [null, null, null, null, null, null] }),
+        )
+        .unwrap();
+        assert!(s["blocks"][0].get("bend").is_none());
+        assert_eq!(c("blocks.list", json!({})).unwrap()["blocks"][0]["shape"], "sphere");
+        // back to a box: the shape isn't written for one
+        let s = c("blocks.set", json!({ "id": id, "shape": "box" })).unwrap();
+        assert!(s["blocks"][0].get("shape").is_none());
+        let (texts, other) = g.backup().unwrap();
+        c("blocks.set", json!({ "id": id, "shape": "sphere" })).unwrap();
+        let (_, other2) = g.backup().unwrap();
+        assert_ne!(other, other2);
+        let h = Graph::in_memory().unwrap();
+        h.restore(&texts, &other2).unwrap();
+        assert_eq!(h.blocks(None).unwrap()[0].t.shape, crate::graph::blocks::Shape::Sphere);
     }
 
     #[test]

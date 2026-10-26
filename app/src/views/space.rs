@@ -1997,7 +1997,8 @@ fn Blocks(
                         {field(b.clone(), "d")}
                     }
                     TurnRow { b: b.clone(), on_send }
-                    details { class: "bend", open: bend_open(),
+                    ShapeRow { b: b.clone(), on_send }
+                    details { class: "bend", open: bend_open(), hidden: b["shape"].as_str() == Some("sphere"),
                         summary { onclick: move |e| { e.prevent_default(); let o = bend_open(); let mut bo = bend_open; bo.set(!o); }, "bend" span { class: "dim small", {bend_words(&b["bend"])} } }
                         if bend_open() {
                             BendEditor { b: b.clone(), on_send }
@@ -2055,6 +2056,23 @@ fn rot_of(b: &Value) -> [f64; 4] {
         [q[0], q[1], q[2], q[3]]
     } else {
         [0.0, 0.0, 0.0, 1.0]
+    }
+}
+
+/// a block's shape: a box or a sphere (its sides become the sphere's diameters)
+#[component]
+fn ShapeRow(b: Value, on_send: EventHandler<Value>) -> Element {
+    let id = b["id"].as_str().unwrap_or("").to_string();
+    let now = b["shape"].as_str().unwrap_or("box").to_string();
+    rsx! {
+        div { class: "row turn-row",
+            span { class: "dim small", "shape" }
+            for (shape , label , tip) in [("box", "box", "six faces, which can bend"), ("sphere", "sphere", "round, its sides its diameters; it doesn't bend and has no faces of its own")] {
+                button { key: "{shape}", class: if now == shape { "btn small on" } else { "plain small" }, title: "{tip}",
+                    onclick: { let id = id.clone(); move |_| on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "shape": shape } })) },
+                    "{label}" }
+            }
+        }
     }
 }
 
@@ -2258,8 +2276,14 @@ fn BlockMenu(
     let title = match b["kind"].as_str().unwrap_or("") {
         "text" => format!("a block of “{}”", b["about"]["text"].as_str().unwrap_or("a text")),
         "picture" => "a picture block".to_string(),
+        "texture" => match b["about"]["name"].as_str().filter(|n| !n.is_empty()) {
+            Some(n) => format!("a block of the recipe {n}"),
+            None => "a block of a texture recipe".to_string(),
+        },
         _ => format!("a block of colour {}", b["texture"].as_str().unwrap_or("")),
     };
+    // a sphere doesn't bend
+    let round = b["shape"].as_str() == Some("sphere");
     let q = rot_of(&b);
     let quarter_y = {
         let h = std::f64::consts::FRAC_PI_4;
@@ -2270,12 +2294,14 @@ fn BlockMenu(
         div { class: "menu smenu", role: "menu",
             style: "left: min({x}px, calc(100vw - 330px)); top: max(8px, min({y}px, calc(100vh - 300px)));",
             div { class: "title", "{title}" }
-            div { class: "title dim small", {format!("{}{}", turn_words(&b["rot"]), bend_words(&b["bend"]))} }
-            button { role: "menuitem", onclick: move |_| { set_pref(ui, |p| p.space.show_blocks = true); let mut bo = bend_open; bo.set(true); close(); },
+            div { class: "title dim small", {if round { format!("{} · a sphere", turn_words(&b["rot"])) } else { format!("{}{}", turn_words(&b["rot"]), bend_words(&b["bend"])) }} }
+            button { role: "menuitem", hidden: round, onclick: move |_| { set_pref(ui, |p| p.space.show_blocks = true); let mut bo = bend_open; bo.set(true); close(); },
                 Icon { name: "edit" } "bend it…" span { class: "dim small", " (the curves in the blocks window)" } }
+            button { role: "menuitem", onclick: { let id = id.clone(); let to = if b["shape"].as_str() == Some("sphere") { "box" } else { "sphere" }; move |_| { on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "shape": to } })); close(); } },
+                Icon { name: "cube" } {if b["shape"].as_str() == Some("sphere") { "make it a box" } else { "make it a sphere" }} }
             button { role: "menuitem", onclick: move |_| { set_pref(ui, |p| p.space.show_textures = true); close(); },
                 Icon { name: "image" } "texture it…" span { class: "dim small", " (a recipe for it or one face)" } }
-            button { role: "menuitem", onclick: { let id = id.clone(); move |_| { on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "bend": Value::Null } })); close(); } },
+            button { role: "menuitem", hidden: round, onclick: { let id = id.clone(); move |_| { on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "bend": Value::Null } })); close(); } },
                 Icon { name: "close" } "straighten" }
             button { role: "menuitem", onclick: { let id = id.clone(); move |_| { on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "rot": quarter_y } })); close(); } },
                 Icon { name: "refresh" } "a quarter turn about the upright" }

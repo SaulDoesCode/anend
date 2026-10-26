@@ -154,7 +154,7 @@ docs/architecture.md (the whole).
       `graph textures` with the textures window's steps, faces and the sky.)
 - [ ] Spheres and curved blocks (#21); lights baked onto blocks (#20).
       (26 Oct: curved blocks as bends, a curtain ripple and a fold, each shaped by a bezier;
-      spheres and lights still to come.)
+      spheres as a block shape; lights still to come.)
 - [ ] Local spreads inside staging blocks (#14).
 - [ ] The visual spec builder, with no JSON typing needed (#4).
 - [ ] ▶ **usable:** building scenes that look the way they are meant to.

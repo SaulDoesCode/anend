@@ -85,7 +85,7 @@ function wavePeak(c1, c2) {
   return m > 1e-6 ? m : 1;
 }
 // what a block's geometry depends on (its sides and bend)
-function shapeKey(t) { return JSON.stringify([t.w, t.h, t.d, t.bend || null]); }
+function shapeKey(t) { return JSON.stringify([t.w, t.h, t.d, t.bend || null, t.shape || 'box']); }
 function localAxis(i) { const a = new THREE.Vector3(); a.setComponent(i, 1); return a; }
 // which variant the n-th block of a recipe shows: core's graph::textures::variant, the
 // same 32-bit mix
@@ -989,7 +989,7 @@ export class Space {
     const key = `${b.kind}:${b.texture}`;
     const about = this.abouts.get(key) || {};
     const base = b.kind === 'texture' ? this.recipeMaterial(key, about, b.variant || 0) : this.material(key, about);
-    if (!b.faces || !b.faces.some(Boolean)) return base;
+    if (b.shape === 'sphere' || !b.faces || !b.faces.some(Boolean)) return base;
     return b.faces.map((f) => (f ? this.recipeMaterial(`texture:${f}`, this.abouts.get(`texture:${f}`) || {}, 0) : base));
   }
 
@@ -1082,6 +1082,7 @@ export class Space {
   // hits all follow the bent shape exactly. Faces are shaded by their direction (the top
   // brightest, the bottom darkest), so a box and a curve both read.
   boxGeometry(t) {
+    if (t.shape === 'sphere') return this.sphereGeometry(t);
     const bent = !!(t.bend && ((t.bend.ripple && t.bend.ripple.amount) || (t.bend.fold && t.bend.fold.amount)));
     const freq = bent && t.bend.ripple && t.bend.ripple.amount ? Math.max(1, t.bend.ripple.freq || 0) : 1;
     const seg = bent ? Math.min(512, Math.max(16, Math.ceil(freq * 24))) : 1;
@@ -1104,6 +1105,27 @@ export class Space {
     const col = new Float32Array(pos.count * 3);
     for (let i = 0; i < pos.count; i++) {
       const v = 0.86 + 0.14 * nor.getY(i) + 0.08 * Math.abs(nor.getZ(i));
+      col.set([v, v, v], i * 3);
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.userData.shape = shapeKey(t);
+    return g;
+  }
+
+  // a sphere block: an ellipsoid with the block's sides as its diameters. Its texture
+  // tiles once per unit round its middle and from pole to pole, as a box's does over its
+  // faces; it neither bends nor has faces of its own (core's graph::blocks::Shape)
+  sphereGeometry(t) {
+    const g = new THREE.SphereGeometry(0.5, 48, 32);
+    const pos = g.attributes.position, uv = g.attributes.uv;
+    for (let i = 0; i < pos.count; i++) pos.setXYZ(i, pos.getX(i) * t.w, pos.getY(i) * t.h, pos.getZ(i) * t.d);
+    const round = (Math.PI * (t.w + t.d)) / 2, meridian = (Math.PI * t.h) / 2;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * round) / BLOCK_TILE, (uv.getY(i) * meridian) / BLOCK_TILE);
+    g.computeVertexNormals();
+    const nor = g.attributes.normal;
+    const col = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) {
+      const v = 0.82 + 0.18 * nor.getY(i) + 0.06 * Math.abs(nor.getZ(i));
       col.set([v, v, v], i * 3);
     }
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
@@ -1142,6 +1164,8 @@ export class Space {
     if (mesh.geometry.userData.shape !== shapeKey(b)) {
       mesh.geometry.dispose();
       mesh.geometry = this.boxGeometry(b);
+      // a sphere has one face: one material, whatever faces the box had
+      mesh.material = this.blockMaterial(b);
     }
     mesh.position.set(b.x, b.y, b.z);
     const r = b.rot || [0, 0, 0, 1];
@@ -1159,8 +1183,8 @@ export class Space {
   }
 
   blockOut(o) {
-    const { id, kind, texture, x, y, z, w, h, d, rot, bend, faces, variant } = o.b;
-    return { id, kind, texture, x, y, z, w, h, d, rot: rot || [0, 0, 0, 1], bend: bend || null, faces: faces || null, ...(variant != null ? { variant } : {}) };
+    const { id, kind, texture, x, y, z, w, h, d, rot, bend, faces, variant, shape } = o.b;
+    return { id, kind, texture, x, y, z, w, h, d, rot: rot || [0, 0, 0, 1], bend: bend || null, faces: faces || null, shape: shape || 'box', ...(variant != null ? { variant } : {}) };
   }
 
   pickBlock(id) {

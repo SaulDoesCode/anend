@@ -424,7 +424,9 @@ equal recipes are one. Its `about` is `{recipe, name, text?}` (`text` for a text
 with variants carries `variant`, the one it shows (`graph::textures::variant(seed, n,
 variants)`, n its number). A block's `faces`, when it has any, is six recipe ids or nulls
 (right, left, top, bottom, front, back): a face with a recipe shows it in place of the
-block's own texture; `faces: null` in `blocks.set` clears them.
+block's own texture; `faces: null` in `blocks.set` clears them. A block's `shape` is
+`"box"` (left out) or `"sphere"` (an ellipsoid with its sides as diameters; a sphere has no
+bend and no faces).
 
 | op | args | data |
 |---|---|---|
