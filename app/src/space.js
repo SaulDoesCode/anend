@@ -161,6 +161,8 @@ export class Space {
     this.mats = new Map(); // texture key (and a recipe's variant) → material
     this.abouts = new Map(); // texture key → what it is (as Rust sent it)
     this.sky = null;
+    this.lights = []; // the room's lights (core's graph::lights), baked onto the blocks
+    this.lightMarks = null; // where the point and cone lights are, while the lights window is open
     this.selBlock = null;
     this.bdrag = null;
     this.ray = new THREE.Raycaster();
@@ -1086,7 +1088,10 @@ export class Space {
     const bent = !!(t.bend && ((t.bend.ripple && t.bend.ripple.amount) || (t.bend.fold && t.bend.fold.amount)));
     const freq = bent && t.bend.ripple && t.bend.ripple.amount ? Math.max(1, t.bend.ripple.freq || 0) : 1;
     const seg = bent ? Math.min(512, Math.max(16, Math.ceil(freq * 24))) : 1;
-    const g = new THREE.BoxGeometry(t.w, t.h, t.d, seg, 1, 1);
+    // faces cut into cells about a unit across (at most 16 a side), so baked light has
+    // somewhere to land
+    const cells = (v) => Math.min(16, Math.max(1, Math.ceil(v - 1e-6)));
+    const g = new THREE.BoxGeometry(t.w, t.h, t.d, Math.max(seg, cells(t.w)), cells(t.h), cells(t.d));
     const uv = g.attributes.uv, pos = g.attributes.position, nor = g.attributes.normal;
     for (let i = 0; i < uv.count; i++) {
       const ax = Math.abs(nor.getX(i)), ay = Math.abs(nor.getY(i));
@@ -1110,6 +1115,140 @@ export class Space {
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
     g.userData.shape = shapeKey(t);
     return g;
+  }
+
+  // ------------------------------------------------------------------ lights
+  //
+  // The room's lights are baked: each block's vertex colours are the light reaching them
+  // (ambient, directional, point and cone lights summed; points and cones fade to nothing
+  // at their range, a cone's edge softened), worked out when a light or the block changes
+  // and not every frame. No shadows. With no lights, faces are shaded by their direction
+  // as before. Texts (html labels) aren't lit.
+
+  // a block's vertex colours from the lights
+  bake(o) {
+    const g = o.mesh.geometry;
+    const pos = g.attributes.position, nor = g.attributes.normal;
+    let col = g.attributes.color;
+    if (!col || col.count !== pos.count) {
+      col = new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3);
+      g.setAttribute('color', col);
+    }
+    const lights = this.lights || [];
+    if (!lights.length) {
+      const round = o.b.shape === 'sphere';
+      for (let i = 0; i < pos.count; i++) {
+        const v = round ? 0.82 + 0.18 * nor.getY(i) + 0.06 * Math.abs(nor.getZ(i)) : 0.86 + 0.14 * nor.getY(i) + 0.08 * Math.abs(nor.getZ(i));
+        col.setXYZ(i, v, v, v);
+      }
+      col.needsUpdate = true;
+      return;
+    }
+    o.mesh.updateMatrixWorld(true);
+    const m = o.mesh.matrixWorld, q = o.mesh.quaternion;
+    const p = new THREE.Vector3(), n = new THREE.Vector3(), l = new THREE.Vector3();
+    const ls = lights.map((x) => ({ ...x, c: new THREE.Color(x.colour || '#ffffff'), d: new THREE.Vector3(...(x.dir || [0, -1, 0])).normalize(), at: new THREE.Vector3(x.x || 0, x.y || 0, x.z || 0) }));
+    for (let i = 0; i < pos.count; i++) {
+      p.fromBufferAttribute(pos, i).applyMatrix4(m);
+      n.fromBufferAttribute(nor, i).applyQuaternion(q).normalize();
+      let r = 0, gg = 0, bb = 0;
+      for (const x of ls) {
+        let f = 0;
+        if (x.kind === 'ambient') f = x.intensity;
+        else if (x.kind === 'directional') f = x.intensity * Math.max(0, -n.dot(x.d));
+        else {
+          l.copy(x.at).sub(p);
+          const dist = l.length();
+          if (dist > x.range) continue;
+          l.divideScalar(dist || 1);
+          const fade = (1 - dist / x.range) ** 2;
+          f = x.intensity * Math.max(0, n.dot(l)) * fade;
+          if (x.kind === 'spot') {
+            const cos = -l.dot(x.d);
+            const outer = Math.cos((x.angle * Math.PI) / 180), inner = Math.cos((x.angle * (1 - x.softness) * Math.PI) / 180);
+            const t = inner > outer ? Math.min(1, Math.max(0, (cos - outer) / (inner - outer))) : cos >= outer ? 1 : 0;
+            f *= t * t * (3 - 2 * t);
+          }
+        }
+        r += x.c.r * f; gg += x.c.g * f; bb += x.c.b * f;
+      }
+      col.setXYZ(i, Math.min(r, 2), Math.min(gg, 2), Math.min(bb, 2));
+    }
+    col.needsUpdate = true;
+  }
+
+  // the lights from Rust; `changed` (ids, with where they were) bakes only the blocks they
+  // reach, else every block
+  setLights(list, changed) {
+    const before = new Map((this.lights || []).map((x) => [x.id, x]));
+    this.lights = list || [];
+    const now = new Map(this.lights.map((x) => [x.id, x]));
+    let all = !changed || (before.size === 0) !== (now.size === 0);
+    const reach = [];
+    for (const id of changed || []) {
+      for (const x of [before.get(id), now.get(id)]) {
+        if (!x) continue;
+        if (x.kind === 'ambient' || x.kind === 'directional') all = true;
+        else reach.push(x);
+      }
+    }
+    for (const o of this.blocks.values()) {
+      if (all) { this.bake(o); continue; }
+      const b = o.b, half = Math.hypot(b.w, b.h, b.d) / 2;
+      if (reach.some((x) => Math.hypot(b.x - x.x, b.y - x.y, b.z - x.z) <= x.range + half)) this.bake(o);
+    }
+    this.markLights();
+    this.render();
+  }
+
+  // the lights window shows where the point and cone lights are, and which is picked
+  showLights(on, picked) {
+    this.lightsShown = !!on;
+    this.lightPicked = picked == null ? null : picked;
+    this.markLights();
+    this.render();
+  }
+
+  markLights() {
+    if (this.lightMarks) {
+      this.scene.remove(this.lightMarks);
+      this.lightMarks.traverse((x) => { x.geometry?.dispose(); x.material?.dispose(); });
+      this.lightMarks = null;
+    }
+    if (!this.lightsShown) return;
+    const g = new THREE.Group();
+    for (const x of this.lights) {
+      if (x.kind !== 'point' && x.kind !== 'spot') continue;
+      const picked = x.id === this.lightPicked;
+      const mat = new THREE.MeshBasicMaterial({ color: x.colour, fog: false, depthTest: false, transparent: true, opacity: picked ? 1 : 0.8 });
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(picked ? 0.22 : 0.15, 16, 12), mat);
+      ball.position.set(x.x, x.y, x.z);
+      ball.renderOrder = 998;
+      g.add(ball);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(picked ? 0.34 : 0.26, 0.02, 6, 32), new THREE.MeshBasicMaterial({ color: picked ? 0xffffff : 0x333333, fog: false, depthTest: false, transparent: true }));
+      ring.position.copy(ball.position);
+      ring.userData.facing = true;
+      ring.renderOrder = 998;
+      g.add(ring);
+      if (x.kind === 'spot') {
+        // the cone's axis, as long as its reach (up to 3 units)
+        const d = new THREE.Vector3(...x.dir).normalize();
+        const len = Math.min(2, x.range);
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(Math.tan((x.angle * Math.PI) / 180) * len, len, 24, 1, true), new THREE.MeshBasicMaterial({ color: x.colour, fog: false, transparent: true, opacity: 0.08, side: THREE.DoubleSide, depthWrite: false }));
+        cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), d);
+        cone.position.copy(ball.position).add(d.clone().multiplyScalar(len / 2));
+        g.add(cone);
+      }
+    }
+    this.lightMarks = g;
+    this.scene.add(g);
+  }
+
+  // where a new light goes: a little ahead of the camera
+  lightSpot() {
+    const at = new THREE.Vector3(0, 0, -4).applyQuaternion(this.camera.quaternion).add(this.camera.position);
+    const d = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    return { x: +at.x.toFixed(2), y: +at.y.toFixed(2), z: +at.z.toFixed(2), dir: [+d.x.toFixed(3), +d.y.toFixed(3), +d.z.toFixed(3)] };
   }
 
   // a sphere block: an ellipsoid with the block's sides as its diameters. Its texture
@@ -1170,6 +1309,7 @@ export class Space {
     mesh.position.set(b.x, b.y, b.z);
     const r = b.rot || [0, 0, 0, 1];
     mesh.quaternion.set(r[0], r[1], r[2], r[3]);
+    this.bake(o);
     if (this.selBlock === b.id) this.placeGizmo();
   }
 
@@ -1728,6 +1868,8 @@ export class Space {
   render() {
     if (this.selBlock != null) this.placeGizmo();
     if (this.sky) this.sky.position.copy(this.camera.position);
+    // the lights' rings face the camera
+    if (this.lightMarks) for (const m of this.lightMarks.children) if (m.userData.facing) m.quaternion.copy(this.camera.quaternion);
     this.gl?.render(this.scene, this.camera);
     const c = this.camera;
     c.updateMatrixWorld();

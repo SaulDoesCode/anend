@@ -305,6 +305,8 @@ pub struct AssetsWritten {
     pub pictures: usize,
     /// texture recipes the target didn't have
     pub textures: usize,
+    /// lights brought in (with new ids; the target's stay)
+    pub lights: usize,
     pub blocks: usize,
     /// saved scenes brought in whole
     pub scenes: usize,
@@ -374,6 +376,12 @@ pub fn assets(target: &crate::graph::Graph, src: &crate::graph::Graph) -> GResul
             w.textures += 1;
         }
         recipes.insert(t.id, put.id);
+    }
+    // lights come in beside the target's, as many as fit
+    for l in src.lights()? {
+        if target.add_light(l).is_ok() {
+            w.lights += 1;
+        }
     }
     let hex = |h: &[u8; 16]| h.iter().map(|b| format!("{b:02x}")).collect::<String>();
     // blocks get fresh ids; a text block finds its text in the target (the entries

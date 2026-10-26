@@ -152,9 +152,10 @@ docs/architecture.md (the whole).
       (#23).
       (26 Oct: rotation done, with the gizmo's rings, stored packed; texture recipes in
       `graph textures` with the textures window's steps, faces and the sky.)
-- [ ] Spheres and curved blocks (#21); lights baked onto blocks (#20).
+- [x] Spheres and curved blocks (#21); lights baked onto blocks (#20).
       (26 Oct: curved blocks as bends, a curtain ripple and a fold, each shaped by a bezier;
-      spheres as a block shape; lights still to come.)
+      spheres as a block shape; ambient, sun, point and cone lights baked onto block
+      vertices, no shadows yet.)
 - [ ] Local spreads inside staging blocks (#14).
 - [ ] The visual spec builder, with no JSON typing needed (#4).
 - [ ] ▶ **usable:** building scenes that look the way they are meant to.

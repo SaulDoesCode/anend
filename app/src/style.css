@@ -813,3 +813,18 @@ a.btn { text-decoration: none; }
 .win:has(.tx-steps) { --win-w: min(360px, calc(100vw - 16px)); }
 .tx-name { flex: 1; min-width: 0; height: 24px; }
 .tx-faces button { padding: 0 6px; }
+/* the lights window */
+.lt-add { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+.lt-list { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
+.lt-row { display: flex; justify-content: flex-start; width: 100%; align-items: center; gap: 8px; padding: 3px 6px; border-radius: 4px; background: none; border: 0; text-align: left; color: inherit; cursor: pointer; }
+.lt-row:hover { background: color-mix(in srgb, var(--dim) 12%, transparent); }
+.lt-row.on { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+.lt-swatch { width: 14px; height: 14px; border-radius: 50%; box-shadow: 0 0 0 1px color-mix(in srgb, var(--dim) 40%, transparent); flex: none; }
+.lt-edit { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid color-mix(in srgb, var(--dim) 18%, transparent); padding-top: 6px; }
+.lt-edit .row { display: flex; gap: 6px; align-items: center; }
+.lt-edit .row.wrap { flex-wrap: wrap; }
+.lt-edit input[type=color] { width: 30px; height: 24px; padding: 0 2px; border: 0; background: none; cursor: pointer; }
+.lt-slider { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.lt-slider > span:first-child { width: 62px; color: var(--dim); flex: none; }
+.lt-slider input { flex: 1; min-width: 0; }
+.lt-slider .dim { width: 64px; text-align: right; flex: none; }

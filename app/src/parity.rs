@@ -251,6 +251,35 @@ mod tests {
         assert!(include_str!("views/space.rs").contains("show_textures"));
     }
 
+    /// lights baked onto blocks, and sphere blocks
+    #[test]
+    fn lights_and_spheres_stay() {
+        let js = include_str!("space.js");
+        for needle in [
+            "bake(o)",
+            "setLights(list, changed)",
+            "showLights(on, picked)",
+            "lightSpot()",
+            "sphereGeometry(t)",
+        ] {
+            assert!(js.contains(needle), "space.js lost {needle}");
+        }
+        let rs = include_str!("views/space/lightwin.rs");
+        for needle in [
+            "fn Lights(",
+            "\"lights.add\"",
+            "\"lights.set\"",
+            "\"lights.delete\"",
+            "move it here",
+        ] {
+            assert!(rs.contains(needle), "lightwin.rs lost {needle}");
+        }
+        let sp = include_str!("views/space.rs");
+        for needle in ["show_lights", "fn ShapeRow(", "make it a sphere"] {
+            assert!(sp.contains(needle), "space.rs lost {needle}");
+        }
+    }
+
     /// the notes editor's spelling check: asked for as one writes, its flags drawn in the
     /// highlight layer, a click's suggestion put in as an undo step of its own
     #[test]

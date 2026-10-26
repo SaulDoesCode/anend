@@ -23,6 +23,7 @@
 //! - `pictures`: `[{id, mime, width, height, name, added, size, data}, ...]`, `data` the
 //!   file's bytes in base64; `picture_lists`: `[[list name, picture id], ...]`.
 //! - `textures`: the texture recipes (`graph::textures::Saved`: id, name, recipe, added).
+//! - `lights`: the room's lights (`graph::lights::Light`), restored with their ids.
 //! - `blocks`: `[{id, kind, texture, x, y, z, w, h, d}, ...]` (`graph::blocks`), restored
 //!   with their ids.
 
@@ -255,6 +256,7 @@ impl Graph {
             }).collect::<Vec<_>>(),
             "picture_lists": self.picture_list_rows()?,
             "textures": self.textures()?,
+            "lights": self.lights()?,
             "scenes": self.scenes()?,
             "instances": self.instance_rows()?,
         });
@@ -399,6 +401,14 @@ impl Graph {
                 self.put_texture(&t.recipe, &t.name, t.added)?;
             }
         }
+        let lights: Vec<super::lights::Light> = o
+            .get("lights")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|l| serde_json::from_value(l.clone()).ok())
+            .collect();
+        self.put_lights(&lights)?;
         if let Some(scenes) = o.get("scenes").and_then(Value::as_array) {
             let scenes: Vec<super::scenes::Scene> = scenes
                 .iter()

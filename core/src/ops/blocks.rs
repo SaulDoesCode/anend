@@ -22,7 +22,7 @@ pub const MAX_PER_CALL: usize = 5000;
 
 /// whether `op` is one of these
 pub fn routed(op: &str) -> bool {
-    op.starts_with("blocks.") || op.starts_with("textures.")
+    op.starts_with("blocks.") || op.starts_with("textures.") || op.starts_with("lights.")
 }
 
 fn num(v: &Value, k: &str) -> Option<f32> {
@@ -209,6 +209,43 @@ fn listed(g: &Graph, blocks: &[Block]) -> Res {
     Ok(json!({ "blocks": blocks, "textures": textures }))
 }
 
+/// the room's lights (`lights.*`, `graph::lights`)
+fn lights_call(g: &Graph, op: &str, args: &Value) -> Res {
+    use crate::graph::lights::Light;
+    let light = |v: &Value| serde_json::from_value::<Light>(v.clone()).map_err(|e| format!("that isn't a light: {e}"));
+    match op {
+        "lights.list" => Ok(json!(g.lights()?)),
+        "lights.add" => Ok(json!(g.add_light(light(args.get("light").unwrap_or(args))?)?)),
+        // the fields given replace the light's, the rest stay
+        "lights.set" => {
+            let id = args.get("id").and_then(Value::as_u64).ok_or("which light? (id)")?;
+            let now = g
+                .lights()?
+                .into_iter()
+                .find(|l| l.id == id)
+                .ok_or_else(|| format!("no light {id}"))?;
+            let mut v = json!(now);
+            if let Some(o) = args.as_object() {
+                for (k, x) in o {
+                    v[k] = x.clone();
+                }
+            }
+            v["id"] = json!(id);
+            Ok(json!(g.set_light(light(&v)?)?))
+        }
+        "lights.delete" => {
+            let id = args.get("id").and_then(Value::as_u64).ok_or("which light? (id)")?;
+            Ok(json!({ "removed": g.delete_light(id)? }))
+        }
+        "lights.restore" => {
+            let ls: Vec<Light> = serde_json::from_value(args.get("lights").cloned().unwrap_or(Value::Null))
+                .map_err(|e| e.to_string())?;
+            Ok(json!({ "restored": g.put_lights(&ls)? }))
+        }
+        _ => Err(format!("unknown op {op:?}")),
+    }
+}
+
 /// the recipes (`textures.*`)
 fn textures_call(g: &Graph, op: &str, args: &Value) -> Res {
     match op {
@@ -249,6 +286,9 @@ fn textures_call(g: &Graph, op: &str, args: &Value) -> Res {
 pub fn call(g: &Graph, op: &str, args: &Value, limits: &Limits) -> Res {
     if op.starts_with("textures.") {
         return textures_call(g, op, args);
+    }
+    if op.starts_with("lights.") {
+        return lights_call(g, op, args);
     }
     match op {
         "blocks.list" => {
@@ -534,6 +574,44 @@ mod tests {
         h.restore(&texts, &other).unwrap();
         assert_eq!(h.textures().unwrap().len(), 2);
         assert_eq!(h.blocks(None).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn lights_through_the_api() {
+        let g = Graph::in_memory().unwrap();
+        let c = |op: &str, a: Value| call(&g, op, &a, &Limits::NONE);
+        let a = c(
+            "lights.add",
+            json!({ "kind": "point", "colour": "#ffeedd", "y": 3, "range": 12 }),
+        )
+        .unwrap();
+        assert_eq!((a["id"].as_u64(), a["kind"].as_str()), (Some(1), Some("point")));
+        let s = c("lights.set", json!({ "id": 1, "intensity": 2.5 })).unwrap();
+        assert_eq!(
+            (s["intensity"].as_f64(), s["range"].as_f64(), s["y"].as_f64()),
+            (Some(2.5), Some(12.0), Some(3.0))
+        );
+        c(
+            "lights.add",
+            json!({ "light": { "kind": "directional", "dir": [1, -1, 0] } }),
+        )
+        .unwrap();
+        assert_eq!(c("lights.list", json!({})).unwrap().as_array().unwrap().len(), 2);
+        // a backup and a merge carry them
+        let (texts, other) = g.backup().unwrap();
+        let h = Graph::in_memory().unwrap();
+        h.restore(&texts, &other).unwrap();
+        assert_eq!(h.lights().unwrap(), g.lights().unwrap());
+        let v = g.view().unwrap();
+        h.write(|tx| crate::ops::merge::merge(tx, &v)).unwrap();
+        assert_eq!(crate::ops::merge::assets(&h, &g).unwrap().lights, 2);
+        assert_eq!(h.lights().unwrap().len(), 4);
+        let gone = c("lights.delete", json!({ "id": 1 })).unwrap();
+        assert_eq!(c("lights.list", json!({})).unwrap().as_array().unwrap().len(), 1);
+        assert_eq!(
+            c("lights.restore", json!({ "lights": [gone["removed"]] })).unwrap()["restored"],
+            1
+        );
     }
 
     #[test]

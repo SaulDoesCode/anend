@@ -147,6 +147,12 @@ text for its menu.
   doesn't repeat; *shuffle* picks again), and **use**: on a new block, on the selected
   block, on one face of it, or as the room's **sky**. Recipes are kept in the save and
   listed at the top of the window; using one twice keeps one copy.
+- **Spheres.** A block's menu (or the blocks window's *shape* row) makes it a sphere
+  and back; its sides become the sphere's diameters.
+- **Lights.** The lights window (the sun chip) adds an *ambient* light, a *sun*, a
+  *point* or a *cone* ahead of you. Pick one to set its colour, strength, reach,
+  direction and cone with sliders, or *move it here*. The light is worked out onto the
+  blocks when something changes (there are no shadows yet); texts aren't lit.
 - **Long texts** show their first piece (80 characters a line, six lines a piece, both
   settings) with how many more there are.
 

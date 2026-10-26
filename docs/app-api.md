@@ -444,6 +444,11 @@ bend and no faces).
 | `textures.save` | `{recipe, name?}` | `{id, name, recipe, added}`: the recipe kept (or the one already kept with that id, renamed when `name` is given) |
 | `textures.name` | `{id, name}` | the recipe, renamed |
 | `textures.delete` | `{id}` | `{removed}`; blocks and faces showing it draw as missing |
+| `lights.list` | | the room's lights: `[{id, kind, colour, intensity, x, y, z, dir, range, angle, softness}]` (`kind` ambient, directional, point or spot) |
+| `lights.add` | a light, or `{light}` | the light, with its id (at most 64 a save) |
+| `lights.set` | `{id, ...fields}` | the light, the fields given replaced |
+| `lights.delete` | `{id}` | `{removed}`: the light, to hand back to `lights.restore` |
+| `lights.restore` | `{lights}` | `{restored}`: lights put back with their ids |
 
 - **Limits**: at most 5000 blocks a call; on a shared hub a save holds at most 50 000.
   `blocks.list`, `blocks.stats`, `blocks.delete`, `textures.list` and `textures.delete`

@@ -26,6 +26,7 @@ use crate::shell::set_pref;
 use crate::ui::*;
 use crate::views::{TChip, use_keys};
 
+mod lightwin;
 mod texwin;
 
 const THREE: &str = include_str!("../../vendor/three.module.min.js");
@@ -521,6 +522,9 @@ try {{
     }}
     else if (c.cmd === 'unblock') sp.unblock(c.ids || []);
     else if (c.cmd === 'sky') sp.setSky(c.about || null);
+    else if (c.cmd === 'lights') sp.setLights(c.lights || [], c.changed || null);
+    else if (c.cmd === 'showlights') sp.showLights(!!c.on, c.picked);
+    else if (c.cmd === 'lightspot') dioxus.send({{ kind: 'lightspot', data: {{ ...sp.lightSpot(), want: c.want }} }});
     else if (c.cmd === 'preview') sp.preview(c.id, c.about || {{}}, c.tiles || 1, !!c.variants);
     else if (c.cmd === 'blockspot') dioxus.send({{ kind: 'spot', data: {{ ...sp.blockSpot(), want: c.want }} }});
     else if (c.cmd === 'blockfields') sp.setBlockFields(c.id, c.t);
@@ -543,7 +547,7 @@ try {{
     )
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 struct Sp {
     tx: Signal<Option<futures_channel::mpsc::UnboundedSender<Value>>>,
     /// the texts in the room (memory texts and notes), by key
@@ -561,6 +565,8 @@ struct Sp {
     block: Signal<Option<Value>>,
     /// how many blocks and textures the save has
     block_use: Signal<(u64, u64)>,
+    /// the room's lights (`lights.list`), as the room bakes them
+    lights: Signal<Vec<Value>>,
     /// the right-click menu on a text
     menu: Signal<Option<SpaceEvent>>,
     /// bumped when a scene is saved, so the scenes window reads them again
@@ -1285,6 +1291,7 @@ pub fn Space() -> Element {
         q_bucket: use_signal(HashMap::new),
         block: use_signal(|| None),
         block_use: use_signal(|| (0, 0)),
+        lights: use_signal(Vec::new),
         menu: use_signal(|| None),
         scenes_rev: use_signal(|| 0),
         bmenu: use_signal(|| None),
@@ -1539,6 +1546,9 @@ pub fn Space() -> Element {
                     bend_open: sp.bend_open,
                 }
             }
+            if p.space.show_lights {
+                lightwin::Lights { sp }
+            }
             if p.space.show_textures {
                 texwin::Textures {
                     selected: (sp.selected)(),
@@ -1649,6 +1659,7 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
             });
         }
         // an undo took back blocks just added, or put back blocks just deleted
+        "lightspot" => lightwin::light_spot(ui, api, sp, e.data.clone()),
         "blockmenu" => {
             let mut m = sp.bmenu;
             m.set(Some((e.x, e.y)));
@@ -1820,6 +1831,7 @@ async fn load_blocks(ui: Ui, api: Api, sp: Sp) {
             let mut b = sp.block;
             b.set(None);
             texwin::load_sky(ui, &api, EventHandler::new(move |v: Value| sp.send(v))).await;
+            lightwin::load_lights(&api, sp).await;
             count_blocks(api, sp).await;
         }
         // a hub from before blocks: the room has none
@@ -3166,6 +3178,12 @@ pub fn SpaceStrip() -> Element {
                 icon: "cube",
                 on: p.space.show_blocks,
                 onclick: move |_| set_pref(ui, |p| p.space.show_blocks = !p.space.show_blocks),
+            }
+            TChip {
+                label: "lights: ambient, sun, point and cone lights, baked onto the blocks",
+                icon: "sun",
+                on: p.space.show_lights,
+                onclick: move |_| set_pref(ui, |p| p.space.show_lights = !p.space.show_lights),
             }
             TChip {
                 label: "textures: recipes from pictures, texts and colours, for blocks, faces and the sky",

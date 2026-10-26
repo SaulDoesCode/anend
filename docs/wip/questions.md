@@ -151,3 +151,24 @@ The answers left these open. Each is written into the design as its default.
 35. **Combining scenes copies:** the combined scene stays as it was. A merge of two saves
     still brings a same-named scene in beside the target's as `<name> 2`; combining them
     is then one click.
+
+## Textures, spheres and lights (26 Oct)
+
+36. **A texture recipe is kept by the hash of its normalized JSON, its name beside it,**
+    so two blocks made with the same choices share one row, and renaming doesn't change
+    the id. A recipe from a text names the text's key; a merge gives it the target's key,
+    so it becomes another recipe there.
+37. **Variants shift the tile and (optionally) turn it; they don't regenerate pixels.**
+    A block picks its variant from its number among its texture's blocks, so copies
+    differ but each block always shows the same one.
+38. **The sky is one recipe for the save's room (`space.sky`),** drawn as a sphere round
+    the camera with the recipe's tile four times round and twice up; saved scenes don't
+    carry a sky of their own.
+39. **A sphere is a block shape, not a kind:** it keeps its texture and sides (as
+    diameters); a bend or faces set on a box are dropped when it becomes a sphere.
+40. **Lights are baked onto block vertices in the room, not stored as lightmaps.** The
+    bake follows from the lights and blocks and is redone when either changes, so the
+    save keeps only the lights. Storing the bake would only pay off for very large
+    scenes. There are no shadows yet (a block doesn't shade another); that would be the
+    next step for baked light. With no lights the room shades faces by direction as
+    before.

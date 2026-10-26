@@ -8,6 +8,7 @@ pub mod checkpoints;
 pub mod codec;
 pub mod gematria;
 pub mod interp;
+pub mod lights;
 pub mod place;
 pub mod postings;
 pub mod query;

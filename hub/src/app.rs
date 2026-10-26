@@ -121,6 +121,8 @@ const CLASSIFY_READ_ONLY: &[&str] = &[
     "blocks.delete",
     "textures.list",
     "textures.delete",
+    "lights.list",
+    "lights.delete",
 ];
 
 fn makes_no_room(op: &str) -> bool {
