@@ -143,7 +143,9 @@ definition is `Def::Texture` (tag 4, the 16-byte id) shows one. A block placemen
 holds records one after another: `B` 1 and nine f32s (its bend), then `F` 1, a byte with
 a bit per face that has a recipe, and those faces' 16-byte recipe ids (right, left, top,
 bottom, front, back). A block's shape is in its placement's flags (bits 3–6,
-`place::Kind`: 1 a box, 5 a sphere). `graph lights` (`core/src/graph/lights.rs`): the
+`place::Kind`: 1 a box, 5 a sphere). A staging zone's record in the extra is `Z` 1, a
+byte with a bit per setting given (repel, attract, link, gravity, damping), then those as
+f32s. `graph lights` (`core/src/graph/lights.rs`): the
 room's lights, light id (u64) → `{kind, colour, intensity, x, y, z, dir, range, angle,
 softness}` JSON.
 

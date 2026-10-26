@@ -68,6 +68,13 @@ fn transform(v: &Value, base: Transform) -> Transform {
             .get("shape")
             .and_then(|s| serde_json::from_value(s.clone()).ok())
             .unwrap_or(base.shape),
+        // `zone: {repel?, attract?, link?, gravity?, damping?}` makes it a staging zone,
+        // `zone: null` an ordinary block again
+        zone: match v.get("zone") {
+            None => base.zone,
+            Some(Value::Null) => None,
+            Some(z) => serde_json::from_value(z.clone()).ok().or(base.zone),
+        },
     }
 }
 
@@ -612,6 +619,34 @@ mod tests {
             c("lights.restore", json!({ "lights": [gone["removed"]] })).unwrap()["restored"],
             1
         );
+    }
+
+    #[test]
+    fn zones_keep_their_physics() {
+        let g = Graph::in_memory().unwrap();
+        let c = |op: &str, a: Value| call(&g, op, &a, &Limits::NONE);
+        let a = c(
+            "blocks.add",
+            json!({ "kind": "plain", "texture": "#88aa88", "w": 10, "h": 6, "d": 2, "zone": {} }),
+        )
+        .unwrap();
+        let id = a["ids"][0].as_str().unwrap().to_string();
+        assert_eq!(a["blocks"][0]["zone"], json!({}));
+        let s = c(
+            "blocks.set",
+            json!({ "id": id, "zone": { "repel": 99, "gravity": 0.2 }, "bend": { "fold": { "amount": 1 } } }),
+        )
+        .unwrap();
+        assert_eq!(
+            s["blocks"][0]["zone"],
+            json!({ "repel": 60.0, "gravity": 0.2_f32 as f64 })
+        );
+        // with its bend, read back from the placement
+        let l = c("blocks.list", json!({})).unwrap();
+        assert_eq!(l["blocks"][0]["zone"]["repel"], 60.0);
+        assert_eq!(l["blocks"][0]["bend"]["fold"]["amount"], 1.0);
+        let s = c("blocks.set", json!({ "id": id, "zone": null })).unwrap();
+        assert!(s["blocks"][0].get("zone").is_none());
     }
 
     #[test]

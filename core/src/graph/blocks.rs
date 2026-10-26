@@ -98,6 +98,9 @@ pub struct Transform {
     /// a box or a sphere (an ellipsoid with the sides as its diameters)
     #[serde(default, skip_serializing_if = "Shape::is_box")]
     pub shape: Shape,
+    /// a staging zone: texts inside it spread among themselves ([`Zone`])
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zone: Option<Zone>,
 }
 
 /// a block's shape, kept in its placement's flags (bits 3–6, `place::Kind`)
@@ -205,21 +208,24 @@ impl<'de> Deserialize<'de> for Faces {
     }
 }
 
-/// a block placement's extra: its bend and its faces, each a record of its own
-fn extra_bytes(bend: Option<Bend>, faces: Option<Faces>) -> Option<Vec<u8>> {
+/// a block placement's extra: its bend, its faces and its zone, each a record of its own
+fn extra_bytes(t: &Transform) -> Option<Vec<u8>> {
     let mut out = Vec::new();
-    if let Some(b) = bend.filter(|b| !b.straight()) {
+    if let Some(b) = t.bend.filter(|b| !b.straight()) {
         out.extend(b.to_bytes());
     }
-    if let Some(f) = faces.filter(|f| !f.is_empty()) {
+    if let Some(f) = t.faces.filter(|f| !f.is_empty()) {
         f.write(&mut out);
+    }
+    if let Some(z) = t.zone {
+        z.write(&mut out);
     }
     (!out.is_empty()).then_some(out)
 }
 
-/// the bend and faces in a block placement's extra (what doesn't read is left out)
-fn read_extra(b: &[u8]) -> (Option<Bend>, Option<Faces>) {
-    let (mut bend, mut faces) = (None, None);
+/// the bend, faces and zone in a block placement's extra (what doesn't read is left out)
+fn read_extra(b: &[u8]) -> (Option<Bend>, Option<Faces>, Option<Zone>) {
+    let (mut bend, mut faces, mut zone) = (None, None, None);
     let mut at = 0;
     while at < b.len() {
         match b[at] {
@@ -234,10 +240,88 @@ fn read_extra(b: &[u8]) -> (Option<Bend>, Option<Faces>) {
                 }
                 None => break,
             },
+            b'Z' => match Zone::read(&b[at..]) {
+                Some((z, n)) => {
+                    zone = Some(z);
+                    at += n;
+                }
+                None => break,
+            },
             _ => break,
         }
     }
-    (bend, faces)
+    (bend, faces, zone)
+}
+
+/// a staging zone: a block whose texts spread among themselves inside it, under physics
+/// of its own (each setting left out follows the room's). Zones nest: a text belongs to
+/// the smallest zone it's in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Zone {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repel: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attract: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub link: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gravity: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub damping: Option<f32>,
+}
+
+impl Zone {
+    fn fields(&self) -> [Option<f32>; 5] {
+        [self.repel, self.attract, self.link, self.gravity, self.damping]
+    }
+
+    /// within the physics panel's bounds (a value that isn't a number is left out)
+    pub fn checked(self) -> Zone {
+        let c = |v: Option<f32>, lo: f32, hi: f32| v.filter(|x| x.is_finite()).map(|x| x.clamp(lo, hi));
+        Zone {
+            repel: c(self.repel, 0.0, 60.0),
+            attract: c(self.attract, 0.0, 5.0),
+            link: c(self.link, 0.5, 30.0),
+            gravity: c(self.gravity, 0.0, 2.0),
+            damping: c(self.damping, 0.1, 10.0),
+        }
+    }
+
+    /// `Z`, version 1, a byte with a bit per setting given, then those as f32s
+    fn write(&self, out: &mut Vec<u8>) {
+        let f = self.fields();
+        let mask = (0..5).filter(|&i| f[i].is_some()).fold(0u8, |m, i| m | 1 << i);
+        out.extend_from_slice(&[b'Z', 1, mask]);
+        for v in f.iter().flatten() {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+
+    fn read(b: &[u8]) -> Option<(Zone, usize)> {
+        if b.len() < 3 || b[0] != b'Z' || b[1] != 1 {
+            return None;
+        }
+        let mask = b[2];
+        let mut f = [None; 5];
+        let mut at = 3;
+        for (i, slot) in f.iter_mut().enumerate() {
+            if mask & (1 << i) != 0 {
+                *slot = Some(f32::from_le_bytes(b.get(at..at + 4)?.try_into().ok()?));
+                at += 4;
+            }
+        }
+        Some((
+            Zone {
+                repel: f[0],
+                attract: f[1],
+                link: f[2],
+                gravity: f[3],
+                damping: f[4],
+            },
+            at,
+        ))
+    }
 }
 
 fn identity() -> [f32; 4] {
@@ -261,6 +345,7 @@ impl Default for Transform {
             bend: None,
             faces: None,
             shape: Shape::Box,
+            zone: None,
         }
     }
 }
@@ -505,6 +590,7 @@ impl Transform {
             rot,
             bend,
             faces: self.faces.filter(|f| !f.is_empty() && self.shape.is_box()),
+            zone: self.zone.map(Zone::checked),
             ..self
         })
     }
@@ -628,7 +714,7 @@ fn placement(t: &Transform, n: u64) -> Placement {
     let mut p = Placement::at(n, [t.x, t.y, t.z]);
     p.scale = Scale::Axes([t.w, t.h, t.d]).canonical();
     p.rot = (t.rot != super::place::IDENTITY).then(|| super::place::pack_rotation(t.rot));
-    p.extra = extra_bytes(t.bend, t.faces);
+    p.extra = extra_bytes(t);
     // its shape (`place::Kind`) in bits 3–6
     p.flags = Some((t.shape.kind() as u64) << 3);
     p
@@ -640,7 +726,7 @@ pub fn transform_of(p: &Placement) -> Transform {
 }
 
 fn transform(p: &Placement) -> Transform {
-    let (bend, faces) = p.extra.as_deref().map(read_extra).unwrap_or((None, None));
+    let (bend, faces, zone) = p.extra.as_deref().map(read_extra).unwrap_or((None, None, None));
     let [w, h, d] = match p.scale {
         Scale::One => [1.0; 3],
         Scale::Uniform(v) => [v; 3],
@@ -660,6 +746,7 @@ fn transform(p: &Placement) -> Transform {
         bend,
         faces,
         shape: Shape::of_flags(p.flags),
+        zone,
     }
 }
 

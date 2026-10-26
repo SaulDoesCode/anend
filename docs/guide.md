@@ -149,6 +149,10 @@ text for its menu.
   listed at the top of the window; using one twice keeps one copy.
 - **Spheres.** A block's menu (or the blocks window's *shape* row) makes it a sphere
   and back; its sides become the sphere's diameters.
+- **Staging zones.** Tick *a staging zone* for a block in the blocks window: texts in it
+  spread among themselves inside it, under sliders of its own, and leave the rest of the
+  room alone. Drag a text in or out; move the zone and its texts come along. Zones can
+  sit inside zones.
 - **Lights.** The lights window (the sun chip) adds an *ambient* light, a *sun*, a
   *point* or a *cone* ahead of you. Pick one to set its colour, strength, reach,
   direction and cone with sliders, or *move it here*. The light is worked out onto the

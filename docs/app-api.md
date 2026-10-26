@@ -426,7 +426,9 @@ variants)`, n its number). A block's `faces`, when it has any, is six recipe ids
 (right, left, top, bottom, front, back): a face with a recipe shows it in place of the
 block's own texture; `faces: null` in `blocks.set` clears them. A block's `shape` is
 `"box"` (left out) or `"sphere"` (an ellipsoid with its sides as diameters; a sphere has no
-bend and no faces).
+bend and no faces). A block's `zone`, when it's a staging zone, is its own physics
+(`{repel?, attract?, link?, gravity?, damping?}`, `{}` for the room's): texts inside it
+spread among themselves, kept inside it; `zone: null` makes it an ordinary block again.
 
 | op | args | data |
 |---|---|---|

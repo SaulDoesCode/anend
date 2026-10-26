@@ -275,7 +275,13 @@ mod tests {
             assert!(rs.contains(needle), "lightwin.rs lost {needle}");
         }
         let sp = include_str!("views/space.rs");
-        for needle in ["show_lights", "fn ShapeRow(", "make it a sphere"] {
+        for needle in [
+            "show_lights",
+            "fn ShapeRow(",
+            "make it a sphere",
+            "fn ZoneRow(",
+            "a staging zone",
+        ] {
             assert!(sp.contains(needle), "space.rs lost {needle}");
         }
     }

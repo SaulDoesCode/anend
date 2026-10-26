@@ -2010,6 +2010,7 @@ fn Blocks(
                     }
                     TurnRow { b: b.clone(), on_send }
                     ShapeRow { b: b.clone(), on_send }
+                    ZoneRow { b: b.clone(), on_send }
                     details { class: "bend", open: bend_open(), hidden: b["shape"].as_str() == Some("sphere"),
                         summary { onclick: move |e| { e.prevent_default(); let o = bend_open(); let mut bo = bend_open; bo.set(!o); }, "bend" span { class: "dim small", {bend_words(&b["bend"])} } }
                         if bend_open() {
@@ -2068,6 +2069,63 @@ fn rot_of(b: &Value) -> [f64; 4] {
         [q[0], q[1], q[2], q[3]]
     } else {
         [0.0, 0.0, 0.0, 1.0]
+    }
+}
+
+/// whether a block is a staging zone (texts inside it spread among themselves, bounded
+/// by it), and its own physics: each slider starts at the room's value, and "as the room"
+/// lets a setting follow the room's again
+#[component]
+fn ZoneRow(b: Value, on_send: EventHandler<Value>) -> Element {
+    let ui = ui();
+    let id = b["id"].as_str().unwrap_or("").to_string();
+    let zone = b["zone"].clone();
+    let on = zone.is_object();
+    let room = ui.prefs.read().space.physics.clone();
+    let send = move |id: &str, z: Value| on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "zone": z } }));
+    rsx! {
+        div { class: "zone-row",
+            label { class: "row small", title: "texts inside it spread among themselves, kept inside it, under physics of its own (zones can nest)",
+                input { r#type: "checkbox", checked: on,
+                    oninput: { let id = id.clone(); move |e: FormEvent| send(&id, if e.checked() { json!({}) } else { Value::Null }) } }
+                "a staging zone"
+            }
+            if on {
+                for (key , short) in [("repel", "push apart"), ("attract", "pull together"), ("link", "spacing"), ("gravity", "to the centre"), ("damping", "damping")] {
+                    {
+                        let s = SLIDERS.iter().find(|s| s.key == key).expect("a physics slider");
+                        let own = zone[key].as_f64();
+                        let v = own.unwrap_or_else(|| room.get(key).copied().unwrap_or(s.def));
+                        let id = id.clone();
+                        let id2 = id.clone();
+                        let zone2 = zone.clone();
+                        let zone3 = zone.clone();
+                        rsx! {
+                            label { key: "{key}", class: "lt-slider", title: "{s.label}",
+                                span { "{short}" }
+                                input { r#type: "range", min: "{s.min}", max: "{s.max}", step: "{s.step}", value: "{v}",
+                                    onchange: move |e| {
+                                        let mut z = zone2.clone();
+                                        z[key] = json!(e.value().parse::<f64>().unwrap_or(v));
+                                        send(&id, z);
+                                    } }
+                                if own.is_some() {
+                                    button { class: "plain small", title: "follow the room's setting again",
+                                        onclick: move |_| {
+                                            let mut z = zone3.clone();
+                                            if let Some(o) = z.as_object_mut() { o.remove(key); }
+                                            send(&id2, z);
+                                        },
+                                        "as the room" }
+                                } else {
+                                    span { class: "dim small", "the room's" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

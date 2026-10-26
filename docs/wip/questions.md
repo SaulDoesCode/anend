@@ -172,3 +172,6 @@ The answers left these open. Each is written into the design as its default.
     scenes. There are no shadows yet (a block doesn't shade another); that would be the
     next step for baked light. With no lights the room shades faces by direction as
     before.
+41. **A staging zone holds the texts inside its box,** decided when texts are placed,
+    dropped, or the zone changes; texts outside pass through it unaffected rather than
+    being kept out. Moving a zone carries its texts, and may take in texts it passes over.

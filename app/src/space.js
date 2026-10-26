@@ -487,7 +487,61 @@ export class Space {
     return w ? sum / w : 0;
   }
 
+  // ------------------------------------------------------------------ staging zones
+  //
+  // A block can be a staging zone (core's graph::blocks::Zone): the texts inside it spread
+  // among themselves, pulled to its centre and kept inside its box, under its own physics
+  // (repel, attract, link, gravity, damping; each left out follows the room's). Texts
+  // outside and inside don't push or pull each other. Zones nest: a text belongs to the
+  // smallest zone it's in. Moving a zone carries its texts along.
+
+  // the zones in the spread's own frame (texts' x y z are relative to `origin`, `quat`)
+  zoneFrames() {
+    if (!this.zoneBlocks) this.zoneBlocks = [...this.blocks.values()].filter((o) => o.b.zone).map((o) => o.b);
+    if (!this.zoneBlocks.length) return [];
+    const qi = this.quat.clone().invert();
+    return this.zoneBlocks.map((b) => {
+      const c = new THREE.Vector3(b.x, b.y, b.z).sub(this.origin).applyQuaternion(qi);
+      const q = qi.clone().multiply(turnOf(b));
+      return { id: b.id, c, q, qi: q.clone().invert(), half: [b.w / 2, b.h / 2, b.d / 2], vol: b.w * b.h * b.d, p: { ...this.p, ...Object.fromEntries(Object.entries(b.zone).filter(([, v]) => v != null)) } };
+    });
+  }
+
+  // the smallest zone a text is in (its id), or null
+  zoneOf(n, frames) {
+    let best = null;
+    const v = new THREE.Vector3();
+    for (const f of frames) {
+      v.set(n.x, n.y, n.z).sub(f.c).applyQuaternion(f.qi);
+      if (Math.abs(v.x) <= f.half[0] && Math.abs(v.y) <= f.half[1] && Math.abs(v.z) <= f.half[2] && (!best || f.vol < best.vol)) best = f;
+    }
+    return best ? best.id : null;
+  }
+
+  // a text kept inside its zone's box (its label's half size in from the sides, at most
+  // half the box)
+  keepIn(n, f) {
+    const v = new THREE.Vector3(n.x, n.y, n.z).sub(f.c).applyQuaternion(f.qi);
+    const m = [Math.min(n.hw || 0.3, f.half[0] * 0.45), Math.min(n.hh || 0.2, f.half[1] * 0.45), Math.min(0.3, f.half[2] * 0.45)];
+    const c = [v.x, v.y, v.z].map((x, i) => Math.max(-f.half[i] + m[i], Math.min(f.half[i] - m[i], x)));
+    if (c[0] === v.x && c[1] === v.y && c[2] === v.z) return false;
+    v.set(c[0], c[1], c[2]).applyQuaternion(f.q).add(f.c);
+    n.x = v.x; n.y = v.y; n.z = v.z;
+    return true;
+  }
+
+  // which zone each text is in: members of a zone that moved come along first
+  assignZones(frames) {
+    const byId = new Map(frames.map((f) => [f.id, f]));
+    for (const n of this.order) {
+      const f = n.zone && byId.get(n.zone);
+      if (f && !n.pinned) this.keepIn(n, f);
+      n.zone = frames.length ? this.zoneOf(n, frames) : null;
+    }
+  }
+
   weights() {
+    this.zonesDirty = true;
     const n = this.order.length;
     this.sim = new Float32Array(n * n);
     for (let i = 0; i < n; i++) {
@@ -524,44 +578,64 @@ export class Space {
       this.mean = { s: ms, ss: Math.sqrt(ss / n), l: ml, t: mt, tt: Math.sqrt(tt / Math.max(1, k)) };
     }
     const a = this.alpha;
+    const frames = this.zoneFrames();
+    if (this.zonesDirty) {
+      this.assignZones(frames);
+      this.zonesDirty = false;
+    }
+    const zones = new Map(frames.map((f) => [f.id, f]));
     const fx = new Float64Array(n), fy = new Float64Array(n), fz = new Float64Array(n);
-    const L = p.link;
     for (let i = 0; i < n; i++) {
       const A = N[i];
+      // a text in a zone moves under the zone's physics, toward its centre
+      const zf = A.zone ? zones.get(A.zone) : null;
+      const pp = zf ? zf.p : p;
+      const L = pp.link;
       for (let j = i + 1; j < n; j++) {
         const B = N[j];
         // a chain's members take no part in the spread's forces: their head stands for them
         if (A.head || B.head) continue;
+        // texts in different zones (or one in, one out) leave each other alone
+        if ((A.zone || null) !== (B.zone || null)) continue;
         let dx = B.x - A.x, dy = B.y - A.y, dz = B.z - A.z;
         let d2 = dx * dx + dy * dy + dz * dz;
         if (d2 < 1e-6) { dx = (hash01(A.key + B.key, 7) - 0.5) * 0.01; dy = (hash01(B.key + A.key, 9) - 0.5) * 0.01; d2 = dx * dx + dy * dy + 1e-6; }
         const d = Math.sqrt(d2);
         const s = this.sim[i * n + j];
         // every two repel (more when the weights say alike texts should part), softened near
-        let f = -p.repel * (1 + Math.max(0, -s) * 2) / (d2 + 0.5);
+        let f = -pp.repel * (1 + Math.max(0, -s) * 2) / (d2 + 0.5);
         // alike texts pull toward a rest length that shrinks the more alike they are
-        if (s > 0) f += p.attract * s * (d - L * (1.15 - s));
+        if (s > 0) f += pp.attract * s * (d - L * (1.15 - s));
         const ux = dx / d, uy = dy / d, uz = dz / d;
         fx[i] += f * ux; fy[i] += f * uy; fz[i] += f * uz;
         fx[j] -= f * ux; fy[j] -= f * uy; fz[j] -= f * uz;
       }
-      // gravity to the centre, and toward the depth the measure gives
+      // gravity to the centre (a zone's own), and toward the depth the measure gives
+      if (zf) {
+        fx[i] -= pp.gravity * (A.x - zf.c.x);
+        fy[i] -= pp.gravity * (A.y - zf.c.y);
+        fz[i] -= p.flat * (A.z - zf.c.z);
+        continue;
+      }
       fx[i] -= p.gravity * A.x;
       fy[i] -= p.gravity * A.y;
       const zt = p.depth_by === 'none' ? 0 : this.depthOf(A) * p.depth;
       fz[i] -= p.flat * (A.z - zt);
     }
-    const drag = Math.exp(-p.damping * h);
     let ke = 0;
     for (let i = 0; i < n; i++) {
       const A = N[i];
       if (A.pinned || A.head || A === this.drag?.n) { A.vx = A.vy = A.vz = 0; continue; }
+      const zf = A.zone ? zones.get(A.zone) : null;
+      const drag = Math.exp(-(zf ? zf.p.damping : p.damping) * h);
       A.vx = (A.vx + a * fx[i] * h) * drag;
       A.vy = (A.vy + a * fy[i] * h) * drag;
       A.vz = (A.vz + a * fz[i] * h) * drag;
       const v2 = A.vx * A.vx + A.vy * A.vy + A.vz * A.vz;
       if (v2 > 900) { const k = 30 / Math.sqrt(v2); A.vx *= k; A.vy *= k; A.vz *= k; }
       A.x += A.vx * h; A.y += A.vy * h; A.z += A.vz * h;
+      // bounded by its zone: the speed into a side is lost there
+      if (zf && this.keepIn(A, zf)) { A.vx *= 0.5; A.vy *= 0.5; A.vz *= 0.5; }
       ke += v2;
     }
     ke += this.follow(h) * 100;
@@ -572,6 +646,7 @@ export class Space {
         for (let j = i + 1; j < n; j++) {
           const B = N[j];
           if (Math.abs(A.z - B.z) > 1.5) continue;
+          if ((A.zone || null) !== (B.zone || null)) continue;
           const ox = A.hw + B.hw + p.pad - Math.abs(B.x - A.x);
           const oy = A.hh + B.hh + p.pad * 0.5 - Math.abs(B.y - A.y);
           if (ox <= 0 || oy <= 0) continue;
@@ -991,8 +1066,21 @@ export class Space {
     const key = `${b.kind}:${b.texture}`;
     const about = this.abouts.get(key) || {};
     const base = b.kind === 'texture' ? this.recipeMaterial(key, about, b.variant || 0) : this.material(key, about);
-    if (b.shape === 'sphere' || !b.faces || !b.faces.some(Boolean)) return base;
-    return b.faces.map((f) => (f ? this.recipeMaterial(`texture:${f}`, this.abouts.get(`texture:${f}`) || {}, 0) : base));
+    const all = b.shape === 'sphere' || !b.faces || !b.faces.some(Boolean) ? base : b.faces.map((f) => (f ? this.recipeMaterial(`texture:${f}`, this.abouts.get(`texture:${f}`) || {}, 0) : base));
+    if (!b.zone) return all;
+    return Array.isArray(all) ? all.map((m) => this.seeThrough(m)) : this.seeThrough(all);
+  }
+
+  // a zone shows the texts in it: its material, see-through (made once per material)
+  seeThrough(m) {
+    if (!m.userData.glass) {
+      const g = m.clone();
+      g.transparent = true;
+      g.opacity = 0.22;
+      g.depthWrite = false;
+      m.userData.glass = g;
+    }
+    return m.userData.glass;
   }
 
   // the sky: a recipe round the room, far off and following the camera (null: none)
@@ -1300,6 +1388,14 @@ export class Space {
 
   shapeBlock(o) {
     const { b, mesh } = o;
+    // a zone's place or size changed: its texts are looked at again (and come along)
+    if (b.zone || o.wasZone) {
+      this.zoneBlocks = null;
+      this.zonesDirty = true;
+      this.wake(1);
+    }
+    if (!!b.zone !== !!o.wasZone) mesh.material = this.blockMaterial(b);
+    o.wasZone = !!b.zone;
     if (mesh.geometry.userData.shape !== shapeKey(b)) {
       mesh.geometry.dispose();
       mesh.geometry = this.boxGeometry(b);
@@ -1316,6 +1412,11 @@ export class Space {
   dropBlock(id) {
     const o = this.blocks.get(id);
     if (!o) return;
+    if (o.b.zone) {
+      this.zoneBlocks = null;
+      this.zonesDirty = true;
+      this.wake(1);
+    }
     this.scene.remove(o.mesh);
     o.mesh.geometry.dispose();
     this.blocks.delete(id);
@@ -1323,8 +1424,8 @@ export class Space {
   }
 
   blockOut(o) {
-    const { id, kind, texture, x, y, z, w, h, d, rot, bend, faces, variant, shape } = o.b;
-    return { id, kind, texture, x, y, z, w, h, d, rot: rot || [0, 0, 0, 1], bend: bend || null, faces: faces || null, shape: shape || 'box', ...(variant != null ? { variant } : {}) };
+    const { id, kind, texture, x, y, z, w, h, d, rot, bend, faces, variant, shape, zone } = o.b;
+    return { id, kind, texture, x, y, z, w, h, d, rot: rot || [0, 0, 0, 1], bend: bend || null, faces: faces || null, shape: shape || 'box', zone: zone || null, ...(variant != null ? { variant } : {}) };
   }
 
   pickBlock(id) {
@@ -1606,6 +1707,9 @@ export class Space {
       this.drag = null;
       d.n.el.classList.remove('dragging');
       if (d.moved) {
+        // dropped into a zone (or out of one)
+        d.n.zone = this.zoneOf(d.n, this.zoneFrames());
+        this.sim = null;
         this.record({ kind: 'move', n: d.n, ...d.from });
         this.send(this.ev('moved', d.n, e));
       } else {

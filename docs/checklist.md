@@ -156,7 +156,8 @@ docs/architecture.md (the whole).
       (26 Oct: curved blocks as bends, a curtain ripple and a fold, each shaped by a bezier;
       spheres as a block shape; ambient, sun, point and cone lights baked onto block
       vertices, no shadows yet.)
-- [ ] Local spreads inside staging blocks (#14).
+- [x] Local spreads inside staging blocks (#14). (26 Oct: zones with their own physics,
+      nesting, carried texts.)
 - [ ] The visual spec builder, with no JSON typing needed (#4).
 - [ ] ▶ **usable:** building scenes that look the way they are meant to.
 - [ ] Blocks that cast rays and run programs (#15), with ray modes including last hit (#28).

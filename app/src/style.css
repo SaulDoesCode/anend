@@ -828,3 +828,7 @@ a.btn { text-decoration: none; }
 .lt-slider > span:first-child { width: 62px; color: var(--dim); flex: none; }
 .lt-slider input { flex: 1; min-width: 0; }
 .lt-slider .dim { width: 64px; text-align: right; flex: none; }
+.zone-row { display: flex; flex-direction: column; gap: 3px; margin: 4px 0; }
+.zone-row .lt-slider > span:first-child { width: 84px; }
+.zone-row .lt-slider button { width: 76px; padding: 0 4px; flex: none; }
+.zone-row .lt-slider .dim { width: 76px; text-align: center; }
