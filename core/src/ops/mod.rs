@@ -20,6 +20,7 @@ pub mod pictures;
 #[cfg(not(target_arch = "wasm32"))]
 mod saves;
 pub mod scenes;
+pub mod script;
 pub mod templates;
 pub mod texts;
 

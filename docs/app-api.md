@@ -452,6 +452,9 @@ texture key from that moment on, eased between keys along CSS cubic-bezier timin
 | `textures.save` | `{recipe, name?}` | `{id, name, recipe, added}`: the recipe kept (or the one already kept with that id, renamed when `name` is given) |
 | `textures.name` | `{id, name}` | the recipe, renamed |
 | `textures.delete` | `{id}` | `{removed}`; blocks and faces showing it draw as missing |
+| `s.run` | `{code}` or `{key}` (a note), `stdin?`, `args?` | `{out, err, code, steps}`: an s program's run (docs/s.md); its files are the save's s programs (notes tagged `s`) by title; at most 2 million steps on a shared hub, 50 million on one's own machine |
+| `s.programs` | | `[{title, key}]`: the notes tagged `s` |
+| `s.words` | | `{commands, suffixes, library: [{module, words}]}`: what the code editor colours |
 | `anims.list` | | `[{key, anim}]`: the animations (entries of mime `application/x-anend-animation`, `graph::anims`) |
 | `anims.save` | `{key?, anim}` | `{key, anim}`: a new animation, or the one at `key` changed (blocks playing it play the change) |
 | `anims.delete` | `{key}` | `{removed}`; blocks playing it stop |

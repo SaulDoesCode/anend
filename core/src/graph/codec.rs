@@ -21,7 +21,16 @@
 //!   its continuation bits only (Hebrew, Cyrillic and most CJK runs pay 6 or 12 bits per
 //!   character instead of 16 or 24);
 //! - `0xF5`: a digit run: 5 bits holding `n - 2`, then `n` (2–33) digits of 4 bits each;
-//! - anything else (`0xC0`, `0xC1`, `0xF6..=0xFF`) is reserved, and fails to decode.
+//! - `0xF6`: **s mode** for the rest of the run. s, the user's language (`crate::s`), is
+//!   written in lowercase words and a few symbols, which plain packing writes in 13 bits
+//!   each. In s mode the case token is spent on them instead: `UPPER` and 4 bits is one of
+//!   the 16 symbols s uses most ([`S_SYMBOLS`]: its ten suffix characters, the literal
+//!   marks `{ } '`, and `> - =`), 9 bits; `ESC 0` and 4 bits is one of 16 more
+//!   ([`S_MORE`]: the digits and `+ * / < ( )`), 10 bits; `ESC 1` and an 8-bit payload is
+//!   any escape above (capitals are written this way, as ASCII), 14 bits. Caps lock is off
+//!   in s mode. The encoder turns it on for a text when that makes it shorter, so any text
+//!   may use it;
+//! - anything else (`0xC0`, `0xC1`, `0xF7..=0xFF`) is reserved, and fails to decode.
 //!
 //! A **callee** under 32 is a builtin (see `interp`); an entry `id` is written `id + 32`.
 //!
@@ -41,6 +50,16 @@ pub const CALL: u32 = 30;
 pub const NEWLINE: u32 = 31;
 
 const DIGITS: u8 = 0xF5;
+const S_MODE: u8 = 0xF6;
+
+/// the symbols s mode writes as `UPPER` and 4 bits
+pub const S_SYMBOLS: [char; 16] = [
+    '?', '!', '~', '$', '`', '#', ';', ':', '.', '@', '{', '}', '\'', '>', '-', '=',
+];
+/// the ones it writes as `ESC 0` and 4 bits
+pub const S_MORE: [char; 16] = [
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '*', '/', '<', '(', ')',
+];
 /// how deep calls may nest inside a body (decoding recurses per level)
 pub const MAX_NESTING: usize = 64;
 
@@ -229,12 +248,43 @@ fn continuations(lead: u8) -> Option<usize> {
     }
 }
 
+#[derive(Clone)]
 struct RunState {
     caps: bool,
     lead: Option<u8>,
+    /// s mode is on (see the escape payloads above)
+    s: bool,
 }
 
+/// writes `ESC` and an 8-bit payload (with s mode's long-form bit when it's on)
+fn esc(w: &mut BitWriter, st: &RunState, b: u32) {
+    w.put(ESC, 5);
+    if st.s {
+        w.put(1, 1);
+    }
+    w.put(b, 8);
+}
+
+/// a text, turning s mode on first when that makes it shorter
 fn encode_text(w: &mut BitWriter, text: &str, st: &mut RunState) {
+    if !st.s && text.chars().any(|c| S_SYMBOLS.contains(&c)) {
+        let mut plain = BitWriter::default();
+        encode_text_in(&mut plain, text, &mut st.clone());
+        let mut on = st.clone();
+        on.s = true;
+        let mut smode = BitWriter::default();
+        encode_text_in(&mut smode, text, &mut on);
+        if smode.bits() + 13 < plain.bits() {
+            w.put(ESC, 5);
+            w.put(S_MODE as u32, 8);
+            st.s = true;
+            st.caps = false;
+        }
+    }
+    encode_text_in(w, text, st);
+}
+
+fn encode_text_in(w: &mut BitWriter, text: &str, st: &mut RunState) {
     let chars: Vec<char> = text.chars().collect();
     let mut i = 0;
     while i < chars.len() {
@@ -243,6 +293,32 @@ fn encode_text(w: &mut BitWriter, text: &str, st: &mut RunState) {
             w.put(SPACE, 5);
         } else if c == '\n' {
             w.put(NEWLINE, 5);
+        } else if st.s {
+            // s mode: lowercase letters as tokens, its symbols short, the rest escaped
+            if c.is_ascii_lowercase() {
+                w.put(letter(c).expect("a letter"), 5);
+            } else if let Some(k) = S_SYMBOLS.iter().position(|&x| x == c) {
+                w.put(UPPER, 5);
+                w.put(k as u32, 4);
+            } else if c.is_ascii_digit() && chars[i..].iter().take(33).take_while(|c| c.is_ascii_digit()).count() >= 4 {
+                let n = chars[i..].iter().take(33).take_while(|c| c.is_ascii_digit()).count();
+                esc(w, st, DIGITS as u32);
+                w.put(n as u32 - 2, 5);
+                for d in &chars[i..i + n] {
+                    w.put(*d as u32 - '0' as u32, 4);
+                }
+                i += n;
+                continue;
+            } else if let Some(k) = S_MORE.iter().position(|&x| x == c) {
+                w.put(ESC, 5);
+                w.put(0, 1);
+                w.put(k as u32, 4);
+            } else if c.is_ascii() {
+                esc(w, st, c as u32);
+            } else {
+                encode_wide(w, &chars, &mut i, st);
+                continue;
+            }
         } else if is_cased(c) {
             let upper = c.is_ascii_uppercase();
             let v = letter(c.to_ascii_lowercase()).unwrap();
@@ -267,8 +343,7 @@ fn encode_text(w: &mut BitWriter, text: &str, st: &mut RunState) {
         } else if c.is_ascii_digit() {
             let n = chars[i..].iter().take(33).take_while(|c| c.is_ascii_digit()).count();
             if n >= 3 {
-                w.put(ESC, 5);
-                w.put(DIGITS as u32, 8);
+                esc(w, st, DIGITS as u32);
                 w.put(n as u32 - 2, 5);
                 for d in &chars[i..i + n] {
                     w.put(*d as u32 - '0' as u32, 4);
@@ -276,51 +351,57 @@ fn encode_text(w: &mut BitWriter, text: &str, st: &mut RunState) {
                 i += n;
                 continue;
             }
-            w.put(ESC, 5);
-            w.put(c as u32, 8);
+            esc(w, st, c as u32);
         } else if c.is_ascii() {
-            w.put(ESC, 5);
-            w.put(c as u32, 8);
+            esc(w, st, c as u32);
         } else {
-            let mut buf = [0u8; 4];
-            let lead = c.encode_utf8(&mut buf).as_bytes()[0];
-            if st.lead == Some(lead) {
-                // a run of characters sharing the last lead byte
-                let n = chars[i..]
-                    .iter()
-                    .take(64)
-                    .take_while(|c| {
-                        let mut b = [0u8; 4];
-                        !c.is_ascii() && c.encode_utf8(&mut b).as_bytes()[0] == lead
-                    })
-                    .count();
-                w.put(ESC, 5);
-                w.put(0x7F + n as u32, 8);
-                for ch in &chars[i..i + n] {
-                    let mut b = [0u8; 4];
-                    for cont in &ch.encode_utf8(&mut b).as_bytes()[1..] {
-                        w.put((cont & 0x3F) as u32, 6);
-                    }
-                }
-                i += n;
-                continue;
-            }
-            let bytes = c.encode_utf8(&mut buf).as_bytes();
-            w.put(ESC, 5);
-            w.put(lead as u32, 8);
-            for cont in &bytes[1..] {
-                w.put((cont & 0x3F) as u32, 6);
-            }
-            st.lead = Some(lead);
+            encode_wide(w, &chars, &mut i, st);
+            continue;
         }
         i += 1;
     }
+}
+
+/// a non-ASCII character at `chars[*i]` (a run of ones sharing the last lead byte, or one
+/// with its lead), moving `i` past what it wrote
+fn encode_wide(w: &mut BitWriter, chars: &[char], i: &mut usize, st: &mut RunState) {
+    let c = chars[*i];
+    let mut buf = [0u8; 4];
+    let lead = c.encode_utf8(&mut buf).as_bytes()[0];
+    if st.lead == Some(lead) {
+        // a run of characters sharing the last lead byte
+        let n = chars[*i..]
+            .iter()
+            .take(64)
+            .take_while(|c| {
+                let mut b = [0u8; 4];
+                !c.is_ascii() && c.encode_utf8(&mut b).as_bytes()[0] == lead
+            })
+            .count();
+        esc(w, st, 0x7F + n as u32);
+        for ch in &chars[*i..*i + n] {
+            let mut b = [0u8; 4];
+            for cont in &ch.encode_utf8(&mut b).as_bytes()[1..] {
+                w.put((cont & 0x3F) as u32, 6);
+            }
+        }
+        *i += n;
+        return;
+    }
+    let bytes = c.encode_utf8(&mut buf).as_bytes();
+    esc(w, st, lead as u32);
+    for cont in &bytes[1..] {
+        w.put((cont & 0x3F) as u32, 6);
+    }
+    st.lead = Some(lead);
+    *i += 1;
 }
 
 fn encode_run(w: &mut BitWriter, segs: &[Seg]) {
     let mut st = RunState {
         caps: false,
         lead: None,
+        s: false,
     };
     for s in segs {
         match s {
@@ -376,6 +457,7 @@ pub fn text_bits(text: &str) -> usize {
         &mut RunState {
             caps: false,
             lead: None,
+            s: false,
         },
     );
     w.bits()
@@ -410,20 +492,32 @@ fn decode_run(r: &mut BitReader, depth: usize) -> Result<Vec<Seg>, CodecError> {
     let mut text: Vec<u8> = Vec::new();
     let mut caps = false;
     let mut lead: Option<u8> = None;
+    let mut smode = false;
     while r.left() >= 5 {
         let t = r.get(5)?;
         match t {
             SPACE => text.push(b' '),
             1..=26 => text.push(if caps { b'A' } else { b'a' } + t as u8 - 1),
             NEWLINE => text.push(b'\n'),
+            UPPER if smode => {
+                let mut buf = [0u8; 4];
+                text.extend_from_slice(S_SYMBOLS[r.get(4)? as usize].encode_utf8(&mut buf).as_bytes());
+            }
             UPPER => match r.get(5)? {
                 UPPER => caps = !caps,
                 l @ 1..=26 => text.push(if caps { b'a' } else { b'A' } + l as u8 - 1),
                 _ => return Err(CodecError::Invalid("UPPER before a non-letter")),
             },
             ESC => {
+                if smode && r.get(1)? == 0 {
+                    text.push(S_MORE[r.get(4)? as usize] as u8);
+                    continue;
+                }
                 let b = r.get(8)? as u8;
-                if b < 0x80 {
+                if b == S_MODE {
+                    smode = true;
+                    caps = false;
+                } else if b < 0x80 {
                     text.push(b);
                 } else if let Some(k) = continuations(b) {
                     text.push(b);
@@ -742,6 +836,55 @@ mod tests {
             run = vec![Seg::call(Callee::Builtin(3), vec![run])];
         }
         assert_eq!(unpack(&pack(&run)), Err(CodecError::TooDeep));
+    }
+
+    #[test]
+    fn s_mode_makes_s_programs_shorter() {
+        let prog =
+            "{i: i~ 0 >> loop.?} loop$ 1000 i# loop.. i~ >\n{~x~ y@} f$ a b f.. {n~ >_} p$ 3 p &&& x? y! =~ `prng";
+        let packed = pack_text(prog);
+        assert_eq!(unpack_text(&packed).unwrap(), prog);
+        // the same text with s mode off
+        let mut w = BitWriter::default();
+        w.put(0, 3);
+        encode_text_in(
+            &mut w,
+            prog,
+            &mut RunState {
+                caps: false,
+                lead: None,
+                s: false,
+            },
+        );
+        let plain = w.bits().div_ceil(8);
+        eprintln!("s mode: {} bytes, plain {plain}, utf-8 {}", packed.len(), prog.len());
+        assert!(
+            packed.len() * 100 < plain * 88 && packed.len() < prog.len(),
+            "{} vs {plain}",
+            packed.len()
+        );
+        // prose with a symbol or two doesn't switch
+        let prose = "an ordinary sentence, with a full stop.";
+        let mut w = BitWriter::default();
+        w.put(0, 3);
+        encode_text_in(
+            &mut w,
+            prose,
+            &mut RunState {
+                caps: false,
+                lead: None,
+                s: false,
+            },
+        );
+        assert_eq!(pack_text(prose).len(), w.bits().div_ceil(8));
+        // s mode across segments and in arguments, with other escapes after it
+        let run = vec![
+            Seg::text("x~ y. {a} 'b' é ü 12345"),
+            Seg::Ref(3),
+            Seg::text("z~ 中文"),
+            Seg::call(Callee::Builtin(3), vec![vec![Seg::text("q$ r@ ~~")]]),
+        ];
+        assert_eq!(unpack(&pack(&run)).unwrap(), run);
     }
 
     #[test]

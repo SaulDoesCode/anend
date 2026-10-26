@@ -33,7 +33,17 @@ allocated. Ids stay under 2^48.
 - **Escape payload `b`:** `0x00–0x7F` that ASCII byte; `0xC2–0xF4` a UTF-8 lead byte with
   its continuation bytes as 6 bits each (it becomes the run's last lead); `0x80–0xBF`
   `b − 0x7F` characters sharing the last lead, continuation bits only; `0xF5` a run of 2–33
-  digits (5 bits for `n − 2`, then 4 bits a digit); anything else is reserved.
+  digits (5 bits for `n − 2`, then 4 bits a digit); `0xF6` s mode (below); anything
+  else (`0xC0`, `0xC1`, `0xF7–0xFF`) is reserved.
+- **s mode** (`0xF6`, for the rest of the run; caps lock off): the escape space spent on
+  s, the user's language (docs/s.md), whose programs are lowercase words and a few
+  symbols. `UPPER` and 4 bits is one of s's 16 commonest symbols (`? ! ~ $ ` # ; : . @
+  { } ' > - =`: its ten suffix characters, the literal marks, the output and two
+  conditions), 9 bits instead of 13; `ESC 0` and 4 bits is one of 16 more (the digits and
+  `+ * / < ( )`), 10 bits; `ESC 1` and a payload is any escape above, 14 bits, which is
+  how capitals are written. The encoder turns s mode on for a text when it comes out
+  shorter, so it serves any symbol-heavy text, and stored texts from before it decode as
+  they did. A sample s program (99 bytes of UTF-8): 102 bytes packed plainly, 88 in s mode.
 - **Callee:** under 32 a builtin, else entry `id + 32`.
 - **Runs:** caps lock and the last lead reset at the start of each run (a body, each
   argument), so arguments decode on their own.
@@ -42,6 +52,16 @@ allocated. Ids stay under 2^48.
 Any UTF-8 round-trips exactly. Measured (packed / UTF-8): lowercase prose 0.63, mixed
 case markdown 0.86, Hebrew 0.61, Russian 0.85, Japanese 0.88, digits 0.87, polytonic Greek
 1.07 (it alternates 2- and 3-byte characters, so the shared-lead runs rarely apply).
+
+## s programs (`crate::s`, `ops::script`)
+
+An s program is a note tagged `s`: its title names it, its body is the code (docs/s.md, the
+user's spec). Runs follow that spec, with tail calls in constant space (the machine keeps
+its own activations; a call that is a unit's last operation replaces the running one).
+In a run the files are the save's s programs (each under its title and its title with
+`.s`, so `name.` runs another one) and stay in that run; `<` is a built-in shell over
+them, workers run in step, `tcp` fails, as in the spec's browser runtime (§10). The
+library (`std/core.s` … `std/elec.s`) is built in as natives (`s::lib`).
 
 ## Rendering and the interpreter (`interp`)
 

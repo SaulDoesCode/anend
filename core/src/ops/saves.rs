@@ -469,6 +469,11 @@ impl Saves {
             let limits = self.models.unwrap_or(super::classify::Limits::NONE);
             return super::blocks::call(&g, op, args, &limits);
         }
+        if super::script::routed(op) {
+            let (_, g) = self.current()?;
+            let limits = self.models.unwrap_or(super::classify::Limits::NONE);
+            return super::script::call(&g, op, args, &limits);
+        }
         if super::chains::routed(op) {
             let (_, g) = self.current()?;
             return super::chains::call(&g, op, args);
