@@ -413,6 +413,19 @@ blocks are `{blocks: [block], textures: {"kind:texture": about}}`, where `about`
 `{text}` for a text (sent once however many blocks show it), `{name, width, height}` for
 a picture, `{colour}` for a colour, and `{gone: true}` when what it showed was deleted.
 
+A block can also show a **texture recipe** (`"texture"`, the recipe's id; `graph::textures`):
+a source (`{"picture": id}`, `{"text": key}` or `{"plain": "#rrggbb"}`) and the steps
+from it to a tile: `crop` `[left, top, right, bottom]` as fractions of the source, `scale`
+`[w, h]` a tile's sides in units, `offset` `[u, v]` fractions of a tile, `turn` quarter
+turns, `mirror`, `tint` `#rrggbb` with `tint_amount` 0–1, and `variants` (1–16) picked
+by `seed` (with `turn_variants`). A recipe is kept by the hash of its normalized JSON, so
+equal recipes are one. Its `about` is `{recipe, name, text?}` (`text` for a text source;
+`text_gone` or `picture_gone` when the source was deleted), and each block of a recipe
+with variants carries `variant`, the one it shows (`graph::textures::variant(seed, n,
+variants)`, n its number). A block's `faces`, when it has any, is six recipe ids or nulls
+(right, left, top, bottom, front, back): a face with a recipe shows it in place of the
+block's own texture; `faces: null` in `blocks.set` clears them.
+
 | op | args | data |
 |---|---|---|
 | `blocks.list` | `{lo?, hi?, kind?, texture?}` | the blocks, by texture and number; `lo` and `hi` (`[x, y, z]` each) keep those whose boxes meet that region |
@@ -424,9 +437,15 @@ a picture, `{colour}` for a colour, and `{gone: true}` when what it showed was d
 | `blocks.duplicate` | `{id or ids, by?: [1, 0, 0]}` | the copies (same texture, the next numbers) and `ids` |
 | `blocks.delete` | `{id or ids}` | `{removed: [block]}`: what was taken, to hand back to `blocks.restore` |
 | `blocks.restore` | `{blocks}` | `{restored}`: blocks put back with their ids (an undo); taken ids and missing textures are skipped |
+| `blocks.retexture` | `{id, kind, texture}` | the block showing another texture, where it was (its new texture's next number: a new id, in `ids`), and `removed` (the old one) |
+| `textures.list` | | `[{id, name, recipe, added, text?}]`, oldest first |
+| `textures.save` | `{recipe, name?}` | `{id, name, recipe, added}`: the recipe kept (or the one already kept with that id, renamed when `name` is given) |
+| `textures.name` | `{id, name}` | the recipe, renamed |
+| `textures.delete` | `{id}` | `{removed}`; blocks and faces showing it draw as missing |
 
 - **Limits**: at most 5000 blocks a call; on a shared hub a save holds at most 50 000.
-  `blocks.list`, `blocks.stats` and `blocks.delete` work when a member's quota is full.
+  `blocks.list`, `blocks.stats`, `blocks.delete`, `textures.list` and `textures.delete`
+  work when a member's quota is full.
 
 ## Spelling and word choice
 

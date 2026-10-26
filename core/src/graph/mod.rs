@@ -15,6 +15,7 @@ pub mod record;
 pub mod scenes;
 pub mod settle;
 pub mod store;
+pub mod textures;
 
 pub use store::{GResult, Graph, Reader, Tx, View};
 

@@ -100,7 +100,7 @@ fn resolve<T: ReadableTable<(u64, u32), &'static [u8]>>(long: &T, id: u64, slot:
 }
 
 /// the names of every table, for stats
-pub const TABLE_NAMES: [&str; 21] = [
+pub const TABLE_NAMES: [&str; 22] = [
     "graph entries",
     "graph long",
     "graph edges",
@@ -120,6 +120,7 @@ pub const TABLE_NAMES: [&str; 21] = [
     "graph pictures",
     "graph picture bytes",
     "graph picture lists",
+    "graph textures",
     "graph blocks",
     "graph block ids",
 ];
@@ -1914,6 +1915,7 @@ fn ensure_tables(txn: &WriteTransaction) -> GResult<()> {
     txn.open_table(SETTINGS).map_err(err)?;
     txn.open_table(MIMES).map_err(err)?;
     super::assets::ensure_tables(txn)?;
+    super::textures::ensure_tables(txn)?;
     super::scenes::ensure_tables(txn)?;
     Ok(())
 }
@@ -2237,6 +2239,7 @@ impl Graph {
         plain!(super::assets::PICTURES, "pictures");
         plain!(super::assets::PICTURE_BYTES, "picture bytes");
         multi!(super::assets::PICTURE_LISTS, "picture lists");
+        plain!(super::textures::TEXTURES, "textures");
         plain!(super::scenes::SCENES, "scenes");
         multi!(super::scenes::INSTANCES, "scene instances");
         multi!(super::scenes::DETACHED, "scene detached");

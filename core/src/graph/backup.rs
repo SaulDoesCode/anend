@@ -22,6 +22,7 @@
 //!   source, created, modified, version, history), without their trained weights;
 //! - `pictures`: `[{id, mime, width, height, name, added, size, data}, ...]`, `data` the
 //!   file's bytes in base64; `picture_lists`: `[[list name, picture id], ...]`.
+//! - `textures`: the texture recipes (`graph::textures::Saved`: id, name, recipe, added).
 //! - `blocks`: `[{id, kind, texture, x, y, z, w, h, d}, ...]` (`graph::blocks`), restored
 //!   with their ids.
 
@@ -253,6 +254,7 @@ impl Graph {
                 v
             }).collect::<Vec<_>>(),
             "picture_lists": self.picture_list_rows()?,
+            "textures": self.textures()?,
             "scenes": self.scenes()?,
             "instances": self.instance_rows()?,
         });
@@ -390,6 +392,11 @@ impl Graph {
                 && self.picture(id)?.is_some()
             {
                 self.tag_picture(id, l, true)?;
+            }
+        }
+        for t in o.get("textures").and_then(Value::as_array).into_iter().flatten() {
+            if let Ok(t) = serde_json::from_value::<super::textures::Saved>(t.clone()) {
+                self.put_texture(&t.recipe, &t.name, t.added)?;
             }
         }
         if let Some(scenes) = o.get("scenes").and_then(Value::as_array) {

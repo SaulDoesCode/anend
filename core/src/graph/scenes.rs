@@ -70,6 +70,8 @@ pub enum Def {
     Colour([u8; 3]),
     /// a scene, placed as a prefab
     Scene(u64),
+    /// a texture recipe (`graph::textures`), by its 128-bit content hash
+    Texture([u8; 16]),
 }
 
 impl Def {
@@ -90,6 +92,10 @@ impl Def {
             Def::Scene(id) => {
                 out.push(3);
                 put_sized(out, *id);
+            }
+            Def::Texture(h) => {
+                out.push(4);
+                out.extend_from_slice(h);
             }
         }
     }
@@ -113,6 +119,7 @@ impl Def {
                 let (id, n) = get_sized(rest)?;
                 (Def::Scene(id), 1 + n)
             }
+            4 => (Def::Texture(rest.get(..16)?.try_into().ok()?), 17),
             _ => return None,
         })
     }
@@ -1115,6 +1122,7 @@ pub fn def_name(def: &Def, version: Option<u64>) -> String {
         Def::Picture(h) => format!("picture:{}", h.iter().map(|b| format!("{b:02x}")).collect::<String>()),
         Def::Colour([r, g, b]) => format!("plain:#{r:02x}{g:02x}{b:02x}"),
         Def::Scene(id) => format!("scene:{id}"),
+        Def::Texture(h) => format!("texture:{}", h.iter().map(|b| format!("{b:02x}")).collect::<String>()),
     };
     match version {
         Some(v) => format!("{base}@{v}"),
@@ -1133,6 +1141,7 @@ pub fn parse_def_name(s: &str) -> Option<(Def, Option<u64>)> {
         "text" => super::blocks::def_of(super::blocks::Kind::Text, rest).ok()?,
         "picture" => super::blocks::def_of(super::blocks::Kind::Picture, rest).ok()?,
         "plain" => super::blocks::def_of(super::blocks::Kind::Plain, rest).ok()?,
+        "texture" => super::blocks::def_of(super::blocks::Kind::Texture, rest).ok()?,
         _ => return None,
     };
     Some((def, version))

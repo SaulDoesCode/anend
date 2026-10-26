@@ -136,7 +136,13 @@ What a save holds besides entries (`core/src/graph/assets.rs`): `graph spec mode
 trainings; [models](models.md#where-a-save-keeps-its-spec-models)), `graph pictures`
 (picture id, a 128-bit FNV-1a hash of its bytes as 32 hex digits → `{id, mime, width,
 height, name, added, size}` JSON), `graph picture bytes` (id → the PNG or JPEG file) and
-`graph picture lists` (list name → picture ids, a multimap).
+`graph picture lists` (list name → picture ids, a multimap). `graph textures`
+(`core/src/graph/textures.rs`): texture recipes, recipe id (FNV-1a 128 of the normalized
+recipe's JSON, 32 hex digits) → `{id, name, recipe, added}` JSON; a block placement whose
+definition is `Def::Texture` (tag 4, the 16-byte id) shows one. A block placement's extra
+holds records one after another: `B` 1 and nine f32s (its bend), then `F` 1, a byte with
+a bit per face that has a recipe, and those faces' 16-byte recipe ids (right, left, top,
+bottom, front, back).
 
 ## Backup
 

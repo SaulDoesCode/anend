@@ -1,7 +1,8 @@
 //! The app's block operations (`blocks.*`, listed in docs/app-api.md): spatial saves,
 //! blocks placed in the space showing a text, a picture or a plain colour tiled over
 //! their faces (`graph::blocks` keeps them: one key per texture, one 32 byte transform
-//! per instance, so repeating a text is cheap).
+//! per instance, so repeating a text is cheap), and the texture recipes blocks, faces and
+//! the sky show (`textures.*`, `graph::textures`).
 
 use std::collections::BTreeMap;
 
@@ -9,8 +10,9 @@ use serde_json::{Value, json};
 
 use super::classify::Limits;
 use super::{Res, s};
-use crate::graph::blocks::{Block, Kind, Transform, key};
+use crate::graph::blocks::{Block, Faces, Kind, Transform, key};
 use crate::graph::record;
+use crate::graph::textures::{self, Recipe};
 use crate::graph::{Graph, Reader};
 
 /// blocks a save holds at most on a shared hub (one's own machine: no limit)
@@ -20,7 +22,7 @@ pub const MAX_PER_CALL: usize = 5000;
 
 /// whether `op` is one of these
 pub fn routed(op: &str) -> bool {
-    op.starts_with("blocks.")
+    op.starts_with("blocks.") || op.starts_with("textures.")
 }
 
 fn num(v: &Value, k: &str) -> Option<f32> {
@@ -54,6 +56,13 @@ fn transform(v: &Value, base: Transform) -> Transform {
             None => base.bend,
             Some(Value::Null) => None,
             Some(b) => serde_json::from_value(b.clone()).ok().or(base.bend),
+        },
+        // six recipe ids or nulls (right, left, top, bottom, front, back); `faces: null`
+        // clears them
+        faces: match v.get("faces") {
+            None => base.faces,
+            Some(Value::Null) => None,
+            Some(f) => serde_json::from_value::<Faces>(f.clone()).ok().or(base.faces),
         },
     }
 }
@@ -109,7 +118,34 @@ fn texture(g: &Graph, kind: Kind, t: &str) -> Result<String, String> {
                 Err(format!("{t:?} isn't a colour (#rrggbb)"))
             }
         }
+        Kind::Texture => {
+            let id = t.to_lowercase();
+            g.texture(&id)?.ok_or_else(|| format!("no texture {t:?}"))?;
+            Ok(id)
+        }
     }
+}
+
+/// what the space needs to draw a recipe: the recipe, its name, and its source's text
+/// (a picture's thumbnail the app adds)
+fn recipe_about(g: &Graph, v: &crate::graph::View, id: &str) -> Result<Value, String> {
+    let Some(t) = g.texture(id)? else {
+        return Ok(json!({ "gone": true }));
+    };
+    let mut about = json!({ "recipe": t.recipe, "name": t.name });
+    match &t.recipe.source {
+        textures::Source::Text(l) => match record::parse_label(l) {
+            Some(e) if v.record(e)?.is_some() => about["text"] = json!(v.render(e)?),
+            _ => about["text_gone"] = json!(true),
+        },
+        textures::Source::Picture(p) => {
+            if g.picture(p)?.is_none() {
+                about["picture_gone"] = json!(true);
+            }
+        }
+        textures::Source::Plain(_) => {}
+    }
+    Ok(about)
 }
 
 /// blocks as JSON, with what their textures are: each text once (however many blocks
@@ -122,6 +158,10 @@ fn listed(g: &Graph, blocks: &[Block]) -> Res {
         if textures.contains_key(&k) {
             continue;
         }
+        if b.kind == Kind::Texture {
+            textures.insert(k, recipe_about(g, &v, &b.texture)?);
+            continue;
+        }
         let about = match b.kind {
             Kind::Text => match record::parse_label(&b.texture) {
                 Some(id) if v.record(id)?.is_some() => json!({ "text": v.render(id)? }),
@@ -132,13 +172,80 @@ fn listed(g: &Graph, blocks: &[Block]) -> Res {
                 None => json!({ "gone": true }),
             },
             Kind::Plain => json!({ "colour": b.texture }),
+            Kind::Texture => unreachable!("recipes are listed above"),
         };
         textures.insert(k, about);
     }
+    // the recipes on single faces
+    for b in blocks {
+        for h in b.t.faces.iter().flat_map(|f| f.0.iter().flatten()) {
+            let id: String = h.iter().map(|x| format!("{x:02x}")).collect();
+            let k = key(Kind::Texture, &id);
+            if let std::collections::btree_map::Entry::Vacant(e) = textures.entry(k) {
+                e.insert(recipe_about(g, &v, &id)?);
+            }
+        }
+    }
+    // each block's variant of a recipe with variants (by its number among its texture's)
+    let blocks: Vec<Value> = blocks
+        .iter()
+        .map(|b| {
+            let mut o = json!(b);
+            if b.kind == Kind::Texture
+                && let Some(r) = textures[&key(b.kind, &b.texture)].get("recipe")
+                && let Ok(r) = serde_json::from_value::<Recipe>(r.clone())
+                && r.variants > 1
+            {
+                let n = crate::graph::blocks::split_id(&b.id).map_or(0, |(_, _, n)| n);
+                o["variant"] = json!(textures::variant(r.seed, n, r.variants));
+            }
+            o
+        })
+        .collect();
     Ok(json!({ "blocks": blocks, "textures": textures }))
 }
 
+/// the recipes (`textures.*`)
+fn textures_call(g: &Graph, op: &str, args: &Value) -> Res {
+    match op {
+        "textures.list" => {
+            let v = g.view()?;
+            let mut out = Vec::new();
+            for t in g.textures()? {
+                let mut about = recipe_about(g, &v, &t.id)?;
+                about["id"] = json!(t.id);
+                about["added"] = json!(t.added);
+                out.push(about);
+            }
+            Ok(json!(out))
+        }
+        "textures.save" => {
+            let r: Recipe = serde_json::from_value(args.get("recipe").cloned().unwrap_or(Value::Null))
+                .map_err(|e| format!("that isn't a recipe: {e}"))?;
+            match &r.source {
+                textures::Source::Picture(p) if g.picture(p)?.is_none() => return Err(format!("no picture {p:?}")),
+                textures::Source::Text(l) => {
+                    texture(g, Kind::Text, l)?;
+                }
+                _ => {}
+            }
+            let t = g.put_texture(&r, s(args, "name"), crate::graph::store::system_ms())?;
+            Ok(json!(t))
+        }
+        "textures.name" => {
+            let id = s(args, "id");
+            let t = g.texture(id)?.ok_or_else(|| format!("no texture {id:?}"))?;
+            Ok(json!(g.put_texture(&t.recipe, s(args, "name"), t.added)?))
+        }
+        "textures.delete" => Ok(json!({ "removed": g.delete_texture(s(args, "id"))? })),
+        _ => Err(format!("unknown op {op:?}")),
+    }
+}
+
 pub fn call(g: &Graph, op: &str, args: &Value, limits: &Limits) -> Res {
+    if op.starts_with("textures.") {
+        return textures_call(g, op, args);
+    }
     match op {
         "blocks.list" => {
             let region = match (args.get("lo").and_then(vec3), args.get("hi").and_then(vec3)) {
@@ -171,7 +278,8 @@ pub fn call(g: &Graph, op: &str, args: &Value, limits: &Limits) -> Res {
             }
             let mut new = Vec::with_capacity(items.len());
             for it in &items {
-                let kind = Kind::parse(s(it, "kind")).ok_or("which kind of block? (text, picture or plain)")?;
+                let kind =
+                    Kind::parse(s(it, "kind")).ok_or("which kind of block? (text, picture, plain or texture)")?;
                 let tex = texture(g, kind, s(it, "texture"))?;
                 new.push((kind, tex, transform(it, Transform::default())));
             }
@@ -225,6 +333,27 @@ pub fn call(g: &Graph, op: &str, args: &Value, limits: &Limits) -> Res {
             let blocks: Vec<Block> = new.iter().filter_map(|id| g.block(id).ok().flatten()).collect();
             let mut out = listed(g, &blocks)?;
             out["ids"] = json!(new);
+            Ok(out)
+        }
+        // shows another texture: the block comes back as the n-th of its new texture's
+        // (a new id), where it was, as big and as turned
+        "blocks.retexture" => {
+            let id = s(args, "id");
+            let b = g.block(id)?.ok_or_else(|| format!("no block {id}"))?;
+            let kind =
+                Kind::parse(s(args, "kind")).ok_or("which kind of texture? (text, picture, plain or texture)")?;
+            let tex = texture(g, kind, s(args, "texture"))?;
+            if kind == b.kind && tex == b.texture {
+                let mut out = listed(g, &[b])?;
+                out["ids"] = json!([id]);
+                return Ok(out);
+            }
+            let removed = g.delete_blocks(&[id.to_string()])?;
+            let ids = g.add_blocks(&[(kind, tex, b.t)])?;
+            let blocks: Vec<Block> = ids.iter().filter_map(|i| g.block(i).ok().flatten()).collect();
+            let mut out = listed(g, &blocks)?;
+            out["ids"] = json!(ids);
+            out["removed"] = json!(removed);
             Ok(out)
         }
         "blocks.delete" => {
@@ -319,6 +448,91 @@ mod tests {
     }
 
     #[test]
+    fn texture_recipes_on_blocks_and_faces() {
+        let g = Graph::in_memory().unwrap();
+        let (id, _) = g.save_text("brick", crate::graph::record::mime::TEXT).unwrap();
+        let label = record::label(id);
+        let c = |op: &str, a: Value| call(&g, op, &a, &Limits::NONE);
+        assert!(c("textures.save", json!({ "recipe": { "source": { "text": "9,9,9" } } })).is_err());
+        assert!(c("textures.save", json!({ "recipe": { "source": { "picture": "00" } } })).is_err());
+        let r = c(
+            "textures.save",
+            json!({ "name": "wall", "recipe": { "source": { "text": label }, "scale": [2, 1], "variants": 4, "seed": 9 } }),
+        )
+        .unwrap();
+        let rid = r["id"].as_str().unwrap().to_string();
+        let plain = c(
+            "textures.save",
+            json!({ "recipe": { "source": { "plain": "#336699" } } }),
+        )
+        .unwrap();
+        let pid = plain["id"].as_str().unwrap().to_string();
+        let list = c("textures.list", json!({})).unwrap();
+        assert_eq!(list.as_array().unwrap().len(), 2);
+        assert_eq!(list[0]["text"], "brick");
+        assert_eq!(list[0]["name"], "wall");
+
+        let a = c(
+            "blocks.add",
+            json!({ "blocks": [
+            { "kind": "texture", "texture": rid, "w": 4 },
+            { "kind": "texture", "texture": rid, "x": 5 },
+            { "kind": "plain", "texture": "#000000", "x": 9 },
+        ] }),
+        )
+        .unwrap();
+        assert_eq!(a["ids"][0], format!("texture:{rid}#1"));
+        // each block of a recipe with variants says which it shows
+        let v0 = a["blocks"][0]["variant"].as_u64().unwrap() as u8;
+        assert_eq!(v0, crate::graph::textures::variant(9, 1, 4));
+        assert!(a["blocks"][2].get("variant").is_none());
+        assert_eq!(
+            a["textures"][format!("texture:{rid}")]["recipe"]["scale"],
+            json!([2.0, 1.0])
+        );
+
+        // a face of the plain block shows the plain recipe; the recipe is listed with it
+        let plain_block = a["ids"][2].as_str().unwrap().to_string();
+        let f = c(
+            "blocks.set",
+            json!({ "id": plain_block, "faces": [null, null, pid, null, null, null] }),
+        )
+        .unwrap();
+        assert_eq!(f["blocks"][0]["faces"], json!([null, null, pid, null, null, null]));
+        assert!(f["textures"].get(format!("texture:{pid}")).is_some());
+        // kept with its bend
+        let f = c(
+            "blocks.set",
+            json!({ "id": plain_block, "bend": { "ripple": { "amount": 0.5 } } }),
+        )
+        .unwrap();
+        assert_eq!(f["blocks"][0]["faces"][2], json!(pid));
+        assert_eq!(f["blocks"][0]["bend"]["ripple"]["amount"], 0.5);
+        let f = c("blocks.set", json!({ "id": plain_block, "faces": null })).unwrap();
+        assert!(f["blocks"][0].get("faces").is_none());
+
+        // retexturing gives the block its new texture's next number
+        let t = c(
+            "blocks.retexture",
+            json!({ "id": plain_block, "kind": "texture", "texture": rid }),
+        )
+        .unwrap();
+        assert_eq!(t["ids"][0], format!("texture:{rid}#3"));
+        assert_eq!(t["blocks"][0]["x"], 9.0);
+        assert_eq!(
+            c("blocks.stats", json!({})).unwrap(),
+            json!({ "blocks": 3, "textures": 1 })
+        );
+
+        // a backup brings the recipes back
+        let (texts, other) = g.backup().unwrap();
+        let h = Graph::in_memory().unwrap();
+        h.restore(&texts, &other).unwrap();
+        assert_eq!(h.textures().unwrap().len(), 2);
+        assert_eq!(h.blocks(None).unwrap().len(), 3);
+    }
+
+    #[test]
     fn blocks_travel_with_backups_and_merges() {
         let g = Graph::in_memory().unwrap();
         let (id, _) = g.save_text("listen", crate::graph::record::mime::TEXT).unwrap();
@@ -350,5 +564,55 @@ mod tests {
         assert_eq!(tb.len(), 1);
         let tid = record::parse_label(&tb[0].texture).unwrap();
         assert_eq!(target.render(tid).unwrap(), "listen");
+
+        // a recipe from a text: in the target it names the target's key, so its id changes,
+        // and the blocks and faces showing it follow
+        let r = Recipe {
+            source: textures::Source::Text(record::label(id)),
+            ..Recipe::plain("#000000")
+        };
+        let saved = g.put_texture(&r, "wall", 1).unwrap();
+        let mut faces = Faces::default();
+        faces.0[4] = crate::graph::blocks::def_of(Kind::Texture, &saved.id)
+            .ok()
+            .and_then(|d| match d {
+                crate::graph::scenes::Def::Texture(h) => Some(h),
+                _ => None,
+            });
+        g.add_block(
+            Kind::Texture,
+            &saved.id,
+            Transform {
+                x: 40.0,
+                faces: Some(faces),
+                ..Transform::default()
+            },
+        )
+        .unwrap();
+        let target = Graph::in_memory().unwrap();
+        target.save_text("other", crate::graph::record::mime::TEXT).unwrap();
+        let v = g.view().unwrap();
+        target.write(|tx| crate::ops::merge::merge(tx, &v)).unwrap();
+        let w = crate::ops::merge::assets(&target, &g).unwrap();
+        assert_eq!((w.textures, w.blocks), (1, 3));
+        let t = &target.textures().unwrap()[0];
+        assert_ne!(t.id, saved.id);
+        let textures::Source::Text(l) = &t.recipe.source else {
+            panic!("a text recipe")
+        };
+        assert_eq!(target.render(record::parse_label(l).unwrap()).unwrap(), "listen");
+        let b = target
+            .blocks(None)
+            .unwrap()
+            .into_iter()
+            .find(|b| b.kind == Kind::Texture)
+            .unwrap();
+        assert_eq!(b.texture, t.id);
+        let face: String = b.t.faces.unwrap().0[4]
+            .unwrap()
+            .iter()
+            .map(|x| format!("{x:02x}"))
+            .collect();
+        assert_eq!(face, t.id);
     }
 }

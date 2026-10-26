@@ -42,6 +42,8 @@ pub enum Kind {
     Picture,
     /// a plain colour, `#rrggbb`
     Plain,
+    /// a texture recipe (`graph::textures`), by its id
+    Texture,
 }
 
 impl Kind {
@@ -50,6 +52,7 @@ impl Kind {
             Kind::Text => "text",
             Kind::Picture => "picture",
             Kind::Plain => "plain",
+            Kind::Texture => "texture",
         }
     }
 
@@ -58,6 +61,7 @@ impl Kind {
             "text" => Some(Kind::Text),
             "picture" => Some(Kind::Picture),
             "plain" => Some(Kind::Plain),
+            "texture" => Some(Kind::Texture),
             _ => None,
         }
     }
@@ -88,6 +92,119 @@ pub struct Transform {
     pub rot: [f32; 4],
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bend: Option<Bend>,
+    /// texture recipes on single faces, in place of the block's own texture there
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub faces: Option<Faces>,
+}
+
+/// the faces' names, in the order [`Faces`] keeps them (three.js's box order)
+pub const FACE_NAMES: [&str; 6] = ["right", "left", "top", "bottom", "front", "back"];
+
+/// a texture recipe's id (`graph::textures`) on any of a block's six faces: right, left,
+/// top, bottom, front, back ([`FACE_NAMES`]); written as six hex ids or nulls
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Faces(pub [Option<[u8; 16]>; 6]);
+
+fn hex16(t: &str) -> Option<[u8; 16]> {
+    let t = t.trim();
+    if t.len() != 32 {
+        return None;
+    }
+    let v: Option<Vec<u8>> = (0..16)
+        .map(|i| u8::from_str_radix(t.get(2 * i..2 * i + 2)?, 16).ok())
+        .collect();
+    v?.try_into().ok()
+}
+
+fn hex_of(h: &[u8; 16]) -> String {
+    h.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+impl Faces {
+    pub fn is_empty(&self) -> bool {
+        self.0.iter().all(Option::is_none)
+    }
+
+    /// `F`, version 1, a byte with a bit per face that has a recipe, then their ids
+    fn write(&self, out: &mut Vec<u8>) {
+        let mask = (0..6).filter(|&i| self.0[i].is_some()).fold(0u8, |m, i| m | 1 << i);
+        out.extend_from_slice(&[b'F', 1, mask]);
+        for h in self.0.iter().flatten() {
+            out.extend_from_slice(h);
+        }
+    }
+
+    /// reads one from the start of `b`, with how many bytes it took
+    fn read(b: &[u8]) -> Option<(Faces, usize)> {
+        if b.len() < 3 || b[0] != b'F' || b[1] != 1 {
+            return None;
+        }
+        let mask = b[2];
+        let mut f = Faces::default();
+        let mut at = 3;
+        for i in 0..6 {
+            if mask & (1 << i) != 0 {
+                f.0[i] = Some(b.get(at..at + 16)?.try_into().ok()?);
+                at += 16;
+            }
+        }
+        Some((f, at))
+    }
+}
+
+impl Serialize for Faces {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let v: Vec<Option<String>> = self.0.iter().map(|h| h.as_ref().map(hex_of)).collect();
+        v.serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for Faces {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Faces, D::Error> {
+        let v: Vec<Option<String>> = Vec::deserialize(d)?;
+        let mut f = Faces::default();
+        for (i, h) in v.iter().take(6).enumerate() {
+            if let Some(h) = h.as_deref().filter(|h| !h.trim().is_empty()) {
+                f.0[i] = Some(hex16(h).ok_or_else(|| serde::de::Error::custom(format!("{h:?} isn't a texture's id")))?);
+            }
+        }
+        Ok(f)
+    }
+}
+
+/// a block placement's extra: its bend and its faces, each a record of its own
+fn extra_bytes(bend: Option<Bend>, faces: Option<Faces>) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    if let Some(b) = bend.filter(|b| !b.straight()) {
+        out.extend(b.to_bytes());
+    }
+    if let Some(f) = faces.filter(|f| !f.is_empty()) {
+        f.write(&mut out);
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// the bend and faces in a block placement's extra (what doesn't read is left out)
+fn read_extra(b: &[u8]) -> (Option<Bend>, Option<Faces>) {
+    let (mut bend, mut faces) = (None, None);
+    let mut at = 0;
+    while at < b.len() {
+        match b[at] {
+            b'B' if b.len() >= at + 38 => {
+                bend = Bend::from_bytes(&b[at..at + 38]);
+                at += 38;
+            }
+            b'F' => match Faces::read(&b[at..]) {
+                Some((f, n)) => {
+                    faces = Some(f);
+                    at += n;
+                }
+                None => break,
+            },
+            _ => break,
+        }
+    }
+    (bend, faces)
 }
 
 fn identity() -> [f32; 4] {
@@ -109,6 +226,7 @@ impl Default for Transform {
             d: 1.0,
             rot: super::place::IDENTITY,
             bend: None,
+            faces: None,
         }
     }
 }
@@ -351,6 +469,7 @@ impl Transform {
             d: side(self.d),
             rot,
             bend,
+            faces: self.faces.filter(|f| !f.is_empty()),
             ..self
         })
     }
@@ -453,6 +572,9 @@ pub fn def_of(kind: Kind, texture: &str) -> GResult<Def> {
             let v = u32::from_str_radix(&t[1..], 16).map_err(err)?;
             Ok(Def::Colour([(v >> 16) as u8, (v >> 8) as u8, v as u8]))
         }
+        Kind::Texture => hex16(t)
+            .map(Def::Texture)
+            .ok_or_else(|| format!("{t:?} isn't a texture's id (32 hex digits)")),
     }
 }
 
@@ -462,6 +584,7 @@ pub fn texture_of(def: &Def) -> Option<(Kind, String)> {
         Def::Entry(id) => (Kind::Text, record::label(*id)),
         Def::Picture(h) => (Kind::Picture, h.iter().map(|b| format!("{b:02x}")).collect()),
         Def::Colour([r, g, b]) => (Kind::Plain, format!("#{r:02x}{g:02x}{b:02x}")),
+        Def::Texture(h) => (Kind::Texture, hex_of(h)),
         Def::Scene(_) => return None,
     })
 }
@@ -473,7 +596,7 @@ fn placement(t: &Transform, n: u64) -> Placement {
     let mut p = Placement::at(n, [t.x, t.y, t.z]);
     p.scale = Scale::Axes([t.w, t.h, t.d]).canonical();
     p.rot = (t.rot != super::place::IDENTITY).then(|| super::place::pack_rotation(t.rot));
-    p.extra = t.bend.filter(|b| !b.straight()).map(|b| b.to_bytes());
+    p.extra = extra_bytes(t.bend, t.faces);
     p.flags = Some(CUBE);
     p
 }
@@ -484,6 +607,7 @@ pub fn transform_of(p: &Placement) -> Transform {
 }
 
 fn transform(p: &Placement) -> Transform {
+    let (bend, faces) = p.extra.as_deref().map(read_extra).unwrap_or((None, None));
     let [w, h, d] = match p.scale {
         Scale::One => [1.0; 3],
         Scale::Uniform(v) => [v; 3],
@@ -500,7 +624,8 @@ fn transform(p: &Placement) -> Transform {
             .rot
             .map(super::place::unpack_rotation)
             .unwrap_or(super::place::IDENTITY),
-        bend: p.extra.as_deref().and_then(Bend::from_bytes),
+        bend,
+        faces,
     }
 }
 

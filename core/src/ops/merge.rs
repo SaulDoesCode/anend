@@ -303,6 +303,8 @@ pub fn merge(tx: &mut Tx, src: &View) -> GResult<Written> {
 pub struct AssetsWritten {
     pub models: usize,
     pub pictures: usize,
+    /// texture recipes the target didn't have
+    pub textures: usize,
     pub blocks: usize,
     /// saved scenes brought in whole
     pub scenes: usize,
@@ -318,6 +320,7 @@ pub struct AssetsWritten {
 /// the target's own models (and the critics naming them) keep answering as before.
 /// Spec models arrive untrained (their weights live in the source's models file).
 pub fn assets(target: &crate::graph::Graph, src: &crate::graph::Graph) -> GResult<AssetsWritten> {
+    use crate::graph::scenes::{Def, Kind as SKind};
     let mut w = AssetsWritten::default();
     for (name, bytes) in src.spec_records()? {
         let r = crate::specs::Record::from_json(&bytes)?;
@@ -347,12 +350,52 @@ pub fn assets(target: &crate::graph::Graph, src: &crate::graph::Graph) -> GResul
             target.tag_picture(&id, &list, true)?;
         }
     }
+    // texture recipes: a recipe from a text names the text as the target keys it, which
+    // makes it another recipe (another id); the rest keep theirs
+    let mut recipes: std::collections::HashMap<String, String> = Default::default();
+    for t in src.textures()? {
+        use crate::graph::textures::Source;
+        let mut r = t.recipe.clone();
+        match &r.source {
+            Source::Text(l) => {
+                let Some(id) = crate::graph::record::parse_label(l) else {
+                    continue;
+                };
+                let Ok(e) = src.entry(id) else { continue };
+                let text = src.render(id)?;
+                r.source = Source::Text(crate::graph::record::label(target.save_text(&text, e.record.mime)?.0));
+            }
+            Source::Picture(p) if target.picture(p)?.is_none() => continue,
+            _ => {}
+        }
+        let had = target.texture(&r.id()?)?.is_some();
+        let put = target.put_texture(&r, &t.name, t.added)?;
+        if !had {
+            w.textures += 1;
+        }
+        recipes.insert(t.id, put.id);
+    }
+    let hex = |h: &[u8; 16]| h.iter().map(|b| format!("{b:02x}")).collect::<String>();
     // blocks get fresh ids; a text block finds its text in the target (the entries
-    // came first), a picture block its picture
+    // came first), a picture block its picture, a recipe block its recipe
     let mut new = Vec::new();
-    for b in src.blocks(None)? {
+    for mut b in src.blocks(None)? {
         use crate::graph::blocks::Kind;
+        if let Some(f) = b.t.faces.as_mut() {
+            for slot in f.0.iter_mut() {
+                *slot = slot.and_then(|h| recipes.get(&hex(&h))).and_then(|id| {
+                    match crate::graph::blocks::def_of(Kind::Texture, id) {
+                        Ok(Def::Texture(h)) => Some(h),
+                        _ => None,
+                    }
+                });
+            }
+        }
         let texture = match b.kind {
+            Kind::Texture => match recipes.get(&b.texture) {
+                Some(id) => id.clone(),
+                None => continue,
+            },
             Kind::Text => {
                 let Some(id) = crate::graph::record::parse_label(&b.texture) else {
                     continue;
@@ -385,7 +428,6 @@ pub fn assets(target: &crate::graph::Graph, src: &crate::graph::Graph) -> GResul
     // saved scenes come in whole (format.md answer 5): each is included as it is, named
     // `<name> 2` (or 3, ...) when the target has one so named; a text placement finds its
     // text in the target, as blocks do
-    use crate::graph::scenes::{Def, Kind as SKind};
     let src_room = src.room()?;
     let mut names: std::collections::HashSet<String> = target.scenes()?.into_iter().map(|s| s.name).collect();
     for sc in src.scenes()? {
