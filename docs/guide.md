@@ -160,11 +160,21 @@ text for its menu.
 - **Long texts** show their first piece (80 characters a line, six lines a piece, both
   settings) with how many more there are.
 
+**Making a scene look right**, start to finish: put down a floor (a wide, thin colour block)
+and a few blocks; open the textures window, pick a picture, drag a box over the part you
+want, set the tile's size and a few variants, and put it on the blocks (or one face of
+one); make one block a sphere from its menu; give the room a sky; then open the lights
+window, add a soft ambient light and a warm point light near the blocks, and slide its
+strength and reach until it looks right. A block ticked as a *staging zone* gives the
+texts inside it a little spread of their own.
+
 ![a chain under its title](guide/chain.png)
 
 ![a block bent by a ripple and a fold](guide/bend.png)
 
 ![a brick recipe on a block, a colour on its top face, and a starry sky](guide/textures.png)
+
+![a floor, a box and two spheres under an ambient, a warm point and a blue cone light](guide/lights.png)
 
 ## Lists
 
@@ -262,9 +272,16 @@ it learns from in this save, and for a writer, which other models judge what it 
   of several), a **tagger** (any of several labels) or a **generator** (writes texts like a
   list's, judged by a trained classifier or spec model of the save when there is one).
   Edit it, then **make it**.
-- **The spec** is a JSON editor. It's checked a beat after you stop typing: a broken rule
-  shows under it with where it is (`heads[0].classes`, `data[1].class`), and unknown fields
-  are named. **Ctrl+Enter** (or **save**) keeps it. Edits to the data, critics, sampling
+- **The spec** shows two ways, the **builder** and the **JSON**, one text under both:
+  a change in either shows in the other. The builder has a control for every part:
+  what the model reads (text with its gematria channels, bytes, pictures, numbers), the
+  trunk (a preset, or sizes of its own), the heads (a kind, classes as chips you add and
+  take out, a weight), the data (picked from the save's lists, tags, picture lists, or
+  examples written in), and for a writer its critics, what it must and mustn't write,
+  and how it samples; then training. A diagram at the top shows what feeds what. The spec
+  is checked a beat after a change: a broken rule shows on the control it concerns (and
+  at the top, with where it is, like `heads[0].classes`). **Ctrl+Enter** (or **save**)
+  keeps it. Edits to the data, critics, sampling
   or training options keep its training; a change to its input, trunk, heads or seed
   means it trains anew.
 - **training**: epochs (the spec's when left empty), from scratch, cancel, and the
@@ -276,7 +293,9 @@ it learns from in this save, and for a writer, which other models judge what it 
   The same seed writes the same candidates. **Enter** in the command bar writes after the
   bar's text. **guided** steers each byte toward what the critics want (slower).
 
-A spec can start from a pretrained open model (`"from": {"pretrained": "folder"}`); see
+![the spec builder](guide/spec-builder.png)
+
+A spec can start from a pretrained open model (the builder's *starts from*); see
 [models](../docs/models.md). On a shared hub only the folders the hub offers can be named.
 
 ## Filters
@@ -295,13 +314,16 @@ run again.
 
 **Ctrl+,** or the gear. The sections fold, and remember it.
 
-- **looks**: a palette to start from, then any colour by name; text size; zen (the bars
-  fade while you rest); the top bar sliding away; zoom.
+- **looks**: a palette to start from, then any colour by name, or by hue, saturation
+  and lightness; text size; the fonts (on the desktop, any installed on this machine);
+  zen (the bars fade while you rest); the top bar sliding away; zoom.
 - **the memory view and the space**: the texts' size, the space between them, the centre
   field's width, the room's colour.
 - **saves**: every save with its counts and size. **open**, **new**, **copy**, **rename**,
   **delete** (two clicks), a **backup** (its texts in one JSON, the rest in another), and
-  **import** weum's `all-of-it.json` into the open save.
+  **import** weum's `all-of-it.json` into the open save. On the desktop, the **saves
+  folder** can be any folder (its saves are listed and the first opens) or a `.redb`
+  file (that save opens); the app starts on the save it had open last.
 - **the GPU**: where classifiers read texts (trying, search, indexing, buckets,
   colouring and filters by a classifier). **auto** uses the GPU when it gives exactly the
   CPU's results and isn't a software renderer, else the CPU; or pick **the CPU**, **the

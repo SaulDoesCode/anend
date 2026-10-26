@@ -27,6 +27,10 @@ It comes as:
 | stats (web) | filters (web) |
 | ![a chain](app/docs/shots/web-space-chain.png) | ![a bent block](app/docs/shots/web-block-bend.png) |
 | a chain of texts under its title (web) | a block bent by a ripple and a fold (web) |
+| ![textures](app/docs/shots/web-textures-room.png) | ![lights](app/docs/shots/web-lights.png) |
+| a texture recipe on a block, a colour on one face, a sky (web) | blocks and spheres under baked lights (web) |
+| ![the spec builder](app/docs/shots/spec-builder.png) | ![a staging zone](app/docs/shots/web-zone.png) |
+| a spec model in the builder | texts spreading inside a staging zone (web) |
 
 ## The views
 
@@ -36,13 +40,13 @@ Every view has the command bar at the bottom, and each view keeps its own text t
 | | |
 |---|---|
 | **memory** (Ctrl+1) | weum's memory view. **Enter** on text gsearches its sum and saves it when it's new. **Enter** on a number gsearches that bucket. **Ctrl+Enter** saves, **Shift+Enter** shows a key, **Delete** forgets. `Enlist` `List` `Delist` `Unlist` work on lists. **r / o / f** pick the bucket (reversed, ordinal, frequency), and **← →** gsearch the term's sums. Hover shows the gsum line, and texts that share a sum are underlined in its colour. The circles at the left edge are the buckets. **Alt+click** selects several texts to put in a list or tag. Right-click opens the menu: edit, tag, select, list, candidate, key, forget. |
-| **space** (Ctrl+2) | memory texts floating in a room ([three.js](https://threejs.org)), laid out by their sums. Clicking a text puts its triangle in the top bar: sides s (ordinal), r (reversed) and ⌊√(s·r)⌋. The arrow keys glide to the nearest text in that direction, and its card opens on the right. It's also where you build: copies that inherit, have their own text or are detached; each placement's size; chains of texts that hang under their title; saved scenes, combined with overlaps settled; and blocks showing texts, pictures or colours, which move, resize, turn and bend. |
+| **space** (Ctrl+2) | memory texts floating in a room ([three.js](https://threejs.org)), laid out by their sums. Clicking a text puts its triangle in the top bar: sides s (ordinal), r (reversed) and ⌊√(s·r)⌋. The arrow keys glide to the nearest text in that direction, and its card opens on the right. It's also where you build: copies that inherit, have their own text or are detached; each placement's size; chains of texts that hang under their title; saved scenes, combined with overlaps settled; and blocks showing texts, pictures, colours or texture recipes (cropped, tiled, tinted, with variants; on a whole block or one face), which move, resize, turn and bend or become spheres; a sky; lights baked onto the blocks; and staging zones whose texts spread among themselves. |
 | **lists** (Ctrl+3) | every list as a tile. A list's page has an editable name and members, and figures for the whole list: its sums, means, gsum and pfR chain. |
 | **reader** (Ctrl+4) | everything that matches, in pages. Short texts appear as a tiny grid, and notes appear as markdown. |
 | **notes** (Ctrl+5) | markdown notes, in a list by date, with tags and a read mode. A note can be attached to any entry. Typing stays quick in a note of any length. |
 | **tags** (Ctrl+6) | tags on any entry: pick tags (all or any) and see the entries that have them. |
 | **stats** (Ctrl+7) | figures for the whole save |
-| **models** (Ctrl+8) | the outline of a model spec (inputs, heads, data, critics). For now it says "not yet": classifiers are being moved onto the spec. |
+| **models** (Ctrl+8) | classifiers (learned from lists, trained and run here) and spec models: models described as data (what they read, their heads, what they learn from, critics for a writer), made in a builder with a control for every part or as JSON, then trained, run and, for a writer, asked to write. |
 | **filters** (Ctrl+9) | words, a sum range, written between two dates, a tag, a kind. Each filter is kept by name in the save. |
 
 The top bar holds the view icons, the search line with its triangle, undo (**Ctrl+Z**) and

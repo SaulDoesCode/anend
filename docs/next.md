@@ -67,8 +67,10 @@ departure says why in its commit).
   window); the line ticked. Questions 36–40 added.
 - Done (26 Oct): staging zones (#14): blocks whose texts spread among themselves.
 - Done (26 Oct): the visual spec builder (#4).
-- Next: the "▶ usable: building scenes" point, then blocks that cast rays and run
-  programs (#15).
+- Done (26 Oct): the "▶ usable: building scenes" point (README, guide, offered on PR #8).
+- Next: blocks that cast rays and run programs (#15, #28); keyframes (#16); prefabs (#19).
+  Open further up: the language lines (s, the standard library), taxonomies and pipes,
+  the wgpu renderer and culling.
 
 **After Stage A (19 Oct, late evening UTC), while the user tries it:**
 - `b5b6b22` docs/format.md "One model for a definition and its placed instances": Stage B's
