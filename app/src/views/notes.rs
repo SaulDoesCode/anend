@@ -229,6 +229,8 @@ pub fn Notes() -> Element {
     let mut seq = use_signal(|| 0u64);
     let mut reading = use_signal(|| false);
     let mut judging = use_signal(|| false);
+    // an s program's last run: its output and error
+    let mut ran: Signal<Option<serde_json::Value>> = use_signal(|| None);
     let mut tag_gen = use_signal(|| 0u64);
     let mut tag_draft = use_signal(String::new);
     // the spelling check: the flags for the text they were made for
@@ -530,7 +532,10 @@ pub fn Notes() -> Element {
     // with no note open the list is all there is: it shows whatever was chosen (the choice
     // to slide it away holds while a note is open)
     let hide_list = hide_list && open().is_some();
-    let check = ui.prefs.read().check_spelling;
+    // a note tagged `s` is s code (docs/s.md): right-aligned, coloured by s's word
+    // classes, run with ▶; the spelling check leaves it alone
+    let code = tags.read().iter().any(|t| t == anend_core::ops::script::TAG);
+    let check = ui.prefs.read().check_spelling && !code;
     let shown_flags: Vec<crate::highlight::Flag> = {
         let (t, fl) = &*flags.read();
         if check && *t == *text.read() {
@@ -565,9 +570,10 @@ pub fn Notes() -> Element {
     {
         let layer = layer.clone();
         let flags_now = shown_flags.clone();
-        use_effect(use_reactive!(|layered, colour, flags_now| {
+        use_effect(use_reactive!(|layered, colour, flags_now, code| {
             let _ = layer_gen();
             let mut l = layer.borrow_mut();
+            l.layer.s = code;
             if !layered {
                 l.layer = Default::default();
                 l.flagged = false;
@@ -683,6 +689,37 @@ pub fn Notes() -> Element {
                             }
                         }
                         button {
+                            class: if code { "plain on" } else { "plain" },
+                            "data-tip": if code { "s code: right-aligned, the acting words in a column; click to make it a plain note" } else { "make it s code (the tag s): right-aligned, coloured by s's words, run with ▶" },
+                            "aria-label": "s code",
+                            "aria-pressed": "{code}",
+                            onclick: move |_| {
+                                let on = tags.peek().iter().any(|t| t == "s");
+                                if on { tags.write().retain(|t| t != "s"); } else { tags.write().push("s".to_string()); }
+                                dirty.set(true);
+                                layer_gen += 1;
+                            },
+                            "s"
+                        }
+                        if code {
+                            button {
+                                class: "plain",
+                                "data-tip": "run it (its files are the save's s programs, by title)",
+                                "aria-label": "run the program",
+                                onclick: { let api = api.clone(); move |_| {
+                                    let api = api.clone();
+                                    let body = anend_core::note::split(&text.peek()).1.to_string();
+                                    spawn(async move {
+                                        match api.call("s.run", serde_json::json!({ "code": body })).await {
+                                            Ok(r) => ran.set(Some(r)),
+                                            Err(e) => ran.set(Some(serde_json::json!({ "out": "", "err": e }))),
+                                        }
+                                    });
+                                } },
+                                Icon { name: "play" }
+                            }
+                        }
+                        button {
                             class: if check { "plain on" } else { "plain" },
                             "data-tip": if check { "the spelling check is on: click an underlined word for what it may be" } else { "check spelling and word choice" },
                             "aria-label": "check spelling",
@@ -744,7 +781,7 @@ pub fn Notes() -> Element {
                         Replace { text, dirty, seq }
                     }
                     for pad in [format!("{}-{}", cur_key, seq())].into_iter().filter(|_| !reading()) {
-                        div { key: "{pad}", class: if layered { "pad hl-on" } else { "pad" },
+                        div { key: "{pad}", class: format!("pad{}{}", if layered { " hl-on" } else { "" }, if code { " code" } else { "" }),
                             // the colours, painted under the textarea's transparent glyphs
                             // its segments are put in by `layer` (not by the render)
                             pre { id: "note-hl", class: "hl", "aria-hidden": "true",
@@ -782,6 +819,19 @@ pub fn Notes() -> Element {
                                         pick.set(hit.map(|flag| Pick { flag, x: c.x, y: c.y }));
                                     });
                                 },
+                            }
+                        }
+                        if code && let Some(r) = ran() {
+                            div { class: "s-run",
+                                div { class: "row",
+                                    span { class: "dim small", {format!("ran in {} steps{}", r["steps"].as_u64().unwrap_or(0), match r["code"].as_i64() { Some(c) if c != 0 => format!(" · exit {c}"), _ => String::new() })} }
+                                    span { class: "grow" }
+                                    button { class: "plain small", onclick: move |_| ran.set(None), Icon { name: "close" } }
+                                }
+                                pre { class: "s-out", {r["out"].as_str().unwrap_or("").trim_start_matches('\n').to_string()} }
+                                if let Some(e) = r["err"].as_str() {
+                                    pre { class: "s-err", role: "alert", "s: {e}" }
+                                }
                             }
                         }
                         if let Some(pk) = pick() {

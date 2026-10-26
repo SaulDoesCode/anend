@@ -1,7 +1,7 @@
 use super::*;
 
 fn out(src: &str) -> String {
-    let o = run(src, "", BTreeMap::new(), &[], 5_000_000);
+    let o = run(src, "", BTreeMap::new(), &[], 5_000_000, 7);
     assert_eq!(o.err, None, "{src}");
     o.out
 }
@@ -86,14 +86,14 @@ fn the_library() {
 
 #[test]
 fn errors_and_exits() {
-    let o = run("+", "", BTreeMap::new(), &[], 1000);
+    let o = run("+", "", BTreeMap::new(), &[], 1000, 7);
     assert_eq!(o.err.as_deref(), Some("+ needs 2 values"));
     assert_eq!(o.code, 1);
-    let o = run("hi > 3 <-- never >", "", BTreeMap::new(), &[], 1000);
+    let o = run("hi > 3 <-- never >", "", BTreeMap::new(), &[], 1000, 7);
     assert_eq!((o.out.as_str(), o.code, o.err), ("\n hi", 3, None));
-    let o = run("{loop.} loop$ loop..", "", BTreeMap::new(), &[], 1000);
+    let o = run("{loop.} loop$ loop..", "", BTreeMap::new(), &[], 1000, 7);
     assert!(o.err.unwrap().contains("steps"));
-    assert!(run("{a", "", BTreeMap::new(), &[], 10).err.is_some());
+    assert!(run("{a", "", BTreeMap::new(), &[], 10, 7).err.is_some());
 }
 
 #[test]
@@ -106,8 +106,9 @@ fn files_input_and_args() {
         files,
         &["first".into()],
         1000,
+        7,
     );
     assert_eq!(o.out, "\n from a file\n hi\n typed\n first");
-    let o = run("{echo hi} < r~ >_", "", BTreeMap::new(), &[], 100);
+    let o = run("{echo hi} < r~ >_", "", BTreeMap::new(), &[], 100, 7);
     assert_eq!(o.out, "hi\n");
 }

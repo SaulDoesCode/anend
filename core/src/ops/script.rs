@@ -8,7 +8,6 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 
-use super::classify::Limits;
 use super::{Res, note_json, s};
 use crate::graph::query::{Order, Page, Query};
 use crate::graph::record::{self, mime};
@@ -45,7 +44,8 @@ pub fn programs(g: &Graph) -> Result<BTreeMap<String, (String, String)>, String>
     Ok(out)
 }
 
-pub fn call(g: &Graph, op: &str, args: &Value, limits: &Limits) -> Res {
+/// `shared`: on a shared hub (fewer steps a run)
+pub fn call(g: &Graph, op: &str, args: &Value, shared: bool) -> Res {
     match op {
         "s.programs" => {
             let p = programs(g)?;
@@ -81,8 +81,8 @@ pub fn call(g: &Graph, op: &str, args: &Value, limits: &Limits) -> Res {
                         .collect()
                 })
                 .unwrap_or_default();
-            let max = if limits.shared { 2_000_000 } else { 50_000_000 };
-            let o = crate::s::run(&code, s(args, "stdin"), files, &argv, max);
+            let max = if shared { 2_000_000 } else { 50_000_000 };
+            let o = crate::s::run(&code, s(args, "stdin"), files, &argv, max, g.now());
             Ok(json!({ "out": o.out, "err": o.err, "code": o.code, "steps": o.steps }))
         }
         "s.words" => {
@@ -118,33 +118,24 @@ mod tests {
             "notes.save",
             json!({ "note": { "tags": ["s"] }, "text": "# main\n\nworld who@ greet." }),
         );
-        let l = Limits::NONE;
-        let p = call(&g, "s.programs", &json!({}), &l).unwrap();
+        let l = false;
+        let p = call(&g, "s.programs", &json!({}), l).unwrap();
         assert_eq!(p.as_array().unwrap().len(), 2);
-        let r = call(&g, "s.run", &json!({ "key": main["_key"] }), &l).unwrap();
+        let r = call(&g, "s.run", &json!({ "key": main["_key"] }), l).unwrap();
         assert_eq!(r["out"], "\n hello world");
         assert_eq!(r["err"], Value::Null);
         let r = call(
             &g,
             "s.run",
             &json!({ "code": "_ <_ _~ > args 0 a [l] a~ >", "stdin": "in", "args": ["x"] }),
-            &l,
+            l,
         )
         .unwrap();
         assert_eq!(r["out"], "\n in\n x");
-        let r = call(
-            &g,
-            "s.run",
-            &json!({ "code": "{l.} l$ l.." }),
-            &Limits {
-                shared: true,
-                ..Limits::NONE
-            },
-        )
-        .unwrap();
+        let r = call(&g, "s.run", &json!({ "code": "{l.} l$ l.." }), true).unwrap();
         assert!(r["err"].as_str().unwrap().contains("2000000 steps"));
         assert!(
-            call(&g, "s.words", &json!({}), &l).unwrap()["commands"]
+            call(&g, "s.words", &json!({}), l).unwrap()["commands"]
                 .as_array()
                 .unwrap()
                 .len()

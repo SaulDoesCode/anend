@@ -876,7 +876,9 @@ impl Rt {
                     self.nset(&dest, x);
                 } else {
                     const L: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-                    let s: String = (0..32).map(|_| L[(self.prng.next_u64() % 52) as usize] as char).collect();
+                    let s: String = (0..32)
+                        .map(|_| L[(self.prng.next_u64() % 52) as usize] as char)
+                        .collect();
                     self.mset(&dest, s.into());
                 }
             }

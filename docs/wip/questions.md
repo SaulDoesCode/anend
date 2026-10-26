@@ -182,3 +182,20 @@ The answers left these open. Each is written into the design as its default.
 43. **An animation poses a block as it plays without moving it in the save:** its gizmo,
     zone and baked light stay where it was put. Turns are degrees about x, y and z after
     the block's own turn; a texture switches at its key rather than blending.
+
+## s programs (26 Oct)
+
+44. **An s program is a note tagged `s`;** its body (below the `# title`) is the code. A
+    run's files are the save's s programs, each under its title and its title with `.s`,
+    so `greet.` runs the note titled "greet". What a run writes to a file stays in that
+    run; the save's notes aren't changed by a program.
+45. **Programs run as the spec's browser runtime does** (s §10, §14): `env` gives 404,
+    `sleep` returns at once, `tcp` fails ("isn't available here"), `now` is the clock's
+    milliseconds. The random numbers are seeded from the save's clock each run, so two
+    runs differ unless the program sets the seed itself.
+46. **A run's step limit is 2 million on a shared hub and 50 million on one's own
+    machine;** past it the run stops with an error naming the limit.
+47. **The code mode colours each word by its class alone** (commands, suffix forms,
+    literals, numbers, library words, escapes, `:` locals). It doesn't follow
+    definitions, so a word a program defines with `$` stays plain where it's used; that
+    comes with the outline and go to definition (the rest of the code-editor line).

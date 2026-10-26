@@ -28,6 +28,19 @@ pub enum Class {
     Table,
     Tag,
     Rule,
+    /// s code (docs/s.md): a command
+    SCommand,
+    /// the suffix character of a suffix form (`x.`, `x~`, `x$`…)
+    SSuffix,
+    /// a brace or quote literal, an angle word
+    SLiteral,
+    /// a local name (`:x`)
+    SLocal,
+    SNumber,
+    /// a word of s's library
+    SLibrary,
+    /// an escape (`\w`)
+    SEscape,
 }
 
 /// a class for every byte of `text`
@@ -375,6 +388,13 @@ impl Class {
             Class::Table => "h-t",
             Class::Tag => "h-g",
             Class::Rule => "h-r",
+            Class::SCommand => "h-sc",
+            Class::SSuffix => "h-ss",
+            Class::SLiteral => "h-sl",
+            Class::SLocal => "h-sv",
+            Class::SNumber => "h-sn",
+            Class::SLibrary => "h-sb",
+            Class::SEscape => "h-se",
         }
     }
 }
@@ -459,11 +479,17 @@ pub fn segments_open(text: &str) -> (Vec<&str>, bool) {
 #[derive(Default)]
 pub struct Layer {
     pub segs: Vec<String>,
+    /// the text is s code (a note tagged `s`): coloured by s's word classes, whole
+    pub s: bool,
 }
 
 impl Layer {
     /// every segment's html, for a whole new text
     pub fn full(&mut self, text: &str, colour: bool, flags: &[Flag]) -> Vec<String> {
+        if self.s {
+            self.segs = vec![text.to_string()];
+            return vec![s_html(text, colour)];
+        }
         self.segs = segments(text).into_iter().map(str::to_string).collect();
         let mut at = 0;
         self.segs
@@ -490,6 +516,18 @@ impl Layer {
     pub fn edit(&mut self, a: usize, b: usize, ins: &str, colour: bool) -> Option<(usize, usize, Vec<String>)> {
         if self.segs.is_empty() {
             return None;
+        }
+        if self.s {
+            // code is coloured whole (a brace literal may span blank lines)
+            let mut t = self.segs.concat();
+            if b > t.len() || a > b || !t.is_char_boundary(a) || !t.is_char_boundary(b) {
+                return None;
+            }
+            t.replace_range(a..b, ins);
+            let went = self.segs.len();
+            let html = s_html(&t, colour);
+            self.segs = vec![t];
+            return Some((0, went, vec![html]));
         }
         let n = self.segs.len();
         let mut starts = Vec::with_capacity(n);
@@ -529,6 +567,114 @@ impl Layer {
     pub fn text(&self) -> String {
         self.segs.concat()
     }
+}
+
+/// a class for every byte of s code: commands, suffix forms (the stem plain or local, the
+/// suffix marked), literals, locals, numbers, library words, escapes
+pub fn s_classes(text: &str) -> Vec<Class> {
+    use anend_core::s::machine::{SUFFIXES, is_command};
+    let library: std::collections::HashSet<&str> =
+        anend_core::s::lib::words().into_iter().flat_map(|(_, w)| w).collect();
+    let mut out = vec![Class::Plain; text.len()];
+    let b = text.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c.is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        // a word, up to whitespace or a literal
+        let start = i;
+        while i < b.len() && !b[i].is_ascii_whitespace() && b[i] != b'{' && b[i] != b'\'' {
+            i += 1;
+        }
+        if i < b.len() && (b[i] == b'{' || b[i] == b'\'') {
+            // a literal (with its prefix)
+            let end = if b[i] == b'\'' {
+                b[i + 1..]
+                    .iter()
+                    .position(|&x| x == b'\'')
+                    .map_or(b.len(), |p| i + 2 + p)
+            } else {
+                let mut depth = 0usize;
+                let mut j = i;
+                while j < b.len() {
+                    match b[j] {
+                        b'{' => depth += 1,
+                        b'}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                (j + 1).min(b.len())
+            };
+            out[start..end].fill(Class::SLiteral);
+            i = end;
+            continue;
+        }
+        let w = &text[start..i];
+        let class = if is_command(w) {
+            Class::SCommand
+        } else if w.len() >= 2 && w.starts_with('\\') {
+            Class::SEscape
+        } else if w.starts_with('⟨') {
+            Class::SLiteral
+        } else if library.contains(w) {
+            Class::SLibrary
+        } else if w.parse::<f64>().is_ok() {
+            Class::SNumber
+        } else if w.starts_with(':') && w.len() > 1 {
+            Class::SLocal
+        } else {
+            Class::Plain
+        };
+        out[start..i].fill(class);
+        // a suffix form: its last character marked
+        if !matches!(class, Class::SCommand | Class::SEscape | Class::SLiteral)
+            && w.chars().count() >= 2
+            && let Some(last) = w.chars().last()
+            && SUFFIXES.contains(&last)
+        {
+            let at = i - last.len_utf8();
+            out[at..i].fill(Class::SSuffix);
+        }
+    }
+    out
+}
+
+/// s code as the colour layer's html
+pub fn s_html(text: &str, colour: bool) -> String {
+    let classes = if colour {
+        s_classes(text)
+    } else {
+        vec![Class::Plain; text.len()]
+    };
+    let mut out = String::with_capacity(text.len() * 2);
+    let mut a = 0;
+    while a < text.len() {
+        let mut b = a + 1;
+        while b < text.len() && (classes[b] == classes[a] || !text.is_char_boundary(b)) {
+            b += 1;
+        }
+        let css = classes[a].css();
+        if css.is_empty() {
+            escape(&text[a..b], &mut out);
+        } else {
+            out.push_str("<span class=\"");
+            out.push_str(css);
+            out.push_str("\">");
+            escape(&text[a..b], &mut out);
+            out.push_str("</span>");
+        }
+        a = b;
+    }
+    out
 }
 
 #[cfg(test)]
@@ -681,6 +827,13 @@ mod tests {
                 Table => 't',
                 Tag => 'g',
                 Rule => 'r',
+                SCommand => 'C',
+                SSuffix => '$',
+                SLiteral => '{',
+                SLocal => 'v',
+                SNumber => '9',
+                SLibrary => 'b',
+                SEscape => '\\',
             })
             .collect()
     }
@@ -779,5 +932,26 @@ mod timing {
         let a = std::time::Instant::now();
         let h = super::to_html(&t, true, &[]);
         eprintln!("{} bytes -> {} in {:?}", t.len(), h.len(), a.elapsed());
+    }
+
+    /// s code coloured by word class: commands, suffix forms, literals, numbers, locals
+    #[test]
+    fn s_word_classes() {
+        use super::Class::*;
+        use super::{s_classes, s_html};
+        let t = "{hi} 3 a# :x >";
+        let c: String = s_classes(t)
+            .iter()
+            .map(|c| match c {
+                SCommand => 'C',
+                SSuffix => '$',
+                SLiteral => '{',
+                SLocal => 'v',
+                SNumber => '9',
+                _ => '.',
+            })
+            .collect();
+        assert_eq!(c, "{{{{.9..$.vv.C");
+        assert!(s_html("{a} <", true).contains("h-sl"));
     }
 }

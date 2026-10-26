@@ -223,6 +223,20 @@ mod tests {
         }
     }
 
+    /// s programs: notes tagged s, the right-aligned code mode, word classes, running
+    #[test]
+    fn s_programs_stay() {
+        let hl = include_str!("highlight.rs");
+        for needle in ["pub fn s_classes(", "pub fn s_html(", "pub s: bool"] {
+            assert!(hl.contains(needle), "highlight.rs lost {needle}");
+        }
+        let rs = include_str!("views/notes.rs");
+        for needle in ["\"run the program\"", "\"s.run\"", "s-run", "ops::script::TAG"] {
+            assert!(rs.contains(needle), "notes.rs lost {needle}");
+        }
+        assert!(include_str!("style.css").contains(".pad.code textarea"));
+    }
+
     /// keyframe animations: the window, the room posing blocks
     #[test]
     fn animations_stay() {

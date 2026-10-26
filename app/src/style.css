@@ -899,3 +899,16 @@ a.btn { text-decoration: none; }
 .anim-vec { display: flex; flex-direction: column; gap: 2px; }
 .anim-vec .lt-slider > span:first-child { width: 20px; }
 .anim-use { display: flex; flex-direction: column; gap: 3px; border-top: 1px solid color-mix(in srgb, var(--dim) 18%, transparent); padding-top: 6px; }
+/* s code in the notes view: right-aligned, so the acting words stand in a column */
+.pad.code textarea, .pad.code .hl { text-align: right; }
+.hl .h-sc { color: var(--hl-heading); font-weight: 700; }
+.hl .h-ss { color: var(--hl-mark); font-weight: 700; }
+.hl .h-sl { color: var(--hl-code); }
+.hl .h-sv { color: var(--hl-tag); }
+.hl .h-sn { color: var(--hl-link); }
+.hl .h-sb { color: var(--hl-url); }
+.hl .h-se { color: var(--hl-mark); font-style: italic; }
+.s-run { margin-top: 6px; border: 1px solid color-mix(in srgb, var(--dim) 25%, transparent); border-radius: 6px; padding: 6px 10px; }
+.s-run .row { display: flex; align-items: center; gap: 6px; }
+.s-out { font: 13px/1.45 var(--mono); white-space: pre-wrap; margin: 4px 0 0; max-height: 240px; overflow: auto; }
+.s-err { font: 13px/1.45 var(--mono); color: var(--bad); white-space: pre-wrap; margin: 4px 0 0; }

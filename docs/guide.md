@@ -206,6 +206,11 @@ Lists are how you tell anend what goes together, and what models learn from.
   **Ctrl+S** saves. The bar narrows the list by words. Deleting takes two clicks. Long
   notes stay quick to type in at any length: only the part you're typing in is sent and
   coloured again.
+- **s programs:** the **s** button in a note's toolbar tags it `s`, which makes it a
+  program in s (docs/s.md). Its text then stands right-aligned, so each line's acting word
+  is at the right, and is coloured by s's kinds of word. **▶** runs it and shows what it
+  printed, or its error, under the pad. A program can run another by its title
+  (`greet.`), since its files are the save's s programs.
 - **The reader** (**Ctrl+4**): notes and texts as cards, a page at a time. Click one (or
   Enter on it) to read it big; **← →** step through, **Esc** goes back.
 - **Tags** (**Ctrl+6**): every tag with its count. Click picks one, Ctrl or Shift+click

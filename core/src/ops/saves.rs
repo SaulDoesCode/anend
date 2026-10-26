@@ -471,8 +471,8 @@ impl Saves {
         }
         if super::script::routed(op) {
             let (_, g) = self.current()?;
-            let limits = self.models.unwrap_or(super::classify::Limits::NONE);
-            return super::script::call(&g, op, args, &limits);
+            let shared = self.models.is_some_and(|l| l.shared);
+            return super::script::call(&g, op, args, shared);
         }
         if super::chains::routed(op) {
             let (_, g) = self.current()?;

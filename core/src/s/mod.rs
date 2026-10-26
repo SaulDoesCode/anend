@@ -13,12 +13,17 @@ use std::collections::BTreeMap;
 
 pub use machine::{Outcome, Rt};
 
-/// runs a program: its source, what stdin holds, its files, its arguments, and at most how
-/// many steps it may take
-pub fn run(src: &str, stdin: &str, files: BTreeMap<String, String>, args: &[String], max_steps: u64) -> Outcome {
-    let seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(7, |d| d.as_nanos() as u64);
+/// runs a program: its source, what stdin holds, its files, its arguments, at most how
+/// many steps it may take, and the seed of its random numbers (the caller's clock: the
+/// browser has no system time to read here)
+pub fn run(
+    src: &str,
+    stdin: &str,
+    files: BTreeMap<String, String>,
+    args: &[String],
+    max_steps: u64,
+    seed: u64,
+) -> Outcome {
     let mut rt = Rt::new(stdin, files, seed);
     rt.max_steps = max_steps;
     rt.run_program(src, args)

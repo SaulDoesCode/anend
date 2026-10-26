@@ -1243,10 +1243,8 @@ const SH: Natives = &[
         Ok(())
     }),
     ("now", |rt| {
-        let ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_millis());
-        rt.push_num(ms as f64);
+        // chrono reads the browser's clock on the web, where the system time panics
+        rt.push_num(chrono::Utc::now().timestamp_millis() as f64);
         Ok(())
     }),
     ("sleep", |rt| rt.pop_num("sleep").map(|_| ())),

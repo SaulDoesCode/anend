@@ -127,13 +127,17 @@ docs/architecture.md (the whole).
       from the scenes window. Merges already worked on wholes: entries, scenes, models.)
 - [x] ▶ **usable:** scenes in saves, copies that are safe, long texts that are smooth.
       (26 Oct: README and guide written up; offered as an update on pull request #8.)
-- [ ] The language: s (docs/s.md, the user's spec) as the high-level form of the 5-bit
+- [x] The language: s (docs/s.md, the user's spec) as the high-level form of the 5-bit
       format. Allocate the 5-bit format's unused escape space efficiently for s's tokens
       and suffix forms, and document the mapping in docs/format.md. Tail calls run in
       constant space, as s §6 requires (#11).
+      (26 Oct: `anend_core::s`, its own activation stack, a tail call replaces its frame;
+      the codec's s mode; programs are notes tagged `s`, run with `s.run`.)
 - [ ] The notes view as s's code editor: a right-aligned mode (the acting word stands at the
       right), highlighting by s's word classes (commands, suffix forms, literals, locals),
       outline, go to definition, inline results, step debugging, completion (#11, #12).
+      (26 Oct: the right-aligned mode, the word-class colours and ▶ running are in; outline,
+      go to definition, inline results, step debugging and completion remain.)
 - [ ] A headless standard library over every app op, and `anend run` (#11).
 - [ ] Classifiers and models as language primitives (#18).
 - [ ] ▶ **usable:** scripting the project from the notes view and the command line.
