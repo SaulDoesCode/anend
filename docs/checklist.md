@@ -148,10 +148,10 @@ docs/architecture.md (the whole).
 - [ ] ▶ **usable:** the taxonomy engine, with effects stacked onto views.
 - [ ] The renderer on wgpu, with WebGPU on the web sharing the code (#25).
 - [ ] Culling (#24); far billboards with deterministic fall-off (#22).
-- [ ] Block rotation and packed storage (#5); the picture-to-texture pipeline (#7); the skybox
+- [x] Block rotation and packed storage (#5); the picture-to-texture pipeline (#7); the skybox
       (#23).
-      (26 Oct: rotation done, with the gizmo's rings, stored packed; the texture pipeline
-      and the skybox still to come.)
+      (26 Oct: rotation done, with the gizmo's rings, stored packed; texture recipes in
+      `graph textures` with the textures window's steps, faces and the sky.)
 - [ ] Spheres and curved blocks (#21); lights baked onto blocks (#20).
       (26 Oct: curved blocks as bends, a curtain ripple and a fold, each shaped by a bezier;
       spheres and lights still to come.)

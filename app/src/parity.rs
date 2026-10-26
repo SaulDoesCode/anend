@@ -223,6 +223,34 @@ mod tests {
         }
     }
 
+    /// texture recipes: the textures window's steps, faces and the sky
+    #[test]
+    fn texture_recipes_stay() {
+        let js = include_str!("space.js");
+        for needle in [
+            "recipeCanvas(about",
+            "recipeTexture(about",
+            "blockMaterial(b)",
+            "setSky(about)",
+            "preview(id, about",
+            "function variantOf(",
+        ] {
+            assert!(js.contains(needle), "space.js lost {needle}");
+        }
+        let rs = include_str!("views/space/texwin.rs");
+        for needle in [
+            "fn Textures(",
+            "\"textures.save\"",
+            "\"blocks.retexture\"",
+            "\"space.sky\"",
+            "on one face:",
+            "as the sky",
+        ] {
+            assert!(rs.contains(needle), "texwin.rs lost {needle}");
+        }
+        assert!(include_str!("views/space.rs").contains("show_textures"));
+    }
+
     /// the notes editor's spelling check: asked for as one writes, its flags drawn in the
     /// highlight layer, a click's suggestion put in as an undo step of its own
     #[test]

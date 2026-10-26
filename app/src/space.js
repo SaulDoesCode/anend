@@ -87,6 +87,19 @@ function wavePeak(c1, c2) {
 // what a block's geometry depends on (its sides and bend)
 function shapeKey(t) { return JSON.stringify([t.w, t.h, t.d, t.bend || null]); }
 function localAxis(i) { const a = new THREE.Vector3(); a.setComponent(i, 1); return a; }
+// which variant the n-th block of a recipe shows: core's graph::textures::variant, the
+// same 32-bit mix
+function variantOf(seed, n, variants) {
+  if (!(variants > 1)) return 0;
+  const lo = n >>> 0, hi = Math.floor(n / 4294967296) >>> 0;
+  let h = ((seed >>> 0) ^ Math.imul(lo, 0x9e3779b9) ^ hi) >>> 0;
+  h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b) >>> 0;
+  h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35) >>> 0;
+  h ^= h >>> 16;
+  return (h >>> 0) % variants;
+}
+export { variantOf };
+
 function turnOf(b) { const r = b.rot || [0, 0, 0, 1]; return new THREE.Quaternion(r[0], r[1], r[2], r[3]); }
 
 export class Space {
@@ -145,7 +158,9 @@ export class Space {
     }
     this.scene.add(this.grid);
     this.blocks = new Map(); // id → {b, mesh, key, about}
-    this.mats = new Map(); // texture key → material
+    this.mats = new Map(); // texture key (and a recipe's variant) → material
+    this.abouts = new Map(); // texture key → what it is (as Rust sent it)
+    this.sky = null;
     this.selBlock = null;
     this.bdrag = null;
     this.ray = new THREE.Raycaster();
@@ -886,8 +901,161 @@ export class Space {
     return c;
   }
 
+  // ------------------------------------------------------------------ texture recipes
+  //
+  // A recipe (core's graph::textures) is drawn into a tile: its source (a picture, a
+  // text drawn as a text block's is, or a colour), cropped, mirrored, turned a quarter
+  // at a time and tinted. The tile repeats every `scale` units, shifted by `offset`; a
+  // block's variant k shifts it by (k·0.381966, k·0.618034) of a tile and, with
+  // `turn_variants`, turns it k more quarters. The same tile shows in the textures
+  // window's previews (`preview`).
+
+  // a recipe's tile; a picture's arrives later, and `redraw` is called when it has
+  recipeCanvas(about, extraTurns, redraw, size = 256) {
+    const r = about.recipe || {};
+    const src = r.source || {};
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const draw = (img) => {
+      const g = c.getContext('2d');
+      g.save();
+      g.clearRect(0, 0, size, size);
+      g.translate(size / 2, size / 2);
+      g.rotate((((r.turn || 0) + (extraTurns || 0)) % 4) * Math.PI / 2);
+      if (r.mirror) g.scale(-1, 1);
+      g.translate(-size / 2, -size / 2);
+      if (src.plain) {
+        g.fillStyle = src.plain;
+        g.fillRect(0, 0, size, size);
+      } else if (img) {
+        const [l, t, rr, b] = r.crop || [0, 0, 1, 1];
+        const w = img.width, h = img.height;
+        g.drawImage(img, l * w, t * h, Math.max(1, (rr - l) * w), Math.max(1, (b - t) * h), 0, 0, size, size);
+      } else {
+        g.fillStyle = about.gone || about.picture_gone ? '#9a8f84' : '#b8a07a';
+        g.fillRect(0, 0, size, size);
+      }
+      g.restore();
+      if (r.tint && r.tint_amount) {
+        g.globalAlpha = r.tint_amount;
+        g.fillStyle = r.tint;
+        g.fillRect(0, 0, size, size);
+        g.globalAlpha = 1;
+      }
+    };
+    if (src.text != null) draw(this.textCanvas(about.text_gone ? '(gone)' : about.text, about.colour));
+    else if (src.picture && about.src) {
+      draw(null);
+      const im = new Image();
+      im.onload = () => { draw(im); if (redraw) redraw(); };
+      im.src = about.src;
+    } else draw(null);
+    return c;
+  }
+
+  // a recipe's texture for a block's variant (or the sky, `sky` repeats round it)
+  recipeTexture(about, variant, sky) {
+    const r = about.recipe || {};
+    const v = variant || 0;
+    const turns = r.turn_variants ? v % 4 : 0;
+    let tex = null;
+    const canvas = this.recipeCanvas(about, turns, () => { if (tex) tex.needsUpdate = true; this.render(); });
+    tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    const [sw, sh] = r.scale || [1, 1];
+    // round the sky: four tiles a turn for a one-unit tile (fewer, bigger, for a bigger one)
+    if (sky) tex.repeat.set(Math.max(1, Math.round(4 / sw)), Math.max(1, Math.round(2 / sh)));
+    else tex.repeat.set(BLOCK_TILE / sw, BLOCK_TILE / sh);
+    const [ou, ov] = r.offset || [0, 0];
+    tex.offset.set(ou + v * 0.381966, ov + v * 0.618034);
+    return tex;
+  }
+
+  recipeMaterial(key, about, variant) {
+    const k = `${key}|${variant || 0}`;
+    let m = this.mats.get(k);
+    if (m) return m;
+    if (!about.recipe) m = new THREE.MeshBasicMaterial({ vertexColors: true, color: new THREE.Color('#9a8f84') });
+    else m = new THREE.MeshBasicMaterial({ vertexColors: true, map: this.recipeTexture(about, variant) });
+    this.mats.set(k, m);
+    return m;
+  }
+
+  // a block's material: its texture's (a recipe's for its variant), or one per face when
+  // some faces show recipes of their own
+  blockMaterial(b) {
+    const key = `${b.kind}:${b.texture}`;
+    const about = this.abouts.get(key) || {};
+    const base = b.kind === 'texture' ? this.recipeMaterial(key, about, b.variant || 0) : this.material(key, about);
+    if (!b.faces || !b.faces.some(Boolean)) return base;
+    return b.faces.map((f) => (f ? this.recipeMaterial(`texture:${f}`, this.abouts.get(`texture:${f}`) || {}, 0) : base));
+  }
+
+  // the sky: a recipe round the room, far off and following the camera (null: none)
+  setSky(about) {
+    if (this.sky) {
+      this.scene.remove(this.sky);
+      this.sky.geometry.dispose();
+      this.sky.material.map?.dispose();
+      this.sky.material.dispose();
+      this.sky = null;
+    }
+    if (about && about.recipe) {
+      const m = new THREE.MeshBasicMaterial({ map: this.recipeTexture(about, 0, true), side: THREE.BackSide, fog: false, depthWrite: false });
+      this.sky = new THREE.Mesh(new THREE.SphereGeometry(1800, 48, 24), m);
+      this.sky.renderOrder = -1000;
+      this.sky.userData.sky = true;
+      this.scene.add(this.sky);
+    }
+    this.render();
+  }
+
+  // draws a recipe's tiles into the canvas with that id on the page (the textures
+  // window's previews): `tiles` across, each block variant in turn when `variants`
+  preview(id, about, tiles, variants, tries = 0) {
+    const el = document.getElementById(id);
+    if (!el) {
+      if (tries < 30) requestAnimationFrame(() => this.preview(id, about, tiles, variants, tries + 1));
+      return;
+    }
+    const n = Math.max(1, tiles || 1);
+    const W = el.width, H = el.height;
+    const g = el.getContext('2d');
+    const r = about.recipe || {};
+    const drawAll = () => {
+      g.clearRect(0, 0, W, H);
+      // a tile keeps its shape (scale w by h)
+      const [sw, sh] = r.scale || [1, 1];
+      const cw0 = W / n, ch0 = cw0 * (sh / sw);
+      const rows = Math.max(1, Math.ceil(H / ch0 - 1e-6));
+      for (let y = 0; y < rows; y++) for (let x = 0; x < n; x++) {
+        const v = variants ? (y * n + x) % Math.max(1, r.variants || 1) : 0;
+        const tile = tiles_[v] || tiles_[0];
+        const [ou, ov] = r.offset || [0, 0];
+        // as the room samples it: the tile moved left by its u offset, down by its v
+        const fu = (((ou + v * 0.381966) % 1) + 1) % 1, fv = (((ov + v * 0.618034) % 1) + 1) % 1;
+        const cw = cw0, ch = ch0, x0 = x * cw, y0 = y * ch;
+        g.save();
+        g.beginPath();
+        g.rect(x0, y0, cw, ch);
+        g.clip();
+        for (const i of [0, 1]) for (const j of [0, 1]) g.drawImage(tile, x0 - fu * cw + i * cw, y0 + fv * ch - j * ch, cw, ch);
+        g.restore();
+      }
+    };
+    const kinds = variants && r.turn_variants ? 4 : 1;
+    const tiles_ = [];
+    for (let k = 0; k < Math.max(kinds, variants ? Math.max(1, r.variants || 1) : 1); k++) {
+      tiles_.push(this.recipeCanvas(about, r.turn_variants ? k % 4 : 0, drawAll, 128));
+    }
+    drawAll();
+  }
+
   // a texture key's material, made once
   material(key, about) {
+    if (key.startsWith('texture:')) return this.recipeMaterial(key, about, 0);
     let m = this.mats.get(key);
     if (m) return m;
     const [kind, ...rest] = key.split(':');
@@ -948,16 +1116,18 @@ export class Space {
     if (replace) {
       for (const id of [...this.blocks.keys()]) this.dropBlock(id);
     }
+    for (const [k, v] of Object.entries(textures || {})) this.abouts.set(k, v);
     for (const b of list || []) {
       const key = `${b.kind}:${b.texture}`;
-      const about = (textures && textures[key]) || {};
+      const about = this.abouts.get(key) || {};
       const had = this.blocks.get(b.id);
       if (had) {
         had.b = b;
+        had.mesh.material = this.blockMaterial(b);
         this.shapeBlock(had);
         continue;
       }
-      const mesh = new THREE.Mesh(this.boxGeometry(b), this.material(key, about));
+      const mesh = new THREE.Mesh(this.boxGeometry(b), this.blockMaterial(b));
       mesh.userData.block = b.id;
       const o = { b, mesh, key, about };
       this.blocks.set(b.id, o);
@@ -989,8 +1159,8 @@ export class Space {
   }
 
   blockOut(o) {
-    const { id, kind, texture, x, y, z, w, h, d, rot, bend } = o.b;
-    return { id, kind, texture, x, y, z, w, h, d, rot: rot || [0, 0, 0, 1], bend: bend || null };
+    const { id, kind, texture, x, y, z, w, h, d, rot, bend, faces, variant } = o.b;
+    return { id, kind, texture, x, y, z, w, h, d, rot: rot || [0, 0, 0, 1], bend: bend || null, faces: faces || null, ...(variant != null ? { variant } : {}) };
   }
 
   pickBlock(id) {
@@ -1533,6 +1703,7 @@ export class Space {
 
   render() {
     if (this.selBlock != null) this.placeGizmo();
+    if (this.sky) this.sky.position.copy(this.camera.position);
     this.gl?.render(this.scene, this.camera);
     const c = this.camera;
     c.updateMatrixWorld();

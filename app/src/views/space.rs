@@ -26,6 +26,8 @@ use crate::shell::set_pref;
 use crate::ui::*;
 use crate::views::{TChip, use_keys};
 
+mod texwin;
+
 const THREE: &str = include_str!("../../vendor/three.module.min.js");
 const ENGINE: &str = include_str!("../space.js");
 
@@ -518,6 +520,8 @@ try {{
       if (c.select != null) sp.pickBlock(c.select);
     }}
     else if (c.cmd === 'unblock') sp.unblock(c.ids || []);
+    else if (c.cmd === 'sky') sp.setSky(c.about || null);
+    else if (c.cmd === 'preview') sp.preview(c.id, c.about || {{}}, c.tiles || 1, !!c.variants);
     else if (c.cmd === 'blockspot') dioxus.send({{ kind: 'spot', data: {{ ...sp.blockSpot(), want: c.want }} }});
     else if (c.cmd === 'blockfields') sp.setBlockFields(c.id, c.t);
     else if (c.cmd === 'pickblock') sp.pickBlock(c.id);
@@ -1486,7 +1490,8 @@ pub fn Space() -> Element {
             if p.space.show_hud {
                 PosCard { pos: sp.pos }
             }
-            if n == 0 {
+            // the hint while the room has nothing in it: no texts and no blocks
+            if n == 0 && (sp.block_use)().0 == 0 {
                 div { class: "space-empty",
                     p { "The room is empty." }
                     p { class: "small", "Type a word, a number or a key in the bar and press Enter: its bucket spreads out here, pulled together by how alike the texts are. Hold the right mouse button to look around, W A S D to fly, the arrow keys hop from text to text; H for help." }
@@ -1532,6 +1537,14 @@ pub fn Space() -> Element {
                     on_duplicate: { let api = api_b.clone(); move |b: Value| duplicate_block(ui, api.clone(), sp, b) },
                     on_delete: { let api = api_b.clone(); move |id: String| delete_block(ui, api.clone(), sp, id) },
                     bend_open: sp.bend_open,
+                }
+            }
+            if p.space.show_textures {
+                texwin::Textures {
+                    selected: (sp.selected)(),
+                    block: (sp.block)(),
+                    on_send: move |v: Value| sp.send(v),
+                    on_changed: { let api = api_b.clone(); move |_| { let api = api.clone(); dioxus::dioxus_core::spawn_forever(count_blocks(api, sp)); } },
                 }
             }
             if p.space.show_details {
@@ -1773,6 +1786,18 @@ async fn dress(ui: Ui, api: &Api, textures: Value) -> Value {
                 && let Some(t) = p["thumb"].as_str()
             {
                 about["src"] = json!(format!("data:image/png;base64,{t}"));
+            } else if k.starts_with("texture:") {
+                // a recipe: its text's colour, its picture's thumbnail
+                if let Some(t) = about["text"].as_str().map(str::to_string) {
+                    about["colour"] = json!(gem::underline(&t, mode));
+                }
+                if let Some(id) = about["recipe"]["source"]["picture"].as_str().map(str::to_string)
+                    && about.get("picture_gone").is_none()
+                    && let Ok(p) = api.call("pictures.get", json!({ "id": id, "thumb": 512 })).await
+                    && let Some(t) = p["thumb"].as_str()
+                {
+                    about["src"] = json!(format!("data:image/png;base64,{t}"));
+                }
             }
         }
     }
@@ -1794,6 +1819,7 @@ async fn load_blocks(ui: Ui, api: Api, sp: Sp) {
             sp.send(json!({ "cmd": "blocks", "blocks": r["blocks"], "textures": textures, "replace": true }));
             let mut b = sp.block;
             b.set(None);
+            texwin::load_sky(ui, &api, EventHandler::new(move |v: Value| sp.send(v))).await;
             count_blocks(api, sp).await;
         }
         // a hub from before blocks: the room has none
@@ -1952,6 +1978,10 @@ fn Blocks(
                                 match b["kind"].as_str().unwrap_or("") {
                                     "text" => format!("“{}”", b["about"]["text"].as_str().unwrap_or("a text")),
                                     "picture" => format!("picture {}", b["about"]["name"].as_str().unwrap_or("")),
+                                    "texture" => match b["about"]["name"].as_str().filter(|n| !n.is_empty()) {
+                                        Some(n) => format!("the recipe {n}"),
+                                        None => "a texture recipe".to_string(),
+                                    },
                                     _ => format!("colour {}", b["texture"].as_str().unwrap_or("")),
                                 }
                             }
@@ -1975,6 +2005,7 @@ fn Blocks(
                     }
                     div { class: "row",
                         button { class: "btn small", title: "a copy beside it (the texture is stored once)", onclick: { let b = b.clone(); move |_| on_duplicate.call(b.clone()) }, Icon { name: "copy" } "copy" }
+                        button { class: "btn small", title: "the textures window: a recipe for this block or one of its faces", onclick: move |_| set_pref(ui, |p| p.space.show_textures = true), Icon { name: "image" } "texture…" }
                         button { class: "btn small", title: "{ui.key_of(Action::DeleteText)}", onclick: { let id = b["id"].as_str().unwrap_or("").to_string(); move |_| on_delete.call(id.clone()) }, Icon { name: "delete" } "delete" }
                     }
                 }
@@ -2242,6 +2273,8 @@ fn BlockMenu(
             div { class: "title dim small", {format!("{}{}", turn_words(&b["rot"]), bend_words(&b["bend"]))} }
             button { role: "menuitem", onclick: move |_| { set_pref(ui, |p| p.space.show_blocks = true); let mut bo = bend_open; bo.set(true); close(); },
                 Icon { name: "edit" } "bend it…" span { class: "dim small", " (the curves in the blocks window)" } }
+            button { role: "menuitem", onclick: move |_| { set_pref(ui, |p| p.space.show_textures = true); close(); },
+                Icon { name: "image" } "texture it…" span { class: "dim small", " (a recipe for it or one face)" } }
             button { role: "menuitem", onclick: { let id = id.clone(); move |_| { on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "bend": Value::Null } })); close(); } },
                 Icon { name: "close" } "straighten" }
             button { role: "menuitem", onclick: { let id = id.clone(); move |_| { on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "rot": quarter_y } })); close(); } },
@@ -3107,6 +3140,12 @@ pub fn SpaceStrip() -> Element {
                 icon: "cube",
                 on: p.space.show_blocks,
                 onclick: move |_| set_pref(ui, |p| p.space.show_blocks = !p.space.show_blocks),
+            }
+            TChip {
+                label: "textures: recipes from pictures, texts and colours, for blocks, faces and the sky",
+                icon: "image",
+                on: p.space.show_textures,
+                onclick: move |_| set_pref(ui, |p| p.space.show_textures = !p.space.show_textures),
             }
             TChip {
                 label: format!("help · {}", ui.key_of(Action::Help)),

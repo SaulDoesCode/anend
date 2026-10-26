@@ -139,12 +139,22 @@ text for its menu.
   ripple* (waves across its width) and a *fold* (a curve from a fold line to the edges).
   Drag the dots on each curve to shape it and the sliders to set how much, how many
   waves and where; the texture follows the bend, and clicks hit the bent shape.
+- **Textures.** The textures window (the picture chip, or a block's menu: *texture it…*)
+  makes a texture recipe in five steps, each with a preview: a **source** (a picture of
+  the save, the selected text, or a colour), a **crop** (drag a box over the part you
+  want), the **tile** (its width and height in units, where it starts, a quarter turn, a
+  mirror, a tint), **variants** (blocks showing the recipe pick one each, so a wall
+  doesn't repeat; *shuffle* picks again), and **use**: on a new block, on the selected
+  block, on one face of it, or as the room's **sky**. Recipes are kept in the save and
+  listed at the top of the window; using one twice keeps one copy.
 - **Long texts** show their first piece (80 characters a line, six lines a piece, both
   settings) with how many more there are.
 
 ![a chain under its title](guide/chain.png)
 
 ![a block bent by a ripple and a fold](guide/bend.png)
+
+![a brick recipe on a block, a colour on its top face, and a starry sky](guide/textures.png)
 
 ## Lists
 

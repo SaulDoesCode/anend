@@ -61,7 +61,9 @@ departure says why in its commit).
   the desktop (`fonts::scan_system`).
 - Done (26 Oct): the space's full search line (counts with icons, pf chain, the
   triangle written); the parity line ticked (WebGPU training joins the GPU back burner).
-- Next: the texture pipeline and the skybox; then the scene-building lines.
+- Done (26 Oct): texture recipes (`graph textures`, the textures window's five steps,
+  faces, the sky); the "Block rotation and packed storage" line ticked.
+- Next: spheres and lights baked onto blocks (#21, #20); then the scene-building lines.
 
 **After Stage A (19 Oct, late evening UTC), while the user tries it:**
 - `b5b6b22` docs/format.md "One model for a definition and its placed instances": Stage B's

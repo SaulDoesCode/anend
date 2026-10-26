@@ -782,3 +782,34 @@ a.btn { text-decoration: none; }
 .hsl-sliders .num { width: auto; }
 .hsl-swatch { display: block; height: 18px; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--text) 25%, transparent); }
 .hsl-sliders input.hue { accent-color: var(--accent); }
+/* the textures window: saved recipes, then the pipeline's steps from source to use */
+.tx-saved { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.tx-item { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 64px; }
+.tx-item canvas { width: 56px; height: 56px; border-radius: 4px; cursor: pointer; box-shadow: 0 0 0 1px color-mix(in srgb, var(--dim) 30%, transparent); }
+.tx-item span { max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx-item button { padding: 0 4px; height: 18px; }
+.tx-steps { display: flex; flex-direction: column; }
+.tx-step { border: 1px solid color-mix(in srgb, var(--dim) 22%, transparent); border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; }
+.tx-step-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tx-step-head .dim { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx-n { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: var(--on-button); font-size: 11px; font-weight: 700; flex: none; }
+.tx-arrow { text-align: center; color: var(--dim); line-height: 14px; }
+.tx-step .row { display: flex; gap: 6px; align-items: center; }
+.tx-step .row.wrap { flex-wrap: wrap; }
+.tx-step select { max-width: 150px; }
+.tx-step input[type=color] { width: 30px; height: 24px; padding: 0 2px; border: 0; background: none; cursor: pointer; }
+.tx-crop { position: relative; align-self: center; touch-action: none; }
+.tx-crop canvas { width: 100%; height: 100%; display: block; border-radius: 3px; }
+.tx-cropbox { position: absolute; border: 2px solid var(--accent); box-shadow: 0 0 0 9999px rgba(0, 0, 0, .35); pointer-events: none; box-sizing: border-box; }
+.tx-crop { overflow: hidden; }
+.tx-crop-grip { position: absolute; inset: 0; cursor: crosshair; }
+.tx-tile-row { display: flex; gap: 8px; align-items: center; }
+.tx-tile-row canvas { width: 96px; height: 96px; flex: none; border-radius: 3px; }
+.tx-sliders { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.tx-sliders label { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.tx-sliders label span { width: 46px; color: var(--dim); }
+.tx-sliders input { flex: 1; min-width: 0; }
+.tx-patch { width: 200px; height: 200px; align-self: center; border-radius: 3px; }
+.win:has(.tx-steps) { --win-w: min(360px, calc(100vw - 16px)); }
+.tx-name { flex: 1; min-width: 0; height: 24px; }
+.tx-faces button { padding: 0 6px; }
