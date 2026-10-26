@@ -766,3 +766,11 @@ a.btn { text-decoration: none; }
 .bend-curve .catch { fill: transparent; cursor: ns-resize; }
 .bend-slider { display: grid; grid-template-columns: 9em 1fr 3.5em; gap: 6px; align-items: center; font-size: 12px; }
 .bend-slider .num { width: auto; }
+
+/* a colour as hue, saturation, lightness and hex (settings, looks) */
+.hsl-edit { display: flex; flex-direction: column; gap: 6px; }
+.hsl-sliders { display: grid; gap: 4px; }
+.hsl-sliders label { display: grid; grid-template-columns: 6.5em 1fr 3.5em; gap: 8px; align-items: center; font-size: 12.5px; }
+.hsl-sliders .num { width: auto; }
+.hsl-swatch { display: block; height: 18px; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--text) 25%, transparent); }
+.hsl-sliders input.hue { accent-color: var(--accent); }

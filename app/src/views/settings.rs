@@ -61,6 +61,8 @@ pub fn Settings() -> Element {
 fn Looks() -> Element {
     let ui = ui();
     let p = ui.prefs.read().clone();
+    // the role whose colour the hue / saturation / lightness editor holds
+    let mut editing: Signal<Option<&'static str>> = use_signal(|| None);
     rsx! {
         Fold { name: "looks", title: "looks",
             label { "palette" }
@@ -89,6 +91,19 @@ fn Looks() -> Element {
                 }
                 if !p.colours.is_empty() {
                     button { class: "plain", onclick: move |_| set_pref(ui, |p| p.colours.clear()), "the palette's own" }
+                }
+            }
+            label { r#for: "hsl-role", "edit a colour" }
+            div { class: "hsl-edit",
+                select { id: "hsl-role", value: editing().unwrap_or(""),
+                    onchange: move |e| { let v = e.value(); editing.set(ROLES.iter().map(|r| r.0).find(|r| *r == v)); },
+                    option { value: "", "pick a role…" }
+                    for (role, _) in ROLES {
+                        option { key: "{role}", value: "{role}", selected: editing() == Some(role), "{role}" }
+                    }
+                }
+                if let Some(role) = editing() {
+                    HslEditor { key: "{role}", role, hex: colour(&p.palette, &p.colours, role) }
                 }
             }
             label { r#for: "fs", "text size" }
@@ -627,6 +642,50 @@ fn reading_words(r: &serde_json::Value) -> String {
 
 /// the limits the open save sets for itself (`limits.*`), each a number with its default;
 /// none caps how long a text can be
+/// a colour as hue, saturation and lightness sliders and a hex box (the Bevy app's), each
+/// change kept as the role's own colour
+#[component]
+fn HslEditor(role: &'static str, hex: String) -> Element {
+    let ui = ui();
+    let (h, s, l) = crate::theme::hsl_of(&hex);
+    let set = move |h: f64, s: f64, l: f64| {
+        let c = crate::theme::hex_of_hsl(h, s.clamp(0.0, 1.0), l.clamp(0.0, 1.0));
+        set_pref(ui, move |p| {
+            p.colours.insert(role.to_string(), c.clone());
+        });
+    };
+    let mut draft = use_signal(|| hex.clone());
+    rsx! {
+        div { class: "hsl-sliders",
+            span { class: "hsl-swatch", style: "background: {hex};" }
+            label { span { "hue" }
+                input { r#type: "range", min: "0", max: "359", step: "1", value: "{h.round()}", class: "hue",
+                    oninput: move |e| set(e.value().parse().unwrap_or(h), s, l) }
+                span { class: "num", "{h.round()}°" } }
+            label { span { "saturation" }
+                input { r#type: "range", min: "0", max: "100", step: "1", value: "{(s * 100.0).round()}",
+                    oninput: move |e| set(h, e.value().parse::<f64>().unwrap_or(s * 100.0) / 100.0, l) }
+                span { class: "num", "{(s * 100.0).round()}%" } }
+            label { span { "lightness" }
+                input { r#type: "range", min: "0", max: "100", step: "1", value: "{(l * 100.0).round()}",
+                    oninput: move |e| set(h, s, e.value().parse::<f64>().unwrap_or(l * 100.0) / 100.0) }
+                span { class: "num", "{(l * 100.0).round()}%" } }
+            label { span { "hex" }
+                input { r#type: "text", value: "{hex}", "aria-label": "{role} as hex", style: "width: 7em;",
+                    oninput: move |e| draft.set(e.value()),
+                    onchange: move |_| {
+                        let v = draft().trim().to_string();
+                        let v = if v.starts_with('#') { v } else { format!("#{v}") };
+                        if v.len() == 7 && v[1..].chars().all(|c| c.is_ascii_hexdigit()) {
+                            set_pref(ui, move |p| { p.colours.insert(role.to_string(), v.to_lowercase()); });
+                        } else {
+                            ui.fail("a colour in hex is like #a07850");
+                        }
+                    } } }
+        }
+    }
+}
+
 #[component]
 fn LimitSettings() -> Element {
     let ui = ui();

@@ -90,7 +90,7 @@ pub fn css_vars(name: &str, own: &BTreeMap<String, String>) -> String {
     out
 }
 
-fn hsl_of(hex: &str) -> (f64, f64, f64) {
+pub fn hsl_of(hex: &str) -> (f64, f64, f64) {
     let (r, g, b) = rgb(hex);
     let (r, g, b) = (r / 255.0, g / 255.0, b / 255.0);
     let (mx, mn) = (r.max(g).max(b), r.min(g).min(b));
@@ -110,7 +110,7 @@ fn hsl_of(hex: &str) -> (f64, f64, f64) {
     (h * 60.0, s, l)
 }
 
-fn hex_of_hsl(h: f64, s: f64, l: f64) -> String {
+pub fn hex_of_hsl(h: f64, s: f64, l: f64) -> String {
     let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
     let hp = h.rem_euclid(360.0) / 60.0;
     let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
