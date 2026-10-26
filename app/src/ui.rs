@@ -115,6 +115,10 @@ pub struct TopLine {
     pub detail: String,
     pub s: u64,
     pub r: u64,
+    /// the space: texts in the room and the buckets they make
+    pub counts: Option<(usize, usize)>,
+    /// a gsearched number's prime factor chain (weum's pfR line), shown after it
+    pub pf: Option<u64>,
 }
 
 /// the list (Shift+click), its candidate (Ctrl+click) and a selection of texts

@@ -232,6 +232,23 @@ pub fn triangle_points(s: u64, r: u64, height: f64, max_width: f64) -> Option<(f
 }
 
 /// the triangle's angles, or why it lies flat, for its tooltip
+/// the triangle in a few characters for the top line: its sides and angles, or that it
+/// lies flat (the Bevy app's `s r t · a° b° c°`)
+pub fn triangle_short(s: u64, r: u64) -> String {
+    let t = ((s as f64) * (r as f64)).sqrt().floor();
+    let (sf, rf) = (s as f64, r as f64);
+    if !(sf < rf + t && rf < sf + t && t < sf + rf) {
+        return format!("{s} {r} {t} lie flat");
+    }
+    let deg = |v: f64| v.clamp(-1.0, 1.0).acos().to_degrees();
+    format!(
+        "{s} {r} {t} · {:.0}° {:.0}° {:.0}°",
+        deg((sf * sf + t * t - rf * rf) / (2.0 * sf * t)),
+        deg((sf * sf + rf * rf - t * t) / (2.0 * sf * rf)),
+        deg((rf * rf + t * t - sf * sf) / (2.0 * rf * t)),
+    )
+}
+
 pub fn triangle_title(s: u64, r: u64) -> String {
     let t = ((s as f64) * (r as f64)).sqrt().floor();
     let (sf, rf) = (s as f64, r as f64);

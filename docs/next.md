@@ -59,7 +59,9 @@ departure says why in its commit).
   saves folder setting (desktop: a folder or a `.redb` file, `saves.folder`; the open
   save's path is kept in the prefs so the desktop starts on it); system fonts listed on
   the desktop (`fonts::scan_system`).
-- Next: parity.md's other gap (the space's full search line); then the texture pipeline and the skybox; then the scene-building lines.
+- Done (26 Oct): the space's full search line (counts with icons, pf chain, the
+  triangle written); the parity line ticked (WebGPU training joins the GPU back burner).
+- Next: the texture pipeline and the skybox; then the scene-building lines.
 
 **After Stage A (19 Oct, late evening UTC), while the user tries it:**
 - `b5b6b22` docs/format.md "One model for a definition and its placed instances": Stage B's

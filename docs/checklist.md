@@ -169,11 +169,13 @@ docs/architecture.md (the whole).
 - [ ] Placing prefabs in first-person mode (#19).
 - [ ] ▶ **usable:** walking through what has been built.
 - [ ] GPU: reading above the CPU at classifier-search batch sizes; training overhead (one
-      submission per step, kept buffers, AdamW on the device). Back burner (user, 25 Oct):
-      CPU training is fine for now.
-- [ ] The rest of parity.md's missing and partial rows: the saves folder setting, system
+      submission per step, kept buffers, AdamW on the device); WebGPU training in the
+      browser. Back burner (user, 25 Oct): CPU training is fine for now.
+- [x] The rest of parity.md's missing and partial rows: the saves folder setting, system
       fonts on the desktop, the window frame colour, HSL colour editing, the space's full
-      search line, WebGPU training in the browser (#24 of the old task list).
+      search line, WebGPU training in the browser (#24 of the old task list). (26 Oct:
+      `fdf6a1c`, `5944ee6`, `42e5f3a` and the search line; WebGPU training joins the GPU
+      line on the back burner.)
 
 **Alongside the list:** the unified asset and ontology browser (#26) grows a little with each
 new kind of data.

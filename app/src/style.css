@@ -99,6 +99,14 @@ input::placeholder, textarea::placeholder { color: var(--dim); opacity: .8; }
 }
 .searchline b { font-weight: 700; }
 .searchline .detail { font-size: 11.5px; color: var(--bar-dim); overflow: hidden; text-overflow: ellipsis; }
+.searchline .detail.tri, .searchline .detail:first-of-type { flex: none; }
+.searchline .counts { display: flex; align-items: center; gap: 8px; flex: none; }
+.searchline .counts > span { display: inline-flex; align-items: center; gap: 3px; }
+.searchline .counts .icon { width: 13px; height: 13px; }
+.searchline .pfline { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; color: var(--bar-dim); }
+.searchline .pfline .pf { display: inline; white-space: nowrap; }
+.searchline .pfline i { cursor: pointer; font-style: normal; color: var(--bar-text); }
+.searchline .pfline i:hover { text-decoration: underline; }
 svg.triangle { flex: none; overflow: visible; display: block; }
 svg.triangle polygon { fill: color-mix(in srgb, var(--accent) 55%, transparent); stroke: var(--bar-text); stroke-width: 1; stroke-linejoin: round; }
 svg.triangle.flat polygon { stroke: hsl(8 85% 72%); fill: none; }

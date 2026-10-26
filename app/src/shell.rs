@@ -415,7 +415,20 @@ fn TopBar() -> Element {
                         if !l.detail.is_empty() {
                             span { class: "detail", "{l.detail}" }
                         }
+                        if let Some((texts, buckets)) = l.counts {
+                            span { class: "counts",
+                                span { title: format!("{texts} text{} in the space", if texts == 1 { "" } else { "s" }), Icon { name: "text" } b { "{texts}" } }
+                                span { title: format!("{buckets} bucket{} in the space", if buckets == 1 { "" } else { "s" }), Icon { name: "bucket" } b { "{buckets}" } }
+                            }
+                        }
                         Triangle { s: l.s, r: l.r }
+                        if l.s > 0 || l.r > 0 {
+                            span { class: "detail tri", "{crate::gem::triangle_short(l.s, l.r)}" }
+                        }
+                        // last: the line's end gives way when the bar is narrow
+                        if let Some(n) = l.pf {
+                            span { class: "pfline", title: "its prime factor chain (weum's pfR); click a number to put it in the bar", crate::views::memory::PfLine { n } }
+                        }
                     }
                 }
             }

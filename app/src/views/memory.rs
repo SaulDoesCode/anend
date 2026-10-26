@@ -74,6 +74,7 @@ fn set_topline(mut ui: Ui, title: &str, mode: Mode, text: Option<&str>, count: u
         detail: format!("{} · {count} text{}", mode.name(), if count == 1 { "" } else { "s" }),
         s,
         r,
+        ..Default::default()
     }));
 }
 

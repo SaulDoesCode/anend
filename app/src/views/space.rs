@@ -687,6 +687,11 @@ fn show(ui: Ui, api: Api, sp: Sp, hits: Vec<Hit>) {
                 v
             })
             .collect();
+        // the room's counts in the search line
+        let mut tl = ui.topline;
+        if let Some(l) = tl.write().as_mut() {
+            l.counts = Some((qs.len(), count.len()));
+        }
         let mut q_bucket = sp.q_bucket;
         q_bucket.set(qs);
         sp.send(json!({ "cmd": "place", "texts": payload, "again": again }));
@@ -694,13 +699,21 @@ fn show(ui: Ui, api: Api, sp: Sp, hits: Vec<Hit>) {
     });
 }
 
-fn topline(mut ui: Ui, title: String, mode: Mode, text: Option<&str>, n: usize) {
+/// the space's search line: what was searched and its mode; the room's counts follow
+/// when the texts are placed (`place`), with icons
+fn topline(ui: Ui, title: String, mode: Mode, text: Option<&str>, n: usize) {
+    topline_pf(ui, title, mode, text, n, None);
+}
+
+fn topline_pf(mut ui: Ui, title: String, mode: Mode, text: Option<&str>, n: usize, pf: Option<u64>) {
     let (s, r) = text.map(gem::sums).unwrap_or((0, 0));
     ui.topline.set(Some(TopLine {
         title,
-        detail: format!("{} · {n} text{}", mode.name(), if n == 1 { "" } else { "s" }),
+        detail: mode.name().to_string(),
         s,
         r,
+        counts: (n == 0).then_some((0, 0)),
+        pf,
     }));
 }
 
@@ -719,7 +732,7 @@ async fn gsearch(ui: Ui, api: Api, sp: Sp, n: u64, mode: Mode, text: Option<Stri
     match api.gsearch(mode, &n.to_string()).await {
         Ok(hits) => {
             let t = text.or_else(|| hits.first().map(|h| h.text.clone()));
-            topline(ui, n.to_string(), mode, t.as_deref(), hits.len());
+            topline_pf(ui, n.to_string(), mode, t.as_deref(), hits.len(), (n > 1).then_some(n));
             if hits.is_empty() {
                 ui.say(format!("nothing in {} {n} yet", mode.name()));
             }
@@ -822,6 +835,7 @@ async fn route(ui: Ui, api: Api, sp: Sp, addr: &str) {
         detail: format!("{} texts", rows.as_array().map(|a| a.len()).unwrap_or(0)),
         s: 0,
         r: 0,
+        ..Default::default()
     }));
 }
 
@@ -897,9 +911,10 @@ async fn command(ui: Ui, api: Api, sp: Sp, word: &str, rest: &str) {
                         let mut tl = ui.topline;
                         tl.set(Some(TopLine {
                             title: format!("list {}", l.text),
-                            detail: format!("{} texts", members.len()),
+                            detail: String::new(),
                             s: 0,
                             r: 0,
+                            ..Default::default()
                         }));
                         show(ui, api, sp, members);
                     }
@@ -1074,6 +1089,7 @@ async fn enter(mut ui: Ui, api: Api, sp: Sp, raw: String, ctrl: bool, shift: boo
                     detail: String::new(),
                     s: 0,
                     r: 0,
+                    ..Default::default()
                 }));
                 show(ui, api, sp, vec![h]);
             }
@@ -1722,6 +1738,7 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
                     detail: format!("{} {}", mode.name(), gem::sum_in(&hit.text, mode)),
                     s,
                     r,
+                    ..Default::default()
                 }));
                 card.set(Some(e.clone()));
             }
