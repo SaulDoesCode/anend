@@ -57,9 +57,9 @@ departure says why in its commit).
 - Done: the ▶ usable point (README, guide "Building in the space", offered on PR #8).
 - Done (26 Oct): parity gaps: the window frame colour and HSL editing (`fdf6a1c`); the
   saves folder setting (desktop: a folder or a `.redb` file, `saves.folder`; the open
-  save's path is kept in the prefs so the desktop starts on it).
-- Next: parity.md's other gaps (system fonts on the desktop, the space's full search
-  line); then the texture pipeline and the skybox; then the scene-building lines.
+  save's path is kept in the prefs so the desktop starts on it); system fonts listed on
+  the desktop (`fonts::scan_system`).
+- Next: parity.md's other gap (the space's full search line); then the texture pipeline and the skybox; then the scene-building lines.
 
 **After Stage A (19 Oct, late evening UTC), while the user tries it:**
 - `b5b6b22` docs/format.md "One model for a definition and its placed instances": Stage B's

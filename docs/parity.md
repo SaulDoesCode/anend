@@ -38,7 +38,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
 | hide the top bar until the pointer nears the top | zen.rs | has |
 | bars swapped (top bar at the bottom, command bar at the top) | config `bars_swapped` | has (19 Oct) |
 | sizes: interface scale, top bar height, command bar height, "default sizes" | sizing.rs | has (zoom, text size, both bars' heights) |
-| fonts: interface font and memory view font pickers (system fonts listed) | typeface.rs, settings.rs | partly (19 Oct): a family name for each, with common ones offered; a webview can't list the system's fonts |
+| fonts: interface font and memory view font pickers (system fonts listed) | typeface.rs, settings.rs | has on the desktop (26 Oct): `fonts::scan_system` reads the family from each font file in the system's font folders (TrueType/OpenType `name` tables, collections, Type 1) at start, and both fields offer them (the hint counts them); checked under Xvfb (all of the container's families, Courier 10 Pitch and Bitstream Charter included; Caladea applied), app/docs/shots/system-fonts.png. The web offers common names: a page can't list the system's fonts |
 | window icon (desktop title bar) | main.rs | has (19 Oct: it never reached the window before, `Config::with_icon` was undone by `with_window`; now on the window, checked as `_NET_WM_ICON` under Xvfb; a desktop entry is put in place for Wayland desktops) |
 | web tab favicon and title | hub/web/index.html | has |
 | saves the open note when the window closes | ui.rs `on_close` | has (19 Oct): closing the desktop window saves a titled note with changes, then the app ends (tested under Xvfb with a WM_DELETE_WINDOW message: the note was there on the next start); leaving the notes view saves it too |

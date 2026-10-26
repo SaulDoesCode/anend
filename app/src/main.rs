@@ -56,6 +56,8 @@ fn main() {
         .position(|a| a == "--save" || a == "--db")
         .and_then(|i| args.get(i + 1))
         .map(std::path::PathBuf::from);
+    // the installed font families, for the settings' font fields
+    fonts::scan_system();
     let prefs = prefs::load();
     let save = arg_save.or_else(|| prefs.save.clone().map(Into::into));
     let dir = prefs::data_dir().join("saves");

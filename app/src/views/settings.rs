@@ -61,6 +61,13 @@ pub fn Settings() -> Element {
 fn Looks() -> Element {
     let ui = ui();
     let p = ui.prefs.read().clone();
+    // the desktop lists the installed families; the web offers common ones
+    let font_names: Vec<String> = match crate::fonts::system() {
+        Some(all) if !all.is_empty() => std::iter::once("Fira Sans".to_string())
+            .chain(all.iter().cloned())
+            .collect(),
+        _ => crate::fonts::COMMON.iter().map(|s| s.to_string()).collect(),
+    };
     // the role whose colour the hue / saturation / lightness editor holds
     let mut editing: Signal<Option<&'static str>> = use_signal(|| None);
     rsx! {
@@ -134,9 +141,15 @@ fn Looks() -> Element {
                 input { id: "font", r#type: "text", list: "fontlist", placeholder: "Fira Sans (built in)", initial_value: "{p.font}", "aria-label": "the interface's font", oninput: move |e| set_pref(ui, |p| p.font = e.value()) }
                 input { r#type: "text", list: "fontlist", placeholder: "the memory view: system serif", initial_value: "{p.memory_family}", "aria-label": "the memory view's font", oninput: move |e| set_pref(ui, |p| p.memory_family = e.value()) }
                 datalist { id: "fontlist",
-                    for f in ["Fira Sans", "Inter", "Noto Sans", "DejaVu Sans", "Liberation Sans", "Ubuntu", "Cantarell", "Georgia", "Times New Roman", "Liberation Serif", "DejaVu Serif", "Noto Serif", "Fira Mono", "DejaVu Sans Mono"] { option { key: "{f}", value: "{f}" } }
+                    for f in font_names.iter() { option { key: "{f}", value: "{f}" } }
                 }
-                span { class: "dim small", "a font's name as the system knows it; empty for the built-in" }
+                span { class: "dim small",
+                    if let Some(n) = crate::fonts::system().map(<[String]>::len) {
+                        "one of this machine's {n} families (type to narrow them); empty for the built-in"
+                    } else {
+                        "a font's name as the system knows it; empty for the built-in"
+                    }
+                }
             }
             label { "the editor" }
             div { class: "row",
