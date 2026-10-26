@@ -26,6 +26,7 @@ use crate::shell::set_pref;
 use crate::ui::*;
 use crate::views::{TChip, use_keys};
 
+mod animwin;
 mod lightwin;
 mod texwin;
 
@@ -522,6 +523,9 @@ try {{
     }}
     else if (c.cmd === 'unblock') sp.unblock(c.ids || []);
     else if (c.cmd === 'sky') sp.setSky(c.about || null);
+    else if (c.cmd === 'anims') sp.setAnims(c.anims || [], c.textures || {{}});
+    else if (c.cmd === 'playanims') sp.playAnims(!!c.on);
+    else if (c.cmd === 'animpreview') sp.previewAnim(c.id, c.anim || null, c.p);
     else if (c.cmd === 'lights') sp.setLights(c.lights || [], c.changed || null);
     else if (c.cmd === 'showlights') sp.showLights(!!c.on, c.picked);
     else if (c.cmd === 'lightspot') dioxus.send({{ kind: 'lightspot', data: {{ ...sp.lightSpot(), want: c.want }} }});
@@ -1546,6 +1550,9 @@ pub fn Space() -> Element {
                     bend_open: sp.bend_open,
                 }
             }
+            if p.space.show_anims {
+                animwin::Anims { sp, block: (sp.block)(), on_changed: { let api = api_b.clone(); move |_| { let api = api.clone(); dioxus::dioxus_core::spawn_forever(count_blocks(api, sp)); } } }
+            }
             if p.space.show_lights {
                 lightwin::Lights { sp }
             }
@@ -1832,6 +1839,7 @@ async fn load_blocks(ui: Ui, api: Api, sp: Sp) {
             b.set(None);
             texwin::load_sky(ui, &api, EventHandler::new(move |v: Value| sp.send(v))).await;
             lightwin::load_lights(&api, sp).await;
+            animwin::load_anims(ui, &api, sp).await;
             count_blocks(api, sp).await;
         }
         // a hub from before blocks: the room has none
@@ -3236,6 +3244,12 @@ pub fn SpaceStrip() -> Element {
                 icon: "cube",
                 on: p.space.show_blocks,
                 onclick: move |_| set_pref(ui, |p| p.space.show_blocks = !p.space.show_blocks),
+            }
+            TChip {
+                label: "animations: keyframes for blocks, eased along timing curves",
+                icon: "play",
+                on: p.space.show_anims,
+                onclick: move |_| set_pref(ui, |p| p.space.show_anims = !p.space.show_anims),
             }
             TChip {
                 label: "lights: ambient, sun, point and cone lights, baked onto the blocks",

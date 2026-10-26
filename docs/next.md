@@ -68,7 +68,8 @@ departure says why in its commit).
 - Done (26 Oct): staging zones (#14): blocks whose texts spread among themselves.
 - Done (26 Oct): the visual spec builder (#4).
 - Done (26 Oct): the "▶ usable: building scenes" point (README, guide, offered on PR #8).
-- Next: blocks that cast rays and run programs (#15, #28); keyframes (#16); prefabs (#19).
+- Done (26 Oct): keyframes (#16): animations as entries, the animations window.
+- Next: the s language (#11, docs/s.md), then rays and programs (#15, #28); prefabs (#19).
   Open further up: the language lines (s, the standard library), taxonomies and pipes,
   the wgpu renderer and culling.
 

@@ -223,6 +223,31 @@ mod tests {
         }
     }
 
+    /// keyframe animations: the window, the room posing blocks
+    #[test]
+    fn animations_stay() {
+        let js = include_str!("space.js");
+        for needle in [
+            "animPose(a, p)",
+            "applyAnims(now)",
+            "previewAnim(id, anim, p)",
+            "function cubicBezier(",
+        ] {
+            assert!(js.contains(needle), "space.js lost {needle}");
+        }
+        let rs = include_str!("views/space/animwin.rs");
+        for needle in [
+            "fn Anims(",
+            "fn Curve(",
+            "\"anims.save\"",
+            "a key here",
+            "the selected block plays it",
+        ] {
+            assert!(rs.contains(needle), "animwin.rs lost {needle}");
+        }
+        assert!(include_str!("views/space.rs").contains("show_anims"));
+    }
+
     /// texture recipes: the textures window's steps, faces and the sky
     #[test]
     fn texture_recipes_stay() {

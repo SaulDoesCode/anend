@@ -153,6 +153,11 @@ text for its menu.
   spread among themselves inside it, under sliders of its own, and leave the rest of the
   room alone. Drag a text in or out; move the zone and its texts come along. Zones can
   sit inside zones.
+- **Animations.** The animations window (the play chip) makes keyframes for blocks: a
+  move, a turn, a scale or a texture at moments, eased along a timing curve you drag
+  (or *linear*, *ease*, *ease-in-out*...). Select a block, scrub to a moment, *a key
+  here*, set its pose with sliders, *play* to see it, *keep*, then *the selected block
+  plays it* (with a delay and a speed). One animation can play on many blocks.
 - **Lights.** The lights window (the sun chip) adds an *ambient* light, a *sun*, a
   *point* or a *cone* ahead of you. Pick one to set its colour, strength, reach,
   direction and cone with sliders, or *move it here*. The light is worked out onto the

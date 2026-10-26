@@ -100,6 +100,16 @@ function variantOf(seed, n, variants) {
 }
 export { variantOf };
 
+// a CSS cubic-bezier timing at x (0 to 1): core's graph::anims::bezier, by bisection
+function cubicBezier(t, x) {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const at = (a, b, s) => 3 * (1 - s) * (1 - s) * s * a + 3 * (1 - s) * s * s * b + s * s * s;
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 40; i++) { const mid = (lo + hi) / 2; if (at(t[0], t[2], mid) < x) lo = mid; else hi = mid; }
+  return at(t[1], t[3], (lo + hi) / 2);
+}
+
 function turnOf(b) { const r = b.rot || [0, 0, 0, 1]; return new THREE.Quaternion(r[0], r[1], r[2], r[3]); }
 
 export class Space {
@@ -162,6 +172,9 @@ export class Space {
     this.abouts = new Map(); // texture key → what it is (as Rust sent it)
     this.sky = null;
     this.lights = []; // the room's lights (core's graph::lights), baked onto the blocks
+    this.anims = new Map(); // animation key → the animation (core's graph::anims)
+    this.animT0 = performance.now(); // when the room's animations started
+    this.animPlaying = true;
     this.lightMarks = null; // where the point and cone lights are, while the lights window is open
     this.selBlock = null;
     this.bdrag = null;
@@ -1205,6 +1218,115 @@ export class Space {
     return g;
   }
 
+  // ------------------------------------------------------------------ animations
+  //
+  // A block playing an animation (core's graph::anims) is posed every frame: its move added
+  // to its place, its turn after its own, its sides scaled, its texture switched from a
+  // key on; the block itself (its place in the save, its gizmo, picking for editing) stays
+  // where it was put. `animPose` follows core's `sample`.
+
+  setAnims(list, textures) {
+    for (const [k, v] of Object.entries(textures || {})) this.abouts.set(k, v);
+    this.anims = new Map((list || []).map((x) => [x.key, x.anim]));
+    this.animT0 = performance.now();
+    for (const o of this.blocks.values()) this.unpose(o);
+    this.dirty = true;
+  }
+
+  // play or pause every animation (paused: each block back where it was put)
+  playAnims(on) {
+    this.animPlaying = !!on;
+    if (on) this.animT0 = performance.now();
+    else for (const o of this.blocks.values()) this.unpose(o);
+    this.dirty = true;
+  }
+
+  // the animations window shows one on a block: at a phase (scrubbing), or playing
+  previewAnim(id, anim, p) {
+    const o = this.blocks.get(id);
+    if (!o) return;
+    o.preview = anim ? { anim, p: p == null ? null : p, t0: performance.now() } : null;
+    if (!anim) this.unpose(o);
+    this.dirty = true;
+  }
+
+  animating() {
+    for (const o of this.blocks.values()) if (o.preview || (this.animPlaying && o.b.anim && this.anims.has(o.b.anim.key))) return true;
+    return false;
+  }
+
+  unpose(o) {
+    o.mesh.scale.set(1, 1, 1);
+    o.mesh.position.set(o.b.x, o.b.y, o.b.z);
+    o.mesh.quaternion.copy(turnOf(o.b));
+    if (o.animTex) {
+      o.animTex = null;
+      o.mesh.material = this.blockMaterial(o.b);
+    }
+  }
+
+  // where in an animation (0 to 1) `t` seconds after it started
+  animPhase(a, t) {
+    const x = Math.max(0, t) / Math.max(0.05, a.duration || 2);
+    if (a.repeat === 'loop') return x % 1;
+    if (a.repeat === 'alternate') { const f = x % 2; return f <= 1 ? f : 2 - f; }
+    return Math.min(1, x);
+  }
+
+  animPose(a, p) {
+    const keys = [...(a.keys || [])].sort((x, y) => x.at - y.at);
+    const timing = a.timing || [0.25, 0.1, 0.25, 1];
+    const field = (name, rest) => {
+      const set = keys.filter((k) => k[name]);
+      if (!set.length) return rest;
+      const f = set[0];
+      if (p <= f.at) {
+        if (f.at <= 0) return f[name];
+        const u = cubicBezier(timing, p / f.at);
+        return rest.map((r, i) => r + (f[name][i] - r) * u);
+      }
+      for (let i = 0; i + 1 < set.length; i++) {
+        const k0 = set[i], k1 = set[i + 1];
+        if (p <= k1.at) {
+          const u = cubicBezier(k0.timing || timing, (p - k0.at) / Math.max(1e-6, k1.at - k0.at));
+          return k0[name].map((v, j) => v + (k1[name][j] - v) * u);
+        }
+      }
+      return set[set.length - 1][name];
+    };
+    let texture = null;
+    for (const k of keys) if (k.at <= p && k.texture) texture = k.texture;
+    return { move: field('move', [0, 0, 0]), turn: field('turn', [0, 0, 0]), scale: field('scale', [1, 1, 1]), texture };
+  }
+
+  // every playing block posed for this moment
+  applyAnims(now) {
+    const e = new THREE.Euler(), q = new THREE.Quaternion();
+    for (const o of this.blocks.values()) {
+      let a = null, p = 0;
+      if (o.preview) {
+        a = o.preview.anim;
+        p = o.preview.p != null ? o.preview.p : this.animPhase(a, (now - o.preview.t0) / 1000);
+      } else if (this.animPlaying && o.b.anim && this.anims.has(o.b.anim.key)) {
+        a = this.anims.get(o.b.anim.key);
+        const t = ((now - this.animT0) / 1000 - (o.b.anim.delay || 0)) * (o.b.anim.speed || 1);
+        p = this.animPhase(a, t);
+      }
+      if (!a) continue;
+      const pose = this.animPose(a, p);
+      const b = o.b;
+      o.mesh.position.set(b.x + pose.move[0], b.y + pose.move[1], b.z + pose.move[2]);
+      e.set((pose.turn[0] * Math.PI) / 180, (pose.turn[1] * Math.PI) / 180, (pose.turn[2] * Math.PI) / 180, 'XYZ');
+      o.mesh.quaternion.copy(turnOf(b)).multiply(q.setFromEuler(e));
+      o.mesh.scale.set(pose.scale[0], pose.scale[1], pose.scale[2]);
+      if ((pose.texture || null) !== (o.animTex || null)) {
+        o.animTex = pose.texture;
+        const m = pose.texture ? this.material(pose.texture, this.abouts.get(pose.texture) || {}) : this.blockMaterial(b);
+        o.mesh.material = b.zone ? (Array.isArray(m) ? m.map((x) => this.seeThrough(x)) : this.seeThrough(m)) : m;
+      }
+    }
+  }
+
   // ------------------------------------------------------------------ lights
   //
   // The room's lights are baked: each block's vertex colours are the light reaching them
@@ -1372,6 +1494,7 @@ export class Space {
       const had = this.blocks.get(b.id);
       if (had) {
         had.b = b;
+        had.animTex = null;
         had.mesh.material = this.blockMaterial(b);
         this.shapeBlock(had);
         continue;
@@ -1405,6 +1528,7 @@ export class Space {
     mesh.position.set(b.x, b.y, b.z);
     const r = b.rot || [0, 0, 0, 1];
     mesh.quaternion.set(r[0], r[1], r[2], r[3]);
+    if (!o.preview && !b.anim) mesh.scale.set(1, 1, 1);
     this.bake(o);
     if (this.selBlock === b.id) this.placeGizmo();
   }
@@ -1424,8 +1548,8 @@ export class Space {
   }
 
   blockOut(o) {
-    const { id, kind, texture, x, y, z, w, h, d, rot, bend, faces, variant, shape, zone } = o.b;
-    return { id, kind, texture, x, y, z, w, h, d, rot: rot || [0, 0, 0, 1], bend: bend || null, faces: faces || null, shape: shape || 'box', zone: zone || null, ...(variant != null ? { variant } : {}) };
+    const { id, kind, texture, x, y, z, w, h, d, rot, bend, faces, variant, shape, zone, anim } = o.b;
+    return { id, kind, texture, x, y, z, w, h, d, rot: rot || [0, 0, 0, 1], bend: bend || null, faces: faces || null, shape: shape || 'box', zone: zone || null, anim: anim || null, ...(variant != null ? { variant } : {}) };
   }
 
   pickBlock(id) {
@@ -1961,7 +2085,9 @@ export class Space {
     // the turn has caught up with the mouse (it keeps the page light while one types
     // elsewhere)
     const turning = Math.abs(this.tyaw - this.yaw) > 1e-5 || Math.abs(this.tpitch - this.pitch) > 1e-5;
-    if (moving || turning || this.keys.size || this.ease || this.looking || this.drag || this.bdrag || this.dirty) {
+    const animated = this.blocks.size && this.animating();
+    if (animated) this.applyAnims(now);
+    if (moving || turning || this.keys.size || this.ease || this.looking || this.drag || this.bdrag || this.dirty || animated) {
       this.dirty = false;
       this.render();
       this.info(false);

@@ -179,3 +179,6 @@ The answers left these open. Each is written into the design as its default.
     app's JSON maps are ordered by key), so a spec typed in another order comes back
     reordered after a change in the builder; nothing in it changes meaning. Keeping the
     typed order would mean ordered maps in every JSON the core writes.
+43. **An animation poses a block as it plays without moving it in the save:** its gizmo,
+    zone and baked light stay where it was put. Turns are degrees about x, y and z after
+    the block's own turn; a texture switches at its key rather than blending.
