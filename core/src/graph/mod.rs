@@ -3,6 +3,7 @@
 pub mod assets;
 pub mod backup;
 pub mod blocks;
+pub mod chains;
 pub mod checkpoints;
 pub mod codec;
 pub mod gematria;

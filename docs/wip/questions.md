@@ -119,3 +119,13 @@ The answers left these open. Each is written into the design as its default.
 27. **The model input ceiling (`classify::io::MAX_LEN`) and the hub's 64 MiB message size
     stay as they are:** the first is a file-safety bound on a model's window, the second
     the hub's own limit, not a save's; neither limits how long a text can be.
+
+## Chains (25 Oct)
+
+28. **A chain hangs downward under its title, left-aligned,** like paragraphs on a page,
+    eased into place each frame (the springs), and its members take no part in the
+    spread's pull and push (the head stands for the chain). Laying them out left to
+    right is the other reading; it would suit short phrases better than paragraphs.
+29. **Adding a text to a chain takes that placement out of the room** (it now hangs in
+    the chain); the entry is unchanged.
+30. **Breaking a chain keeps its members in the room** as texts where they hung.

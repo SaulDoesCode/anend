@@ -160,7 +160,8 @@ docs/wip/questions.md.
 **Built so far (20 Oct):** the tables and the packed placements (`core/src/graph/scenes.rs`);
 the migration of `graph blocks`, `PLACE` edges and `space.maps`; the room's blocks and
 the saved scenes' texts on scenes (`blocks.*`, `scenes.*`); backups and whole-scene
-merges; inheritance for texts (25 Oct: inheriting, own text, detached). Not yet: prefabs, chains, font
+merges; inheritance for texts (25 Oct: inheriting, own text, detached); chains (25 Oct:
+mime 8 `application/x-anend-chain`, `graph::chains`). Not yet: prefabs, chains, font
 sizes in the space beyond a saved text's size, physics settling overlaps on merge, long
 texts. The rest of this section is the design; "today" below means before scenes.
 

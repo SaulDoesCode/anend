@@ -9,6 +9,7 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod blocks;
+pub mod chains;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod classify;
 pub mod merge;
@@ -246,6 +247,23 @@ fn space_features(v: &View, args: &Value) -> Res {
             "lists": lists.get(&id).cloned().unwrap_or_default(),
             "frequency": m.frequency,
         }));
+        // a chain shows its members under it; a note shows as a chain of two, its title and
+        // its body (answer 4; worked out here, no chain entry made)
+        let f = out.last_mut().expect("pushed");
+        if rec.mime == mime::CHAIN
+            && let Ok(c) = chains::chain_json(v, id)
+        {
+            f["isChain"] = json!(true);
+            f["titleKey"] = c["title"]["key"].clone();
+            f["chain"] = c["members"].clone();
+        } else if rec.mime == mime::MARKDOWN {
+            let (_, body) = crate::note::split(&text);
+            if !body.trim().is_empty() {
+                let shown =
+                    crate::pieces::pieces(body.trim(), crate::pieces::LINE, crate::pieces::LINES)[0].to_string();
+                f["chain"] = json!([{ "key": k, "text": shown, "note": true, "virt": true }]);
+            }
+        }
     }
     Ok(json!({ "features": out }))
 }

@@ -23,8 +23,10 @@ pub mod mime {
     pub const MAP: u16 = 5;
     pub const CLASSIFIER: u16 = 6;
     pub const JSON: u16 = 7;
+    /// a chain: a ref to its title, members as ordered `MEMBER` edges (`graph::chains`)
+    pub const CHAIN: u16 = 8;
 
-    pub const NAMES: [&str; 8] = [
+    pub const NAMES: [&str; 9] = [
         "text/plain",
         "text/markdown",
         "application/x-anend-fn",
@@ -33,6 +35,7 @@ pub mod mime {
         "application/x-anend-map",
         "application/x-anend-classifier",
         "application/json",
+        "application/x-anend-chain",
     ];
 
     pub fn builtin(name: &str) -> Option<u16> {

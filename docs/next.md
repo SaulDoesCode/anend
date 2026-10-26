@@ -50,8 +50,9 @@ departure says why in its commit).
   here); visual pieces (`anend_core::pieces`: 80 characters, six lines, both settings)
   in the memory view and the space's labels; records over 64 KiB in `graph long`; the
   limits as the save's settings. Later, if wanted: `text.window` and per-piece edits.
-- Next: chains (the core model and ops first, then the space, then notes as chains of
-  two), merging; then parity.md's gaps; then block features.
+- Done: "Chains" (ticked; blocks in chains not yet).
+- Next (the user, 25 Oct): block rotation together with the bending shader, one schema
+  change (#5 rotation, #21 curved blocks; a new save, no migration). Then merging; then parity.md's gaps; then block features.
 
 **After Stage A (19 Oct, late evening UTC), while the user tries it:**
 - `b5b6b22` docs/format.md "One model for a definition and its placed instances": Stage B's

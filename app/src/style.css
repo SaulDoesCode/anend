@@ -747,3 +747,8 @@ a.btn { text-decoration: none; }
 .smenu .size-row { padding: 4px 12px; }
 .size-row .num { white-space: nowrap; width: 14ch; text-align: center; }
 .size-row button.btn.small { width: auto; min-width: 26px; padding: 1px 8px; justify-content: center; }
+/* chains in the space: the members hang under their head, a rule at their left */
+.slabel.member { border-left: 2px solid color-mix(in srgb, var(--accent) 80%, transparent); padding-left: 5px; }
+.slabel.chain-head { font-weight: 600; }
+.menu .rot-up { transform: rotate(-90deg); }
+.menu .rot-down { transform: rotate(90deg); }

@@ -123,6 +123,8 @@ pub struct Picks {
     pub list: Option<Hit>,
     pub candidate: Option<Hit>,
     pub selected: Vec<Hit>,
+    /// the chain texts are being added to in the space (its key, its title)
+    pub chain: Option<Hit>,
 }
 
 /// what the next Enter in the bar does instead of a search

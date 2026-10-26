@@ -117,8 +117,10 @@ docs/architecture.md (the whole).
   space; records over 64 KiB stored in pieces; the limits as the save's settings. Simpler
   than format.md's design: pieces cut by bytes, edits rewrite a record's pieces whole,
   no `text.window` yet; see format.md "Long texts".)
-- [ ] Chains as their own entries (a title plus ordered members); a note placed in a scene
+- [x] Chains as their own entries (a title plus ordered members); a note placed in a scene
       shows as a chain of two (#8, answer 4).
+      (25 Oct: `graph::chains`, `chains.*`, the space's chains and their menu. Blocks in
+      chains not yet.)
 - [ ] Merging works on whole things, with overlapping placements settled by deterministic
       physics (answer 5).
 - [ ] ▶ **usable:** scenes in saves, copies that are safe, long texts that are smooth.

@@ -219,6 +219,19 @@ struct SpaceEvent {
     /// the entry's text (what an inheriting placement shows without its own)
     #[serde(default)]
     entry_text: String,
+    /// the chain it heads or is in (the chain entry's key), its place among the members
+    /// (-1: the head), how many members a head has, and the node of its head
+    #[serde(default)]
+    chain: String,
+    #[serde(default = "minus_one")]
+    idx: i64,
+    #[serde(default)]
+    members: u32,
+    #[serde(default)]
+    head_node: String,
+    /// a note's body shown as the second of a chain of two (no entry of its own)
+    #[serde(default)]
+    virt: bool,
     /// its font size in steps of 1/50 unit (0: the default), and the default's step
     #[serde(default)]
     font: u32,
@@ -254,11 +267,27 @@ fn SizeRow(ev: SpaceEvent, on_send: EventHandler<Value>) -> Element {
     }
 }
 
+fn minus_one() -> i64 {
+    -1
+}
+
 impl SpaceEvent {
     /// how this placement relates to its entry, in words
     fn relation(&self) -> String {
         if self.free {
             return String::new();
+        }
+        if self.virt {
+            return "a note's body, shown under its title as a chain of two".into();
+        }
+        if self.idx >= 0 {
+            return format!(
+                "text {} of a chain under its title (drag any of it to move it)",
+                self.idx + 1
+            );
+        }
+        if !self.chain.is_empty() {
+            return format!("heads a chain of {} texts", self.members);
         }
         if self.det > 0 {
             let when = chrono_date(self.det);
@@ -268,6 +297,164 @@ impl SpaceEvent {
             return "its own text over the entry's".into();
         }
         "inherits: shows the entry's text as it is now".into()
+    }
+}
+
+/// what a chain op does to the room once it's done
+#[derive(Clone, PartialEq)]
+enum ChainThen {
+    /// the text becomes the new chain's head, and the chain is the one to add to
+    Start(String),
+    /// the chain changed (cut: a new one starts beside it); the node, when given, leaves
+    /// the room (it went into the chain)
+    Changed(Option<String>),
+    /// the chain broke: its head shows its title again
+    Broke,
+}
+
+/// a change to a chain's members' keys
+type MembersEdit = std::rc::Rc<dyn Fn(&mut Vec<Value>)>;
+
+/// the right-click menu's chain items: start one, add to the chain being built, move a
+/// member, cut, take out, break (docs/format.md answer 4, queued #8)
+#[component]
+fn ChainItems(ev: SpaceEvent, sp_menu: Signal<Option<SpaceEvent>>, on_send: EventHandler<Value>) -> Element {
+    let ui = ui();
+    let api = api();
+    if ev.free || ev.virt {
+        return rsx! {};
+    }
+    let building = ui.picks.read().chain.clone();
+    // runs a chain op, tells the room, then closes the menu (its handler goes with it)
+    let run = {
+        let api = api.clone();
+        move |op: &'static str, args: Value, then: ChainThen| {
+            let api = api.clone();
+            let mut sm = sp_menu;
+            spawn(async move {
+                match api.call(op, args).await {
+                    Ok(r) => match then {
+                        ChainThen::Start(node) => {
+                            on_send.call(json!({ "cmd": "chainify", "node": node, "chain": r }));
+                            let mut p = ui.picks;
+                            p.write().chain = Some(Hit {
+                                key: r["key"].as_str().unwrap_or("").to_string(),
+                                text: r["title"]["text"].as_str().unwrap_or("").to_string(),
+                                note: false,
+                            });
+                            ui.say("a chain: right-click other texts to add them to it");
+                        }
+                        ChainThen::Changed(gone) => {
+                            let (chain, new) = if r.get("chain").is_some() {
+                                (r["chain"].clone(), r["new"].clone())
+                            } else {
+                                (r.clone(), Value::Null)
+                            };
+                            on_send.call(json!({ "cmd": "chain", "key": chain["key"], "chain": chain }));
+                            if !new.is_null() {
+                                on_send.call(json!({ "cmd": "addchain", "near": chain["key"], "chain": new }));
+                            }
+                            if let Some(n) = gone {
+                                on_send.call(json!({ "cmd": "removenode", "node": n, "quiet": true }));
+                                ui.say(format!(
+                                    "added to the chain “{}”",
+                                    chain["title"]["text"].as_str().unwrap_or("")
+                                ));
+                            }
+                        }
+                        ChainThen::Broke => {
+                            on_send.call(json!({ "cmd": "chain", "key": r["key"], "chain": Value::Null }));
+                            let mut p = ui.picks;
+                            if p.peek()
+                                .chain
+                                .as_ref()
+                                .is_some_and(|c| Some(c.key.as_str()) == r["key"].as_str())
+                            {
+                                p.write().chain = None;
+                            }
+                            ui.say("the chain broke: its texts stay");
+                        }
+                    },
+                    Err(e) => ui.fail(e),
+                }
+                sm.set(None);
+            });
+        }
+    };
+    // the chain's members' keys with one change made
+    let reorder = {
+        let api = api.clone();
+        let run = run.clone();
+        move |chain: String, f: MembersEdit| {
+            let (api, run) = (api.clone(), run.clone());
+            spawn(async move {
+                match api.call("chains.get", json!({ "key": chain })).await {
+                    Ok(c) => {
+                        let mut keys: Vec<Value> = c["members"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .map(|m| m["key"].clone())
+                            .collect();
+                        f(&mut keys);
+                        run(
+                            "chains.set",
+                            json!({ "key": chain, "members": keys }),
+                            ChainThen::Changed(None),
+                        );
+                    }
+                    Err(e) => ui.fail(e),
+                }
+            });
+        }
+    };
+    let idx = ev.idx;
+    let member = ev.idx >= 0;
+    let head = ev.idx < 0 && !ev.chain.is_empty();
+    let chain = ev.chain.clone();
+    rsx! {
+        if !member && !head && !ev.note {
+            button { role: "menuitem", onclick: { let run = run.clone(); let (k, n) = (ev.key.clone(), ev.node.clone()); move |_| run("chains.make", json!({ "title": k, "members": [] }), ChainThen::Start(n.clone())) },
+                Icon { name: "list" } "start a chain with this as its title" }
+        }
+        if let Some(b) = building.clone().filter(|b| !member && b.key != ev.key && b.key != chain) {
+            button { role: "menuitem", onclick: { let api = api.clone(); let run = run.clone(); let (k, n) = (ev.key.clone(), ev.node.clone()); let b = b.clone(); move |_| {
+                    let (api, run, k, n, b) = (api.clone(), run.clone(), k.clone(), n.clone(), b.clone());
+                    spawn(async move {
+                        match api.call("chains.get", json!({ "key": b.key })).await {
+                            Ok(c) => {
+                                let mut keys: Vec<Value> = c["members"].as_array().into_iter().flatten().map(|m| m["key"].clone()).collect();
+                                keys.push(json!(k));
+                                run("chains.set", json!({ "key": b.key, "members": keys }), ChainThen::Changed(Some(n)));
+                            }
+                            Err(e) => ui.fail(e),
+                        }
+                    });
+                } },
+                Icon { name: "list" } "add it to the chain “{b.text}”" }
+        }
+        if head {
+            button { role: "menuitem", onclick: { let (k, t) = (chain.clone(), ev.text.clone()); move |_| {
+                    let mut p = ui.picks; p.write().chain = Some(Hit { key: k.clone(), text: t.clone(), note: false });
+                    ui.say("right-click other texts to add them to this chain");
+                    let mut sm = sp_menu; sm.set(None);
+                } },
+                Icon { name: "list" } "add texts to this chain" span { class: "dim small", " ({ev.members} now)" } }
+            button { role: "menuitem", onclick: { let run = run.clone(); let k = chain.clone(); move |_| run("chains.break", json!({ "key": k }), ChainThen::Broke) },
+                Icon { name: "close" } "break the chain" span { class: "dim small", " (its texts stay)" } }
+        }
+        if member {
+            if idx > 0 {
+                button { role: "menuitem", onclick: { let r = reorder.clone(); let k = chain.clone(); move |_| r(k.clone(), std::rc::Rc::new(move |v: &mut Vec<Value>| v.swap(idx as usize - 1, idx as usize))) },
+                    Icon { name: "chevron-right", class: "rot-up" } "earlier in the chain" }
+            }
+            button { role: "menuitem", onclick: { let r = reorder.clone(); let k = chain.clone(); move |_| r(k.clone(), std::rc::Rc::new(move |v: &mut Vec<Value>| if (idx as usize) + 1 < v.len() { v.swap(idx as usize, idx as usize + 1) })) },
+                Icon { name: "chevron-right", class: "rot-down" } "later in the chain" }
+            button { role: "menuitem", onclick: { let run = run.clone(); let k = chain.clone(); move |_| run("chains.cut", json!({ "key": k, "at": idx }), ChainThen::Changed(None)) },
+                Icon { name: "close" } "cut the chain before this" span { class: "dim small", " (this heads a new one)" } }
+            button { role: "menuitem", onclick: { let r = reorder.clone(); let k = chain.clone(); move |_| r(k.clone(), std::rc::Rc::new(move |v: &mut Vec<Value>| { if (idx as usize) < v.len() { v.remove(idx as usize); } })) },
+                Icon { name: "close" } "take it out of the chain" }
+        }
     }
 }
 
@@ -336,8 +523,11 @@ try {{
     else if (c.cmd === 'pickblock') sp.pickBlock(c.id);
     else if (c.cmd === 'dup') {{ const k = sp.duplicate(c.node, c.det || 0); dioxus.send({{ kind: 'toast', text: !k ? 'select a text first' : c.det ? 'a detached copy: it keeps the text as it reads now · Ctrl+Z takes it away' : 'a copy that inherits: it shows the entry as it changes · Ctrl+Z takes it away' }}); }}
     else if (c.cmd === 'size') sp.setSize(c.node, c.by || 0, c.to);
+    else if (c.cmd === 'chain') sp.setChain(c.key, c.chain);
+    else if (c.cmd === 'chainify') sp.chainify(c.node, c.chain);
+    else if (c.cmd === 'addchain') sp.addChain(c.near, c.chain);
     else if (c.cmd === 'own') {{ const k = sp.setOwn(c.node, c.text); dioxus.send({{ kind: 'toast', text: !k ? 'that placement can\'t have its own text' : c.text ? 'this placement has its own text now; the entry is unchanged · Ctrl+Z undoes it' : 'it follows the entry again · Ctrl+Z undoes it' }}); }}
-    else if (c.cmd === 'removenode') {{ const k = sp.removeNode(c.node); dioxus.send({{ kind: 'toast', text: k ? 'taken out of the room (the entry stays) · Ctrl+Z puts it back' : 'gone already' }}); }}
+    else if (c.cmd === 'removenode') {{ const k = sp.removeNode(c.node); if (!c.quiet) dioxus.send({{ kind: 'toast', text: k ? 'taken out of the room (the entry stays) · Ctrl+Z puts it back' : 'gone already' }}); }}
     else if (c.cmd === 'pinnode') dioxus.send({{ kind: 'toast', text: sp.pinNode(c.node) || 'gone already' }});
   }}
 }} catch (e) {{
@@ -481,6 +671,7 @@ fn show(ui: Ui, api: Api, sp: Sp, hits: Vec<Hit>) {
                     "under": gem::underline(&h.text, if reversed { Mode::Reversed } else { Mode::Ordinal }),
                     "chars": f["chars"], "words": f["words"], "kind": f["kind"], "types": f["types"],
                     "created": f["created"], "lists": f["lists"], "freq": letter_counts(&h.text),
+                    "chain": f["chain"], "isChain": f["isChain"], "titleKey": f["titleKey"],
                 });
                 if let Some((c, st, colour)) = tints.get(&h.key) {
                     v["cls"] = c.clone();
@@ -1781,6 +1972,21 @@ fn SpaceMenu(
     let m = gem::Measure::of(&ev.text);
     let list = ui.picks.read().list.clone();
     let (x, y) = (ev.x, ev.y);
+    // a note's body under its title: it isn't an entry of its own, so the menu only opens
+    // the note (editing it here would put the body in place of the whole note)
+    if ev.virt {
+        let k = ev.key.clone();
+        return rsx! {
+            div { class: "backdrop", onclick: move |_| close(), oncontextmenu: move |e| { e.prevent_default(); close() } }
+            div { class: "menu smenu", role: "menu",
+                style: "left: min({x}px, calc(100vw - 330px)); top: max(8px, min({y}px, calc(100vh - 160px)));",
+                div { class: "title", "{ev.text}" }
+                div { class: "title dim small", "{ev.relation()}" }
+                button { role: "menuitem", onclick: move |_| { let mut o = ui.open_note; o.set(Some(k.clone())); crate::shell::go(ui, View::Notes); close(); },
+                    Icon { name: "editor" } "open the note" }
+            }
+        };
+    }
     let copies = ev.copies.max(1);
     let which = if ev.free {
         "a free text (in this room only)".to_string()
@@ -1848,6 +2054,7 @@ fn SpaceMenu(
                         Icon { name: "undo" } "follow the entry again" span { class: "dim small", " (drops its own text)" } }
                 }
             }
+            ChainItems { ev: ev.clone(), sp_menu, on_send: move |v: Value| on_send.call(v) }
             button { role: "menuitem", onclick: { let t = ev.text.clone(); move |_| { copy_text(ui, &t); close(); } },
                 Icon { name: "copy" } "copy the text" kbd { "{ui.key_of(Action::CopyText)}" } }
             if !ev.free {

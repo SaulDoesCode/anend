@@ -217,6 +217,9 @@ export class Space {
         Object.assign(n.f, t);
         if (n.det) n.f.text = kept;
         this.showText(n);
+        const was = (n.links || []).map((c) => c.f.key + '|' + c.f.text).join('\n');
+        const now = (Array.isArray(t.chain) ? t.chain : []).map((m) => m.key + '|' + m.text).join('\n');
+        if (was !== now) this.link(n, t.chain);
         n.el.style.borderBottomColor = t.under || 'transparent';
         continue;
       }
@@ -250,7 +253,100 @@ export class Space {
     this.order.push(n);
     this.wire(n);
     this.measure(n);
+    if (t.isChain) el.classList.add('chain-head');
+    this.link(n, t.chain);
     return n;
+  }
+
+  // a chain's members under its head (a chain entry's, or a note's body as a chain of
+  // two): nodes of their own, laid out in reading order by `follow`, never moved by the
+  // spread; dragging any of them drags the head
+  link(n, members) {
+    for (const c of n.links || []) this.drop(c);
+    n.links = [];
+    if (!Array.isArray(members)) return;
+    members.forEach((m, i) => {
+      const c = this.make({ key: String(m.key), text: m.text, note: !!m.note, virt: !!m.virt }, false, `${n.key}>${i}>${m.key}`);
+      c.head = n;
+      c.idx = i;
+      c.el.classList.add('member');
+      c.x = n.x; c.y = n.y - (i + 1) * 0.9; c.z = n.z;
+      n.links.push(c);
+    });
+    this.sim = null;
+  }
+
+  // a chain changed (or broke, `chain` null): every head showing it takes its members
+  // again; a broken one becomes its title again
+  setChain(key, chain) {
+    for (const n of [...this.order]) {
+      if (n.head || String(n.f.key) !== String(key)) continue;
+      if (!chain) {
+        // broken: the head shows its title, and the members stay as texts where they are
+        n.f.key = n.f.titleKey || n.f.key;
+        n.f.isChain = false;
+        for (const c of n.links || []) {
+          c.head = null;
+          c.el.classList.remove('member');
+          c.pinned = true;
+          c.el.classList.add('pinned');
+        }
+        n.links = [];
+        n.el.classList.remove('chain-head');
+        continue;
+      }
+      n.f.text = chain.title.text;
+      n.f.titleKey = chain.title.key;
+      n.f.isChain = true;
+      n.el.classList.add('chain-head');
+      this.showText(n);
+      this.measure(n);
+      this.link(n, chain.members);
+    }
+    this.wake(0.5);
+    this.render();
+  }
+
+  // a text in the room becomes a chain's head (a chain just made with it as title)
+  chainify(node, chain) {
+    const n = this.nodes.get(node);
+    if (!n) return;
+    n.f.key = chain.key;
+    this.setChain(chain.key, chain);
+  }
+
+  // a new chain (from a cut) beside the head it came from
+  addChain(near, chain) {
+    const h = this.order.find((x) => !x.head && String(x.f.key) === String(near));
+    const n = this.make({ key: chain.key, text: chain.title.text, note: false, titleKey: chain.title.key, isChain: true, chain: chain.members }, false,
+      this.nodes.has(String(chain.key)) ? this.copyKey(chain.key) : null);
+    n.el.classList.add('chain-head');
+    if (h) { n.x = h.x + h.hw * 2 + 1.5; n.y = h.y; n.z = h.z; }
+    n.pinned = true;
+    n.el.classList.add('pinned');
+    this.render();
+  }
+
+  // members placed in reading order under their head, left-aligned, spaced by their own
+  // heights, eased there like a spring (so a dragged chain follows and settles)
+  follow(h) {
+    const k = Math.min(1, 10 * h);
+    let moved = 0;
+    for (const n of this.order) {
+      if (!n.links || !n.links.length) continue;
+      const gap = 0.12;
+      const left = n.x - n.hw;
+      let y = n.y - n.hh - gap;
+      for (const c of n.links) {
+        const tx = left + c.hw, ty = y - c.hh;
+        y -= c.hh * 2 + gap;
+        const dx = tx - c.x, dy = ty - c.y, dz = n.z - c.z;
+        c.x += dx * k; c.y += dy * k; c.z += dz * k;
+        c.vx = c.vy = c.vz = 0;
+        moved += dx * dx + dy * dy + dz * dz;
+      }
+    }
+    return moved;
   }
 
   // a new text starts beside the texts most like it, or at a spot of its own
@@ -278,6 +374,8 @@ export class Space {
   }
 
   drop(n) {
+    for (const c of n.links || []) if (c !== n) this.drop(c);
+    n.links = [];
     n.el.remove();
     this.nodes.delete(n.key);
     this.order = this.order.filter((x) => x !== n);
@@ -384,6 +482,8 @@ export class Space {
       const A = N[i];
       for (let j = i + 1; j < n; j++) {
         const B = N[j];
+        // a chain's members take no part in the spread's forces: their head stands for them
+        if (A.head || B.head) continue;
         let dx = B.x - A.x, dy = B.y - A.y, dz = B.z - A.z;
         let d2 = dx * dx + dy * dy + dz * dz;
         if (d2 < 1e-6) { dx = (hash01(A.key + B.key, 7) - 0.5) * 0.01; dy = (hash01(B.key + A.key, 9) - 0.5) * 0.01; d2 = dx * dx + dy * dy + 1e-6; }
@@ -407,7 +507,7 @@ export class Space {
     let ke = 0;
     for (let i = 0; i < n; i++) {
       const A = N[i];
-      if (A.pinned || A === this.drag?.n) { A.vx = A.vy = A.vz = 0; continue; }
+      if (A.pinned || A.head || A === this.drag?.n) { A.vx = A.vy = A.vz = 0; continue; }
       A.vx = (A.vx + a * fx[i] * h) * drag;
       A.vy = (A.vy + a * fy[i] * h) * drag;
       A.vz = (A.vz + a * fz[i] * h) * drag;
@@ -416,6 +516,7 @@ export class Space {
       A.x += A.vx * h; A.y += A.vy * h; A.z += A.vz * h;
       ke += v2;
     }
+    ke += this.follow(h) * 100;
     // labels never overlap: separate rectangles in the facing plane, along the shorter way
     for (let pass = 0; pass < 2; pass++) {
       for (let i = 0; i < n; i++) {
@@ -426,7 +527,9 @@ export class Space {
           const ox = A.hw + B.hw + p.pad - Math.abs(B.x - A.x);
           const oy = A.hh + B.hh + p.pad * 0.5 - Math.abs(B.y - A.y);
           if (ox <= 0 || oy <= 0) continue;
-          const am = A.pinned || A === this.drag?.n ? 0 : 1, bm = B.pinned || B === this.drag?.n ? 0 : 1;
+          // a chain's members aren't pushed (their head is), nor pushed off their own head
+          if ((A.head && (A.head === B || A.head === B.head)) || (B.head && B.head === A)) continue;
+          const am = A.pinned || A.head || A === this.drag?.n ? 0 : 1, bm = B.pinned || B.head || B === this.drag?.n ? 0 : 1;
           if (!am && !bm) continue;
           const share = am && bm ? 0.5 : 1;
           if (ox / (A.hw + B.hw) < oy / (A.hh + B.hh)) {
@@ -551,7 +654,7 @@ export class Space {
   showText(n) {
     // a long text shows its first piece (`shown`, made by Rust); its whole text stays in f.text
     const t = n.own != null ? n.own : n.det ? n.f.text : n.f.shown || n.f.text;
-    n.el.textContent = n.f.note ? `✎ ${t}` : t;
+    n.el.textContent = n.f.note && !n.f.virt ? `✎ ${t}` : t;
     n.el.classList.toggle('det', !!n.det);
     n.el.classList.toggle('own', n.own != null);
   }
@@ -673,7 +776,8 @@ export class Space {
   // own text)
   rows() {
     const w = new THREE.Vector3();
-    return this.order.map((n) => {
+    // a chain is one row, its head's (its members are laid out from it)
+    return this.order.filter((n) => !n.head).map((n) => {
       this.world(n, w);
       const o = {};
       if (!n.free) o.key = String(n.f.key);
@@ -1034,7 +1138,7 @@ export class Space {
   // the placements of one entry in the room (a copy is another placement of the same
   // entry, never another entry)
   placements(entry) {
-    return this.order.filter((x) => !x.free && String(x.f.key) === String(entry));
+    return this.order.filter((x) => !x.free && !x.head && String(x.f.key) === String(entry));
   }
 
   ev(kind, n, e, extra) {
@@ -1042,7 +1146,9 @@ export class Space {
     return {
       kind, key: n ? (n.free ? n.key : String(n.f.key)) : '', node: n ? n.key : '',
       copies: same.length, primary: !!(n && !n.free && same[0] === n), text: n ? (n.own != null ? n.own : n.f.text) : '', note: !!(n && n.f.note), free: !!(n && n.free),
-      det: n ? n.det || 0 : 0, font: n && n.size ? Math.round(n.size * 50) : 0, font_default: Math.round(this.p.size * 50), own: n ? n.own : null, entry_text: n ? n.f.text : '',
+      det: n ? n.det || 0 : 0,
+      chain: n ? (n.head ? String(n.head.f.key) : n.f.isChain ? String(n.f.key) : '') : '', idx: n && n.head ? n.idx : -1,
+      members: n && n.links ? n.links.length : 0, virt: !!(n && n.f.virt), head_node: n && n.head ? n.head.key : '', font: n && n.size ? Math.round(n.size * 50) : 0, font_default: Math.round(this.p.size * 50), own: n ? n.own : null, entry_text: n ? n.f.text : '',
       x: e ? e.clientX : 0, y: e ? e.clientY : 0, ctrl: !!(e && (e.ctrlKey || e.metaKey)), shift: !!(e && e.shiftKey), alt: !!(e && e.altKey),
       q: n ? n.f.q || 0 : 0, hue: n ? n.f.hue || 0 : 0, pinned: !!(n && n.pinned), data: extra || '',
     };
@@ -1065,32 +1171,35 @@ export class Space {
       e.preventDefault();
       e.stopPropagation();
       try { el.setPointerCapture(e.pointerId); } catch { /* fine without */ }
-      const w = this.world(n);
+      // a chain's member drags its head (the chain comes along)
+      const t = n.head || n;
+      const w = this.world(t);
       const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
-      this.drag = { n, x0: e.clientX, y0: e.clientY, moved: false, depth: w.clone().sub(this.camera.position).dot(fwd), from: { x: n.x, y: n.y, z: n.z, pinned: n.pinned }, off: null };
+      this.drag = { n: t, el: n, x0: e.clientX, y0: e.clientY, moved: false, depth: this.world(n).sub(this.camera.position).dot(fwd), from: { x: t.x, y: t.y, z: t.z, pinned: t.pinned }, off: null };
       // where the pointer is on the text, so it doesn't jump to its centre
       const hit = this.rayAt(e.clientX, e.clientY, this.drag.depth);
       this.drag.off = w.clone().sub(hit);
     });
     el.addEventListener('pointermove', (e) => {
       const d = this.drag;
-      if (!d || d.n !== n) return;
+      if (!d || d.el !== n) return;
       if (!d.moved && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 4) return;
       d.moved = true;
-      n.pinned = true;
-      n.el.classList.add('pinned', 'dragging');
+      const t = d.n;
+      t.pinned = true;
+      t.el.classList.add('pinned', 'dragging');
       const w = this.rayAt(e.clientX, e.clientY, d.depth).add(d.off);
-      this.local(w, n);
+      this.local(w, t);
       this.wake(0.3);
     });
     const up = (e) => {
       const d = this.drag;
-      if (!d || d.n !== n) return;
+      if (!d || d.el !== n) return;
       this.drag = null;
-      n.el.classList.remove('dragging');
+      d.n.el.classList.remove('dragging');
       if (d.moved) {
-        this.record({ kind: 'move', n, ...d.from });
-        this.send(this.ev('moved', n, e));
+        this.record({ kind: 'move', n: d.n, ...d.from });
+        this.send(this.ev('moved', d.n, e));
       } else {
         this.pick(n);
         const now = performance.now();
