@@ -158,7 +158,8 @@ docs/architecture.md (the whole).
       vertices, no shadows yet.)
 - [x] Local spreads inside staging blocks (#14). (26 Oct: zones with their own physics,
       nesting, carried texts.)
-- [ ] The visual spec builder, with no JSON typing needed (#4).
+- [x] The visual spec builder, with no JSON typing needed (#4). (26 Oct: the builder beside
+      the JSON, a control for every field, tested against the format.)
 - [ ] ▶ **usable:** building scenes that look the way they are meant to.
 - [ ] Blocks that cast rays and run programs (#15), with ray modes including last hit (#28).
 - [ ] Keyframes with a bezier timing editor (#16).

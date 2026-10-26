@@ -278,17 +278,24 @@ impl<'a> Critic<'a> {
     }
 }
 
-/// a running sum a constraint can bound
+/// a running sum a constraint can bound; written as docs/models.md has it (`bytes`,
+/// `bytes_reversed`, ...), and read in the names specs had before too (`Bytes`, ...)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Measure {
     /// Σ (byte + 1), `crate::measure`
+    #[serde(alias = "Bytes")]
     Bytes,
     /// Σ (256 − byte)
+    #[serde(alias = "BytesReversed")]
     BytesReversed,
     /// letter sums a = 1 .. z = 26 and reversed, `crate::simd`
+    #[serde(alias = "Ordinal")]
     Ordinal,
+    #[serde(alias = "Reversed")]
     Reversed,
     /// the number of bytes
+    #[serde(alias = "Length")]
     Length,
 }
 

@@ -352,7 +352,7 @@ since the Unix epoch), size (bytes), lists: [names]}`.
 | `pictures.add` | `{data (base64, or a data: URL) or path (one's own machine only), name?, list?, thumb?}` | the details and `new` (false when the save had those bytes already: nothing changes) and, with `thumb`, a thumbnail; `name` defaults to the file's name for a path; `list` puts it into that list |
 | `pictures.list` | `{list?, thumb?}` | `[details]`, oldest first: the save's pictures or a list's; `thumb` (16 to 512) adds each one's thumbnail, a PNG in base64 fitting `thumb` × `thumb` |
 | `pictures.lists` | | `[{list, count}]`: the lists that hold pictures |
-| `pictures.get` | `{id, thumb?}` | the details and `data`, the file in base64, or with `thumb` only the thumbnail |
+| `pictures.get` | `{id, thumb?, rgb?}` | the details and `data`, the file in base64, or with `thumb` only the thumbnail; with `rgb: {width, height}` the picture as `image: {width, height, rgb}` scaled to fill (a spec's inline picture) |
 | `pictures.name` | `{id, name}` | the details |
 | `pictures.tag` | `{id, list, remove?: false}` | `{id, lists, changed}`: the picture put into a list, or with `remove` taken out |
 | `pictures.delete` | `{id}` | `null`; it leaves its lists too |

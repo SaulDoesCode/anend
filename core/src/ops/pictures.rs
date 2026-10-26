@@ -232,6 +232,15 @@ pub fn call(g: &Graph, op: &str, args: &Value, limits: &Limits) -> Res {
             let id = id_arg(args)?;
             let p = g.picture(&id)?.ok_or_else(|| format!("no picture {id:?}"))?;
             let mut v = details(g, &p);
+            // `rgb: {width, height}`: the picture as a spec's inline image (scaled to fill)
+            if let Some(r) = args.get("rgb").filter(|r| r.is_object()) {
+                let side = |k: &str| r.get(k).and_then(Value::as_u64).filter(|&x| (1..=1024).contains(&x));
+                let (Some(w), Some(h)) = (side("width"), side("height")) else {
+                    return Err("rgb needs a width and a height, 1 to 1024".into());
+                };
+                v["image"] = json!(as_image(g, &id, w as usize, h as usize)?);
+                return Ok(v);
+            }
             match thumb_arg(args) {
                 Some(t) => v["thumb"] = json!(thumb(g, &id, t)?),
                 None => v["data"] = json!(base64(&g.picture_bytes(&id)?.unwrap_or_default())),

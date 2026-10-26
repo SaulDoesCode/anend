@@ -32,6 +32,9 @@ let bytes = model.to_bytes();                          // weights + spec + codeb
 
 ## The format (version 1)
 
+In the app, a spec model's page (and "new") shows the spec in a builder, a control for
+every field below, beside the JSON; either edits the same text.
+
 | field | meaning |
 |---|---|
 | `version` | spec version, default 1; a newer version than the build reads is refused |

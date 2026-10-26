@@ -175,3 +175,7 @@ The answers left these open. Each is written into the design as its default.
 41. **A staging zone holds the texts inside its box,** decided when texts are placed,
     dropped, or the zone changes; texts outside pass through it unaffected rather than
     being kept out. Moving a zone carries its texts, and may take in texts it passes over.
+42. **The builder writes the spec's JSON back with its keys in alphabetical order** (the
+    app's JSON maps are ordered by key), so a spec typed in another order comes back
+    reordered after a change in the builder; nothing in it changes meaning. Keeping the
+    typed order would mean ordered maps in every JSON the core writes.

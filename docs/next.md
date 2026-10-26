@@ -66,7 +66,9 @@ departure says why in its commit).
 - Done (26 Oct): sphere blocks; lights baked onto blocks (`graph lights`, the lights
   window); the line ticked. Questions 36–40 added.
 - Done (26 Oct): staging zones (#14): blocks whose texts spread among themselves.
-- Next: the visual spec builder (#4).
+- Done (26 Oct): the visual spec builder (#4).
+- Next: the "▶ usable: building scenes" point, then blocks that cast rays and run
+  programs (#15).
 
 **After Stage A (19 Oct, late evening UTC), while the user tries it:**
 - `b5b6b22` docs/format.md "One model for a definition and its placed instances": Stage B's

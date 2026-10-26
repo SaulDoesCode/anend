@@ -3,8 +3,9 @@
 //! the web, through the backend.
 //!
 //! The left column lists them; "new" starts one from a template (a classifier, a tagger,
-//! a generator) filled in with the save's lists. A model's page has its spec in a JSON
-//! editor (checked as you type, a broken rule shown with where it is; Ctrl+Enter saves),
+//! a generator) filled in with the save's lists. A model's page has its spec in the
+//! builder (`builder.rs`: a control for every field) and in a JSON editor, the same text
+//! under both (checked as you type, a broken rule shown where it is; Ctrl+Enter saves),
 //! its training (epochs, progress, cancel, the metrics), a run card (the command bar's
 //! text through every head as you type) and, for a generator, a write card: candidates
 //! judged by its critics, each critic's score shown (Enter in the bar writes after the
@@ -14,6 +15,8 @@ use dioxus::prelude::*;
 use serde_json::{Value, json};
 
 use super::classifiers::{Metrics, Progress, hue, pct, strs};
+
+mod builder;
 use crate::backend::ListInfo;
 use crate::ui::*;
 
@@ -351,7 +354,7 @@ fn NewSpec(on_made: EventHandler<String>) -> Element {
                 span { class: "dim small", {which().about()} }
             }
             for g in [form()] {
-                SpecEditor { key: "{g}", text: shown.clone(), on_change: move |t: String| text.set(Some(t)), on_save: { let mut c = create2.clone(); move |_| c() } }
+                SpecBoth { key: "{g}", text: shown.clone(), on_change: move |t: String| text.set(Some(t)), on_save: { let mut c = create2.clone(); move |_| c() } }
             }
             div { class: "row",
                 span { class: "dim small", "lists are named by their names; docs/models.md has every field" }
@@ -363,6 +366,49 @@ fn NewSpec(on_made: EventHandler<String>) -> Element {
 }
 
 // ------------------------------------------------------------------ the editor
+
+/// a spec two ways: the builder (every part a control; the default) and the JSON, the
+/// same text under both, so a change in one shows in the other; a broken rule shows on
+/// the builder's control it concerns
+#[component]
+fn SpecBoth(text: String, on_change: EventHandler<String>, on_save: EventHandler<()>) -> Element {
+    let api = api();
+    let mut cur = use_signal(|| text.clone());
+    let mut as_json = use_signal(|| false);
+    let mut jgen = use_signal(|| 0u64);
+    let checked = use_resource(move || {
+        let api = api.clone();
+        let t = cur();
+        async move {
+            sleep_ms(250).await;
+            api.check_spec(&t).await.ok()
+        }
+    });
+    let rule = match &*checked.read() {
+        Some(Some(v)) if v["ok"] == false => Some((
+            v["path"].as_str().unwrap_or("").to_string(),
+            v["message"].as_str().unwrap_or("").to_string(),
+        )),
+        _ => None,
+    };
+    let now = cur();
+    rsx! {
+        div { class: "row sb-tabs", role: "tablist",
+            button { role: "tab", class: if !as_json() { "tab on" } else { "tab" }, "aria-selected": "{!as_json()}",
+                onclick: move |_| as_json.set(false), Icon { name: "sliders" } "builder" }
+            button { role: "tab", class: if as_json() { "tab on" } else { "tab" }, "aria-selected": "{as_json()}",
+                onclick: move |_| { jgen += 1; as_json.set(true); }, Icon { name: "editor" } "JSON" }
+            span { class: "dim small", "the same spec two ways: a change in one shows in the other" }
+        }
+        if as_json() {
+            for g in [jgen()] {
+                SpecEditor { key: "{g}", text: now.clone(), on_change: move |t: String| { cur.set(t.clone()); on_change.call(t); }, on_save }
+            }
+        } else {
+            builder::SpecBuilder { text: now.clone(), on_change: move |t: String| { cur.set(t.clone()); on_change.call(t); }, err: rule }
+        }
+    }
+}
 
 /// a spec's JSON in a monospace textarea, checked a beat after typing stops: a broken
 /// rule shows under it with where in the spec it is; Ctrl+Enter saves
@@ -564,7 +610,7 @@ fn SpecPage(name: String, enter: Signal<u64>, on_gone: EventHandler<()>, on_rena
                     button { class: "primary", disabled: !edited || running, onclick: { let c = save.clone(); move |_| c() }, Icon { name: "save" } "save" }
                 }
                 for g in [form()] {
-                    SpecEditor { key: "{g}", text: shown.clone(), on_change: move |t: String| text.set(Some(t)), on_save: { let c = save2.clone(); move |_| c() } }
+                    SpecBoth { key: "{g}", text: shown.clone(), on_change: move |t: String| text.set(Some(t)), on_save: { let c = save2.clone(); move |_| c() } }
                 }
             }
             SpecTrain { name: name.clone(), details: d.clone(), job: job(), on_start: move |j: Value| { job.set(Some(j)); watching.set(true); } }
