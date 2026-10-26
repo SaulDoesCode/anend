@@ -207,3 +207,49 @@ fn limits_are_settings_with_defaults() {
     assert!(c("limits.set", json!({"name": "limits.texts_per_call", "value": "lots"})).is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn saves_folder_lists_a_folder_and_opens_a_file() {
+    let dir = temp("folder");
+    let other = temp("folder-other");
+    // a hub's saves stay where they are
+    let hub = Saves::new(&dir, "notes");
+    assert!(
+        hub.call("saves.folder", &json!({"path": other.display().to_string()}))
+            .is_err()
+    );
+    assert_eq!(hub.call("saves.folder", &json!({})).unwrap()["can"], false);
+    let sv = Saves::new(&dir, "notes").with_folders();
+    let c = |op: &str, a: Value| sv.call(op, &a).unwrap();
+    c("mem.saturate", json!({"text": "first folder"}));
+    // an empty folder: a new `main` there
+    let f = c("saves.folder", json!({"path": other.display().to_string()}));
+    assert_eq!(f["save"], "main");
+    assert_eq!(f["folder"], other.display().to_string());
+    assert!(other.join("main.redb").exists());
+    c("saves.new", json!({"name": "beta"}));
+    let names: Vec<Value> = c("saves.list", json!({}))
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].clone())
+        .collect();
+    assert_eq!(names, vec![json!("beta"), json!("main")]);
+    // a .redb file: that save, its folder the saves folder
+    let f = c(
+        "saves.folder",
+        json!({"path": dir.join("notes.redb").display().to_string()}),
+    );
+    assert_eq!(f["save"], "notes");
+    assert_eq!(f["folder"], dir.display().to_string());
+    assert!(
+        c("mem.search", json!({"q": "first folder"}))
+            .to_string()
+            .contains("first folder")
+    );
+    // a folder with saves opens its first
+    let f = c("saves.folder", json!({"path": other.display().to_string()}));
+    assert_eq!(f["save"], "beta");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&other);
+}

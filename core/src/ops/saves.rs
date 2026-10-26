@@ -91,7 +91,11 @@ pub struct Open {
 
 /// a folder of saves and the open one
 pub struct Saves {
-    dir: PathBuf,
+    /// the saves folder: changed by `saves.folder` where `folders` allows it
+    dir: Mutex<PathBuf>,
+    /// whether `saves.folder` may point this at another folder or `.redb` file (the
+    /// desktop, whose saves are this person's own files; never a hub)
+    folders: bool,
     /// the save made when there's none
     default: String,
     /// whether the open save's name is kept in `.open` and opened again next time
@@ -112,7 +116,8 @@ pub struct Saves {
 impl Saves {
     pub fn new(dir: impl Into<PathBuf>, default: &str) -> Saves {
         Saves {
-            dir: dir.into(),
+            dir: Mutex::new(dir.into()),
+            folders: false,
             default: default.to_string(),
             remember: false,
             backups_on_disk: true,
@@ -153,6 +158,13 @@ impl Saves {
         self
     }
 
+    /// lets `saves.folder` change the saves folder, or open a `.redb` file anywhere on
+    /// this machine (the desktop only: a hub's saves stay in its own folder)
+    pub fn with_folders(mut self) -> Saves {
+        self.folders = true;
+        self
+    }
+
     pub fn with_companions(mut self, extensions: &[&str]) -> Saves {
         self.companions = extensions.iter().map(|e| e.to_string()).collect();
         self
@@ -170,22 +182,22 @@ impl Saves {
         self
     }
 
-    pub fn dir(&self) -> &Path {
-        &self.dir
+    pub fn dir(&self) -> PathBuf {
+        self.dir.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn path(&self, name: &str) -> Result<PathBuf, String> {
-        Ok(self.dir.join(format!("{}.redb", clean(name)?)))
+        Ok(self.dir().join(format!("{}.redb", clean(name)?)))
     }
 
     /// a save's companion file (`<name>.<extension>`)
     pub fn companion(&self, name: &str, extension: &str) -> Result<PathBuf, String> {
-        Ok(self.dir.join(format!("{}.{extension}", clean(name)?)))
+        Ok(self.dir().join(format!("{}.{extension}", clean(name)?)))
     }
 
     /// the saves' names, alphabetically
     pub fn names(&self) -> Vec<String> {
-        let mut names: Vec<String> = std::fs::read_dir(&self.dir)
+        let mut names: Vec<String> = std::fs::read_dir(self.dir())
             .into_iter()
             .flatten()
             .flatten()
@@ -203,10 +215,10 @@ impl Saves {
         if let Some(o) = open.as_ref() {
             return Ok((o.name.clone(), o.graph.clone()));
         }
-        std::fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(self.dir()).map_err(|e| e.to_string())?;
         let last = self
             .remember
-            .then(|| std::fs::read_to_string(self.dir.join(".open")).ok())
+            .then(|| std::fs::read_to_string(self.dir().join(".open")).ok())
             .flatten();
         let name = last
             .map(|s| s.trim().to_string())
@@ -235,6 +247,57 @@ impl Saves {
         self.path(&name)
     }
 
+    /// points the saves at another folder (its saves listed, the first opened, or a new
+    /// `main` when it has none), or opens a `.redb` file there (its folder becomes the
+    /// saves folder); a leading `~` is the home folder
+    pub fn set_folder(&self, path: &str) -> Result<(String, Arc<Graph>), String> {
+        if !self.folders {
+            return Err("the saves folder is chosen on the desktop only".into());
+        }
+        let path = path.trim();
+        if path.is_empty() {
+            return Err("give a folder or a .redb file".into());
+        }
+        let path = match path.strip_prefix('~') {
+            Some(rest) if rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\') => {
+                let home = std::env::var_os("HOME")
+                    .or_else(|| std::env::var_os("USERPROFILE"))
+                    .ok_or("there's no home folder to put for ~")?;
+                PathBuf::from(home).join(rest.trim_start_matches(['/', '\\']))
+            }
+            _ => PathBuf::from(path),
+        };
+        let file = path.extension().is_some_and(|x| x == "redb");
+        if !file && path.is_file() {
+            return Err("that's a file but not a save (.redb)".into());
+        }
+        let folder = if file {
+            path.parent()
+                .filter(|d| !d.as_os_str().is_empty())
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from("."))
+        } else {
+            path.clone()
+        };
+        std::fs::create_dir_all(&folder).map_err(|e| format!("couldn't use {}: {e}", folder.display()))?;
+        {
+            let mut open = self.open.lock().unwrap_or_else(|e| e.into_inner());
+            // let go of the old one first
+            *open = None;
+            *self.dir.lock().unwrap_or_else(|e| e.into_inner()) = folder;
+            let name = if file {
+                save_name(&path)
+            } else {
+                self.names().into_iter().next().unwrap_or_else(|| "main".to_string())
+            };
+            let at = self.path(&name)?;
+            let graph = graph_at(&at)?;
+            *open = Some(Open { name, path: at, graph });
+        }
+        self.removed.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.current()
+    }
+
     /// opens another save (made when it's new)
     pub fn switch(&self, name: &str) -> Result<(String, Arc<Graph>), String> {
         let name = clean(name)?;
@@ -256,7 +319,7 @@ impl Saves {
         }
         self.removed.lock().unwrap_or_else(|e| e.into_inner()).clear();
         if self.remember {
-            let _ = std::fs::write(self.dir.join(".open"), &name);
+            let _ = std::fs::write(self.dir().join(".open"), &name);
         }
         self.current()
     }
@@ -448,6 +511,19 @@ impl Saves {
     fn saves_call(&self, op: &str, args: &Value) -> Res {
         let (open, g) = self.current()?;
         match op {
+            "saves.folder" => {
+                let path = s(args, "path");
+                if !path.trim().is_empty() {
+                    self.set_folder(path)?;
+                }
+                let (name, _) = self.current()?;
+                Ok(json!({
+                    "folder": self.dir().display().to_string(),
+                    "save": name,
+                    "path": self.path(&name)?.display().to_string(),
+                    "can": self.folders,
+                }))
+            }
             "saves.list" => Ok(Value::Array(
                 self.names().iter().map(|n| self.info(n, &open, &g)).collect(),
             )),
@@ -527,7 +603,7 @@ impl Saves {
                     let o: Value = serde_json::from_str(&other).map_err(|e| e.to_string())?;
                     return Ok(json!({ "paths": [], "texts": t, "other": o }));
                 }
-                let dir = self.dir.join("backups");
+                let dir = self.dir().join("backups");
                 std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
                 let stamp = chrono::Local::now().format("%Y-%m-%d %H%M%S");
                 let tp = dir.join(format!("{name} {stamp} texts.json"));

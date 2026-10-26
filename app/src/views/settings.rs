@@ -326,11 +326,21 @@ fn Saves() -> Element {
         Some(Ok(v)) => v.clone(),
         _ => vec![],
     };
+    let on_disk = api.on_disk();
+    let api_k = use_signal(|| api.clone());
+    // the desktop opens the save it had open last (`prefs.save`), so its folder too
+    let keep = move || {
+        if on_disk {
+            let path = api_k.peek().describe();
+            set_pref(ui, |p| p.save = Some(path));
+        }
+    };
     let act = move |f: crate::backend::Fut<()>, msg: String| {
         dioxus::dioxus_core::spawn_forever(async move {
             match f.await {
                 Ok(()) => {
                     ui.say(msg);
+                    keep();
                     reload += 1;
                     ui.touched();
                 }
@@ -338,8 +348,59 @@ fn Saves() -> Element {
             }
         });
     };
+    let api_f = api.clone();
+    let folder = use_resource(move || {
+        let api = api_f.clone();
+        let _ = reload();
+        async move { api.call("saves.folder", serde_json::json!({})).await }
+    });
+    let folder_now = match &*folder.read() {
+        Some(Ok(v)) if v["can"].as_bool() == Some(true) => v["folder"].as_str().map(str::to_string),
+        _ => None,
+    };
+    let mut folder_text = use_signal(String::new);
+    let mut folder_gen = use_signal(|| 0u64);
+    let use_folder = {
+        let api = api.clone();
+        move || {
+            let api = api.clone();
+            let path = folder_text();
+            dioxus::dioxus_core::spawn_forever(async move {
+                match api.call("saves.folder", serde_json::json!({ "path": path })).await {
+                    Ok(v) => {
+                        ui.say(format!(
+                            "saves from {}: opened {}",
+                            v["folder"].as_str().unwrap_or(""),
+                            v["save"].as_str().unwrap_or("")
+                        ));
+                        keep();
+                        folder_text.set(String::new());
+                        folder_gen += 1;
+                        reload += 1;
+                        ui.touched();
+                        ui.refresh(api);
+                    }
+                    Err(e) => ui.fail(e),
+                }
+            });
+        }
+    };
     rsx! {
         Fold { name: "saves", title: "saves",
+            if let Some(f) = folder_now {
+                label { r#for: "savesfolder", "saves folder" }
+                div { class: "row",
+                    for g in [folder_gen()] {
+                        input { key: "{g}", id: "savesfolder", r#type: "text", style: "flex: 1; min-width: 12em;",
+                            placeholder: "another folder, or a .redb file",
+                            oninput: move |e| folder_text.set(e.value()),
+                            onkeydown: { let u = use_folder.clone(); move |e: KeyboardEvent| if e.key() == Key::Enter { u() } } }
+                    }
+                    button { disabled: folder_text().trim().is_empty(), onclick: { let u = use_folder.clone(); move |_| u() },
+                        Icon { name: "folder" } "use it" }
+                    span { class: "dim small", "now {f}. A folder lists its saves and opens the first (or makes a main); a .redb file opens that save, and its folder becomes the saves folder." }
+                }
+            }
             div { class: "wide",
                 table { class: "saves",
                     thead { tr { th { "save" } th { "entries" } th { "size" } th { "" } } }

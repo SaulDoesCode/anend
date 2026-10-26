@@ -35,6 +35,7 @@ texts as reversed does), and asking for it answers an error.
 | `hello` | | `{save, saves: [name], counts: {notes, memories}}` (memories: entries that are neither notes nor tags) |
 | `saves.list` | | `[{name, open, notes, memories, size, modified}]` (counts for the open save only) |
 | `saves.open` / `saves.new` | `{name}` | `{save}` |
+| `saves.folder` | `{path?}` | `{folder, save, path, can}`: the saves folder and the open save's file. With `path` (the desktop only, where `can` is true; a hub answers an error): a folder becomes the saves folder (made when it's new) and its first save opens, or a new `main`; a `.redb` file opens that save and its folder becomes the saves folder. A leading `~` is the home folder |
 | `saves.copy` | `{name, to?}` | `{save}` (through a backup and restore, classifiers copied along) |
 | `saves.rename` | `{name, to}` (the open one too) | `{save}` |
 | `saves.delete` | `{name}` (not the open one) | `null` |

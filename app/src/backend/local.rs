@@ -30,7 +30,7 @@ impl Local {
     pub fn open(dir: &Path, save: Option<&Path>) -> Result<Local, String> {
         let path = save.map(Path::to_path_buf).unwrap_or_else(|| dir.join("main.redb"));
         Ok(Local {
-            saves: Arc::new(Saves::at(&path)?.with_models(Limits::NONE)),
+            saves: Arc::new(Saves::at(&path)?.with_models(Limits::NONE).with_folders()),
         })
     }
 

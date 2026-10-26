@@ -55,9 +55,11 @@ departure says why in its commit).
   curtain ripple and a fold, bezier-shaped, edited on drawn curves; the block's menu).
 - Done: "Merging" (ticked: settling in `graph::settle`, scenes combine, merged blocks settle).
 - Done: the ▶ usable point (README, guide "Building in the space", offered on PR #8).
-- Next: parity.md's gaps (saves folder setting, system fonts on the desktop, window frame
-  colour, HSL editing, the space's full search line); then the texture pipeline and the
-  skybox; then the scene-building lines. then parity.md's gaps; then block features.
+- Done (26 Oct): parity gaps: the window frame colour and HSL editing (`fdf6a1c`); the
+  saves folder setting (desktop: a folder or a `.redb` file, `saves.folder`; the open
+  save's path is kept in the prefs so the desktop starts on it).
+- Next: parity.md's other gaps (system fonts on the desktop, the space's full search
+  line); then the texture pipeline and the skybox; then the scene-building lines.
 
 **After Stage A (19 Oct, late evening UTC), while the user tries it:**
 - `b5b6b22` docs/format.md "One model for a definition and its placed instances": Stage B's
