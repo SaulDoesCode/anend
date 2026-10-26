@@ -429,6 +429,12 @@ block's own texture; `faces: null` in `blocks.set` clears them. A block's `shape
 bend and no faces). A block's `zone`, when it's a staging zone, is its own physics
 (`{repel?, attract?, link?, gravity?, damping?}`, `{}` for the room's): texts inside it
 spread among themselves, kept inside it; `zone: null` makes it an ordinary block again.
+A block's `anim`, when it plays one, is `{key, delay, speed}`: an animation entry, the
+seconds after the room opens before it starts, and how fast (1 as made); `anim: null`
+stops it. An animation is `{name, duration, repeat: once | loop | alternate, timing:
+[x1, y1, x2, y2], keys: [{at, move?, turn?, scale?, texture?, timing?}]}`: keys at moments
+from 0 to 1, a move in units, a turn in degrees about x, y and z, a scale of the sides, a
+texture key from that moment on, eased between keys along CSS cubic-bezier timings.
 
 | op | args | data |
 |---|---|---|
@@ -446,6 +452,9 @@ spread among themselves, kept inside it; `zone: null` makes it an ordinary block
 | `textures.save` | `{recipe, name?}` | `{id, name, recipe, added}`: the recipe kept (or the one already kept with that id, renamed when `name` is given) |
 | `textures.name` | `{id, name}` | the recipe, renamed |
 | `textures.delete` | `{id}` | `{removed}`; blocks and faces showing it draw as missing |
+| `anims.list` | | `[{key, anim}]`: the animations (entries of mime `application/x-anend-animation`, `graph::anims`) |
+| `anims.save` | `{key?, anim}` | `{key, anim}`: a new animation, or the one at `key` changed (blocks playing it play the change) |
+| `anims.delete` | `{key}` | `{removed}`; blocks playing it stop |
 | `lights.list` | | the room's lights: `[{id, kind, colour, intensity, x, y, z, dir, range, angle, softness}]` (`kind` ambient, directional, point or spot) |
 | `lights.add` | a light, or `{light}` | the light, with its id (at most 64 a save) |
 | `lights.set` | `{id, ...fields}` | the light, the fields given replaced |

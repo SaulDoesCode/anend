@@ -100,6 +100,10 @@ pub fn hits<R: Reader>(v: &R, ids: &[u64]) -> Value {
     let mut out = Vec::with_capacity(ids.len());
     for (id, t) in ids.iter().zip(texts) {
         let Ok(text) = t else { continue };
+        // an animation's JSON isn't a text to show
+        if v.record(*id).ok().flatten().is_some_and(|r| r.mime == mime::ANIMATION) {
+            continue;
+        }
         let note = is_note(v, *id);
         let shown = if note { crate::note::split(&text).0 } else { text };
         let m = Measure::of(&shown);
@@ -189,7 +193,8 @@ pub fn counts(v: &View) -> Result<(u64, u64), String> {
     };
     let notes = of(mime::MARKDOWN)?;
     let tags = of(mime::TAG)?;
-    Ok((notes, all.saturating_sub(notes + tags)))
+    let anims = of(mime::ANIMATION)?;
+    Ok((notes, all.saturating_sub(notes + tags + anims)))
 }
 
 fn tag_counts(v: &View) -> Result<Vec<(String, u64)>, String> {

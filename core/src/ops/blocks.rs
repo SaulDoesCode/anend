@@ -22,7 +22,7 @@ pub const MAX_PER_CALL: usize = 5000;
 
 /// whether `op` is one of these
 pub fn routed(op: &str) -> bool {
-    op.starts_with("blocks.") || op.starts_with("textures.") || op.starts_with("lights.")
+    op.starts_with("blocks.") || op.starts_with("textures.") || op.starts_with("lights.") || op.starts_with("anims.")
 }
 
 fn num(v: &Value, k: &str) -> Option<f32> {
@@ -74,6 +74,12 @@ fn transform(v: &Value, base: Transform) -> Transform {
             None => base.zone,
             Some(Value::Null) => None,
             Some(z) => serde_json::from_value(z.clone()).ok().or(base.zone),
+        },
+        // `anim: {key, delay?, speed?}` plays an animation, `anim: null` stops it
+        anim: match v.get("anim") {
+            None => base.anim,
+            Some(Value::Null) => None,
+            Some(a) => serde_json::from_value(a.clone()).ok().or(base.anim),
         },
     }
 }
@@ -216,6 +222,62 @@ fn listed(g: &Graph, blocks: &[Block]) -> Res {
     Ok(json!({ "blocks": blocks, "textures": textures }))
 }
 
+/// animations (`anims.*`, `graph::anims`): entries of their own mime, their text the JSON
+fn anims_call(g: &Graph, op: &str, args: &Value) -> Res {
+    use crate::graph::anims::Animation;
+    use crate::graph::query::{Page, Query};
+    use crate::graph::record::mime;
+    let key = |args: &Value| -> Result<u64, String> {
+        let k = s(args, "key");
+        let id = record::parse_label(k).ok_or_else(|| format!("{k:?} isn't an animation's key"))?;
+        match g.view()?.record(id)? {
+            Some(r) if r.mime == mime::ANIMATION => Ok(id),
+            _ => Err(format!("no animation {k}")),
+        }
+    };
+    match op {
+        "anims.list" => {
+            let v = g.view()?;
+            let found = v.query(
+                &Query {
+                    mime: Some(mime::ANIMATION),
+                    ..Query::default()
+                },
+                Page::all(),
+            )?;
+            let mut out = Vec::new();
+            for id in found.ids {
+                if let Ok(a) = serde_json::from_str::<Animation>(&v.render(id)?) {
+                    out.push(json!({ "key": record::label(id), "anim": a }));
+                }
+            }
+            Ok(json!(out))
+        }
+        "anims.save" => {
+            let a: Animation = serde_json::from_value(args.get("anim").cloned().unwrap_or(Value::Null))
+                .map_err(|e| format!("that isn't an animation: {e}"))?;
+            let a = a.checked()?;
+            let text = serde_json::to_string(&a).map_err(|e| e.to_string())?;
+            let id = if s(args, "key").is_empty() {
+                g.save_text(&text, mime::ANIMATION)?.0
+            } else {
+                let id = key(args)?;
+                if g.render(id)? != text {
+                    g.edit_text(id, &text)?;
+                }
+                id
+            };
+            Ok(json!({ "key": record::label(id), "anim": a }))
+        }
+        "anims.delete" => {
+            let id = key(args)?;
+            g.delete(id)?;
+            Ok(json!({ "removed": record::label(id) }))
+        }
+        _ => Err(format!("unknown op {op:?}")),
+    }
+}
+
 /// the room's lights (`lights.*`, `graph::lights`)
 fn lights_call(g: &Graph, op: &str, args: &Value) -> Res {
     use crate::graph::lights::Light;
@@ -296,6 +358,9 @@ pub fn call(g: &Graph, op: &str, args: &Value, limits: &Limits) -> Res {
     }
     if op.starts_with("lights.") {
         return lights_call(g, op, args);
+    }
+    if op.starts_with("anims.") {
+        return anims_call(g, op, args);
     }
     match op {
         "blocks.list" => {
@@ -619,6 +684,53 @@ mod tests {
             c("lights.restore", json!({ "lights": [gone["removed"]] })).unwrap()["restored"],
             1
         );
+    }
+
+    #[test]
+    fn animations_are_entries_blocks_play() {
+        let g = Graph::in_memory().unwrap();
+        let c = |op: &str, a: Value| call(&g, op, &a, &Limits::NONE);
+        let a = c(
+            "anims.save",
+            json!({ "anim": { "name": "bob", "duration": 3, "repeat": "loop",
+            "keys": [{ "at": 1, "move": [0, 2, 0] }, { "at": 0, "move": [0, 0, 0] }] } }),
+        )
+        .unwrap();
+        let key = a["key"].as_str().unwrap().to_string();
+        assert_eq!(a["anim"]["keys"][0]["at"], 0.0);
+        // not a text: search and the counts leave it out
+        assert_eq!(super::super::counts(&g.view().unwrap()).unwrap(), (0, 0));
+        let b = c(
+            "blocks.add",
+            json!({ "kind": "plain", "texture": "#ffffff", "anim": { "key": key, "delay": 0.5 } }),
+        )
+        .unwrap();
+        assert_eq!(
+            b["blocks"][0]["anim"],
+            json!({ "key": key, "delay": 0.5, "speed": 1.0 })
+        );
+        // edited in place: the block still plays it
+        let e = c(
+            "anims.save",
+            json!({ "key": key, "anim": { "name": "bob", "duration": 6, "keys": [] } }),
+        )
+        .unwrap();
+        assert_eq!(e["key"], key);
+        assert_eq!(c("anims.list", json!({})).unwrap()[0]["anim"]["duration"], 6.0);
+        // a merge finds it in the target as an entry of its own
+        let target = Graph::in_memory().unwrap();
+        target.save_text("other", crate::graph::record::mime::TEXT).unwrap();
+        let v = g.view().unwrap();
+        target.write(|tx| crate::ops::merge::merge(tx, &v)).unwrap();
+        crate::ops::merge::assets(&target, &g).unwrap();
+        let tb = &target.blocks(None).unwrap()[0];
+        let r = tb.t.anim.unwrap();
+        assert!(target.render(r.entry).unwrap().contains("\"duration\":6"));
+        let id = b["ids"][0].as_str().unwrap().to_string();
+        let s = c("blocks.set", json!({ "id": id, "anim": null })).unwrap();
+        assert!(s["blocks"][0].get("anim").is_none());
+        c("anims.delete", json!({ "key": key })).unwrap();
+        assert_eq!(c("anims.list", json!({})).unwrap(), json!([]));
     }
 
     #[test]

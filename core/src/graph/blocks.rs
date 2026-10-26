@@ -101,6 +101,9 @@ pub struct Transform {
     /// a staging zone: texts inside it spread among themselves ([`Zone`])
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zone: Option<Zone>,
+    /// the animation it plays (`graph::anims`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anim: Option<super::anims::AnimRef>,
 }
 
 /// a block's shape, kept in its placement's flags (bits 3–6, `place::Kind`)
@@ -220,12 +223,15 @@ fn extra_bytes(t: &Transform) -> Option<Vec<u8>> {
     if let Some(z) = t.zone {
         z.write(&mut out);
     }
+    if let Some(a) = t.anim {
+        a.write(&mut out);
+    }
     (!out.is_empty()).then_some(out)
 }
 
 /// the bend, faces and zone in a block placement's extra (what doesn't read is left out)
-fn read_extra(b: &[u8]) -> (Option<Bend>, Option<Faces>, Option<Zone>) {
-    let (mut bend, mut faces, mut zone) = (None, None, None);
+fn read_extra(b: &[u8]) -> Extra {
+    let (mut bend, mut faces, mut zone, mut anim) = (None, None, None, None);
     let mut at = 0;
     while at < b.len() {
         match b[at] {
@@ -247,11 +253,21 @@ fn read_extra(b: &[u8]) -> (Option<Bend>, Option<Faces>, Option<Zone>) {
                 }
                 None => break,
             },
+            b'A' => match super::anims::AnimRef::read(&b[at..]) {
+                Some((a, n)) => {
+                    anim = Some(a);
+                    at += n;
+                }
+                None => break,
+            },
             _ => break,
         }
     }
-    (bend, faces, zone)
+    (bend, faces, zone, anim)
 }
+
+/// what a block placement's extra holds
+type Extra = (Option<Bend>, Option<Faces>, Option<Zone>, Option<super::anims::AnimRef>);
 
 /// a staging zone: a block whose texts spread among themselves inside it, under physics
 /// of its own (each setting left out follows the room's). Zones nest: a text belongs to
@@ -346,6 +362,7 @@ impl Default for Transform {
             faces: None,
             shape: Shape::Box,
             zone: None,
+            anim: None,
         }
     }
 }
@@ -591,6 +608,7 @@ impl Transform {
             bend,
             faces: self.faces.filter(|f| !f.is_empty() && self.shape.is_box()),
             zone: self.zone.map(Zone::checked),
+            anim: self.anim.map(super::anims::AnimRef::checked),
             ..self
         })
     }
@@ -726,7 +744,7 @@ pub fn transform_of(p: &Placement) -> Transform {
 }
 
 fn transform(p: &Placement) -> Transform {
-    let (bend, faces, zone) = p.extra.as_deref().map(read_extra).unwrap_or((None, None, None));
+    let (bend, faces, zone, anim) = p.extra.as_deref().map(read_extra).unwrap_or((None, None, None, None));
     let [w, h, d] = match p.scale {
         Scale::One => [1.0; 3],
         Scale::Uniform(v) => [v; 3],
@@ -747,6 +765,7 @@ fn transform(p: &Placement) -> Transform {
         faces,
         shape: Shape::of_flags(p.flags),
         zone,
+        anim,
     }
 }
 

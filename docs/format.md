@@ -145,7 +145,9 @@ a bit per face that has a recipe, and those faces' 16-byte recipe ids (right, le
 bottom, front, back). A block's shape is in its placement's flags (bits 3–6,
 `place::Kind`: 1 a box, 5 a sphere). A staging zone's record in the extra is `Z` 1, a
 byte with a bit per setting given (repel, attract, link, gravity, damping), then those as
-f32s. `graph lights` (`core/src/graph/lights.rs`): the
+f32s. An animation it plays is `A` 1, the animation entry's id (u64), then its delay and
+speed (f32s). Animations are entries of mime 9 (`application/x-anend-animation`), their
+text the animation's JSON (`core/src/graph/anims.rs`). `graph lights` (`core/src/graph/lights.rs`): the
 room's lights, light id (u64) → `{kind, colour, intensity, x, y, z, dir, range, angle,
 softness}` JSON.
 

@@ -389,6 +389,13 @@ pub fn assets(target: &crate::graph::Graph, src: &crate::graph::Graph) -> GResul
     let mut new = Vec::new();
     for mut b in src.blocks(None)? {
         use crate::graph::blocks::Kind;
+        // an animation is an entry: the same animation in the target (its text), or none
+        if let Some(a) = b.t.anim.as_mut() {
+            match src.render(a.entry) {
+                Ok(text) => a.entry = target.save_text(&text, crate::graph::record::mime::ANIMATION)?.0,
+                Err(_) => b.t.anim = None,
+            }
+        }
         if let Some(f) = b.t.faces.as_mut() {
             for slot in f.0.iter_mut() {
                 *slot = slot.and_then(|h| recipes.get(&hex(&h))).and_then(|id| {

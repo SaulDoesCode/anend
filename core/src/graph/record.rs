@@ -25,8 +25,10 @@ pub mod mime {
     pub const JSON: u16 = 7;
     /// a chain: a ref to its title, members as ordered `MEMBER` edges (`graph::chains`)
     pub const CHAIN: u16 = 8;
+    /// an animation: its text the animation's JSON (`graph::anims`)
+    pub const ANIMATION: u16 = 9;
 
-    pub const NAMES: [&str; 9] = [
+    pub const NAMES: [&str; 10] = [
         "text/plain",
         "text/markdown",
         "application/x-anend-fn",
@@ -36,6 +38,7 @@ pub mod mime {
         "application/x-anend-classifier",
         "application/json",
         "application/x-anend-chain",
+        "application/x-anend-animation",
     ];
 
     pub fn builtin(name: &str) -> Option<u16> {

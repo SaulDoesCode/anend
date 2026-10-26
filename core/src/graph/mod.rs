@@ -1,5 +1,6 @@
 //! The entry graph (work in progress).
 
+pub mod anims;
 pub mod assets;
 pub mod backup;
 pub mod blocks;
