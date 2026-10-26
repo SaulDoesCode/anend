@@ -1,299 +1,488 @@
-diff --git a/core/src/graph/blocks.rs b/core/src/graph/blocks.rs
-index 1548c3d..10b2ca1 100644
---- a/core/src/graph/blocks.rs
-+++ b/core/src/graph/blocks.rs
-@@ -478,6 +478,11 @@ fn placement(t: &Transform, n: u64) -> Placement {
-     p
+diff --git a/app/src/gem.rs b/app/src/gem.rs
+index 0cf9838..3c1ad5c 100644
+--- a/app/src/gem.rs
++++ b/app/src/gem.rs
+@@ -232,6 +232,23 @@ pub fn triangle_points(s: u64, r: u64, height: f64, max_width: f64) -> Option<(f
  }
  
-+/// a block placement's transform (its place, sides, turn and bend)
-+pub fn transform_of(p: &Placement) -> Transform {
-+    transform(p)
-+}
-+
- fn transform(p: &Placement) -> Transform {
-     let [w, h, d] = match p.scale {
-         Scale::One => [1.0; 3],
-diff --git a/core/src/graph/mod.rs b/core/src/graph/mod.rs
-index ce61961..c95109d 100644
---- a/core/src/graph/mod.rs
-+++ b/core/src/graph/mod.rs
-@@ -13,6 +13,7 @@ pub mod postings;
- pub mod query;
- pub mod record;
- pub mod scenes;
-+pub mod settle;
- pub mod store;
- 
- pub use store::{GResult, Graph, Reader, Tx, View};
-diff --git a/core/src/graph/settle.rs b/core/src/graph/settle.rs
-new file mode 100644
-index 0000000..0c058ab
---- /dev/null
-+++ b/core/src/graph/settle.rs
-@@ -0,0 +1,114 @@
-+//! Settling placements that come in on top of others (docs/format.md, answer 5): when two
-+//! scenes become one, or a merge brings another save's blocks into the room, what was
-+//! there stays put ("keep" semantics) and each incoming body is pushed out of whatever it
-+//! overlaps, done once when the merge is made and written as the settled positions.
-+//!
-+//! Deterministic: the bodies are boxes (centre and half sides), the incoming ones are
-+//! settled one at a time in the order given, each pushed along the axis it overlaps
-+//! least, away from the other's centre (ties: x, then y, then z, and the positive way),
-+//! with plain f32 arithmetic in a fixed order, so the same inputs always give the same
-+//! positions on every machine.
-+
-+/// a box: its centre and half its sides
-+#[derive(Clone, Copy, Debug, PartialEq)]
-+pub struct Body {
-+    pub at: [f32; 3],
-+    pub half: [f32; 3],
-+}
-+
-+/// room left between two bodies once they're apart
-+pub const GAP: f32 = 0.05;
-+
-+fn overlap(a: &Body, b: &Body) -> Option<[f32; 3]> {
-+    let mut o = [0f32; 3];
-+    for i in 0..3 {
-+        o[i] = a.half[i] + b.half[i] + GAP - (a.at[i] - b.at[i]).abs();
-+        if o[i] <= 0.0 {
-+            return None;
-+        }
+ /// the triangle's angles, or why it lies flat, for its tooltip
++/// the triangle in a few characters for the top line: its sides and angles, or that it
++/// lies flat (the Bevy app's `s r t · a° b° c°`)
++pub fn triangle_short(s: u64, r: u64) -> String {
++    let t = ((s as f64) * (r as f64)).sqrt().floor();
++    let (sf, rf) = (s as f64, r as f64);
++    if !(sf < rf + t && rf < sf + t && t < sf + rf) {
++        return format!("{s} {r} {t} lie flat");
 +    }
-+    Some(o)
++    let deg = |v: f64| v.clamp(-1.0, 1.0).acos().to_degrees();
++    format!(
++        "{s} {r} {t} · {:.0}° {:.0}° {:.0}°",
++        deg((sf * sf + t * t - rf * rf) / (2.0 * sf * t)),
++        deg((sf * sf + rf * rf - t * t) / (2.0 * sf * rf)),
++        deg((rf * rf + t * t - sf * sf) / (2.0 * rf * t)),
++    )
 +}
 +
-+/// moves each of `incoming` (in order) out of `fixed` and out of the incoming ones
-+/// settled before it; how many moved
-+pub fn settle(fixed: &[Body], incoming: &mut [Body]) -> usize {
-+    let mut moved = 0;
-+    for k in 0..incoming.len() {
-+        let mut b = incoming[k];
-+        let start = b.at;
-+        // each push clears one overlap; a few hundred rounds settle any crowd met in practice
-+        for _ in 0..512 {
-+            let hit = fixed
-+                .iter()
-+                .chain(incoming[..k].iter())
-+                .find_map(|o| overlap(&b, o).map(|ov| (*o, ov)));
-+            let Some((o, ov)) = hit else { break };
-+            let mut axis = 0;
-+            for i in 1..3 {
-+                if ov[i] < ov[axis] {
-+                    axis = i;
-+                }
-+            }
-+            let dir = if b.at[axis] >= o.at[axis] { 1.0 } else { -1.0 };
-+            // a hair past, so rounding never leaves a sliver of overlap
-+            b.at[axis] += dir * (ov[axis] + 1e-4 * (1.0 + b.at[axis].abs() * 1e-3));
-+        }
-+        if b.at != start {
-+            moved += 1;
-+        }
-+        incoming[k] = b;
-+    }
-+    moved
-+}
-+
-+/// a text placement's box, roughly as the space draws it: about a quarter unit a
-+/// character wide (up to 12 units), half a unit high, scaled by its size, and deep (a
-+/// label faces the viewer, so two at different depths still cover each other: they part
-+/// sideways or up and down, as the space's own overlap rule has them)
-+pub fn text_body(at: [f32; 3], chars: usize, size: f32) -> Body {
-+    let k = size / 0.5;
-+    Body {
-+        at,
-+        half: [((chars as f32 * 0.27 + 0.1).min(12.0)) * k, 0.25 * k, 0.75],
-+    }
-+}
-+
-+#[cfg(test)]
-+mod tests {
-+    use super::*;
-+
-+    fn cube(x: f32, y: f32) -> Body {
-+        Body {
-+            at: [x, y, 0.0],
-+            half: [0.5; 3],
-+        }
-+    }
-+
-+    #[test]
-+    fn incoming_bodies_leave_what_was_there_and_each_other() {
-+        let fixed = [cube(0.0, 0.0), cube(3.0, 0.0)];
-+        let mut came = [cube(0.2, 0.0), cube(0.2, 0.1), cube(10.0, 10.0)];
-+        let moved = settle(&fixed, &mut came);
-+        assert_eq!(moved, 2, "the far one stays");
-+        assert_eq!(came[2], cube(10.0, 10.0));
-+        let all: Vec<Body> = fixed.iter().chain(came.iter()).copied().collect();
-+        for i in 0..all.len() {
-+            for j in i + 1..all.len() {
-+                assert!(overlap(&all[i], &all[j]).is_none(), "{i} and {j} still overlap");
-+            }
-+        }
-+        // the same inputs, the same bits
-+        let mut again = [cube(0.2, 0.0), cube(0.2, 0.1), cube(10.0, 10.0)];
-+        settle(&fixed, &mut again);
-+        assert_eq!(again, came);
-+        // a crowd of identical bodies spreads out without overlaps
-+        let mut crowd = vec![cube(0.0, 0.0); 40];
-+        settle(&[cube(0.0, 0.0)], &mut crowd);
-+        for i in 0..crowd.len() {
-+            for j in i + 1..crowd.len() {
-+                assert!(overlap(&crowd[i], &crowd[j]).is_none(), "{i} {:?} {j} {:?}", crowd[i], crowd[j]);
-+            }
-+        }
-+    }
-+}
-diff --git a/core/src/ops/merge.rs b/core/src/ops/merge.rs
-index 0540fa1..8230bbc 100644
---- a/core/src/ops/merge.rs
-+++ b/core/src/ops/merge.rs
-@@ -306,6 +306,8 @@ pub struct AssetsWritten {
-     pub blocks: usize,
-     /// saved scenes brought in whole
-     pub scenes: usize,
-+    /// incoming blocks moved out of ones already in the room
-+    pub settled: usize,
+ pub fn triangle_title(s: u64, r: u64) -> String {
+     let t = ((s as f64) * (r as f64)).sqrt().floor();
+     let (sf, rf) = (s as f64, r as f64);
+diff --git a/app/src/shell.rs b/app/src/shell.rs
+index f418ea5..a54ca79 100644
+--- a/app/src/shell.rs
++++ b/app/src/shell.rs
+@@ -415,7 +415,20 @@ fn TopBar() -> Element {
+                         if !l.detail.is_empty() {
+                             span { class: "detail", "{l.detail}" }
+                         }
++                        if let Some((texts, buckets)) = l.counts {
++                            span { class: "counts",
++                                span { title: format!("{texts} text{} in the space", if texts == 1 { "" } else { "s" }), Icon { name: "text" } b { "{texts}" } }
++                                span { title: format!("{buckets} bucket{} in the space", if buckets == 1 { "" } else { "s" }), Icon { name: "bucket" } b { "{buckets}" } }
++                            }
++                        }
+                         Triangle { s: l.s, r: l.r }
++                        if l.s > 0 || l.r > 0 {
++                            span { class: "detail tri", "{crate::gem::triangle_short(l.s, l.r)}" }
++                        }
++                        // last: the line's end gives way when the bar is narrow
++                        if let Some(n) = l.pf {
++                            span { class: "pfline", title: "its prime factor chain (weum's pfR); click a number to put it in the bar", crate::views::memory::PfLine { n } }
++                        }
+                     }
+                 }
+             }
+diff --git a/app/src/style.css b/app/src/style.css
+index 0751be9..ccc9821 100644
+--- a/app/src/style.css
++++ b/app/src/style.css
+@@ -99,6 +99,14 @@ input::placeholder, textarea::placeholder { color: var(--dim); opacity: .8; }
+ }
+ .searchline b { font-weight: 700; }
+ .searchline .detail { font-size: 11.5px; color: var(--bar-dim); overflow: hidden; text-overflow: ellipsis; }
++.searchline .detail.tri { flex: none; }
++.searchline .counts { display: flex; align-items: center; gap: 8px; flex: none; }
++.searchline .counts > span { display: inline-flex; align-items: center; gap: 3px; }
++.searchline .counts .icon { width: 13px; height: 13px; }
++.searchline .pfline { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; color: var(--bar-dim); }
++.searchline .pfline .pf { display: inline; white-space: nowrap; }
++.searchline .pfline i { cursor: pointer; font-style: normal; color: var(--bar-text); }
++.searchline .pfline i:hover { text-decoration: underline; }
+ svg.triangle { flex: none; overflow: visible; display: block; }
+ svg.triangle polygon { fill: color-mix(in srgb, var(--accent) 55%, transparent); stroke: var(--bar-text); stroke-width: 1; stroke-linejoin: round; }
+ svg.triangle.flat polygon { stroke: hsl(8 85% 72%); fill: none; }
+diff --git a/app/src/ui.rs b/app/src/ui.rs
+index 63af56e..f48016e 100644
+--- a/app/src/ui.rs
++++ b/app/src/ui.rs
+@@ -115,6 +115,10 @@ pub struct TopLine {
+     pub detail: String,
+     pub s: u64,
+     pub r: u64,
++    /// the space: texts in the room and the buckets they make
++    pub counts: Option<(usize, usize)>,
++    /// a gsearched number's prime factor chain (weum's pfR line), shown after it
++    pub pf: Option<u64>,
  }
  
- /// a save's spec models, pictures and blocks into another (a merge's second half; the entries
-@@ -365,6 +367,19 @@ pub fn assets(target: &crate::graph::Graph, src: &crate::graph::Graph) -> GResul
-         new.push((b.kind, texture, b.t));
-     }
-     if !new.is_empty() {
-+        // the target's room keeps its blocks where they are; the incoming ones settle out of
-+        // them and out of each other (answer 5)
-+        use crate::graph::settle::{Body, settle};
-+        let body = |t: &crate::graph::blocks::Transform| Body {
-+            at: [t.x, t.y, t.z],
-+            half: t.half_extent(),
-+        };
-+        let fixed: Vec<Body> = target.blocks(None)?.iter().map(|b| body(&b.t)).collect();
-+        let mut came: Vec<Body> = new.iter().map(|(_, _, t)| body(t)).collect();
-+        w.settled = settle(&fixed, &mut came);
-+        for ((_, _, t), b) in new.iter_mut().zip(came) {
-+            [t.x, t.y, t.z] = b.at;
-+        }
-         w.blocks = target.add_blocks(&new)?.len();
-     }
-     // saved scenes come in whole (format.md answer 5): each is included as it is, named
-diff --git a/core/src/ops/scenes.rs b/core/src/ops/scenes.rs
-index 339ac26..1b7e6a9 100644
---- a/core/src/ops/scenes.rs
-+++ b/core/src/ops/scenes.rs
-@@ -8,6 +8,7 @@ use serde_json::{Map, Value, json};
- use super::{Res, is_note, s};
- use crate::graph::record;
- use crate::graph::scenes::{Def, Kind, size_of};
-+use crate::graph::settle::{Body, settle, text_body};
- use crate::graph::{Graph, Reader};
- 
- pub fn routed(op: &str) -> bool {
-@@ -134,10 +135,76 @@ pub fn call(g: &Graph, op: &str, args: &Value) -> Res {
-             g.delete_scene(sc.id)?;
-             Ok(json!({ "name": n, "rows": rows }))
-         }
-+        // scene `from`'s placements copied into scene `into` (the room by default), settled
-+        // out of what `into` has and out of each other (answer 5); `from` stays as it was
-+        "scenes.combine" => {
-+            let from = name_arg(args, "from")?;
-+            let src = g
-+                .scene_named(&from)?
-+                .ok_or_else(|| format!("there's no scene named {from}"))?;
-+            let into = match s(args, "into").trim() {
-+                "" => room.ok_or("the room has no scene yet: save it first")?,
-+                n => g.scene_named(n)?.ok_or_else(|| format!("there's no scene named {n}"))?.id,
-+            };
-+            if into == src.id {
-+                return Err("a scene can't be combined with itself".into());
-+            }
-+            let (placed, settled) = combine(g, src.id, into)?;
-+            Ok(json!({ "from": from, "into": into, "placements": placed, "settled": settled }))
-+        }
-         _ => Err(format!("unknown op {op:?}")),
-     }
+ /// the list (Shift+click), its candidate (Ctrl+click) and a selection of texts
+diff --git a/app/src/views/memory.rs b/app/src/views/memory.rs
+index 9ed6ace..184413c 100644
+--- a/app/src/views/memory.rs
++++ b/app/src/views/memory.rs
+@@ -74,6 +74,7 @@ fn set_topline(mut ui: Ui, title: &str, mode: Mode, text: Option<&str>, count: u
+         detail: format!("{} · {count} text{}", mode.name(), if count == 1 { "" } else { "s" }),
+         s,
+         r,
++        ..Default::default()
+     }));
  }
  
-+/// a placement's box for settling: a text's from its length and size, a block's from
-+/// its sides, turn and bend
-+fn body_of(v: &impl Reader, p: &crate::graph::scenes::Placed) -> Body {
-+    match p.kind {
-+        Kind::Block => {
-+            let t = crate::graph::blocks::transform_of(&p.place);
-+            Body {
-+                at: p.place.pos,
-+                half: t.half_extent(),
-+            }
+diff --git a/app/src/views/space.rs b/app/src/views/space.rs
+index 1c66a67..2634c9c 100644
+--- a/app/src/views/space.rs
++++ b/app/src/views/space.rs
+@@ -687,6 +687,11 @@ fn show(ui: Ui, api: Api, sp: Sp, hits: Vec<Hit>) {
+                 v
+             })
+             .collect();
++        // the room's counts in the search line
++        let mut tl = ui.topline;
++        if let Some(l) = tl.write().as_mut() {
++            l.counts = Some((qs.len(), count.len()));
 +        }
-+        _ => {
-+            let chars = match p.def {
-+                Def::Entry(id) => v.render(id).map(|t| t.chars().count().min(200)).unwrap_or(10),
-+                _ => 10,
-+            };
-+            text_body(p.place.pos, chars, size_of(p.place.font).unwrap_or(0.5) as f32)
-+        }
-+    }
-+}
-+
-+/// copies `from`'s placements into `into`, settled; (how many, how many moved)
-+pub fn combine(g: &Graph, from: u64, into: u64) -> Result<(usize, usize), String> {
-+    let v = g.view()?;
-+    let have = [g.placements(into, false)?, g.placements(into, true)?].concat();
-+    let mut came = [g.placements(from, false)?, g.placements(from, true)?].concat();
-+    let fixed: Vec<Body> = have.iter().map(|p| body_of(&v, p)).collect();
-+    let mut bodies: Vec<Body> = came.iter().map(|p| body_of(&v, p)).collect();
-+    drop(v);
-+    let settled = settle(&fixed, &mut bodies);
-+    for (p, b) in came.iter_mut().zip(&bodies) {
-+        p.place.pos = b.at;
-+        // new numbers in `into`
-+        p.place.n = 0;
-+    }
-+    // one write per (kind, definition, version)
-+    let mut groups: Vec<(Kind, Def, Option<u64>, Vec<crate::graph::scenes::Placement>)> = Vec::new();
-+    for p in &came {
-+        match groups.iter_mut().find(|x| x.0 == p.kind && x.1 == p.def && x.2 == p.version) {
-+            Some(x) => x.3.push(p.place.clone()),
-+            None => groups.push((p.kind, p.def, p.version, vec![p.place.clone()])),
-+        }
-+    }
-+    for (kind, def, version, places) in groups {
-+        g.place(into, version.is_some(), kind, def, version, places)?;
-+    }
-+    Ok((came.len(), settled))
-+}
-+
- #[cfg(test)]
- mod tests {
-     use super::*;
-@@ -290,6 +357,28 @@ mod tests {
-         assert!(m[3][4]["detached"].is_u64());
-     }
+         let mut q_bucket = sp.q_bucket;
+         q_bucket.set(qs);
+         sp.send(json!({ "cmd": "place", "texts": payload, "again": again }));
+@@ -694,13 +699,21 @@ fn show(ui: Ui, api: Api, sp: Sp, hits: Vec<Hit>) {
+     });
+ }
  
-+    #[test]
-+    fn combined_scenes_settle_their_overlaps() {
-+        let g = Graph::in_memory().unwrap();
-+        let (id, _) = g.save_text("plum", record::mime::TEXT).unwrap();
-+        let key = record::label(id);
-+        let c = |op: &str, a: Value| call(&g, op, &a);
-+        c("scenes.save", json!({ "name": "a", "rows": [["plum", 0, 0, 0, { "key": key }]] })).unwrap();
-+        c("scenes.save", json!({ "name": "b", "rows": [["plum", 0, 0, 0, { "key": key }], ["far", 50, 0, 0, {}]] })).unwrap();
-+        let r = c("scenes.combine", json!({ "from": "b", "into": "a" })).unwrap();
-+        assert_eq!(r["placements"], 2);
-+        assert_eq!(r["settled"], 1, "the one on top of a's moved; the far one didn't");
-+        let rows = c("scenes.get", json!({ "name": "a" })).unwrap()["rows"].clone();
-+        let rows = rows.as_array().unwrap();
-+        assert_eq!(rows.len(), 3);
-+        assert_eq!((rows[0][1].as_f64(), rows[0][2].as_f64()), (Some(0.0), Some(0.0)), "a's own stays put");
-+        let moved = rows.iter().filter(|r| r[0] == "plum").nth(1).unwrap();
-+        assert!(moved[1].as_f64() != Some(0.0) || moved[2].as_f64() != Some(0.0));
-+        // b is unchanged; a scene can't combine with itself
-+        assert_eq!(c("scenes.get", json!({ "name": "b" })).unwrap()["rows"].as_array().unwrap().len(), 2);
-+        assert!(c("scenes.combine", json!({ "from": "a", "into": "a" })).is_err());
-+    }
+-fn topline(mut ui: Ui, title: String, mode: Mode, text: Option<&str>, n: usize) {
++/// the space's search line: what was searched and its mode; the room's counts follow
++/// when the texts are placed (`place`), with icons
++fn topline(ui: Ui, title: String, mode: Mode, text: Option<&str>, n: usize) {
++    topline_pf(ui, title, mode, text, n, None);
++}
 +
-     #[test]
-     fn old_saved_scenes_become_scenes_when_the_save_opens() {
-         let dir = std::env::temp_dir().join(format!("anend-oldmaps-{}", std::process::id()));
++fn topline_pf(mut ui: Ui, title: String, mode: Mode, text: Option<&str>, n: usize, pf: Option<u64>) {
+     let (s, r) = text.map(gem::sums).unwrap_or((0, 0));
+     ui.topline.set(Some(TopLine {
+         title,
+-        detail: format!("{} · {n} text{}", mode.name(), if n == 1 { "" } else { "s" }),
++        detail: mode.name().to_string(),
+         s,
+         r,
++        counts: (n == 0).then_some((0, 0)),
++        pf,
+     }));
+ }
+ 
+@@ -719,7 +732,7 @@ async fn gsearch(ui: Ui, api: Api, sp: Sp, n: u64, mode: Mode, text: Option<Stri
+     match api.gsearch(mode, &n.to_string()).await {
+         Ok(hits) => {
+             let t = text.or_else(|| hits.first().map(|h| h.text.clone()));
+-            topline(ui, n.to_string(), mode, t.as_deref(), hits.len());
++            topline_pf(ui, n.to_string(), mode, t.as_deref(), hits.len(), (n > 1).then_some(n));
+             if hits.is_empty() {
+                 ui.say(format!("nothing in {} {n} yet", mode.name()));
+             }
+@@ -822,6 +835,7 @@ async fn route(ui: Ui, api: Api, sp: Sp, addr: &str) {
+         detail: format!("{} texts", rows.as_array().map(|a| a.len()).unwrap_or(0)),
+         s: 0,
+         r: 0,
++        ..Default::default()
+     }));
+ }
+ 
+@@ -897,9 +911,10 @@ async fn command(ui: Ui, api: Api, sp: Sp, word: &str, rest: &str) {
+                         let mut tl = ui.topline;
+                         tl.set(Some(TopLine {
+                             title: format!("list {}", l.text),
+-                            detail: format!("{} texts", members.len()),
++                            detail: String::new(),
+                             s: 0,
+                             r: 0,
++                            ..Default::default()
+                         }));
+                         show(ui, api, sp, members);
+                     }
+@@ -1074,6 +1089,7 @@ async fn enter(mut ui: Ui, api: Api, sp: Sp, raw: String, ctrl: bool, shift: boo
+                     detail: String::new(),
+                     s: 0,
+                     r: 0,
++                    ..Default::default()
+                 }));
+                 show(ui, api, sp, vec![h]);
+             }
+@@ -1722,6 +1738,7 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
+                     detail: format!("{} {}", mode.name(), gem::sum_in(&hit.text, mode)),
+                     s,
+                     r,
++                    ..Default::default()
+                 }));
+                 card.set(Some(e.clone()));
+             }
+diff --git a/docs/wip/checklist-snapshot.patch b/docs/wip/checklist-snapshot.patch
+index fda7820..d46ec12 100644
+--- a/docs/wip/checklist-snapshot.patch
++++ b/docs/wip/checklist-snapshot.patch
+@@ -1,299 +0,0 @@
+-diff --git a/core/src/graph/blocks.rs b/core/src/graph/blocks.rs
+-index 1548c3d..10b2ca1 100644
+---- a/core/src/graph/blocks.rs
+-+++ b/core/src/graph/blocks.rs
+-@@ -478,6 +478,11 @@ fn placement(t: &Transform, n: u64) -> Placement {
+-     p
+- }
+- 
+-+/// a block placement's transform (its place, sides, turn and bend)
+-+pub fn transform_of(p: &Placement) -> Transform {
+-+    transform(p)
+-+}
+-+
+- fn transform(p: &Placement) -> Transform {
+-     let [w, h, d] = match p.scale {
+-         Scale::One => [1.0; 3],
+-diff --git a/core/src/graph/mod.rs b/core/src/graph/mod.rs
+-index ce61961..c95109d 100644
+---- a/core/src/graph/mod.rs
+-+++ b/core/src/graph/mod.rs
+-@@ -13,6 +13,7 @@ pub mod postings;
+- pub mod query;
+- pub mod record;
+- pub mod scenes;
+-+pub mod settle;
+- pub mod store;
+- 
+- pub use store::{GResult, Graph, Reader, Tx, View};
+-diff --git a/core/src/graph/settle.rs b/core/src/graph/settle.rs
+-new file mode 100644
+-index 0000000..0c058ab
+---- /dev/null
+-+++ b/core/src/graph/settle.rs
+-@@ -0,0 +1,114 @@
+-+//! Settling placements that come in on top of others (docs/format.md, answer 5): when two
+-+//! scenes become one, or a merge brings another save's blocks into the room, what was
+-+//! there stays put ("keep" semantics) and each incoming body is pushed out of whatever it
+-+//! overlaps, done once when the merge is made and written as the settled positions.
+-+//!
+-+//! Deterministic: the bodies are boxes (centre and half sides), the incoming ones are
+-+//! settled one at a time in the order given, each pushed along the axis it overlaps
+-+//! least, away from the other's centre (ties: x, then y, then z, and the positive way),
+-+//! with plain f32 arithmetic in a fixed order, so the same inputs always give the same
+-+//! positions on every machine.
+-+
+-+/// a box: its centre and half its sides
+-+#[derive(Clone, Copy, Debug, PartialEq)]
+-+pub struct Body {
+-+    pub at: [f32; 3],
+-+    pub half: [f32; 3],
+-+}
+-+
+-+/// room left between two bodies once they're apart
+-+pub const GAP: f32 = 0.05;
+-+
+-+fn overlap(a: &Body, b: &Body) -> Option<[f32; 3]> {
+-+    let mut o = [0f32; 3];
+-+    for i in 0..3 {
+-+        o[i] = a.half[i] + b.half[i] + GAP - (a.at[i] - b.at[i]).abs();
+-+        if o[i] <= 0.0 {
+-+            return None;
+-+        }
+-+    }
+-+    Some(o)
+-+}
+-+
+-+/// moves each of `incoming` (in order) out of `fixed` and out of the incoming ones
+-+/// settled before it; how many moved
+-+pub fn settle(fixed: &[Body], incoming: &mut [Body]) -> usize {
+-+    let mut moved = 0;
+-+    for k in 0..incoming.len() {
+-+        let mut b = incoming[k];
+-+        let start = b.at;
+-+        // each push clears one overlap; a few hundred rounds settle any crowd met in practice
+-+        for _ in 0..512 {
+-+            let hit = fixed
+-+                .iter()
+-+                .chain(incoming[..k].iter())
+-+                .find_map(|o| overlap(&b, o).map(|ov| (*o, ov)));
+-+            let Some((o, ov)) = hit else { break };
+-+            let mut axis = 0;
+-+            for i in 1..3 {
+-+                if ov[i] < ov[axis] {
+-+                    axis = i;
+-+                }
+-+            }
+-+            let dir = if b.at[axis] >= o.at[axis] { 1.0 } else { -1.0 };
+-+            // a hair past, so rounding never leaves a sliver of overlap
+-+            b.at[axis] += dir * (ov[axis] + 1e-4 * (1.0 + b.at[axis].abs() * 1e-3));
+-+        }
+-+        if b.at != start {
+-+            moved += 1;
+-+        }
+-+        incoming[k] = b;
+-+    }
+-+    moved
+-+}
+-+
+-+/// a text placement's box, roughly as the space draws it: about a quarter unit a
+-+/// character wide (up to 12 units), half a unit high, scaled by its size, and deep (a
+-+/// label faces the viewer, so two at different depths still cover each other: they part
+-+/// sideways or up and down, as the space's own overlap rule has them)
+-+pub fn text_body(at: [f32; 3], chars: usize, size: f32) -> Body {
+-+    let k = size / 0.5;
+-+    Body {
+-+        at,
+-+        half: [((chars as f32 * 0.27 + 0.1).min(12.0)) * k, 0.25 * k, 0.75],
+-+    }
+-+}
+-+
+-+#[cfg(test)]
+-+mod tests {
+-+    use super::*;
+-+
+-+    fn cube(x: f32, y: f32) -> Body {
+-+        Body {
+-+            at: [x, y, 0.0],
+-+            half: [0.5; 3],
+-+        }
+-+    }
+-+
+-+    #[test]
+-+    fn incoming_bodies_leave_what_was_there_and_each_other() {
+-+        let fixed = [cube(0.0, 0.0), cube(3.0, 0.0)];
+-+        let mut came = [cube(0.2, 0.0), cube(0.2, 0.1), cube(10.0, 10.0)];
+-+        let moved = settle(&fixed, &mut came);
+-+        assert_eq!(moved, 2, "the far one stays");
+-+        assert_eq!(came[2], cube(10.0, 10.0));
+-+        let all: Vec<Body> = fixed.iter().chain(came.iter()).copied().collect();
+-+        for i in 0..all.len() {
+-+            for j in i + 1..all.len() {
+-+                assert!(overlap(&all[i], &all[j]).is_none(), "{i} and {j} still overlap");
+-+            }
+-+        }
+-+        // the same inputs, the same bits
+-+        let mut again = [cube(0.2, 0.0), cube(0.2, 0.1), cube(10.0, 10.0)];
+-+        settle(&fixed, &mut again);
+-+        assert_eq!(again, came);
+-+        // a crowd of identical bodies spreads out without overlaps
+-+        let mut crowd = vec![cube(0.0, 0.0); 40];
+-+        settle(&[cube(0.0, 0.0)], &mut crowd);
+-+        for i in 0..crowd.len() {
+-+            for j in i + 1..crowd.len() {
+-+                assert!(overlap(&crowd[i], &crowd[j]).is_none(), "{i} {:?} {j} {:?}", crowd[i], crowd[j]);
+-+            }
+-+        }
+-+    }
+-+}
+-diff --git a/core/src/ops/merge.rs b/core/src/ops/merge.rs
+-index 0540fa1..8230bbc 100644
+---- a/core/src/ops/merge.rs
+-+++ b/core/src/ops/merge.rs
+-@@ -306,6 +306,8 @@ pub struct AssetsWritten {
+-     pub blocks: usize,
+-     /// saved scenes brought in whole
+-     pub scenes: usize,
+-+    /// incoming blocks moved out of ones already in the room
+-+    pub settled: usize,
+- }
+- 
+- /// a save's spec models, pictures and blocks into another (a merge's second half; the entries
+-@@ -365,6 +367,19 @@ pub fn assets(target: &crate::graph::Graph, src: &crate::graph::Graph) -> GResul
+-         new.push((b.kind, texture, b.t));
+-     }
+-     if !new.is_empty() {
+-+        // the target's room keeps its blocks where they are; the incoming ones settle out of
+-+        // them and out of each other (answer 5)
+-+        use crate::graph::settle::{Body, settle};
+-+        let body = |t: &crate::graph::blocks::Transform| Body {
+-+            at: [t.x, t.y, t.z],
+-+            half: t.half_extent(),
+-+        };
+-+        let fixed: Vec<Body> = target.blocks(None)?.iter().map(|b| body(&b.t)).collect();
+-+        let mut came: Vec<Body> = new.iter().map(|(_, _, t)| body(t)).collect();
+-+        w.settled = settle(&fixed, &mut came);
+-+        for ((_, _, t), b) in new.iter_mut().zip(came) {
+-+            [t.x, t.y, t.z] = b.at;
+-+        }
+-         w.blocks = target.add_blocks(&new)?.len();
+-     }
+-     // saved scenes come in whole (format.md answer 5): each is included as it is, named
+-diff --git a/core/src/ops/scenes.rs b/core/src/ops/scenes.rs
+-index 339ac26..1b7e6a9 100644
+---- a/core/src/ops/scenes.rs
+-+++ b/core/src/ops/scenes.rs
+-@@ -8,6 +8,7 @@ use serde_json::{Map, Value, json};
+- use super::{Res, is_note, s};
+- use crate::graph::record;
+- use crate::graph::scenes::{Def, Kind, size_of};
+-+use crate::graph::settle::{Body, settle, text_body};
+- use crate::graph::{Graph, Reader};
+- 
+- pub fn routed(op: &str) -> bool {
+-@@ -134,10 +135,76 @@ pub fn call(g: &Graph, op: &str, args: &Value) -> Res {
+-             g.delete_scene(sc.id)?;
+-             Ok(json!({ "name": n, "rows": rows }))
+-         }
+-+        // scene `from`'s placements copied into scene `into` (the room by default), settled
+-+        // out of what `into` has and out of each other (answer 5); `from` stays as it was
+-+        "scenes.combine" => {
+-+            let from = name_arg(args, "from")?;
+-+            let src = g
+-+                .scene_named(&from)?
+-+                .ok_or_else(|| format!("there's no scene named {from}"))?;
+-+            let into = match s(args, "into").trim() {
+-+                "" => room.ok_or("the room has no scene yet: save it first")?,
+-+                n => g.scene_named(n)?.ok_or_else(|| format!("there's no scene named {n}"))?.id,
+-+            };
+-+            if into == src.id {
+-+                return Err("a scene can't be combined with itself".into());
+-+            }
+-+            let (placed, settled) = combine(g, src.id, into)?;
+-+            Ok(json!({ "from": from, "into": into, "placements": placed, "settled": settled }))
+-+        }
+-         _ => Err(format!("unknown op {op:?}")),
+-     }
+- }
+- 
+-+/// a placement's box for settling: a text's from its length and size, a block's from
+-+/// its sides, turn and bend
+-+fn body_of(v: &impl Reader, p: &crate::graph::scenes::Placed) -> Body {
+-+    match p.kind {
+-+        Kind::Block => {
+-+            let t = crate::graph::blocks::transform_of(&p.place);
+-+            Body {
+-+                at: p.place.pos,
+-+                half: t.half_extent(),
+-+            }
+-+        }
+-+        _ => {
+-+            let chars = match p.def {
+-+                Def::Entry(id) => v.render(id).map(|t| t.chars().count().min(200)).unwrap_or(10),
+-+                _ => 10,
+-+            };
+-+            text_body(p.place.pos, chars, size_of(p.place.font).unwrap_or(0.5) as f32)
+-+        }
+-+    }
+-+}
+-+
+-+/// copies `from`'s placements into `into`, settled; (how many, how many moved)
+-+pub fn combine(g: &Graph, from: u64, into: u64) -> Result<(usize, usize), String> {
+-+    let v = g.view()?;
+-+    let have = [g.placements(into, false)?, g.placements(into, true)?].concat();
+-+    let mut came = [g.placements(from, false)?, g.placements(from, true)?].concat();
+-+    let fixed: Vec<Body> = have.iter().map(|p| body_of(&v, p)).collect();
+-+    let mut bodies: Vec<Body> = came.iter().map(|p| body_of(&v, p)).collect();
+-+    drop(v);
+-+    let settled = settle(&fixed, &mut bodies);
+-+    for (p, b) in came.iter_mut().zip(&bodies) {
+-+        p.place.pos = b.at;
+-+        // new numbers in `into`
+-+        p.place.n = 0;
+-+    }
+-+    // one write per (kind, definition, version)
+-+    let mut groups: Vec<(Kind, Def, Option<u64>, Vec<crate::graph::scenes::Placement>)> = Vec::new();
+-+    for p in &came {
+-+        match groups.iter_mut().find(|x| x.0 == p.kind && x.1 == p.def && x.2 == p.version) {
+-+            Some(x) => x.3.push(p.place.clone()),
+-+            None => groups.push((p.kind, p.def, p.version, vec![p.place.clone()])),
+-+        }
+-+    }
+-+    for (kind, def, version, places) in groups {
+-+        g.place(into, version.is_some(), kind, def, version, places)?;
+-+    }
+-+    Ok((came.len(), settled))
+-+}
+-+
+- #[cfg(test)]
+- mod tests {
+-     use super::*;
+-@@ -290,6 +357,28 @@ mod tests {
+-         assert!(m[3][4]["detached"].is_u64());
+-     }
+- 
+-+    #[test]
+-+    fn combined_scenes_settle_their_overlaps() {
+-+        let g = Graph::in_memory().unwrap();
+-+        let (id, _) = g.save_text("plum", record::mime::TEXT).unwrap();
+-+        let key = record::label(id);
+-+        let c = |op: &str, a: Value| call(&g, op, &a);
+-+        c("scenes.save", json!({ "name": "a", "rows": [["plum", 0, 0, 0, { "key": key }]] })).unwrap();
+-+        c("scenes.save", json!({ "name": "b", "rows": [["plum", 0, 0, 0, { "key": key }], ["far", 50, 0, 0, {}]] })).unwrap();
+-+        let r = c("scenes.combine", json!({ "from": "b", "into": "a" })).unwrap();
+-+        assert_eq!(r["placements"], 2);
+-+        assert_eq!(r["settled"], 1, "the one on top of a's moved; the far one didn't");
+-+        let rows = c("scenes.get", json!({ "name": "a" })).unwrap()["rows"].clone();
+-+        let rows = rows.as_array().unwrap();
+-+        assert_eq!(rows.len(), 3);
+-+        assert_eq!((rows[0][1].as_f64(), rows[0][2].as_f64()), (Some(0.0), Some(0.0)), "a's own stays put");
+-+        let moved = rows.iter().filter(|r| r[0] == "plum").nth(1).unwrap();
+-+        assert!(moved[1].as_f64() != Some(0.0) || moved[2].as_f64() != Some(0.0));
+-+        // b is unchanged; a scene can't combine with itself
+-+        assert_eq!(c("scenes.get", json!({ "name": "b" })).unwrap()["rows"].as_array().unwrap().len(), 2);
+-+        assert!(c("scenes.combine", json!({ "from": "a", "into": "a" })).is_err());
+-+    }
+-+
+-     #[test]
+-     fn old_saved_scenes_become_scenes_when_the_save_opens() {
+-         let dir = std::env::temp_dir().join(format!("anend-oldmaps-{}", std::process::id()));
