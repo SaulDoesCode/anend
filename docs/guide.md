@@ -211,6 +211,8 @@ texts inside it a little spread of their own.
 
 ### Walking, the grapple and superflight
 
+![superflight: the texts flown through](guide/superflight.png)
+
 The space flies by default. **V** walks instead: you fall to the floor or onto the blocks
 below, bump into blocks, climb low steps, run with Shift, sneak with Z, crouch with C (you
 stay down where there's no room to stand), lean with Q and E, and jump with Space; a jump

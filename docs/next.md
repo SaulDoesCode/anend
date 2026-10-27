@@ -87,7 +87,8 @@ departure says why in its commit).
   events were attached every frame since the sounds commit); a guard now checks
   space.js's methods are defined once, and a fault in a frame is reported, not fatal.
 - Done (27 Oct): placing prefabs by hand (#19): the ghost, snapping, turning, red overlaps.
-- Next: the ▶ usable point for walking through what has been built (README, guide, PR #8).
+- Done (27 Oct): the ▶ usable point for walking through what has been built (README,
+  guide, offered on PR #8).
   Open further up: the language lines (s, the standard library), taxonomies and pipes,
   the wgpu renderer and culling.
 

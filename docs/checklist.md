@@ -191,7 +191,8 @@ docs/architecture.md (the whole).
       list or the bar's text. The desktop doesn't lock the pointer.)
 - [x] Placing prefabs in first-person mode (#19). (27 Oct: "by hand": a ghost where you
       look, on faces or the floor, snapped, turned by the wheel, red where it would overlap.)
-- [ ] ▶ **usable:** walking through what has been built.
+- [x] ▶ **usable:** walking through what has been built. (27 Oct: README and guide written
+      up, offered on PR #8.)
 - [ ] GPU: reading above the CPU at classifier-search batch sizes; training overhead (one
       submission per step, kept buffers, AdamW on the device); WebGPU training in the
       browser. Back burner (user, 25 Oct): CPU training is fine for now.
