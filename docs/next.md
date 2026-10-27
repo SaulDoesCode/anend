@@ -86,7 +86,8 @@ departure says why in its commit).
   way: an audio `listen` method had shadowed the one attaching the room's events (so
   events were attached every frame since the sounds commit); a guard now checks
   space.js's methods are defined once, and a fault in a frame is reported, not fatal.
-- Next: placing prefabs in first-person mode (#19), then the ▶ usable point for walking.
+- Done (27 Oct): placing prefabs by hand (#19): the ghost, snapping, turning, red overlaps.
+- Next: the ▶ usable point for walking through what has been built (README, guide, PR #8).
   Open further up: the language lines (s, the standard library), taxonomies and pipes,
   the wgpu renderer and culling.
 

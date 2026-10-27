@@ -274,6 +274,13 @@ mod tests {
     fn prefabs_stay() {
         let js = include_str!("space.js");
         assert!(js.contains("thumbs(list, textures)") && js.contains("part_of"));
+        for needle in [
+            "startGhost(prefab, parts, textures, name)",
+            "aimGhost()",
+            "placeGhost()",
+        ] {
+            assert!(js.contains(needle), "space.js lost {needle}");
+        }
         let rs = include_str!("views/space/prefabwin.rs");
         for needle in [
             "fn Prefabs(",

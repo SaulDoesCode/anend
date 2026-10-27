@@ -1250,6 +1250,95 @@ export class Space {
   }
 
 
+
+  // ------------------------------------------------------------------ placing prefabs
+  //
+  // Placing a prefab by hand, flying or walking: a see-through copy (the ghost) follows
+  // where you look (where the pointer is, when it isn't locked), sitting on the face of a
+  // block or on the floor, snapped to a half-unit grid (Shift: free). The wheel turns it a
+  // quarter at a time; it shows red where it would overlap a block. A click places a copy
+  // there (and the ghost stays, to place more); Esc or a right click stops.
+  startGhost(prefab, parts, textures, name) {
+    this.stopGhost();
+    for (const [k, v] of Object.entries(textures || {})) this.abouts.set(k, v);
+    const g = new THREE.Group();
+    const mats = [];
+    for (const b of parts || []) {
+      const mesh = new THREE.Mesh(this.boxGeometry(b), this.blockMaterial(b));
+      mesh.position.set(b.x, b.y, b.z);
+      const r = b.rot || [0, 0, 0, 1];
+      mesh.quaternion.set(r[0], r[1], r[2], r[3]);
+      this.bake({ b, mesh });
+      const all = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      mesh.material = all.map((m) => { const c = m.clone(); c.transparent = true; c.opacity = 0.55; c.depthWrite = false; mats.push(c); return c; });
+      if (mesh.material.length === 1) mesh.material = mesh.material[0];
+      g.add(mesh);
+    }
+    this.scene.add(g);
+    this.ghost = { prefab, g, mats, turn: 0, ok: true, name: name || 'the prefab' };
+    this.dirty = true;
+  }
+
+  stopGhost() {
+    if (!this.ghost) return;
+    this.scene.remove(this.ghost.g);
+    for (const m of this.ghost.g.children) m.geometry.dispose();
+    for (const m of this.ghost.mats) m.dispose();
+    this.ghost = null;
+    this.dirty = true;
+  }
+
+  // the ghost where you look: on a block's face or the floor, snapped, turned; red if
+  // it would overlap
+  aimGhost() {
+    const gh = this.ghost;
+    if (!gh) return;
+    const locked = document.pointerLockElement === this.host;
+    const ray = this.rayFrom(locked || !this.pointer ? null : this.pointer);
+    const g = gh.g;
+    g.position.set(0, 0, 0);
+    g.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), gh.turn * Math.PI / 2);
+    g.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(g);
+    const meshes = [...this.blocks.values()].map((o) => o.mesh);
+    const hit = ray.intersectObjects(meshes, false).find((h) => h.distance <= 80);
+    let at, n;
+    if (hit) {
+      at = hit.point.clone();
+      n = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : new THREE.Vector3(0, 1, 0);
+    } else {
+      // the floor, where the ray meets it (else 12 units ahead)
+      const o = ray.ray.origin, d = ray.ray.direction;
+      const t = d.y < -1e-3 ? (BODY.floor - o.y) / d.y : -1;
+      at = t > 0 && t < 200 ? o.clone().addScaledVector(d, t) : o.clone().addScaledVector(d, 12);
+      n = new THREE.Vector3(0, 1, 0);
+    }
+    // the ghost's box rests against the surface along its normal
+    const ax = Math.abs(n.x) > Math.abs(n.y) && Math.abs(n.x) > Math.abs(n.z) ? 'x' : Math.abs(n.y) >= Math.abs(n.z) ? 'y' : 'z';
+    const sign = Math.sign(n[ax]) || 1;
+    const pos = at.clone();
+    pos[ax] += sign > 0 ? -box.min[ax] : -box.max[ax];
+    const snap = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') ? 0 : 0.5;
+    if (snap) for (const k of ['x', 'y', 'z']) if (k !== ax) pos[k] = Math.round(pos[k] / snap) * snap;
+    g.position.copy(pos);
+    g.updateMatrixWorld(true);
+    const placed = new THREE.Box3().setFromObject(g);
+    placed.min.addScalar(0.01);
+    placed.max.addScalar(-0.01);
+    gh.ok = !this.solids().some((s) => s.intersectsBox(placed));
+    for (const m of gh.mats) m.color && m.color.set(gh.ok ? 0xb8ffc0 : 0xff6a6a);
+    gh.at = pos;
+  }
+
+  // the click: a copy where the ghost is, if it fits
+  placeGhost() {
+    const gh = this.ghost;
+    if (!gh || !gh.at) return;
+    if (!gh.ok) { this.send({ ...this.ev('toast', null), text: 'it would overlap a block there (red); move it, or turn it with the wheel' }); return; }
+    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), gh.turn * Math.PI / 2);
+    this.send({ ...this.ev('ghostplace', null), data: { prefab: gh.prefab, x: +gh.at.x.toFixed(4), y: +gh.at.y.toFixed(4), z: +gh.at.z.toFixed(4), rot: [q.x, q.y, q.z, q.w] } });
+  }
+
   // ------------------------------------------------------------------ first person
   //
   // Besides flying (the default), you can walk (V): gravity, blocks to stand on and bump
@@ -2548,6 +2637,12 @@ export class Space {
     h.addEventListener('contextmenu', (e) => e.preventDefault());
     h.addEventListener('pointerdown', (e) => {
       if (e.target.closest('.slabel')) return;
+      // placing a prefab: a click places it, a right click stops
+      if (this.ghost && (e.button === 0 || e.button === 2)) {
+        e.preventDefault();
+        if (e.button === 0) this.placeGhost(); else { this.stopGhost(); this.send({ ...this.ev('ghostdone', null) }); }
+        return;
+      }
       if (e.button === 0) {
         // a block's gizmo, or a block: select it (and drag it in the view's plane)
         // playing, a click on a block listening for clicks fires it (through the gizmo)
@@ -2592,6 +2687,8 @@ export class Space {
       this.tpitch = Math.max(-1.55, Math.min(1.55, this.tpitch - (e.movementY || 0) * k));
     });
     h.addEventListener('pointermove', (e) => {
+      this.pointer = { clientX: e.clientX, clientY: e.clientY };
+      if (this.ghost) this.dirty = true;
       if (this.bdrag) { this.dragBlock(e); return; }
       if (!this.looking) return;
       const k = LOOK * (this.p.look || 1);
@@ -2620,6 +2717,8 @@ export class Space {
     h.addEventListener('wheel', (e) => {
       if (e.target.closest('.slabel')) return;
       e.preventDefault();
+      // placing a prefab, the wheel turns it a quarter
+      if (this.ghost) { this.ghost.turn = (this.ghost.turn + (e.deltaY > 0 ? 1 : 3)) % 4; this.dirty = true; return; }
       // hanging on the grapple, the wheel reels the rope in or out
       if (this.rope) { this.rope.len = Math.max(1.2, Math.min(60, this.rope.len + (e.deltaY > 0 ? 0.8 : -0.8))); return; }
       this.speed = Math.min(200, Math.max(0.5, this.speed * (e.deltaY > 0 ? 0.9 : 1.1)));
@@ -2636,7 +2735,8 @@ export class Space {
       } else if (k.startsWith('Arrow') && !e.shiftKey) {
         e.preventDefault();
         this.hop(k);
-      } else if (k === b.level) this.level();
+      } else if (k === 'Escape' && this.ghost) { this.stopGhost(); this.send({ ...this.ev('ghostdone', null) }); }
+      else if (k === b.level) this.level();
       else if (k === b.walk) this.setMode(this.mode === 'walk' ? 'fly' : 'walk');
       else if (k === b.superflight) this.setMode(this.mode === 'super' ? 'fly' : 'super');
       else if (k === b.grapple) this.grapple();
@@ -2716,8 +2816,9 @@ export class Space {
     if (animated) this.applyAnims(now);
     this.wireTimers(now);
     this.hearFrom();
+    if (this.ghost) this.aimGhost();
     const rays = this.fadeRays(now);
-    if (moving || turning || this.keys.size || this.ease || this.looking || this.drag || this.bdrag || this.dirty || animated || rays || (this.mode && this.mode !== 'fly')) {
+    if (moving || turning || this.keys.size || this.ease || this.looking || this.drag || this.bdrag || this.dirty || animated || rays || (this.mode && this.mode !== 'fly') || this.ghost) {
       this.dirty = false;
       this.render();
       this.info(false);

@@ -60,6 +60,35 @@ pub(super) fn place_at(ui: Ui, api: Api, sp: Sp, data: Value) {
     });
 }
 
+/// a copy just where the hand put it (the ghost), turned as it was
+pub(super) fn place_exactly(ui: Ui, api: Api, sp: Sp, data: Value) {
+    dioxus::dioxus_core::spawn_forever(async move {
+        let args =
+            json!({ "prefab": data["prefab"], "x": data["x"], "y": data["y"], "z": data["z"], "rot": data["rot"] });
+        match api.call("prefabs.place", args).await {
+            Ok(r) => {
+                show(ui, &api, sp, &r).await;
+                load_prefabs(ui, &api, sp).await;
+            }
+            Err(e) => ui.fail(e),
+        }
+    });
+}
+
+/// a prefab to place by hand: its ghost follows where you look
+async fn ghost(ui: Ui, api: &Api, sp: Sp, p: &Value) {
+    let r = match api.call("prefabs.list", json!({})).await {
+        Ok(r) => r,
+        Err(e) => return ui.fail(e),
+    };
+    let textures = dress(ui, api, r["textures"].clone()).await;
+    sp.send(json!({ "cmd": "ghost", "prefab": p["id"], "parts": p["parts"], "textures": textures, "name": p["name"] }));
+    ui.say(format!(
+        "placing {}: it follows where you look · the wheel turns it · click places · Shift: off the grid · Esc stops",
+        p["name"].as_str().unwrap_or("")
+    ));
+}
+
 /// blocks an answer brings, into the room
 async fn show(ui: Ui, api: &Api, sp: Sp, r: &Value) {
     if r["removed"].as_array().is_some_and(|a| !a.is_empty()) {
@@ -347,8 +376,12 @@ pub(super) fn Prefabs(sp: Sp) -> Element {
                                         b { class: "small", ondoubleclick: { let pn = pname.clone(); move |_| { rename_to.set(pn.clone()); renaming.set(Some(id)); } }, title: "double click to rename", "{pname}" }
                                     }
                                     span { class: "dim small", {format!("{parts} block{} · {n} cop{}", if parts == 1 { "" } else { "s" }, if n == 1 { "y" } else { "ies" })} }
-                                    div { class: "row",
+                                    div { class: "row wrap",
                                         button { class: "btn small", onclick: move |_| sp.send(json!({ "cmd": "prefabspot", "want": id })), "place" }
+                                        button { class: "btn small", title: "place copies by hand: the prefab follows where you look, flying or walking; the wheel turns it, a click places it, Esc stops",
+                                            onclick: { let api = api.clone(); let p = p.clone(); move |_| { let api = api.clone(); let p = p.clone(); spawn(async move { ghost(ui, &api, sp, &p).await }); } },
+                                            "by hand"
+                                        }
                                         button { class: if deleting() == Some(id) { "btn small primary" } else { "btn small" },
                                             onclick: move |_| {
                                                 if deleting() != Some(id) { deleting.set(Some(id)); return; }

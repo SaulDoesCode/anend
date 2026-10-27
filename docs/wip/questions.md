@@ -292,3 +292,7 @@ The answers left these open. Each is written into the design as its default.
     the bar).
 74. **No pointer lock on the desktop:** under Xvfb, WebKitGTK stopped passing key presses
     on once the pointer was locked, so the desktop keeps right-drag looking.
+75. **Placing by hand snaps to half units** across the surface (Shift: free) and rests the
+    ghost against the face it points at; with nothing under the view it hangs 12 units
+    ahead, since blocks float in the room anyway. A click where it would overlap a block
+    is refused rather than settled.

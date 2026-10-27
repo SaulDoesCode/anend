@@ -538,6 +538,8 @@ try {{
     else if (c.cmd === 'sounds') sp.sounds(c.sounds || []);
     else if (c.cmd === 'soundpreview') sp.previewSound(c.id);
     else if (c.cmd === 'clearcollected') sp.clearCollected();
+    else if (c.cmd === 'ghost') sp.startGhost(c.prefab, c.parts || [], c.textures || {{}}, c.name);
+    else if (c.cmd === 'noghost') sp.stopGhost();
     else if (c.cmd === 'animpreview') sp.previewAnim(c.id, c.anim || null, c.p);
     else if (c.cmd === 'lights') sp.setLights(c.lights || [], c.changed || null);
     else if (c.cmd === 'showlights') sp.showLights(!!c.on, c.picked);
@@ -1714,6 +1716,9 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
         // an undo took back blocks just added, or put back blocks just deleted
         "lightspot" => lightwin::light_spot(ui, api, sp, e.data.clone()),
         "prefabspot" => prefabwin::place_at(ui, api, sp, e.data.clone()),
+        // placing a prefab by hand: a copy where the ghost was
+        "ghostplace" => prefabwin::place_exactly(ui, api, sp, e.data.clone()),
+        "ghostdone" => ui.say("placing stopped"),
         "mode" => {
             let m = e.data.as_str().unwrap_or("fly").to_string();
             ui.say(match m.as_str() {

@@ -164,7 +164,10 @@ text for its menu.
   ahead of you. Links inside it (a switch's ray aimed at its lamp) work in every copy on
   their own. Select a part to move, turn or size its whole copy, or to *detach* it. A part
   you change by hand changes in that copy only; *make them the prefab's* changes every
-  copy, or *…but not the other copies* keeps the rest as they were.
+  copy, or *…but not the other copies* keeps the rest as they were. *by hand* places
+  copies yourself, flying or walking: a see-through copy follows where you look, resting
+  on blocks or the floor and snapped to half units (Shift: free); the wheel turns it, a
+  click places it (not where it shows red: it would overlap), Esc stops.
 - **Switches and gates.** *add the starters* in the prefabs window makes a switch, AND,
   OR, XOR and NOT gates, a latch, a lamp and a door, with the s programs they run (notes
   tagged `s`, yours to read and change). Place copies in a row at one height, switches on

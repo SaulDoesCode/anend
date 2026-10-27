@@ -189,7 +189,8 @@ docs/architecture.md (the whole).
       texts (#9). (27 Oct: walking with gravity, collisions, run, sneak, crouch, lean,
       mantle; the grapple's rope; superflight's collected texts as an entry, a chain, a
       list or the bar's text. The desktop doesn't lock the pointer.)
-- [ ] Placing prefabs in first-person mode (#19).
+- [x] Placing prefabs in first-person mode (#19). (27 Oct: "by hand": a ghost where you
+      look, on faces or the floor, snapped, turned by the wheel, red where it would overlap.)
 - [ ] ▶ **usable:** walking through what has been built.
 - [ ] GPU: reading above the CPU at classifier-search batch sizes; training overhead (one
       submission per step, kept buffers, AdamW on the device); WebGPU training in the
