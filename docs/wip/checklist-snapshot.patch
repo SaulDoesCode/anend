@@ -115,6 +115,24 @@ index d46f27c..0ef230a 100644
 +        assert!(h[..i].contains('\n') && !h[..i].contains("b"), "the note starts line 2: {h}");
      }
  }
+diff --git a/app/src/style.css b/app/src/style.css
+index 17664dd..0776237 100644
+--- a/app/src/style.css
++++ b/app/src/style.css
+@@ -934,3 +934,13 @@ a.btn { text-decoration: none; }
+ /* the sounds window */
+ .snd-row { gap: 6px; align-items: center; }
+ .snd-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
++
++/* s code: inline results, the stepped token, completion, the outline, the debugger */
++.pad pre.hl .s-note { position: absolute; left: 10px; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); font-style: italic; font-size: .88em; text-align: left; pointer-events: none; }
++.pad pre.hl mark.s-at { background: color-mix(in srgb, var(--accent) 45%, transparent); color: inherit; border-radius: 2px; }
++.s-compl { gap: 4px; padding: 4px 2px 0; }
++.s-outline { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: 5px; background: var(--card); max-height: 220px; overflow: auto; }
++.s-outline .s-item { justify-content: flex-start; gap: 4px; height: auto; padding: 2px 4px; }
++.s-dbg .s-stack { gap: 4px; padding: 4px 0; }
++.s-dbg .s-vals { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 2px 10px; padding: 4px 0; }
++.s-dbg .s-unit { font-size: .9em; }
 diff --git a/app/src/views/mod.rs b/app/src/views/mod.rs
 index 1279d2a..dff8223 100644
 --- a/app/src/views/mod.rs
@@ -128,7 +146,7 @@ index 1279d2a..dff8223 100644
  pub mod space;
  pub mod specs;
 diff --git a/app/src/views/notes.rs b/app/src/views/notes.rs
-index 3a5ef29..b4fa407 100644
+index 3a5ef29..679e20c 100644
 --- a/app/src/views/notes.rs
 +++ b/app/src/views/notes.rs
 @@ -105,18 +105,49 @@ if (!window.__anendPadSync) {
@@ -238,7 +256,7 @@ index 3a5ef29..b4fa407 100644
              }
          });
      });
-@@ -535,6 +600,65 @@ pub fn Notes() -> Element {
+@@ -535,6 +600,103 @@ pub fn Notes() -> Element {
      // a note tagged `s` is s code (docs/s.md): right-aligned, coloured by s's word
      // classes, run with ▶; the spelling check leaves it alone
      let code = tags.read().iter().any(|t| t == anend_core::ops::script::TAG);
@@ -262,6 +280,44 @@ index 3a5ef29..b4fa407 100644
 +                }
 +            });
 +        }));
++    }
++    // the stepped run: run again to the step asked for; the token it stops before is
++    // marked in the pad when it's the program's own
++    {
++        let api = api.clone();
++        let layer = layer.clone();
++        use_effect(move || {
++            let state = dbg();
++            let layer = layer.clone();
++            let Some((n, seed)) = state else {
++                snap.set(None);
++                let had = layer.borrow().layer.at.is_some();
++                if had {
++                    layer.borrow_mut().layer.at = None;
++                    layer_gen += 1;
++                }
++                return;
++            };
++            let whole = text.peek().clone();
++            let body_at = crate::views::scode::body_offset(&whole);
++            let body = whole[body_at..].to_string();
++            let api = api.clone();
++            spawn(async move {
++                match api.call("s.debug", serde_json::json!({ "code": body, "steps": n, "seed": seed })).await {
++                    Ok(r) => {
++                        let at = (r["main"] == true)
++                            .then(|| Some(body_at + r["at"]["start"].as_u64()? as usize..body_at + r["at"]["end"].as_u64()? as usize))
++                            .flatten();
++                        if *text.peek() == whole {
++                            layer.borrow_mut().layer.at = at;
++                            layer_gen += 1;
++                        }
++                        snap.set(Some(r));
++                    }
++                    Err(e) => ui.fail(e),
++                }
++            });
++        });
 +    }
 +    // a Ctrl+click: the word's definition here, else the program it names
 +    {
@@ -304,7 +360,7 @@ index 3a5ef29..b4fa407 100644
      let check = ui.prefs.read().check_spelling && !code;
      let shown_flags: Vec<crate::highlight::Flag> = {
          let (t, fl) = &*flags.read();
-@@ -566,7 +690,8 @@ pub fn Notes() -> Element {
+@@ -566,7 +728,8 @@ pub fn Notes() -> Element {
      // each typed change patches only its segments, in the pad's delta loop). The spelling
      // check still pauses on long notes.
      let big = text.read().len() > big_at();
@@ -314,7 +370,7 @@ index 3a5ef29..b4fa407 100644
      {
          let layer = layer.clone();
          let flags_now = shown_flags.clone();
-@@ -706,18 +831,53 @@ pub fn Notes() -> Element {
+@@ -706,18 +869,57 @@ pub fn Notes() -> Element {
                                  class: "plain",
                                  "data-tip": "run it (its files are the save's s programs, by title)",
                                  "aria-label": "run the program",
@@ -358,7 +414,11 @@ index 3a5ef29..b4fa407 100644
 +                                "data-tip": "step through it: the stack, the values and the token it stops before",
 +                                "aria-label": "step through the program",
 +                                onclick: move |_| {
-+                                    if dbg.peek().is_some() { dbg.set(None); } else { dbg.set(Some((0, anend_core::graph::store::system_ms()))); }
++                                    if dbg.peek().is_some() { dbg.set(None); } else {
++                                        // one seed for the whole session, so each step runs the same run again
++                                        let seed = text.peek().bytes().fold(0x5eed_u64, |h, b| h.rotate_left(5) ^ b as u64).wrapping_add(seq() * 7919);
++                                        dbg.set(Some((0, seed)));
++                                    }
 +                                },
 +                                Icon { name: "chevron-right" }
 +                            }
@@ -372,6 +432,117 @@ index 3a5ef29..b4fa407 100644
                          }
                          button {
                              class: if check { "plain on" } else { "plain" },
+@@ -834,6 +1036,110 @@ pub fn Notes() -> Element {
+                                 }
+                             }
+                         }
++                        if code && !compl().1.is_empty() {
++                            div { class: "s-compl row wrap",
++                                span { class: "dim small", "Tab:" }
++                                for (i, w) in compl().1.into_iter().enumerate() {
++                                    {
++                                        let rest = w[compl().0.len().min(w.len())..].to_string();
++                                        rsx! {
++                                            button { key: "{w}", class: if i == 0 { "chip small on" } else { "chip small" },
++                                                onclick: move |_| {
++                                                    document::eval(&format!(
++                                                        "const p = document.getElementById('note-pad'); if (p) {{ const a = p.selectionStart; p.setRangeText({}, a, a, 'end'); p.focus(); window.__anendCompl = null; p.dispatchEvent(new Event('input', {{ bubbles: true }})); }}",
++                                                        serde_json::to_string(&rest).unwrap_or_default()
++                                                    ));
++                                                },
++                                                "{w}"
++                                            }
++                                        }
++                                    }
++                                }
++                            }
++                        }
++                        if code && outline_open() {
++                            {
++                                let t = text.read().clone();
++                                let body_at = crate::views::scode::body_offset(&t);
++                                let titles: Vec<String> = progs.read().iter().map(|p| p.0.clone()).collect();
++                                let items = crate::views::scode::outline(&t[body_at..], &titles);
++                                rsx! {
++                                    div { class: "s-outline",
++                                        div { class: "row",
++                                            span { class: "dim small", if items.is_empty() { "it defines nothing and calls no other program" } else { "the outline · Ctrl+click a word in the code: its definition" } }
++                                            span { class: "grow" }
++                                            button { class: "plain small", "aria-label": "close the outline", onclick: move |_| outline_open.set(false), Icon { name: "close" } }
++                                        }
++                                        for (i, it) in items.into_iter().enumerate() {
++                                            {
++                                                let (a, b) = (body_at + it.at, body_at + it.at + it.name.len());
++                                                let line = crate::views::scode::line_of(&t, a) + 1;
++                                                let what = match it.kind { "script" => "script", "word" => "word", _ => "calls" };
++                                                rsx! {
++                                                    button { key: "{i}", class: "plain s-item", onclick: move |_| pad_show(a, b),
++                                                        span { class: "chip small", "{what}" }
++                                                        b { " {it.name}" }
++                                                        span { class: "dim small", " line {line}" }
++                                                    }
++                                                }
++                                            }
++                                        }
++                                    }
++                                }
++                            }
++                        }
++                        if code && let (Some((n, seed)), Some(s)) = (dbg(), snap()) {
++                            div { class: "s-run s-dbg",
++                                div { class: "row wrap",
++                                    span { class: "dim small", {format!("step {}{}", s["steps"].as_u64().unwrap_or(n), if s["done"] == true { " · it ended" } else { "" })} }
++                                    span { class: "grow" }
++                                    button { class: "btn small", title: "back to the start", onclick: move |_| dbg.set(Some((0, seed))), "⏮" }
++                                    button { class: "btn small primary", disabled: s["done"] == true, title: "one step", onclick: move |_| dbg.set(Some((n + 1, seed))), "step" }
++                                    button { class: "btn small", disabled: s["done"] == true, onclick: move |_| dbg.set(Some((n + 10, seed))), "+10" }
++                                    button { class: "btn small", disabled: s["done"] == true, onclick: move |_| dbg.set(Some((n + 100, seed))), "+100" }
++                                    button { class: "btn small", disabled: s["done"] == true, title: "run to the end", onclick: move |_| dbg.set(Some((n + 1_000_000, seed))), "⏭" }
++                                    button { class: "plain small", "aria-label": "stop stepping", onclick: move |_| dbg.set(None), Icon { name: "close" } }
++                                }
++                                if s["done"] != true && s["main"] != true {
++                                    div { class: "small", "in a call, depth {s[\"depth\"]}: " code { class: "s-unit", {s["unit"].as_str().unwrap_or("").chars().take(80).collect::<String>()} } }
++                                }
++                                div { class: "row wrap s-stack",
++                                    span { class: "dim small", if s["ow"] == true { "stack (ow on)" } else { "stack" } }
++                                    for (i, v) in s["stack"].as_array().cloned().unwrap_or_default().into_iter().enumerate() {
++                                        span { key: "{i}", class: "chip small", {v.as_str().unwrap_or("").to_string()} }
++                                    }
++                                }
++                                {
++                                    let mut rows: Vec<(String, String)> = Vec::new();
++                                    for k in ["locals", "mem", "numbers"] {
++                                        for (name, v) in s[k].as_object().into_iter().flatten() {
++                                            if k != "numbers" || !s["mem"].as_object().is_some_and(|m| m.contains_key(name)) {
++                                                rows.push((if k == "locals" { name.clone() } else { name.clone() }, v.as_str().unwrap_or("").to_string()));
++                                            }
++                                        }
++                                    }
++                                    for (name, v) in s["lists"].as_object().into_iter().flatten() {
++                                        let items: Vec<String> = v.as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_string)).collect();
++                                        rows.push((format!("{name} []"), items.join(" · ")));
++                                    }
++                                    rsx! {
++                                        if !rows.is_empty() {
++                                            div { class: "s-vals",
++                                                for (i, (k, v)) in rows.into_iter().enumerate() {
++                                                    div { key: "{i}", class: "small", b { "{k}" } " {v}" }
++                                                }
++                                            }
++                                        }
++                                    }
++                                }
++                                if !s["out"].as_str().unwrap_or("").is_empty() {
++                                    pre { class: "s-out", {s["out"].as_str().unwrap_or("").trim_start_matches('\n').to_string()} }
++                                }
++                                if let Some(e) = s["err"].as_str() {
++                                    pre { class: "s-err", role: "alert", "s: {e}" }
++                                }
++                            }
++                        }
+                         if let Some(pk) = pick() {
+                             SpellPick {
+                                 pick: pk,
 diff --git a/app/src/views/scode.rs b/app/src/views/scode.rs
 new file mode 100644
 index 0000000..183c6f4
