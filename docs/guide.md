@@ -206,6 +206,25 @@ texts inside it a little spread of their own.
 
 ![a floor, a box and two spheres under an ambient, a warm point and a blue cone light](guide/lights.png)
 
+### Blocks that act on each other
+
+![two switches through an AND gate light a lamp](guide/gates.png)
+
+A first logic scene, in about a minute:
+
+1. Open the prefabs window (the stacked-blocks chip) and press *add the starters*.
+2. Place two *switch* copies, an *AND gate* and a *lamp*: *place* puts each ahead of you;
+   select a part of a copy and use its arrows to set them in a row at one height, the two
+   switches side by side on the left (their rays go out to the right).
+3. Open the wiring window (the bolt chip) and press *▶ play*. Click a switch: its paddle
+   tilts. With both on, the gate turns yellow and the lamp lights.
+
+Everything here is open to change: the switch and the gates are s programs (notes tagged
+`s`, in the notes view); the wiring window sets what any block listens for, its program
+and its ray; a timer, a text entering a zone or a signal can start a cause too; keyframe
+animations move blocks, and sounds play from them while the room plays. Group what you
+build into a prefab of your own and place it as often as you like.
+
 ## Lists
 
 ![a list's page](guide/lists.png)

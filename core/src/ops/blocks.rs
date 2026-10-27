@@ -610,8 +610,9 @@ mod tests {
         let pid = plain["id"].as_str().unwrap().to_string();
         let list = c("textures.list", json!({})).unwrap();
         assert_eq!(list.as_array().unwrap().len(), 2);
-        assert_eq!(list[0]["text"], "brick");
-        assert_eq!(list[0]["name"], "wall");
+        // two saved in the same millisecond list by id, so find it by name
+        let wall = list.as_array().unwrap().iter().find(|t| t["name"] == "wall").unwrap();
+        assert_eq!(wall["text"], "brick");
 
         let a = c(
             "blocks.add",

@@ -183,7 +183,8 @@ docs/architecture.md (the whole).
 - [x] Audio emitters and the sounds table (#17).
       (27 Oct: `graph::sounds`, `ops::sounds`, the sounds window, emitters played by the
       room while it plays, `sound` and `hush` from programs.)
-- [ ] ▶ **usable:** logic-world scenes, with blocks acting on each other.
+- [x] ▶ **usable:** logic-world scenes, with blocks acting on each other. (27 Oct: README
+      and guide written up, offered on PR #8.)
 - [ ] First-person mode with Thief-like movement, the grapple, and superflight that collects
       texts (#9).
 - [ ] Placing prefabs in first-person mode (#19).
