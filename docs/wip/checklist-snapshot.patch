@@ -1,0 +1,66 @@
+diff --git a/README.md b/README.md
+index 1df5995..185b419 100644
+--- a/README.md
++++ b/README.md
+@@ -31,6 +31,8 @@ It comes as:
+ | a texture recipe on a block, a colour on one face, a sky (web) | blocks and spheres under baked lights (web) |
+ | ![the spec builder](app/docs/shots/spec-builder.png) | ![a staging zone](app/docs/shots/web-zone.png) |
+ | a spec model in the builder | texts spreading inside a staging zone (web) |
++| ![switches, a gate and a lamp](app/docs/shots/web-gates-lit.png) | ![the prefabs window](app/docs/shots/desktop-prefabs.png) |
++| two switches through an AND gate light a lamp, while the room plays (web) | a copy of a prefab selected, with its menu (desktop) |
+ 
+ ## The views
+ 
+@@ -40,7 +42,7 @@ Every view has the command bar at the bottom, and each view keeps its own text t
+ | | |
+ |---|---|
+ | **memory** (Ctrl+1) | weum's memory view. **Enter** on text gsearches its sum and saves it when it's new. **Enter** on a number gsearches that bucket. **Ctrl+Enter** saves, **Shift+Enter** shows a key, **Delete** forgets. `Enlist` `List` `Delist` `Unlist` work on lists. **r / o / f** pick the bucket (reversed, ordinal, frequency), and **← →** gsearch the term's sums. Hover shows the gsum line, and texts that share a sum are underlined in its colour. The circles at the left edge are the buckets. **Alt+click** selects several texts to put in a list or tag. Right-click opens the menu: edit, tag, select, list, candidate, key, forget. |
+-| **space** (Ctrl+2) | memory texts floating in a room ([three.js](https://threejs.org)), laid out by their sums. Clicking a text puts its triangle in the top bar: sides s (ordinal), r (reversed) and ⌊√(s·r)⌋. The arrow keys glide to the nearest text in that direction, and its card opens on the right. It's also where you build: copies that inherit, have their own text or are detached; each placement's size; chains of texts that hang under their title; saved scenes, combined with overlaps settled; and blocks showing texts, pictures, colours or texture recipes (cropped, tiled, tinted, with variants; on a whole block or one face), which move, resize, turn and bend or become spheres; a sky; lights baked onto the blocks; and staging zones whose texts spread among themselves. |
++| **space** (Ctrl+2) | memory texts floating in a room ([three.js](https://threejs.org)), laid out by their sums. Clicking a text puts its triangle in the top bar: sides s (ordinal), r (reversed) and ⌊√(s·r)⌋. The arrow keys glide to the nearest text in that direction, and its card opens on the right. It's also where you build: copies that inherit, have their own text or are detached; each placement's size; chains of texts that hang under their title; saved scenes, combined with overlaps settled; and blocks showing texts, pictures, colours or texture recipes (cropped, tiled, tinted, with variants; on a whole block or one face), which move, resize, turn and bend or become spheres; a sky; lights baked onto the blocks; and staging zones whose texts spread among themselves. Blocks act on each other: each can listen for clicks, other blocks' rays, texts entering its zone, timers or signals, run an s program, cast a ray, play keyframe animations and sounds; blocks group into prefabs placed as copies, and starter prefabs (a switch, logic gates, a lamp, a door) show it working. |
+ | **lists** (Ctrl+3) | every list as a tile. A list's page has an editable name and members, and figures for the whole list: its sums, means, gsum and pfR chain. |
+ | **reader** (Ctrl+4) | everything that matches, in pages. Short texts appear as a tiny grid, and notes appear as markdown. |
+ | **notes** (Ctrl+5) | markdown notes, in a list by date, with tags and a read mode. A note can be attached to any entry. Typing stays quick in a note of any length. |
+diff --git a/docs/checklist.md b/docs/checklist.md
+index aac8290..63ba217 100644
+--- a/docs/checklist.md
++++ b/docs/checklist.md
+@@ -183,7 +183,8 @@ docs/architecture.md (the whole).
+ - [x] Audio emitters and the sounds table (#17).
+       (27 Oct: `graph::sounds`, `ops::sounds`, the sounds window, emitters played by the
+       room while it plays, `sound` and `hush` from programs.)
+-- [ ] ▶ **usable:** logic-world scenes, with blocks acting on each other.
++- [x] ▶ **usable:** logic-world scenes, with blocks acting on each other. (27 Oct: README
++      and guide written up, offered on PR #8.)
+ - [ ] First-person mode with Thief-like movement, the grapple, and superflight that collects
+       texts (#9).
+ - [ ] Placing prefabs in first-person mode (#19).
+diff --git a/docs/guide.md b/docs/guide.md
+index ab60dd5..325ed9d 100644
+--- a/docs/guide.md
++++ b/docs/guide.md
+@@ -206,6 +206,25 @@ texts inside it a little spread of their own.
+ 
+ ![a floor, a box and two spheres under an ambient, a warm point and a blue cone light](guide/lights.png)
+ 
++### Blocks that act on each other
++
++![two switches through an AND gate light a lamp](guide/gates.png)
++
++A first logic scene, in about a minute:
++
++1. Open the prefabs window (the stacked-blocks chip) and press *add the starters*.
++2. Place two *switch* copies, an *AND gate* and a *lamp*: *place* puts each ahead of you;
++   select a part of a copy and use its arrows to set them in a row at one height, the two
++   switches side by side on the left (their rays go out to the right).
++3. Open the wiring window (the bolt chip) and press *▶ play*. Click a switch: its paddle
++   tilts. With both on, the gate turns yellow and the lamp lights.
++
++Everything here is open to change: the switch and the gates are s programs (notes tagged
++`s`, in the notes view); the wiring window sets what any block listens for, its program
++and its ray; a timer, a text entering a zone or a signal can start a cause too; keyframe
++animations move blocks, and sounds play from them while the room plays. Group what you
++build into a prefab of your own and place it as often as you like.
++
+ ## Lists
+ 
+ ![a list's page](guide/lists.png)
