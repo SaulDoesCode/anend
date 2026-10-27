@@ -35,6 +35,8 @@ It comes as:
 | two switches through an AND gate light a lamp, while the room plays (web) | a copy of a prefab selected, with its menu (desktop) |
 | ![superflight](app/docs/shots/web-superflight.png) | ![placing by hand](app/docs/shots/web-ghost-red.png) |
 | superflight: the texts flown through, ready to become an entry (web) | placing a prefab by hand: red where it would overlap (web) |
+| ![an s program asking a classifier](app/docs/shots/web-s-learn.png) | ![the step debugger](app/docs/shots/web-s-editor.png) |
+| an s program asking a classifier, its output beside each line (web) | an s program in the editor (web) |
 
 ## The views
 
@@ -47,7 +49,7 @@ Every view has the command bar at the bottom, and each view keeps its own text t
 | **space** (Ctrl+2) | memory texts floating in a room ([three.js](https://threejs.org)), laid out by their sums. Clicking a text puts its triangle in the top bar: sides s (ordinal), r (reversed) and ⌊√(s·r)⌋. The arrow keys glide to the nearest text in that direction, and its card opens on the right. It's also where you build: copies that inherit, have their own text or are detached; each placement's size; chains of texts that hang under their title; saved scenes, combined with overlaps settled; and blocks showing texts, pictures, colours or texture recipes (cropped, tiled, tinted, with variants; on a whole block or one face), which move, resize, turn and bend or become spheres; a sky; lights baked onto the blocks; and staging zones whose texts spread among themselves. Blocks act on each other: each can listen for clicks, other blocks' rays, texts entering its zone, timers or signals, run an s program, cast a ray, play keyframe animations and sounds; blocks group into prefabs placed as copies, and starter prefabs (a switch, logic gates, a lamp, a door) show it working. Besides flying you can walk (V: gravity, collisions, run, sneak, crouch, lean, mantle), swing on a grapple (G), place prefabs by hand where you look, and superflight (B) through texts to collect them, in order, into an entry, a chain or a list. |
 | **lists** (Ctrl+3) | every list as a tile. A list's page has an editable name and members, and figures for the whole list: its sums, means, gsum and pfR chain. |
 | **reader** (Ctrl+4) | everything that matches, in pages. Short texts appear as a tiny grid, and notes appear as markdown. |
-| **notes** (Ctrl+5) | markdown notes, in a list by date, with tags and a read mode. A note can be attached to any entry. Typing stays quick in a note of any length. |
+| **notes** (Ctrl+5) | markdown notes, in a list by date, with tags and a read mode. A note can be attached to any entry. Typing stays quick in a note of any length. A note tagged `s` is a program in s (below), and the notes view is its code editor. |
 | **tags** (Ctrl+6) | tags on any entry: pick tags (all or any) and see the entries that have them. |
 | **stats** (Ctrl+7) | figures for the whole save |
 | **models** (Ctrl+8) | classifiers (learned from lists, trained and run here) and spec models: models described as data (what they read, their heads, what they learn from, critics for a writer), made in a builder with a control for every part or as JSON, then trained, run and, for a writer, asked to write. |
@@ -63,6 +65,38 @@ settings. **Ctrl+= / Ctrl+−** zoom and **0** resets it.
   the top edge;
 - keys, and the hub (a hub's address, to browse and share);
 - saves: open, new, copy, delete, **backup**, and **import from weum**.
+
+## Programs
+
+A save can be scripted in s, the project's own language ([docs/s.md](docs/s.md)). A program
+is a note tagged `s`: its title names it, its body is the code. The notes view is its
+editor: the text stands right-aligned (each line's acting word at the right), coloured by
+kind of word, with an outline, Ctrl+click to a definition, completion, ▶ to run it with each
+line's output beside it, and a step debugger showing the stack and the values.
+
+A program reaches the rest of the save through two library modules of anend's own. With
+`std/anend.s.`, `op` calls any of the app's ops ([docs/app-api.md](docs/app-api.md)) and
+`json`, `#json` and `obj` read and build their JSON. With `std/learn.s.`, classifiers and
+models are words whose answers are s values:
+
+```
+std/learn.s.
+{c is the top class, c/p its probability} //
+{things} {a ripe mango} class
+{~c~ (~c/p~)} >
+{found lists what the search finds} //
+{mango} search
+found all {, } l/
+{found: ~all~} >
+```
+
+With the "things" starter classifier made under the name `things`, that prints
+`fruit, stones and animals: fruit (0.888…)` and the texts with "mango" in them.
+
+Programs run from the notes view, from the bar anywhere (`Run <title> [arguments]`, the
+output as a toast), from blocks in the space (a block's wiring runs a program when it's
+clicked, hit by a ray or signalled), and from a shell with `anend-app run` (below). On a
+shared hub a run takes at most 2 million steps, and the hub's limits apply to what it asks.
 
 ## Saves
 
@@ -98,7 +132,8 @@ app/web/build.sh            # writes app/web/dist
 cargo run --release -p anend-hub -- --local
 
 # an s program on a save, headless: a file, or the save's program (a note tagged s) by
-# title; piped stdin is its stdin, its output comes out (std:anend reaches every op)
+# title; stdin, when it isn't a terminal, is read to its end as the program's stdin
+# (give it </dev/null when there's none); its output comes out, and its exit code
 cargo run --release -p anend-app -- run tally --save ~/.local/share/anend/saves/main.redb
 ```
 

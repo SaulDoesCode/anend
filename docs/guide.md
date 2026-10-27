@@ -267,20 +267,7 @@ Lists are how you tell anend what goes together, and what models learn from.
   **Ctrl+S** saves. The bar narrows the list by words. Deleting takes two clicks. Long
   notes stay quick to type in at any length: only the part you're typing in is sent and
   coloured again.
-- **s programs:** the **s** button in a note's toolbar tags it `s`, which makes it a
-  program in s (docs/s.md). Its text then stands right-aligned, so each line's acting word
-  is at the right, and is coloured by s's kinds of word. **▶** runs it and shows what it
-  printed, or its error, under the pad, and each line's output beside it. A program can
-  run another by its title (`greet.`), since its files are the save's s programs. The step
-  button runs it one step at a time (or 10, 100, to the end), with the stack and the values
-  shown and the next token marked; the outline lists what it defines; Ctrl+click a word
-  goes to its definition; typing offers completions (Tab takes the first). `Run <title>
-  [arguments]` in the bar runs a program from anywhere, and `anend-app run` from a shell.
-  With `std/anend.s.` a program reaches everything the app does: `{notes.list} op` puts
-  the answer in `r`, and `json`, `#json` and `obj` read and build what ops take and give.
-  `std/learn.s.` makes classifiers and models words: `{things} {a pear} class` puts the
-  top class in `c` and its probability in `c/p`; `feedback`, `steer`, `likely`,
-  `similar`, `search`, `model` and `generate` do the rest (docs/format.md lists them).
+- **s programs** have a section of their own, below.
 - **The reader** (**Ctrl+4**): notes and texts as cards, a page at a time. Click one (or
   Enter on it) to read it big; **← →** step through, **Esc** goes back.
 - **Tags** (**Ctrl+6**): every tag with its count. Click picks one, Ctrl or Shift+click
@@ -290,6 +277,39 @@ Lists are how you tell anend what goes together, and what models learn from.
   lists and tags.
 
 ![the reader at night](guide/reader.png)
+
+## Programs
+
+![an s program asking a classifier, each line's output beside it](guide/programs.png)
+
+A note tagged `s` is a program in s, the project's own language (docs/s.md has all of
+it). The **s** button in a note's toolbar tags it. Its title names it and its body is the
+code.
+
+- **Writing:** the text stands right-aligned, so each line's acting word is at the right,
+  and is coloured by s's kinds of word. Typing offers completions (Tab takes the first);
+  Ctrl+click a word goes to its definition, or opens the program it names; the outline
+  button lists what the program defines and the programs it calls.
+- **Running:** **▶** runs it and shows what it printed, or its error, under the pad, and
+  each line's output beside the line. A program runs another by its title (`greet.`),
+  since its files are the save's programs. The step button runs it a step at a time (or
+  10, 100, to the end), with the stack and the values shown and the next token marked.
+- **From anywhere:** `Run <title> [arguments]` in the bar of the memory view or the space
+  runs a program and shows its output as a toast. A block's wiring runs one when the
+  block is clicked, hit by a ray, signalled or timed (see "Blocks that act on each
+  other"). From a shell: `anend-app run <file or title> [arguments] --save <path>`.
+- **The save:** with `std/anend.s.`, `op` calls any of the app's ops by name, with JSON
+  arguments (docs/app-api.md lists them): `{notes.list} op` puts the answer in `r`, and
+  `json`, `#json` and `obj` read and build the JSON. A program can't start another run
+  that way; it calls the program by name instead.
+- **Classifiers and models:** with `std/learn.s.` they are words. `{things} {a pear}
+  class` puts the top class in `c`, its probability in `c/p` and every class's in
+  `c/<class>`; `feedback` and `steer` teach and tune a classifier; `likely`, `similar`
+  and `search` fill a list with texts; `model` runs a spec model and `generate` asks a
+  writer for its best candidate (docs/format.md lists each word's arguments).
+
+On a shared hub a run takes at most 2 million steps (50 million on your own machine), and
+the hub's limits apply to whatever it asks.
 
 ## Models
 

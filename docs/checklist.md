@@ -142,7 +142,8 @@ docs/architecture.md (the whole).
       `std:anend`'s `op` and its JSON words; `Run` in the bar; `anend-app run`.)
 - [x] Classifiers and models as language primitives (#18). (27 Oct: `std:learn`'s
       `class`, `feedback`, `steer`, `likely`, `similar`, `search`, `model`, `generate`.)
-- [ ] ▶ **usable:** scripting the project from the notes view and the command line.
+- [x] ▶ **usable:** scripting the project from the notes view and the command line.
+      (27 Oct: README "Programs", the guide's "Programs", offered on PR #8.)
 - [ ] Taxonomies: classifiers in hierarchies that route a text to further classifiers,
       trained by hand in the UI, with accuracy per node (docs/architecture.md 1).
 - [ ] Pipes: sources through filters to stacked effects, computed rather than stored; the

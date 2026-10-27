@@ -93,7 +93,10 @@ departure says why in its commit).
   the step debugger, completion.
 - Done (27 Oct): `std:anend` over every app op, `Run` in the bar, `anend-app run` (#11).
 - Done (27 Oct): `std:learn`, classifiers and models as s words (#18).
-- Next: the ▶ usable point for scripting (README, guide, PR #8 comment), then taxonomies.
+- Done (27 Oct): the ▶ usable point for scripting (README, guide "Programs", offered on
+  PR #8).
+- Next: taxonomies (classifiers in hierarchies routing texts, trained by hand, accuracy
+  per node; docs/architecture.md 1).
   Open further up: the language lines (s, the standard library), taxonomies and pipes,
   the wgpu renderer and culling.
 
