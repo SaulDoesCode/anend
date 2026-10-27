@@ -455,6 +455,7 @@ texture key from that moment on, eased between keys along CSS cubic-bezier timin
 | `s.run` | `{code}` or `{key}` (a note), `stdin?`, `args?`, `trace?`, `seed?` | `{out, err, code, steps, writes?}` (with `trace`, `writes: [{from, to, out}]`: the output each of the program's own tokens wrote, by its place in the code): an s program's run (docs/s.md); its files are the save's s programs (notes tagged `s`) by title; at most 2 million steps on a shared hub, 50 million on one's own machine |
 | `s.debug` | as `s.run`, with `steps` and `seed` | the run stopped before its `steps`-th step: `{done, steps, out, err, main, unit, at: {start, end}, depth, stack, ow, mem, numbers, lists, locals}` (`at` the next token's place in the program when `main`, else in `unit`, the call's text); the same seed gives the same run |
 | `std:anend` | (inside a run) | `op` calls the ops here on the run's save, not `s.*` or `wiring.fire`; see docs/format.md, "s programs" |
+| `std:learn` | (inside a run) | `class`, `feedback`, `steer`, `likely`, `similar` (`classify.*`), `model`, `generate` (`models.*`) and `search` (`mem.search`), with answers as s values; see docs/format.md |
 | `s.programs` | | `[{title, key}]`: the notes tagged `s` |
 | `s.words` | | `{commands, suffixes, library: [{module, words}]}`: what the code editor colours |
 | `anims.list` | | `[{key, anim}]`: the animations (entries of mime `application/x-anend-animation`, `graph::anims`) |

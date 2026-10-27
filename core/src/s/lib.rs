@@ -23,6 +23,7 @@ fn module(name: &str) -> Option<(&'static [&'static str], Natives)> {
         "logic" => (&["core"], LOGIC),
         "elec" => (&["line"], ELEC),
         "anend" => (&[], ANEND),
+        "learn" => (&["anend"], LEARN),
         _ => return None,
     })
 }
@@ -1544,6 +1545,269 @@ const ANEND: Natives = &[
     }),
 ];
 
+// ------------------------------------------------------------ std:learn
+
+/// asks the run's anend for one op: the answer, or None with mem[err] set and ow false
+fn ask(rt: &mut Rt, who: &str, op: &str, args: serde_json::Value) -> Result<Option<serde_json::Value>, Stop> {
+    let Some(host) = rt.host else {
+        return Err(Stop::Err(format!(
+            "{who}: this run has no anend to ask (it runs in the notes view, the bar or `anend run`)"
+        )));
+    };
+    match host(op, &args) {
+        Ok(v) => Ok(Some(v)),
+        Err(e) => {
+            rt.global.mem.insert("err".into(), V::from(e));
+            rt.ow = false;
+            Ok(None)
+        }
+    }
+}
+
+/// a record's field, as std/text.s's `set` keeps it (with name/keys)
+fn rec_set(rt: &mut Rt, name: &str, key: &str, v: V) {
+    let keys = format!("{name}/keys");
+    if !rt.list(&keys).is_some_and(|l| l.iter().any(|x| *x.text() == *key)) {
+        rt.list_mut(&keys).push(V::str(key));
+    }
+    rt.mset(&format!("{name}/{key}"), v);
+}
+
+/// clears a record and a list of the same name, so a word's answer doesn't mix with the last
+fn fresh(rt: &mut Rt, name: &str) {
+    let keys: Vec<V> = rt.list(&format!("{name}/keys")).cloned().unwrap_or_default();
+    for k in keys {
+        let var = format!("{name}/{}", k.text());
+        rt.scope(&var).mem.remove(var.as_str());
+    }
+    rt.list_mut(&format!("{name}/keys")).clear();
+    rt.list_mut(name).clear();
+}
+
+fn arg(vals: &[V], i: usize, or: &str) -> String {
+    vals.get(i).map(|v| v.text().to_string()).unwrap_or_else(|| or.into())
+}
+
+fn texts_into(rt: &mut Rt, dest: &str, rows: Option<&serde_json::Value>) -> usize {
+    fresh(rt, dest);
+    let texts: Vec<String> = rows
+        .and_then(|r| r.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|r| r.get("text").and_then(|t| t.as_str()).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    rt.mset(dest, V::from(texts.first().cloned().unwrap_or_else(|| "404".into())));
+    let n = texts.len();
+    for t in texts {
+        rt.list_mut(dest).push(V::from(t));
+    }
+    n
+}
+
+/// a classifier's answer for one text into a record: dest = the top class, dest/p its
+/// probability, dest/<class> each class's, list dest = the classes it's in (a multi head)
+fn answer_into(rt: &mut Rt, dest: &str, classes: &[String], o: &serde_json::Value) -> bool {
+    fresh(rt, dest);
+    let probs: Vec<f64> = o
+        .get("probs")
+        .and_then(|p| p.as_array())
+        .map(|a| a.iter().map(|x| x.as_f64().unwrap_or(0.0)).collect())
+        .unwrap_or_default();
+    for (c, p) in classes.iter().zip(&probs) {
+        rec_set(rt, dest, c, V::N(*p));
+    }
+    let top = o.get("class").and_then(|c| c.as_str()).map(String::from);
+    let p = o
+        .get("top")
+        .and_then(|t| t.as_u64())
+        .and_then(|t| probs.get(t as usize))
+        .copied();
+    rt.mset(dest, V::from(top.clone().unwrap_or_else(|| "404".into())));
+    rt.mset(&format!("{dest}/p"), V::N(p.unwrap_or(0.0)));
+    for m in o.get("members").and_then(|m| m.as_array()).into_iter().flatten() {
+        if let Some(m) = m.as_str() {
+            rt.list_mut(dest).push(V::str(m));
+        }
+    }
+    top.is_some()
+}
+
+fn classes_of(v: &serde_json::Value) -> Vec<String> {
+    v.get("classes")
+        .and_then(|c| c.as_array())
+        .map(|a| a.iter().map(|c| c.as_str().unwrap_or("").to_string()).collect())
+        .unwrap_or_default()
+}
+
+/// classifiers, spec models and searches as words (anend's own, beside `std:anend`); every
+/// word asks the run's anend, with the app's limits, and leaves mem[err] and ow false when
+/// that fails
+const LEARN: Natives = &[
+    // classifier text [dest = c]: mem[dest] = the top class (404 for none), dest/p its
+    // probability, dest/<class> every class's, list dest the classes a multi head puts it
+    // in; ow: the classifier is trained and gave a class
+    ("class", |rt| {
+        let vals = line(rt);
+        need_vals(&vals, 2, "class")?;
+        let dest = arg(&vals, 2, "c");
+        let args = serde_json::json!({ "name": vals[0].text().to_string(), "texts": [vals[1].text().to_string()] });
+        let Some(v) = ask(rt, "class", "classify.predict", args)? else {
+            return Ok(());
+        };
+        let classes = classes_of(&v);
+        let first = v.get("results").and_then(|r| r.get(0)).cloned().unwrap_or_default();
+        let got = answer_into(rt, &dest, &classes, &first);
+        rt.ow = got && v.get("trained").and_then(|t| t.as_bool()).unwrap_or(false);
+        Ok(())
+    }),
+    // classifier text class [yes = yes]: tells the classifier the text is (yes) or isn't
+    // (no) in the class, as the feedback buttons do; ow: taken
+    ("feedback", |rt| {
+        let vals = line(rt);
+        need_vals(&vals, 3, "feedback")?;
+        let yes = !matches!(&*arg(&vals, 3, "yes"), "no" | "0" | "false");
+        let args = serde_json::json!({
+            "name": vals[0].text().to_string(), "text": vals[1].text().to_string(),
+            "class": vals[2].text().to_string(), "yes": yes,
+        });
+        rt.ow = ask(rt, "feedback", "classify.feedback", args)?.is_some();
+        Ok(())
+    }),
+    // classifier class bias: steers the class by bias (added before the softmax; 0 takes
+    // it back), kept with the classifier; ow: steered
+    ("steer", |rt| {
+        let vals = line(rt);
+        need_vals(&vals, 3, "steer")?;
+        let b = vals[2].num();
+        let mut bias = serde_json::Map::new();
+        bias.insert(vals[1].text().to_string(), serde_json::json!(b));
+        let args = serde_json::json!({ "name": vals[0].text().to_string(), "steer": { "bias": bias } });
+        rt.ow = ask(rt, "steer", "classify.steer", args)?.is_some();
+        Ok(())
+    }),
+    // classifier class [limit = 10] [dest = likely]: list dest = the save's texts most
+    // likely in the class, most likely first; mem[dest] the first; ow: any
+    ("likely", |rt| {
+        let vals = line(rt);
+        need_vals(&vals, 2, "likely")?;
+        let limit = vals.get(2).map(|v| v.num()).filter(|x| *x >= 1.0).unwrap_or(10.0) as u64;
+        let dest = arg(&vals, 3, "likely");
+        let args = serde_json::json!({ "name": vals[0].text().to_string(), "class": vals[1].text().to_string(), "limit": limit });
+        let Some(v) = ask(rt, "likely", "classify.search", args)? else {
+            return Ok(());
+        };
+        rt.ow = texts_into(rt, &dest, v.get("results")) > 0;
+        Ok(())
+    }),
+    // classifier text [limit = 10] [dest = similar]: list dest = the texts the classifier
+    // reads as nearest to the text, nearest first; ow: any
+    ("similar", |rt| {
+        let vals = line(rt);
+        need_vals(&vals, 2, "similar")?;
+        let limit = vals.get(2).map(|v| v.num()).filter(|x| *x >= 1.0).unwrap_or(10.0) as u64;
+        let dest = arg(&vals, 3, "similar");
+        let args = serde_json::json!({ "name": vals[0].text().to_string(), "text": vals[1].text().to_string(), "limit": limit });
+        let Some(v) = ask(rt, "similar", "classify.similar", args)? else {
+            return Ok(());
+        };
+        rt.ow = texts_into(rt, &dest, v.get("results")) > 0;
+        Ok(())
+    }),
+    // query [dest = found]: list dest = the save's texts the search finds (as the bar's
+    // search, with variations); mem[dest] the first; ow: any
+    ("search", |rt| {
+        let vals = line(rt);
+        need_vals(&vals, 1, "search")?;
+        let dest = arg(&vals, 1, "found");
+        let Some(v) = ask(
+            rt,
+            "search",
+            "mem.search",
+            serde_json::json!({ "q": vals[0].text().to_string() }),
+        )?
+        else {
+            return Ok(());
+        };
+        rt.ow = texts_into(rt, &dest, Some(&v)) > 0;
+        Ok(())
+    }),
+    // model input [dest = m]: runs a spec model on the text; dest/<head> = each head's
+    // answer (the text a generate head writes, a classes head's top class, a values head's
+    // values as dest/<head>/<value>), mem[dest] the first head's (by name); ow: trained
+    ("model", |rt| {
+        let vals = line(rt);
+        need_vals(&vals, 2, "model")?;
+        let dest = arg(&vals, 2, "m");
+        let args = serde_json::json!({ "name": vals[0].text().to_string(), "text": vals[1].text().to_string() });
+        let Some(v) = ask(rt, "model", "models.run", args)? else {
+            return Ok(());
+        };
+        fresh(rt, &dest);
+        let mut first = None;
+        for (head, a) in v.get("outputs").and_then(|o| o.as_object()).into_iter().flatten() {
+            let main = match a.get("kind").and_then(|k| k.as_str()) {
+                Some("generated") => V::from(a.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string()),
+                Some("classes") => V::from(a.get("top").map(json_text).unwrap_or_else(|| "404".into())),
+                Some("values") => {
+                    let mut firstv = None;
+                    for (k, x) in a.get("values").and_then(|x| x.as_object()).into_iter().flatten() {
+                        let x = x.as_f64().map(V::N).unwrap_or_else(|| V::from(json_text(x)));
+                        firstv.get_or_insert_with(|| x.clone());
+                        rec_set(rt, &format!("{dest}/{head}"), k, x);
+                    }
+                    firstv.unwrap_or_else(|| V::str("404"))
+                }
+                _ => V::from(a.to_string()),
+            };
+            first.get_or_insert_with(|| main.clone());
+            rec_set(rt, &dest, head, main);
+        }
+        rt.mset(&dest, first.unwrap_or_else(|| V::str("404")));
+        rt.ow = v.get("trained").and_then(|t| t.as_bool()).unwrap_or(false);
+        Ok(())
+    }),
+    // model [prompt] [candidates = 8] [dest = g]: generates with a spec model, judged by its
+    // critics; mem[dest] = the best kept candidate (else the best), dest/score its score,
+    // list dest the kept candidates, best first; ow: one was kept
+    ("generate", |rt| {
+        let vals = line(rt);
+        need_vals(&vals, 1, "generate")?;
+        let n = vals.get(2).map(|v| v.num()).filter(|x| *x >= 1.0).unwrap_or(8.0) as u64;
+        let dest = arg(&vals, 3, "g");
+        let args =
+            serde_json::json!({ "name": vals[0].text().to_string(), "prompt": arg(&vals, 1, ""), "candidates": n });
+        let Some(v) = ask(rt, "generate", "models.generate", args)? else {
+            return Ok(());
+        };
+        fresh(rt, &dest);
+        let cands: Vec<serde_json::Value> = v
+            .get("candidates")
+            .and_then(|c| c.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let best = cands.first();
+        let text = |c: &serde_json::Value| c.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string();
+        rt.mset(&dest, V::from(best.map(text).unwrap_or_else(|| "404".into())));
+        let score = best
+            .and_then(|b| b.get("score"))
+            .and_then(|s| s.as_f64())
+            .unwrap_or(0.0);
+        rt.mset(&format!("{dest}/score"), V::N(score));
+        let mut kept = 0;
+        for c in cands
+            .iter()
+            .filter(|c| c.get("kept").and_then(|k| k.as_bool()).unwrap_or(false))
+        {
+            rt.list_mut(&dest).push(V::from(text(c)));
+            kept += 1;
+        }
+        rt.ow = kept > 0;
+        Ok(())
+    }),
+];
+
 fn need_vals(vals: &[V], n: usize, who: &str) -> Res {
     if vals.len() < n {
         return err(format!("{who} needs {n} value{}", if n == 1 { "" } else { "s" }));
@@ -1553,7 +1817,7 @@ fn need_vals(vals: &[V], n: usize, who: &str) -> Res {
 
 /// every library word, by module (for completion and highlighting)
 pub fn words() -> Vec<(&'static str, Vec<&'static str>)> {
-    ["core", "line", "text", "gem", "sh", "logic", "elec", "anend"]
+    ["core", "line", "text", "gem", "sh", "logic", "elec", "anend", "learn"]
         .iter()
         .filter_map(|m| module(m).map(|(_, w)| (*m, w.iter().map(|(n, _)| *n).collect())))
         .collect()

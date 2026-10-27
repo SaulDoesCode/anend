@@ -140,7 +140,8 @@ docs/architecture.md (the whole).
       completion; `s.run` with `trace`, `s.debug`.)
 - [x] A headless standard library over every app op, and `anend run` (#11). (27 Oct:
       `std:anend`'s `op` and its JSON words; `Run` in the bar; `anend-app run`.)
-- [ ] Classifiers and models as language primitives (#18).
+- [x] Classifiers and models as language primitives (#18). (27 Oct: `std:learn`'s
+      `class`, `feedback`, `steer`, `likely`, `similar`, `search`, `model`, `generate`.)
 - [ ] ▶ **usable:** scripting the project from the notes view and the command line.
 - [ ] Taxonomies: classifiers in hierarchies that route a text to further classifiers,
       trained by hand in the UI, with accuracy per node (docs/architecture.md 1).

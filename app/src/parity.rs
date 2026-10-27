@@ -256,6 +256,8 @@ mod tests {
         assert!(include_str!("views/space.rs").contains("run_from_bar"));
         assert!(include_str!("main.rs").contains("fn run_cli("));
         assert!(include_str!("../../core/src/s/lib.rs").contains("\"anend\" =>"));
+        // classifiers and models as words (#18)
+        assert!(include_str!("../../core/src/s/lib.rs").contains("\"learn\" => (&[\"anend\"], LEARN)"));
     }
 
     /// wiring: blocks that cast rays and run programs, the window, playing in the room

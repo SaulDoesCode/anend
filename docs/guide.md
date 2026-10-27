@@ -278,6 +278,9 @@ Lists are how you tell anend what goes together, and what models learn from.
   [arguments]` in the bar runs a program from anywhere, and `anend-app run` from a shell.
   With `std/anend.s.` a program reaches everything the app does: `{notes.list} op` puts
   the answer in `r`, and `json`, `#json` and `obj` read and build what ops take and give.
+  `std/learn.s.` makes classifiers and models words: `{things} {a pear} class` puts the
+  top class in `c` and its probability in `c/p`; `feedback`, `steer`, `likely`,
+  `similar`, `search`, `model` and `generate` do the rest (docs/format.md lists them).
 - **The reader** (**Ctrl+4**): notes and texts as cards, a page at a time. Click one (or
   Enter on it) to read it big; **← →** step through, **Esc** goes back.
 - **Tags** (**Ctrl+6**): every tag with its count. Click picks one, Ctrl or Shift+click

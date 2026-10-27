@@ -533,3 +533,60 @@ fn picture_models_learn_from_the_save() {
     drop(ws);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// std:learn: a program asks classifiers, spec models and searches through the save
+#[test]
+fn programs_classify_and_generate() {
+    let dir = temp("learn");
+    let ws = Saves::new(&dir, "notes").with_models(Limits::NONE);
+    save(&ws);
+    let c = |op: &str, a: Value| ws.call(op, &a);
+    c("models.create", json!({ "spec": kind_spec() })).unwrap();
+    train(&ws, "kind");
+    c("models.create", json!({ "spec": writer_spec() })).unwrap();
+    train(&ws, "writer");
+    let lists = c("lists.stats", json!({})).unwrap()["lists"].clone();
+    let keys: Vec<Value> = lists.as_array().unwrap().iter().map(|l| l["list"].clone()).collect();
+    c(
+        "classify.create",
+        json!({ "name": "sorter", "classes": keys, "preset": "tiny" }),
+    )
+    .unwrap();
+    c(
+        "classify.train",
+        json!({ "name": "sorter", "epochs": 30, "wait": true }),
+    )
+    .unwrap();
+
+    let code = "std/learn.s.\n\
+        {sorter} {banana plum cherry} class\n{sorted ~c~} >\n{trained} >?\n{p ~c/p~} >\n\
+        {sorter} {granite slate} class {sorted ~c~} >\n\
+        {kind} {granite slate} model\n{kind says ~m~} >\n\
+        {writer} {} 2 generate\n{wrote ~g~} >\n\
+        {cherry} search\n{found} #l {found ~=~} >\n\
+        {sorter} {fruit} 3 likely\n{likely} #l {likely ~=~} >\n\
+        {sorter} {granite slate} {rocks} feedback {taken} >?\n\
+        {sorter} {fruit} 0.5 steer {steered} >?\n\
+        {nobody} {x} class {no ~err~} >!";
+    let r = c("s.run", json!({ "code": code })).unwrap();
+    assert_eq!(r["err"], Value::Null, "{r}");
+    let out = r["out"].as_str().unwrap();
+    for want in [
+        "sorted fruit",
+        "trained",
+        "sorted rocks",
+        "kind says rock",
+        "wrote ",
+        "found 6",
+        "likely 3",
+        "taken",
+        "steered",
+        "no ",
+    ] {
+        assert!(out.contains(want), "{want:?} not in {out}");
+    }
+    let p: f64 = out.split("p ").nth(1).unwrap().lines().next().unwrap().parse().unwrap();
+    assert!(p > 0.5 && p <= 1.0, "{out}");
+    drop(ws);
+    let _ = std::fs::remove_dir_all(dir);
+}

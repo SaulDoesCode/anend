@@ -75,6 +75,24 @@ program with `name.`. Programs run from the notes view (▶), the bar (`Run <tit
 [arguments]`), blocks' wirings, and the command line (`anend-app run <file or title>
 [arguments] [--save path]`).
 
+`std:learn` (`std/learn.s.`, which loads `std:anend`) puts the save's classifiers, spec
+models and search into words whose answers are s values rather than JSON. `class`
+(`classifier text [dest = c]`): mem[dest] = the top class (404 for none), dest/p its
+probability as a number, dest/<class> each class's, list dest the classes a multi head
+puts the text in; ow = the classifier is trained and gave a class. `feedback`
+(`classifier text class [yes|no]`) and `steer` (`classifier class bias`) do what the
+classifiers page's buttons and sliders do; ow = taken. `likely` (`classifier class [limit
+= 10] [dest = likely]`) and `similar` (`classifier text [limit] [dest = similar]`) fill list
+dest with texts, most likely or nearest first, mem[dest] the first. `search` (`query [dest
+= found]`) does the bar's search into list dest. `model` (`model input [dest = m]`) runs a
+spec model: dest/<head> each head's answer (a generate head's text, a classes head's top
+class, a values head's values as dest/<head>/<value>), mem[dest] the first head's by name;
+ow = trained. `generate` (`model [prompt] [candidates = 8] [dest = g]`): mem[dest] the best
+candidate its critics kept (else the best), dest/score its score, list dest the kept ones;
+ow = one was kept. A class is named as the classifier names it (a starter's classes carry
+the starter's name: `fruit, stones and animals: fruit`). Each word goes through the same
+ops as the app, so a shared hub's limits apply, and a failure leaves mem[err] and ow false.
+
 ## Rendering and the interpreter (`interp`)
 
 Rendering a body decodes it, transcludes `REF`s and evaluates `CALL`s. A function is any

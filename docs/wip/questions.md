@@ -322,3 +322,11 @@ The answers left these open. Each is written into the design as its default.
     error on stderr, the program's exit code, and piped stdin as its stdin.
 82. **`Run <title> [arguments]` in the bar** (the memory view and the space) shows the
     output as a toast (it can be clicked into the bar) and an error in the top bar.
+83. **Classifiers and models get a module of their own, `std:learn`,** whose words answer
+    in s values (a record for a classifier's answer, lists for texts, numbers for
+    probabilities and scores) rather than JSON, so a program needs no `json` to use them.
+84. **A class is named as the classifier names it** (a starter's carry its name, `fruit,
+    stones and animals: fruit`), so the name `class` gives back works in `feedback`,
+    `steer` and `likely` unchanged.
+85. **A block generating its next texture waits:** a generate head writes text, and a
+    texture is a recipe; a model that writes recipes would be its own piece of work.

@@ -92,8 +92,8 @@ departure says why in its commit).
 - Done (27 Oct): the rest of s's code editor: outline, go to definition, inline results,
   the step debugger, completion.
 - Done (27 Oct): `std:anend` over every app op, `Run` in the bar, `anend-app run` (#11).
-- Next: classifiers and models as language primitives (#18), then the ▶ usable point for
-  scripting.
+- Done (27 Oct): `std:learn`, classifiers and models as s words (#18).
+- Next: the ▶ usable point for scripting (README, guide, PR #8 comment), then taxonomies.
   Open further up: the language lines (s, the standard library), taxonomies and pipes,
   the wgpu renderer and culling.
 
