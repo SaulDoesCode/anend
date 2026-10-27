@@ -210,6 +210,10 @@ pub(super) fn listed(g: &Graph, blocks: &[Block]) -> Res {
         .iter()
         .map(|b| {
             let mut o = json!(b);
+            // a prefab copy's part names its copy
+            if let Some((copy, _)) = crate::graph::prefabs::split_part(&b.id) {
+                o["part_of"] = json!(copy);
+            }
             if b.kind == Kind::Texture
                 && let Some(r) = textures[&key(b.kind, &b.texture)].get("recipe")
                 && let Ok(r) = serde_json::from_value::<Recipe>(r.clone())
@@ -371,7 +375,13 @@ pub fn call(g: &Graph, op: &str, args: &Value, limits: &Limits) -> Res {
                 (None, None) => None,
                 _ => return Err("a region is lo and hi, [x, y, z] each".into()),
             };
+            // the room's blocks and every prefab copy's parts
             let mut blocks = g.blocks(region)?;
+            blocks.extend(
+                g.parts()?
+                    .into_iter()
+                    .filter(|b| region.is_none_or(|(lo, hi)| b.t.meets(lo, hi))),
+            );
             if let Some(k) = Kind::parse(s(args, "kind")) {
                 blocks.retain(|b| b.kind == k);
             }
@@ -461,6 +471,13 @@ pub fn call(g: &Graph, op: &str, args: &Value, limits: &Limits) -> Res {
             let kind =
                 Kind::parse(s(args, "kind")).ok_or("which kind of texture? (text, picture, plain or texture)")?;
             let tex = texture(g, kind, s(args, "texture"))?;
+            // a part shows it in its copy only, under the same address
+            if crate::graph::prefabs::is_part(id) {
+                let p = g.retexture_part(id, kind, &tex)?.ok_or("the part went")?;
+                let mut out = listed(g, &[p])?;
+                out["ids"] = json!([id]);
+                return Ok(out);
+            }
             if kind == b.kind && tex == b.texture {
                 let mut out = listed(g, &[b])?;
                 out["ids"] = json!([id]);

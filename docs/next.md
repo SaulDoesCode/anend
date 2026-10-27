@@ -75,7 +75,9 @@ departure says why in its commit).
   for outline, go to definition, inline results, step debugging and completion.
 - Done (26 Oct): rays and programs (#15, #28): wirings as entries, `wiring.fire` runs a
   cause and what it sets off in core; the wiring window, playing, timers, zone events.
-- Next: subassemblies and the prefab menu (#19), then the switch and gate prefabs (#27).
+- Done (27 Oct): prefabs (#19): grouping, the menu with pictures, copies as one
+  placement each with their own values, links inside a prefab working per copy, merges.
+- Next: the switch and gate prefabs (#27), then audio emitters (#17).
   Open further up: the language lines (s, the standard library), taxonomies and pipes,
   the wgpu renderer and culling.
 

@@ -458,6 +458,17 @@ texture key from that moment on, eased between keys along CSS cubic-bezier timin
 | `anims.list` | | `[{key, anim}]`: the animations (entries of mime `application/x-anend-animation`, `graph::anims`) |
 | `anims.save` | `{key?, anim}` | `{key, anim}`: a new animation, or the one at `key` changed (blocks playing it play the change) |
 | `anims.delete` | `{key}` | `{removed}`; blocks playing it stop |
+| `prefabs.list` | | `{prefabs: [{id, name, created, edited, copies, parts}], textures}`: the save's prefabs (`graph::prefabs`), each with its blocks (relative to its origin) |
+| `prefabs.copies` | | `[{id, scene, name, x, y, z, rot, scale, own}]`: the room's copies (`own`: how many parts have the copy's own values) |
+| `prefabs.make` | `{name, ids}` | the blocks grouped into a new prefab, one copy where they were: `{prefab, copy, blocks, textures, removed}` (`blocks` the copy's parts, `removed` the blocks' old addresses) |
+| `prefabs.place` | `{prefab, x, y, z, rot?, scale?}` | a new copy: `{copy, blocks, textures}` |
+| `prefabs.set` | `{id, x?, y?, z?, by?, rot?, turn?, scale?}` | the copy moved (`by` adds), turned (`turn`: quarter turns about the upright) or sized: `{copy, blocks, textures}` |
+| `prefabs.remove` | `{id}` | `{removed}`: the copy taken away, its parts' addresses |
+| `prefabs.reset` | `{id}` | the copy without its own values: `{copy, blocks, textures}` |
+| `prefabs.apply` | `{id, others}` | the copy's own values made the prefab's; `others: false` keeps the other copies on the prefab as it was (`kept`: that prefab's id): `{blocks, textures, kept, copies}` |
+| `prefabs.detach` | `{id}` | the copy as ordinary blocks: `{ids, blocks, textures, removed}` |
+| `prefabs.rename` | `{prefab, name}` | `{renamed}` |
+| `prefabs.delete` | `{prefab}` | `{copies, removed}`: the prefab and its copies gone |
 | `wiring.list` | | `[{id, key, wiring}]`: the wired blocks (`graph::wiring`; a wiring is an entry of mime `application/x-anend-wiring`) |
 | `wiring.get` | `{id}` | the block's wiring `{on, every?, signal?, program?, ray?: {dir, targets?, stick?, mode, n, range, sees?}, state?}`, or null |
 | `wiring.set` | `{id, wiring}` | the block (as `blocks.list` has it) and its `wiring`; `wiring: null` unwires it. An entry another block shares isn't changed: the block gets its own |

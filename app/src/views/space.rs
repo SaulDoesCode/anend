@@ -28,6 +28,7 @@ use crate::views::{TChip, use_keys};
 
 mod animwin;
 mod lightwin;
+mod prefabwin;
 mod texwin;
 mod wirewin;
 
@@ -527,6 +528,8 @@ try {{
     else if (c.cmd === 'anims') sp.setAnims(c.anims || [], c.textures || {{}});
     else if (c.cmd === 'playanims') sp.playAnims(!!c.on);
     else if (c.cmd === 'wires') sp.setWires(c.wires || [], !!c.live);
+    else if (c.cmd === 'thumbs') dioxus.send({{ kind: 'thumbs', data: sp.thumbs(c.prefabs || [], c.textures || {{}}) }});
+    else if (c.cmd === 'prefabspot') dioxus.send({{ kind: 'prefabspot', data: {{ ...sp.blockSpot(), want: c.want }} }});
     else if (c.cmd === 'rays') sp.showRays(c.rays || []);
     else if (c.cmd === 'animpreview') sp.previewAnim(c.id, c.anim || null, c.p);
     else if (c.cmd === 'lights') sp.setLights(c.lights || [], c.changed || null);
@@ -586,6 +589,10 @@ struct Sp {
     live: Signal<bool>,
     /// what the last cause set off (`wiring.fire`'s events)
     fired: Signal<Vec<Value>>,
+    /// the save's prefabs (`prefabs.list`), their copies, and each one's picture
+    prefabs: Signal<Vec<Value>>,
+    copies: Signal<Vec<Value>>,
+    thumbs: Signal<HashMap<u64, String>>,
 }
 
 impl Sp {
@@ -1309,6 +1316,9 @@ pub fn Space() -> Element {
         bend_open: use_signal(|| false),
         live: use_signal(|| false),
         fired: use_signal(Vec::new),
+        prefabs: use_signal(Vec::new),
+        copies: use_signal(Vec::new),
+        thumbs: use_signal(HashMap::new),
     };
     // the engine and its channel
     {
@@ -1562,6 +1572,9 @@ pub fn Space() -> Element {
             if p.space.show_anims {
                 animwin::Anims { sp, block: (sp.block)(), on_changed: { let api = api_b.clone(); move |_| { let api = api.clone(); dioxus::dioxus_core::spawn_forever(count_blocks(api, sp)); } } }
             }
+            if p.space.show_prefabs {
+                prefabwin::Prefabs { sp }
+            }
             if p.space.show_wiring {
                 wirewin::Wires { sp }
             }
@@ -1679,6 +1692,17 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
         }
         // an undo took back blocks just added, or put back blocks just deleted
         "lightspot" => lightwin::light_spot(ui, api, sp, e.data.clone()),
+        "prefabspot" => prefabwin::place_at(ui, api, sp, e.data.clone()),
+        "thumbs" => {
+            let mut t = sp.thumbs;
+            let mut m = t.peek().clone();
+            for (k, v) in e.data.as_object().into_iter().flatten() {
+                if let (Ok(k), Some(v)) = (k.parse::<u64>(), v.as_str()) {
+                    m.insert(k, v.to_string());
+                }
+            }
+            t.set(m);
+        }
         // a wired block fired in the room (a click while playing, a timer, a zone)
         "blockfire" => {
             let ev = match e.data["event"].as_str().unwrap_or("") {
@@ -1874,6 +1898,11 @@ async fn load_blocks(ui: Ui, api: Api, sp: Sp) {
 }
 
 fn delete_block(ui: Ui, api: Api, sp: Sp, id: String) {
+    // a part goes with its whole copy (the prefabs window), or after detaching it
+    if id.starts_with("prefab:") {
+        ui.say("a part of a prefab's copy: remove the whole copy, or detach it, in the prefabs window");
+        return;
+    }
     dioxus::dioxus_core::spawn_forever(async move {
         match api.call("blocks.delete", json!({ "ids": [id] })).await {
             Ok(_) => {
@@ -3276,6 +3305,12 @@ pub fn SpaceStrip() -> Element {
                 icon: "play",
                 on: p.space.show_anims,
                 onclick: move |_| set_pref(ui, |p| p.space.show_anims = !p.space.show_anims),
+            }
+            TChip {
+                label: "prefabs: blocks grouped into subassemblies, placed as copies",
+                icon: "prefab",
+                on: p.space.show_prefabs,
+                onclick: move |_| set_pref(ui, |p| p.space.show_prefabs = !p.space.show_prefabs),
             }
             TChip {
                 label: "wiring: blocks that cast rays and run programs",

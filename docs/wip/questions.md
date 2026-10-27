@@ -224,3 +224,22 @@ The answers left these open. Each is written into the design as its default.
 54. **A wiring is shared by copies of a block until one is changed,** like an animation.
     Changing it from one block gives that block its own entry.
 55. **Playing is a state of the room, not the save:** it starts off each time.
+
+## Prefabs (27 Oct)
+
+56. **A prefab's origin is the middle of its blocks' boxes,** so a copy turns about its
+    middle; the first copy stands where the grouped blocks were.
+57. **A part changed in a copy (by hand or by a program) changes in that copy only:** a
+    switch's lamp lifted in one copy stays down in the others. The copy can drop its own
+    values or make them the prefab's.
+58. **"…but not the other copies" makes the old prefab a prefab of its own,** named
+    `<name> (before)`, which the other copies then show; that's what a detached prefab is
+    in format.md.
+59. **A copy's own values don't travel in a merge;** the copy arrives showing the prefab.
+    Prefabs keep their inner links through a merge; links to the source room's blocks are
+    dropped, as a merged block's are.
+60. **Prefabs are left out of the scenes window** (and of `#name` scene search); they have
+    their own window.
+61. **Grouping takes only room blocks,** not parts of other copies (no prefab inside a
+    prefab yet), and a prefab's set of parts can't be edited after it's made: change a
+    copy and make its changes the prefab's, or detach, edit and group again.

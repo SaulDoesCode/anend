@@ -158,6 +158,13 @@ text for its menu.
   (or *linear*, *ease*, *ease-in-out*...). Select a block, scrub to a moment, *a key
   here*, set its pose with sliders, *play* to see it, *keep*, then *the selected block
   plays it* (with a delay and a speed). One animation can play on many blocks.
+- **Prefabs.** The prefabs window (the stacked-blocks chip) groups blocks into a prefab:
+  *pick blocks in the room*, click each one, name it, *make it*. One copy stands where
+  they were; the menu shows a picture of each prefab, and *place* puts another copy
+  ahead of you. Links inside it (a switch's ray aimed at its lamp) work in every copy on
+  their own. Select a part to move, turn or size its whole copy, or to *detach* it. A part
+  you change by hand changes in that copy only; *make them the prefab's* changes every
+  copy, or *…but not the other copies* keeps the rest as they were.
 - **Wiring.** The wiring window (the bolt chip) makes a block act: pick what it listens
   for (a click, another block's ray, a text coming into or leaving its zone, a timer, a
   signal), the s program it runs (a note tagged `s`) and its ray: *fixed* out of one of

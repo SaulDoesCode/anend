@@ -312,6 +312,9 @@ pub struct AssetsWritten {
     pub scenes: usize,
     /// incoming blocks moved out of ones already in the room
     pub settled: usize,
+    /// prefabs brought in (`<name> 2` when the target has one so named), and their copies
+    pub prefabs: usize,
+    pub copies: usize,
 }
 
 /// a save's spec models, pictures and blocks into another (a merge's second half; the entries
@@ -386,8 +389,12 @@ pub fn assets(target: &crate::graph::Graph, src: &crate::graph::Graph) -> GResul
     let hex = |h: &[u8; 16]| h.iter().map(|b| format!("{b:02x}")).collect::<String>();
     // blocks get fresh ids; a text block finds its text in the target (the entries
     // came first), a picture block its picture, a recipe block its recipe
-    let mut new = Vec::new();
-    for mut b in src.blocks(None)? {
+    // a source block as the target has it: its texture, animation, wiring and faces
+    // found or brought there (None: what it shows isn't there). `keep_targets`: a
+    // prefab's part keeps its sticky targets (inner addresses), remapped after
+    let bring = |mut b: crate::graph::blocks::Block,
+                 keep_targets: bool|
+     -> GResult<Option<(crate::graph::blocks::Kind, String, crate::graph::blocks::Transform)>> {
         use crate::graph::blocks::Kind;
         // an animation is an entry: the same animation in the target (its text), or none
         if let Some(a) = b.t.anim.as_mut() {
@@ -401,7 +408,9 @@ pub fn assets(target: &crate::graph::Graph, src: &crate::graph::Graph) -> GResul
         if let Some(wr) = b.t.wire.as_mut() {
             let text = src.render(wr.entry).ok().and_then(|t| {
                 let mut w: crate::graph::wiring::Wiring = serde_json::from_str(&t).ok()?;
-                if let Some(r) = w.ray.as_mut() {
+                if let Some(r) = w.ray.as_mut()
+                    && !keep_targets
+                {
                     r.targets.clear();
                 }
                 serde_json::to_string(&w).ok()
@@ -424,20 +433,26 @@ pub fn assets(target: &crate::graph::Graph, src: &crate::graph::Graph) -> GResul
         let texture = match b.kind {
             Kind::Texture => match recipes.get(&b.texture) {
                 Some(id) => id.clone(),
-                None => continue,
+                None => return Ok(None),
             },
             Kind::Text => {
                 let Some(id) = crate::graph::record::parse_label(&b.texture) else {
-                    continue;
+                    return Ok(None);
                 };
-                let Ok(e) = src.entry(id) else { continue };
+                let Ok(e) = src.entry(id) else { return Ok(None) };
                 let text = src.render(id)?;
                 crate::graph::record::label(target.save_text(&text, e.record.mime)?.0)
             }
-            Kind::Picture if target.picture(&b.texture)?.is_none() => continue,
+            Kind::Picture if target.picture(&b.texture)?.is_none() => return Ok(None),
             _ => b.texture.clone(),
         };
-        new.push((b.kind, texture, b.t));
+        Ok(Some((b.kind, texture, b.t)))
+    };
+    let mut new = Vec::new();
+    for b in src.blocks(None)? {
+        if let Some(x) = bring(b, false)? {
+            new.push(x);
+        }
     }
     if !new.is_empty() {
         // the target's room keeps its blocks where they are; the incoming ones settle out of
@@ -455,13 +470,64 @@ pub fn assets(target: &crate::graph::Graph, src: &crate::graph::Graph) -> GResul
         }
         w.blocks = target.add_blocks(&new)?.len();
     }
+    // prefabs come in as prefabs of their own, their parts as blocks come (links inside
+    // a prefab follow its parts' addresses there), and the room's copies of them with
+    // them, where they stood (a copy's own changes stay behind)
+    let mut prefab_ids: std::collections::HashMap<u64, u64> = Default::default();
+    let mut have: std::collections::HashSet<String> = target.prefabs()?.into_iter().map(|p| p.name).collect();
+    for p in src.prefabs()? {
+        let mut parts = Vec::new();
+        let mut olds = Vec::new();
+        for b in src.prefab_parts(p.id)? {
+            let old = b.id.clone();
+            if let Some(x) = bring(b, true)? {
+                parts.push(x);
+                olds.push(old);
+            }
+        }
+        let news = crate::graph::prefabs::inner_ids(&parts.iter().map(|(k, t, _)| (*k, t.clone())).collect::<Vec<_>>());
+        for (_, _, t) in parts.iter_mut() {
+            let Some(r) = t.wire.as_mut() else { continue };
+            let Ok(text) = target.render(r.entry) else { continue };
+            let Ok(mut wi) = serde_json::from_str::<crate::graph::wiring::Wiring>(&text) else {
+                continue;
+            };
+            if let Some(ray) = wi.ray.as_mut() {
+                // inner addresses follow; others (the source room's blocks) are dropped
+                ray.targets = ray
+                    .targets
+                    .iter()
+                    .filter_map(|x| olds.iter().position(|o| o == x).map(|i| news[i].clone()))
+                    .collect();
+                let text = serde_json::to_string(&wi).map_err(|e| e.to_string())?;
+                r.entry = target.save_text(&text, crate::graph::record::mime::WIRING)?.0;
+            }
+        }
+        let mut name = p.name.clone();
+        let mut k = 2;
+        while have.contains(&name) {
+            name = format!("{} {k}", p.name);
+            k += 1;
+        }
+        let id = target.put_prefab(&name, &parts)?;
+        have.insert(name);
+        prefab_ids.insert(p.id, id);
+        w.prefabs += 1;
+    }
+    for c in src.copies()? {
+        if let Some(&to) = prefab_ids.get(&c.scene) {
+            target.add_copy(to, [c.x, c.y, c.z], c.rot, c.scale)?;
+            w.copies += 1;
+        }
+    }
     // saved scenes come in whole (format.md answer 5): each is included as it is, named
     // `<name> 2` (or 3, ...) when the target has one so named; a text placement finds its
     // text in the target, as blocks do
     let src_room = src.room()?;
     let mut names: std::collections::HashSet<String> = target.scenes()?.into_iter().map(|s| s.name).collect();
     for sc in src.scenes()? {
-        if Some(sc.id) == src_room {
+        // the room's blocks and the prefabs came above
+        if Some(sc.id) == src_room || prefab_ids.contains_key(&sc.id) || src.prefabs()?.iter().any(|p| p.id == sc.id) {
             continue;
         }
         let mut name = sc.name.clone();

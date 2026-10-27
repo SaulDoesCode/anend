@@ -15,6 +15,7 @@ pub fn svg(name: &str) -> &'static str {
         "copy" => include_str!("../../assets/icons/copy.svg"),
         "cube" => include_str!("../../assets/icons/cube.svg"),
         "delete" => include_str!("../../assets/icons/delete.svg"),
+        "prefab" => include_str!("../../assets/icons/prefab.svg"),
         "download" => include_str!("../../assets/icons/download.svg"),
         "edit" => include_str!("../../assets/icons/edit.svg"),
         "editor" => include_str!("../../assets/icons/editor.svg"),

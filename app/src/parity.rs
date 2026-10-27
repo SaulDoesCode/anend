@@ -265,6 +265,27 @@ mod tests {
         assert!(sp.contains("show_wiring") && sp.contains("\"blockfire\""));
     }
 
+    /// prefabs: grouping, the menu with pictures, a copy's controls
+    #[test]
+    fn prefabs_stay() {
+        let js = include_str!("space.js");
+        assert!(js.contains("thumbs(list, textures)") && js.contains("part_of"));
+        let rs = include_str!("views/space/prefabwin.rs");
+        for needle in [
+            "fn Prefabs(",
+            "\"prefabs.make\"",
+            "\"prefabs.place\"",
+            "\"prefabs.apply\"",
+            "\"prefabs.detach\"",
+            "pick blocks in the room",
+            "…but not the other copies",
+        ] {
+            assert!(rs.contains(needle), "prefabwin.rs lost {needle}");
+        }
+        let sp = include_str!("views/space.rs");
+        assert!(sp.contains("show_prefabs") && sp.contains("\"prefabspot\"") && sp.contains("\"thumbs\""));
+    }
+
     /// keyframe animations: the window, the room posing blocks
     #[test]
     fn animations_stay() {

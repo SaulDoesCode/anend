@@ -41,6 +41,7 @@
 <symbol id="i-pick" viewBox="0 0 24 24"><path d="M4 3l7 17 2.5-7.5L21 10z"/></symbol>
 <symbol id="i-pin" viewBox="0 0 24 24"><path d="M9 3h6l-1 6 4 4H6l4-4z"/><path d="M12 13v8"/></symbol>
 <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></symbol>
+<symbol id="i-prefab" viewBox="0 0 24 24"><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/><rect x="8" y="3" width="8" height="8" rx="1"/></symbol>
 <symbol id="i-reader" viewBox="0 0 24 24"><path d="M2 5c3-1.5 7-1.5 10 1 3-2.5 7-2.5 10-1v14c-3-1.5-7-1.5-10 1-3-2.5-7-2.5-10-1z"/><path d="M12 6v14"/></symbol>
 <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.5-4.5L3 9"/><path d="M3 3v6h6"/><path d="M4 13a8 8 0 0 0 14.5 4.5L21 15"/><path d="M21 21v-6h-6"/></symbol>
 <symbol id="i-rename" viewBox="0 0 24 24"><path d="M12 4h6M15 4v16M12 20h6"/><path d="M10 8H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h6M20 8h1v8h-1"/></symbol>

@@ -750,7 +750,7 @@ pub fn texture_of(def: &Def) -> Option<(Kind, String)> {
     })
 }
 
-fn placement(t: &Transform, n: u64) -> Placement {
+pub(crate) fn placement(t: &Transform, n: u64) -> Placement {
     let mut p = Placement::at(n, [t.x, t.y, t.z]);
     p.scale = Scale::Axes([t.w, t.h, t.d]).canonical();
     p.rot = (t.rot != super::place::IDENTITY).then(|| super::place::pack_rotation(t.rot));
@@ -798,7 +798,7 @@ fn transform(p: &Placement) -> Transform {
     }
 }
 
-fn block_of(p: &Placed) -> Option<Block> {
+pub(crate) fn block_of(p: &Placed) -> Option<Block> {
     if p.kind != SKind::Block {
         return None;
     }
@@ -888,6 +888,10 @@ impl Graph {
 
     /// one block
     pub fn block(&self, id: &str) -> GResult<Option<Block>> {
+        // a prefab copy's part (`graph::prefabs`)
+        if super::prefabs::is_part(id) {
+            return self.part(id);
+        }
         let Some((kind, texture, n)) = split_id(id) else {
             return Ok(None);
         };
@@ -906,6 +910,11 @@ impl Graph {
         let mut todo = Vec::new();
         for (id, t) in changes {
             let t = t.checked()?;
+            // a part changes in its copy only
+            if super::prefabs::is_part(id) {
+                out.extend(self.set_part(id, t)?);
+                continue;
+            }
             if let Some(mut b) = self.block(id)? {
                 b.t = t;
                 todo.push(b);
@@ -938,7 +947,8 @@ impl Graph {
     /// takes blocks away; the ones that were there, as they were (to put them back)
     pub fn delete_blocks(&self, ids: &[String]) -> GResult<Vec<Block>> {
         let mut out = Vec::new();
-        for id in ids {
+        // a part goes only with its copy
+        for id in ids.iter().filter(|i| !super::prefabs::is_part(i)) {
             if let Some(b) = self.block(id)? {
                 out.push(b);
             }

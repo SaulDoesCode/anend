@@ -12,6 +12,7 @@ pub mod interp;
 pub mod lights;
 pub mod place;
 pub mod postings;
+pub mod prefabs;
 pub mod query;
 pub mod record;
 pub mod scenes;

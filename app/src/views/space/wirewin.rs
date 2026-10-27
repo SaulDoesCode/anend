@@ -103,11 +103,15 @@ fn has(w: &Value, ev: &str) -> bool {
 }
 
 fn short(id: &str) -> String {
-    // `plain:#88aa88#3` → `#88aa88 #3`, a text's key as it is
+    // a prefab copy's part: its address inside, and which copy
+    if let Some((copy, inner)) = id.strip_prefix("prefab:").and_then(|r| r.split_once('/')) {
+        let n = copy.rsplit_once('#').map_or(copy, |x| x.1);
+        return format!("{} in copy {n}", short(inner));
+    }
     let (k, n) = id.rsplit_once('#').unwrap_or((id, ""));
     let k = k.split_once(':').map_or(k, |(_, t)| t);
-    let k = if k.len() > 14 {
-        format!("{}…", &k[..12])
+    let k = if k.chars().count() > 14 {
+        format!("{}…", k.chars().take(12).collect::<String>())
     } else {
         k.to_string()
     };

@@ -18,6 +18,8 @@ pub mod models;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod pictures;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod prefabs;
+#[cfg(not(target_arch = "wasm32"))]
 mod saves;
 pub mod scenes;
 pub mod script;

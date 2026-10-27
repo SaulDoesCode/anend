@@ -11,6 +11,11 @@ use crate::graph::scenes::{Def, Kind, size_of};
 use crate::graph::settle::{Body, settle, text_body};
 use crate::graph::{Graph, Reader};
 
+/// whether a scene is a prefab (`graph::prefabs`)
+fn is_prefab(s: &crate::graph::scenes::Scene) -> bool {
+    s.settings.get("prefab") == Some(&Value::Bool(true))
+}
+
 pub fn routed(op: &str) -> bool {
     op.starts_with("scenes.")
 }
@@ -66,7 +71,8 @@ pub fn call(g: &Graph, op: &str, args: &Value) -> Res {
     match op {
         "scenes.list" => {
             let mut out = Vec::new();
-            for sc in g.scenes()? {
+            // prefabs are listed by `prefabs.list`
+            for sc in g.scenes()?.into_iter().filter(|s| !is_prefab(s)) {
                 let ps = [g.placements(sc.id, false)?, g.placements(sc.id, true)?].concat();
                 let texts = ps.iter().filter(|p| p.kind == Kind::Text).count();
                 let blocks = ps.iter().filter(|p| p.kind == Kind::Block).count();
@@ -80,7 +86,7 @@ pub fn call(g: &Graph, op: &str, args: &Value) -> Res {
         // every saved scene by name, as rows (the scenes window, `#name`)
         "scenes.maps" => {
             let mut m = Map::new();
-            for sc in g.scenes()? {
+            for sc in g.scenes()?.into_iter().filter(|s| !is_prefab(s)) {
                 if Some(sc.id) != room {
                     m.insert(sc.name.clone(), Value::Array(rows(g, sc.id)?));
                 }

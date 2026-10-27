@@ -1246,6 +1246,49 @@ export class Space {
     this.dirty = true;
   }
 
+  // ------------------------------------------------------------------ prefabs
+  //
+  // A prefab's copies are drawn as their parts, ordinary blocks whose ids name their copy
+  // (core's graph::prefabs). The prefab menu shows each prefab as a small picture of its
+  // parts, drawn here on a renderer of its own: `thumbs` answers id → a PNG data URL.
+  thumbs(list, textures) {
+    for (const [k, v] of Object.entries(textures || {})) this.abouts.set(k, v);
+    const size = 112;
+    if (!this.thumbR) {
+      this.thumbR = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+      this.thumbR.setPixelRatio(1);
+      this.thumbR.setSize(size, size);
+    }
+    const out = {};
+    for (const p of list || []) {
+      const sc = new THREE.Scene();
+      const box = new THREE.Box3();
+      const made = [];
+      for (const b of p.parts || []) {
+        const mesh = new THREE.Mesh(this.boxGeometry(b), this.blockMaterial(b));
+        mesh.position.set(b.x, b.y, b.z);
+        const r = b.rot || [0, 0, 0, 1];
+        mesh.quaternion.set(r[0], r[1], r[2], r[3]);
+        const o = { b, mesh };
+        this.bake(o);
+        sc.add(mesh);
+        made.push(mesh);
+        box.expandByObject(mesh);
+      }
+      if (!made.length) continue;
+      const c = box.getCenter(new THREE.Vector3());
+      const r = Math.max(0.5, box.getSize(new THREE.Vector3()).length() / 2);
+      const cam = new THREE.PerspectiveCamera(35, 1, 0.05, r * 20);
+      cam.position.copy(c).add(new THREE.Vector3(0.9, 0.7, 1.4).normalize().multiplyScalar(r / Math.sin((35 / 2) * Math.PI / 180)));
+      cam.lookAt(c);
+      this.thumbR.setClearColor(0x000000, 0);
+      this.thumbR.render(sc, cam);
+      out[p.id] = this.thumbR.domElement.toDataURL('image/png');
+      for (const m of made) m.geometry.dispose();
+    }
+    return out;
+  }
+
   // ------------------------------------------------------------------ wiring
   //
   // Blocks that cast rays and run programs (core's `ops::wiring`). The room only knows
@@ -1629,8 +1672,8 @@ export class Space {
   }
 
   blockOut(o) {
-    const { id, kind, texture, x, y, z, w, h, d, rot, bend, faces, variant, shape, zone, anim } = o.b;
-    return { id, kind, texture, x, y, z, w, h, d, rot: rot || [0, 0, 0, 1], bend: bend || null, faces: faces || null, shape: shape || 'box', zone: zone || null, anim: anim || null, ...(variant != null ? { variant } : {}) };
+    const { id, kind, texture, x, y, z, w, h, d, rot, bend, faces, variant, shape, zone, anim, part_of } = o.b;
+    return { id, kind, texture, x, y, z, w, h, d, rot: rot || [0, 0, 0, 1], bend: bend || null, faces: faces || null, shape: shape || 'box', zone: zone || null, anim: anim || null, ...(variant != null ? { variant } : {}), ...(part_of ? { part_of } : {}) };
   }
 
   pickBlock(id) {

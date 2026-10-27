@@ -743,9 +743,12 @@ impl Graph {
         }
     }
 
-    /// the first scene with this name
+    /// the first scene with this name (prefabs aside: `graph::prefabs`)
     pub fn scene_named(&self, name: &str) -> GResult<Option<Scene>> {
-        Ok(self.scenes()?.into_iter().find(|s| s.name == name))
+        Ok(self
+            .scenes()?
+            .into_iter()
+            .find(|s| s.name == name && s.settings.get("prefab") != Some(&serde_json::Value::Bool(true))))
     }
 
     pub fn rename_scene(&self, id: u64, name: &str) -> GResult<()> {

@@ -173,7 +173,10 @@ docs/architecture.md (the whole).
       texts as targets, rays from where an animation shows a block, undo of a cause.)
 - [x] Keyframes with a bezier timing editor (#16). (26 Oct: animations as entries, the
       animations window with its curve, timeline and scrubber; blocks play them.)
-- [ ] Subassemblies and the prefab menu (#19).
+- [x] Subassemblies and the prefab menu (#19).
+      (27 Oct: `graph::prefabs`, `ops::prefabs`, the prefabs window with pictures, copies
+      with their own values. Not yet: prefabs inside prefabs, editing a prefab's set of
+      parts, undo of prefab changes.)
 - [ ] Switch and logic-gate prefabs (#27).
 - [ ] Audio emitters and the sounds table (#17).
 - [ ] ▶ **usable:** logic-world scenes, with blocks acting on each other.

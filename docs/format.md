@@ -345,7 +345,12 @@ detached?}]`.
 
 **A prefab copy that modifies** keeps its overrides in X: a list of (inner address, field,
 value) that replace the prototype's values for that copy only. A part the prefab later
-removes takes its overrides with it.
+removes takes its overrides with it. (27 Oct, `graph::prefabs`:) they are kept as the
+copy's own values (flag 128), a JSON object `{"parts": {"<inner address>": {"t":
+<transform relative to the prefab>, "kind": ..., "texture": ..., "wiring": <wiring
+JSON>}}}`, each field there only when the copy changed it. A prefab is a scene whose
+settings are `{"prefab": true}`; a part is addressed as `prefab:<scene>#<n>/<inner
+address>`.
 
 **Canonical,** as `place` is. Writing the same placements always gives the same bytes:
 - the encoder chooses the smallest of the encodings that decode to the same value;

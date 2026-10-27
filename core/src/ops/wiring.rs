@@ -41,7 +41,11 @@ pub fn routed(op: &str) -> bool {
 }
 
 /// a block's wiring, when it has one that reads
-fn wiring_of(g: &Graph, b: &Block) -> Result<Option<Wiring>, String> {
+pub(super) fn wiring_of(g: &Graph, b: &Block) -> Result<Option<Wiring>, String> {
+    // a prefab copy's part: its copy's own wiring, else the prefab's
+    if let Some(own) = g.part_wiring(&b.id)? {
+        return Ok(serde_json::from_value(own).ok());
+    }
     let Some(r) = b.t.wire else { return Ok(None) };
     let v = g.view()?;
     match v.record(r.entry)? {
@@ -52,14 +56,31 @@ fn wiring_of(g: &Graph, b: &Block) -> Result<Option<Wiring>, String> {
 
 /// gives the block this wiring (none takes it away); the block as it is now. An entry
 /// another block shares isn't changed: this block gets an entry of its own
-fn set_wiring(g: &Graph, b: &Block, w: Option<Wiring>) -> Result<Block, String> {
+pub(super) fn set_wiring(g: &Graph, b: &Block, w: Option<Wiring>) -> Result<Block, String> {
+    // a part's wiring changes in its copy only
+    if crate::graph::prefabs::is_part(&b.id) {
+        let v = match w {
+            Some(w) => Some(serde_json::to_value(w.checked()?).map_err(|e| e.to_string())?),
+            None => Some(serde_json::json!({ "on": [] })),
+        };
+        g.set_part_wiring(&b.id, v)?;
+        return g.block(&b.id)?.ok_or_else(|| "the part went".to_string());
+    }
     let mut t = b.t;
     match w {
         None => t.wire = None,
         Some(w) => {
             let text = serde_json::to_string(&w.checked()?).map_err(|e| e.to_string())?;
             let shared = |entry: u64| -> Result<bool, String> {
-                Ok(g.blocks(None)?
+                // the room's other blocks, and the prefabs' parts
+                let mut others = g.blocks(None)?;
+                for p in g.prefabs()? {
+                    others.extend(g.prefab_parts(p.id)?.into_iter().map(|mut x| {
+                        x.id = format!("prefab {}: {}", p.id, x.id);
+                        x
+                    }));
+                }
+                Ok(others
                     .iter()
                     .any(|o| o.id != b.id && o.t.wire.is_some_and(|r| r.entry == entry)))
             };
@@ -130,7 +151,7 @@ struct Report {
 /// the blocks listening for a signal by this name, in address order
 fn listeners(g: &Graph, name: &str) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
-    for b in g.blocks(None)? {
+    for b in g.world_blocks()? {
         if let Some(w) = wiring_of(g, &b)?
             && w.on.contains(&Event::Signal)
             && w.signal == name
@@ -179,6 +200,14 @@ fn act(
                 return Ok(false);
             };
             let tex = super::blocks::texture(g, kind, tex)?;
+            // a part shows it in its copy only, under the same address
+            if crate::graph::prefabs::is_part(id) {
+                g.retexture_part(id, kind, &tex)?;
+                if !r.changed.contains(id) {
+                    r.changed.push(id.clone());
+                }
+                return Ok(true);
+            }
             if kind != b.kind || tex != b.texture {
                 g.delete_blocks(std::slice::from_ref(id))?;
                 let new = g.add_blocks(&[(kind, tex, b.t)])?.swap_remove(0);
@@ -309,7 +338,7 @@ fn fire(g: &Graph, id: &str, event: Event, from: &str, shared: bool) -> Result<R
             let b = g.block(&id)?.ok_or("the block went")?;
             let from_at = [b.t.x, b.t.y, b.t.z];
             let hits: Vec<String> = if ray.targets.is_empty() {
-                let all = g.blocks(None)?;
+                let all = g.world_blocks()?;
                 let hits = wiring::cast(&b, &ray, &all);
                 r.rays.push(json!({ "from": from_at, "to": wiring::ray_end(&b, &ray, &hits), "hits": hits.iter().map(|h| &h.0).collect::<Vec<_>>() }));
                 let ids: Vec<String> = hits.into_iter().map(|h| h.0).collect();
@@ -322,11 +351,22 @@ fn fire(g: &Graph, id: &str, event: Event, from: &str, shared: bool) -> Result<R
                 ids
             } else {
                 let mut ids = Vec::new();
+                // a part's target inside its prefab is that part of its own copy
+                let copy = crate::graph::prefabs::split_part(&id).map(|(c, _)| c.to_string());
                 for t in &ray.targets {
-                    if let Some(tb) = g.block(t)? {
+                    let inside = copy.as_ref().map(|c| format!("{c}/{t}"));
+                    let found = match &inside {
+                        Some(i) => g.block(i)?.map(|b| (i.clone(), b)),
+                        None => None,
+                    };
+                    let found = match found {
+                        Some(f) => Some(f),
+                        None => g.block(t)?.map(|b| (t.clone(), b)),
+                    };
+                    if let Some((t, tb)) = found {
                         r.rays
                             .push(json!({ "from": from_at, "to": [tb.t.x, tb.t.y, tb.t.z], "hits": [t] }));
-                        ids.push(t.clone());
+                        ids.push(t);
                     }
                 }
                 ids
@@ -356,7 +396,7 @@ pub fn call(g: &Graph, op: &str, args: &Value, shared: bool) -> Res {
         // the wired blocks: `[{id, key, wiring}]`
         "wiring.list" => {
             let mut out = Vec::new();
-            for b in g.blocks(None)? {
+            for b in g.world_blocks()? {
                 if let Some(w) = wiring_of(g, &b)? {
                     out.push(json!({ "id": b.id, "key": b.t.wire.map(|r| record::label(r.entry)), "wiring": w }));
                 }
