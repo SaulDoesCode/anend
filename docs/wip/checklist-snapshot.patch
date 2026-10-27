@@ -1,0 +1,802 @@
+diff --git a/app/src/style.css b/app/src/style.css
+index 8e0e3bc..ad5bddf 100644
+--- a/app/src/style.css
++++ b/app/src/style.css
+@@ -972,3 +972,15 @@ input.tax-about { width: 100%; }
+ .rrow h3 { margin: 0; font-size: 1em; }
+ .rrow .body { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ .view-title { font-style: italic; }
++
++/* ---------------------------------------------------------------- tag sets */
++.chip.ts-type { background: color-mix(in srgb, var(--c) 30%, var(--cards)); box-shadow: inset 3px 0 0 var(--c); }
++.swatch-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
++.ts-words { display: flex; flex-wrap: wrap; gap: 6px 4px; padding: 8px 0; align-items: flex-start; }
++.ts-word { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; }
++.ts-word > button.plain { display: inline-flex; flex-direction: column; align-items: center; height: auto; padding: 2px 6px; border-radius: var(--radius); border-bottom: 3px solid var(--c); }
++.ts-word .w { font-size: 1.15em; }
++.ts-word .l { font-size: 11px; color: var(--dim); }
++.ts-word.flagged .w { text-decoration: underline wavy #d6453d; }
++.ts-pick, .ts-suggest { display: flex; gap: 3px; flex-wrap: wrap; justify-content: center; }
++.row.wrap { flex-wrap: wrap; }
+diff --git a/app/src/views/classifiers.rs b/app/src/views/classifiers.rs
+index 2e6f11c..a0ef7c8 100644
+--- a/app/src/views/classifiers.rs
++++ b/app/src/views/classifiers.rs
+@@ -48,11 +48,13 @@ pub fn Models() -> Element {
+     let mut chosen: Signal<Option<String>> = use_signal(|| None);
+     let mut side = use_signal(|| Side::None);
+     let mut rev = use_signal(|| 0u64);
+-    // the classifiers (0), the spec models (1) or the taxonomies (2)
++    // the classifiers (0), the spec models (1), the taxonomies (2) or the tag sets (3)
+     let mut tab = use_signal(|| {
+         let p = ui.prefs.peek();
+-        if p.folded("models: taxonomies") {
+-            2u8
++        if p.folded("models: tagsets") {
++            3u8
++        } else if p.folded("models: taxonomies") {
++            2
+         } else if p.folded("models: specs") {
+             1
+         } else {
+@@ -70,6 +72,9 @@ pub fn Models() -> Element {
+         async move { api.models().await }
+     });
+     use_keys(View::Models, move |k: KeyPress| {
++        if *tab.peek() == 3 {
++            return false;
++        }
+         if *tab.peek() == 2 {
+             if k.bar && k.key == "Enter" {
+                 let n = tax_bar.peek().0 + 1;
+@@ -133,7 +138,7 @@ pub fn Models() -> Element {
+         div { class: "page wide",
+             div { class: "row",
+                 div { class: "mtabs", role: "tablist", "aria-label": "kinds of model",
+-                    for (on , label) in [(0u8, "classifiers"), (1, "spec models"), (2, "taxonomies")] {
++                    for (on , label) in [(0u8, "classifiers"), (1, "spec models"), (2, "taxonomies"), (3, "tag sets")] {
+                         button { key: "{label}", role: "tab", "aria-selected": "{tab() == on}",
+                             class: if tab() == on { "mtab on" } else { "mtab" },
+                             onclick: move |_| {
+@@ -141,9 +146,11 @@ pub fn Models() -> Element {
+                                 crate::shell::set_pref(ui, |p| {
+                                     p.collapsed.remove("models: specs");
+                                     p.collapsed.remove("models: taxonomies");
++                                    p.collapsed.remove("models: tagsets");
+                                     match on {
+                                         1 => { p.collapsed.insert("models: specs".into()); }
+                                         2 => { p.collapsed.insert("models: taxonomies".into()); }
++                                        3 => { p.collapsed.insert("models: tagsets".into()); }
+                                         _ => {}
+                                     }
+                                 });
+@@ -151,7 +158,9 @@ pub fn Models() -> Element {
+                             "{label}" }
+                     }
+                 }
+-                if tab() == 2 {
++                if tab() == 3 {
++                    span { class: "dim small", "word types of your own, learned from words you mark" }
++                } else if tab() == 2 {
+                     span { class: "dim small", "classifiers in a tree: each answer picks the next classifier" }
+                 } else if specs_tab() {
+                     span { class: "dim small", "described as data: what they read, their heads, what they learn from" }
+@@ -170,7 +179,9 @@ pub fn Models() -> Element {
+                     Icon { name: "upload" } "import" }
+                 }
+             }
+-            if tab() == 2 {
++            if tab() == 3 {
++                crate::views::tagsets::TagSets {}
++            } else if tab() == 2 {
+                 crate::views::taxonomy::Taxonomies { bar: tax_bar }
+             } else if specs_tab() {
+                 crate::views::specs::SpecModels { state: specs }
+diff --git a/app/src/views/memory.rs b/app/src/views/memory.rs
+index 8d82cf2..b9f35df 100644
+--- a/app/src/views/memory.rs
++++ b/app/src/views/memory.rs
+@@ -615,7 +615,8 @@ pub(crate) fn TaggedText(
+     #[props(default)]
+     ruby: bool,
+ ) -> Element {
+-    let tags = anend_core::kinds::tag(&text);
++    // English types only on English (other languages get their own tag sets)
++    let tags = if anend_core::kinds::looks_english(&text) { anend_core::kinds::tag(&text) } else { vec![] };
+     let mut parts: Vec<(String, Option<&'static str>)> = Vec::new();
+     let mut at = 0;
+     for t in &tags {
+@@ -655,7 +656,7 @@ pub(crate) fn TaggedText(
+ #[component]
+ fn TypesLegend(texts: Vec<String>) -> Element {
+     let mut counts: std::collections::BTreeMap<usize, (&'static str, usize)> = Default::default();
+-    for t in &texts {
++    for t in texts.iter().filter(|t| anend_core::kinds::looks_english(t)) {
+         for w in anend_core::kinds::tag(t) {
+             let i = anend_core::kinds::WORD_TYPES
+                 .iter()
+diff --git a/app/src/views/mod.rs b/app/src/views/mod.rs
+index c60fb53..c196e79 100644
+--- a/app/src/views/mod.rs
++++ b/app/src/views/mod.rs
+@@ -20,6 +20,7 @@ pub mod space;
+ pub mod specs;
+ pub mod stats;
+ pub mod tags;
++pub mod tagsets;
+ pub mod taxonomy;
+ 
+ use dioxus::prelude::*;
+diff --git a/app/src/views/tagsets.rs b/app/src/views/tagsets.rs
+new file mode 100644
+index 0000000..76f9fb6
+--- /dev/null
++++ b/app/src/views/tagsets.rs
+@@ -0,0 +1,412 @@
++//! Tag sets (queued requests #13, #10; `tagsets.*` in docs/app-api.md): word types of
++//! one's own, the models view's fourth tab. A set's page shows its types and their
++//! colours, how many words each has marked, how well it reads words it didn't train on
++//! (precision and recall per type), and a try card: a text's words labelled by the set,
++//! where clicking a word picks its right type (which marks it, and teaches the set when it
++//! is trained). A checker set marks words right or wrong and offers the nearest right
++//! words for a wrong one. The built-in English set is shown read-only.
++
++use dioxus::prelude::*;
++use serde_json::{Value, json};
++
++use crate::ui::*;
++use crate::views::classifiers::pct;
++
++const PALETTE: [&str; 8] = ["#e07a3f", "#3f7ae0", "#3fae6a", "#b05cc8", "#d6453d", "#c9a227", "#2bb3b1", "#8a6d5a"];
++
++#[component]
++pub fn TagSets() -> Element {
++    let ui = ui();
++    let api = api();
++    let mut chosen: Signal<Option<String>> = use_signal(|| None);
++    let mut making = use_signal(|| false);
++    let mut rev = use_signal(|| 0u64);
++    let list = use_resource(move || {
++        let api = api.clone();
++        let _ = ((ui.changed)(), rev());
++        async move { api.call("tagsets.list", json!({})).await }
++    });
++    let (items, note): (Vec<Value>, Option<String>) = match &*list.read() {
++        Some(Ok(v)) => (v.as_array().cloned().unwrap_or_default(), None),
++        Some(Err(e)) => (vec![], Some(e.clone())),
++        None => (vec![], None),
++    };
++    let open = chosen().unwrap_or_else(|| "english".to_string());
++    let current = items.iter().find(|t| t["builtin"] == true && open == "english" || t["set"]["name"] == open.as_str()).cloned();
++    rsx! {
++        if let Some(n) = note {
++            div { class: "card bad", "{n}" }
++        }
++        div { class: "cls-layout",
++            div { class: "card cls-list", role: "listbox", "aria-label": "tag sets",
++                button { class: if making() { "cls-item on" } else { "cls-item" }, onclick: move |_| making.set(!making()),
++                    b { Icon { name: "new" } " new" } }
++                for t in items.iter().cloned() {
++                    {
++                        let builtin = t["builtin"] == true;
++                        let name = if builtin { "english".to_string() } else { t["set"]["name"].as_str().unwrap_or("").to_string() };
++                        let on = !making() && open == name;
++                        let sub = if builtin {
++                            "by rule, on English".to_string()
++                        } else if t["set"]["check"] == true {
++                            "a checker: right or wrong".to_string()
++                        } else {
++                            t["set"]["types"].as_array().into_iter().flatten().filter_map(|x| x["name"].as_str()).collect::<Vec<_>>().join(" · ")
++                        };
++                        rsx! {
++                            button { key: "{name}", role: "option", "aria-selected": "{on}", class: if on { "cls-item on" } else { "cls-item" },
++                                onclick: { let n = name.clone(); move |_| { chosen.set(Some(n.clone())); making.set(false); } },
++                                b { "{name}" }
++                                span { class: "small", "{sub}" }
++                            }
++                        }
++                    }
++                }
++            }
++            div { class: "cls-main",
++                if making() {
++                    SetEditor { set: Value::Null, on_saved: move |n: String| { making.set(false); chosen.set(Some(n)); rev += 1; } }
++                } else if let Some(t) = current {
++                    if t["builtin"] == true {
++                        English { types: crate::views::classifiers::strs(&t["types"]) }
++                    } else {
++                        SetPage { key: "{open}", set: t["set"].clone(), on_changed: move |_| rev += 1, on_gone: move |_| { chosen.set(None); rev += 1; } }
++                    }
++                }
++            }
++        }
++    }
++}
++
++#[component]
++fn English(types: Vec<String>) -> Element {
++    rsx! {
++        div { class: "card",
++            h3 { "english" span { class: "dim small", " built in" } }
++            p { "Word types by rule, for texts that read as English (most of their words are English ones). The memory view's word types (T) use it. Texts in other languages get no English types; make a tag set for them, and say which texts it's for." }
++            div { class: "row wrap",
++                for t in types { span { key: "{t}", class: "tw t-{t}", b { "{t}" } } }
++            }
++        }
++    }
++}
++
++/// a new set, or a set's types, threshold and which texts it's for
++#[component]
++fn SetEditor(set: Value, on_saved: EventHandler<String>) -> Element {
++    let ui = ui();
++    let api = api();
++    let fresh = set.is_null();
++    let mut draft = use_signal(|| {
++        if set.is_null() {
++            json!({ "name": "", "types": [
++                { "name": "", "colour": PALETTE[0] }, { "name": "", "colour": PALETTE[1] }
++            ], "check": false, "threshold": 0.5 })
++        } else {
++            set.clone()
++        }
++    });
++    let api_c = api.clone();
++    let models = use_resource(move || {
++        let api = api_c.clone();
++        async move { api.models().await.unwrap_or_default() }
++    });
++    let models = models.read().clone().unwrap_or_default();
++    let d = draft();
++    let check = d["check"] == true;
++    let types: Vec<Value> = d["types"].as_array().cloned().unwrap_or_default();
++    let ft_cls = d["for_texts"]["classifier"].as_str().unwrap_or("").to_string();
++    let ft_class = d["for_texts"]["class"].as_str().unwrap_or("").to_string();
++    let classes: Vec<String> = models.iter().find(|m| m.name == ft_cls).map(|m| m.classes.clone()).unwrap_or_default();
++    let was = set["name"].as_str().unwrap_or("").to_string();
++    rsx! {
++        div { class: "card cls-new",
++            h3 { Icon { name: "new" } if fresh { "a new tag set" } else { "its types" } }
++            div { class: "form",
++                if fresh {
++                    label { r#for: "ts-name", "name" }
++                    input { r#type: "text", id: "ts-name", placeholder: "elvish, sacred words…", value: "{d[\"name\"].as_str().unwrap_or(\"\")}",
++                        oninput: move |e| draft.write()["name"] = json!(e.value()) }
++                    label { "kind" }
++                    div { class: "row",
++                        button { class: if !check { "chip on" } else { "chip" }, onclick: move |_| draft.write()["check"] = json!(false), "word types" }
++                        button { class: if check { "chip on" } else { "chip" }, "data-tip": "for a language of one's own: words marked right or wrong, wrong ones flagged with suggestions",
++                            onclick: move |_| draft.write()["check"] = json!(true), "a checker" }
++                    }
++                }
++                if !check {
++                    label { "types" }
++                    div { class: "col",
++                        for (i , t) in types.iter().cloned().enumerate() {
++                            div { key: "{i}", class: "row",
++                                input { r#type: "color", "aria-label": "its colour", value: "{t[\"colour\"].as_str().unwrap_or(\"#888888\")}",
++                                    oninput: move |e| draft.write()["types"][i]["colour"] = json!(e.value()) }
++                                input { r#type: "text", "aria-label": "the type's name", placeholder: "a type", value: "{t[\"name\"].as_str().unwrap_or(\"\")}",
++                                    oninput: move |e| draft.write()["types"][i]["name"] = json!(e.value()) }
++                                input { r#type: "text", class: "grow", "aria-label": "what it is", placeholder: "what it is (optional)", value: "{t[\"about\"].as_str().unwrap_or(\"\")}",
++                                    oninput: move |e| draft.write()["types"][i]["about"] = json!(e.value()) }
++                                if types.len() > 2 {
++                                    button { class: "plain ibtn", "aria-label": "remove it", onclick: move |_| { if let Some(a) = draft.write()["types"].as_array_mut() { a.remove(i); } }, Icon { name: "close" } }
++                                }
++                            }
++                        }
++                        button { class: "plain", onclick: move |_| {
++                                let n = draft.peek()["types"].as_array().map(|a| a.len()).unwrap_or(0);
++                                if let Some(a) = draft.write()["types"].as_array_mut() { a.push(json!({ "name": "", "colour": PALETTE[n % PALETTE.len()] })); }
++                            }, Icon { name: "new" } "a type" }
++                    }
++                }
++                label { "for texts" }
++                div { class: "row wrap",
++                    select { "aria-label": "the classifier that says which texts", value: "{ft_cls}",
++                        onchange: move |e| { let v = e.value(); if v.is_empty() { if let Some(o) = draft.write().as_object_mut() { o.remove("for_texts"); } } else { draft.write()["for_texts"] = json!({ "classifier": v, "class": "" }); } },
++                        option { value: "", selected: ft_cls.is_empty(), "any text I pick it for" }
++                        for m in models.iter() { option { key: "{m.name}", value: "{m.name}", selected: m.name == ft_cls, "{m.name} says…" } }
++                    }
++                    if !ft_cls.is_empty() {
++                        select { "aria-label": "the class", value: "{ft_class}",
++                            onchange: move |e| draft.write()["for_texts"]["class"] = json!(e.value()),
++                            option { value: "", "which class…" }
++                            for c in classes { option { key: "{c}", value: "{c}", selected: c == ft_class, "{c}" } }
++                        }
++                    }
++                }
++                label { r#for: "ts-th", "show a type from" }
++                div { class: "row",
++                    input { r#type: "range", id: "ts-th", min: "0", max: "1", step: "0.05", value: "{d[\"threshold\"].as_f64().unwrap_or(0.5)}",
++                        oninput: move |e| draft.write()["threshold"] = json!(e.value().parse::<f64>().unwrap_or(0.5)) }
++                    span { class: "dim small", {format!("{} sure", pct(d["threshold"].as_f64().unwrap_or(0.5)))} }
++                }
++            }
++            div { class: "row",
++                button { class: "primary",
++                    onclick: move |_| {
++                        let api = api.clone();
++                        let mut set = draft();
++                        if let Some(a) = set["types"].as_array_mut() {
++                            a.retain(|t| !t["name"].as_str().unwrap_or("").trim().is_empty());
++                        }
++                        let mut args = json!({ "set": set });
++                        if fresh { args["new"] = json!(true); } else { args["was"] = json!(was.clone()); }
++                        spawn(async move {
++                            match api.call("tagsets.save", args).await {
++                                Ok(v) => {
++                                    ui.say("saved: mark some words of each type in the try card, then train it");
++                                    on_saved.call(v["set"]["name"].as_str().unwrap_or("").to_string());
++                                }
++                                Err(e) => ui.fail(e),
++                            }
++                        });
++                    },
++                    Icon { name: "save" } if fresh { "make it" } else { "save" } }
++            }
++        }
++    }
++}
++
++#[component]
++fn SetPage(set: Value, on_changed: EventHandler<()>, on_gone: EventHandler<()>) -> Element {
++    let ui = ui();
++    let api = api();
++    let name = set["name"].as_str().unwrap_or("").to_string();
++    let mut rev = use_signal(|| 0u64);
++    let mut editing = use_signal(|| false);
++    let mut sure = use_signal(|| false);
++    let (api_s, n_s) = (api.clone(), name.clone());
++    let score = use_resource(move || {
++        let (api, n) = (api_s.clone(), n_s.clone());
++        let _ = ((ui.changed)(), rev());
++        async move { api.call("tagsets.score", json!({ "name": n })).await }
++    });
++    let sc = score.read().clone().and_then(|r| r.ok()).unwrap_or(Value::Null);
++    let training = sc["training"] == true;
++    // while it trains, look again now and then
++    use_future(move || async move {
++        loop {
++            crate::ui::sleep_ms(1500).await;
++            if score.peek().as_ref().and_then(|r| r.as_ref().ok()).is_some_and(|v| v["training"] == true) {
++                rev += 1;
++            }
++        }
++    });
++    let colour = |ty: &str| {
++        set["types"].as_array().into_iter().flatten().find(|t| t["name"] == ty).and_then(|t| t["colour"].as_str()).unwrap_or("#888").to_string()
++    };
++    let check = set["check"] == true;
++    let (api_t, n_t) = (api.clone(), name.clone());
++    let train = move |_| {
++        let (api, n) = (api_t.clone(), n_t.clone());
++        spawn(async move {
++            match api.call("tagsets.train", json!({ "name": n })).await {
++                Ok(_) => { ui.say("training: it reads its marked words, and how well it reads unseen ones shows here"); rev += 1; }
++                Err(e) => ui.fail(e),
++            }
++        });
++    };
++    let (api_d, n_d) = (api.clone(), name.clone());
++    rsx! {
++        div { class: "cls-page",
++            div { class: "card cls-head",
++                div { class: "row",
++                    h2 { "{name}" }
++                    for t in set["types"].as_array().cloned().unwrap_or_default() {
++                        span { key: "{t[\"name\"]}", class: "chip ts-type", style: "--c: {t[\"colour\"].as_str().unwrap_or(\"#888\")};", title: "{t[\"about\"].as_str().unwrap_or(\"\")}", "{t[\"name\"].as_str().unwrap_or(\"\")}" }
++                    }
++                    span { class: "grow" }
++                    button { class: if editing() { "on" } else { "" }, onclick: move |_| editing.set(!editing()), Icon { name: "edit" } "types" }
++                    button { class: if sure() { "danger" } else { "" },
++                        onclick: move |_| {
++                            if !sure() { sure.set(true); return; }
++                            let (api, n) = (api_d.clone(), n_d.clone());
++                            spawn(async move {
++                                match api.call("tagsets.delete", json!({ "name": n })).await {
++                                    Ok(_) => { ui.say("deleted the set and its classifier (the marked words' lists stay)"); on_gone.call(()); }
++                                    Err(e) => ui.fail(e),
++                                }
++                            });
++                        },
++                        Icon { name: "delete" } if sure() { "sure? delete" } else { "delete" } }
++                }
++                if let Some(f) = set["for_texts"].as_object() {
++                    span { class: "dim small", {format!("for texts {} puts in {}", f.get("classifier").or(f.get("taxonomy")).and_then(|x| x.as_str()).unwrap_or(""), f.get("class").and_then(|x| x.as_str()).unwrap_or(""))} }
++                } else {
++                    span { class: "dim small", "for any text it's picked for" }
++                }
++            }
++            if editing() {
++                SetEditor { set: set.clone(), on_saved: move |_| { editing.set(false); on_changed.call(()); rev += 1; } }
++            }
++            div { class: "card",
++                h3 { Icon { name: "classifier" } "how it reads"
++                    span { class: "grow" }
++                    button { class: "primary", disabled: training, onclick: train, Icon { name: "play" } if training { "training…" } else if sc["trained"] == true { "train again" } else { "train it" } }
++                }
++                table { class: "confusion",
++                    thead { tr { th { "type" } th { "words marked" } th { "precision" } th { "recall" } } }
++                    tbody {
++                        for m in sc["marked"].as_array().cloned().unwrap_or_default() {
++                            {
++                                let ty = m["type"].as_str().unwrap_or("").to_string();
++                                let st = sc["types"].as_array().into_iter().flatten().find(|x| x["type"] == ty.as_str()).cloned().unwrap_or(Value::Null);
++                                let some: Vec<String> = crate::views::classifiers::strs(&m["some"]);
++                                rsx! {
++                                    tr { key: "{ty}",
++                                        th { span { class: "swatch-dot", style: "background: {colour(&ty)};" } " {ty}" }
++                                        td { title: "{some.join(\", \")}", "{m[\"words\"]}" }
++                                        td { {st["precision"].as_f64().map(pct).unwrap_or_else(|| "—".into())} }
++                                        td { {st["recall"].as_f64().map(pct).unwrap_or_else(|| "—".into())} }
++                                    }
++                                }
++                            }
++                        }
++                    }
++                }
++                p { class: "dim small",
++                    if let Some(a) = sc["accuracy"].as_f64() { {format!("{} right on words it didn't train on ({})", pct(a), sc["measured_on"].as_str().unwrap_or(""))} }
++                    else { "Mark two words or more of each type in the try card, then train it." }
++                }
++            }
++            TryTags { name: name.clone(), set: set.clone(), check, on_marked: move |_| rev += 1 }
++        }
++    }
++}
++
++/// a text's words as the set labels them; clicking a word picks its right type
++#[component]
++fn TryTags(name: String, set: Value, check: bool, on_marked: EventHandler<()>) -> Element {
++    let ui = ui();
++    let api = api();
++    let mut text = use_signal(String::new);
++    let mut got: Signal<Option<Value>> = use_signal(|| None);
++    let mut picking: Signal<Option<usize>> = use_signal(|| None);
++    let tag = {
++        let (api, name) = (api.clone(), name.clone());
++        move || {
++            let (api, name) = (api.clone(), name.clone());
++            let t = text.peek().clone();
++            if t.trim().is_empty() {
++                return;
++            }
++            spawn(async move {
++                match api.call("tagsets.tag", json!({ "name": name, "text": t })).await {
++                    Ok(v) => { picking.set(None); got.set(Some(v)); }
++                    Err(e) => { got.set(None); ui.fail(e) }
++                }
++            });
++        }
++    };
++    let types: Vec<(String, String)> = set["types"]
++        .as_array()
++        .into_iter()
++        .flatten()
++        .map(|t| (t["name"].as_str().unwrap_or("").to_string(), t["colour"].as_str().unwrap_or("#888").to_string()))
++        .collect();
++    let words: Vec<Value> = got().and_then(|v| v["words"].as_array().cloned()).unwrap_or_default();
++    rsx! {
++        div { class: "card",
++            h3 { Icon { name: "text" } "try a text" span { class: "dim small", " click a word to say which type it is" } }
++            div { class: "row",
++                input { r#type: "text", class: "grow", "aria-label": "a text to tag", placeholder: "a text in the set's language", value: "{text}",
++                    oninput: move |e| text.set(e.value()),
++                    onkeydown: { let tag = tag.clone(); move |e: KeyboardEvent| if e.key() == Key::Enter { tag() } } }
++                button { onclick: { let tag = tag.clone(); move |_| tag() }, Icon { name: "play" } "tag it" }
++            }
++            div { class: "ts-words",
++                for (i , w) in words.iter().cloned().enumerate() {
++                    {
++                        let word = w["word"].as_str().unwrap_or("").to_string();
++                        let ty = w["type"].as_str().map(String::from);
++                        let c = w["colour"].as_str().unwrap_or("transparent").to_string();
++                        let suggest = crate::views::classifiers::strs(&w["suggest"]);
++                        rsx! {
++                            span { key: "{i}", class: if check && ty.as_deref() == Some("wrong") { "ts-word flagged" } else { "ts-word" },
++                                button { class: "plain", style: "--c: {c};", "aria-label": "{word}: say which type",
++                                    title: {format!("{} · {}", ty.clone().unwrap_or_else(|| "no type".into()), pct(w["prob"].as_f64().unwrap_or(0.0)))},
++                                    onclick: move |_| picking.set(if picking() == Some(i) { None } else { Some(i) }),
++                                    span { class: "w", "{word}" }
++                                    span { class: "l", {ty.clone().unwrap_or_else(|| "?".into())} }
++                                }
++                                if !suggest.is_empty() {
++                                    span { class: "ts-suggest",
++                                        for s in suggest {
++                                            button { key: "{s}", class: "chip", "data-tip": "use it",
++                                                onclick: { let (s, word, tag) = (s.clone(), word.clone(), tag.clone()); move |_| { let t = text.peek().replacen(&word, &s, 1); text.set(t); tag(); } },
++                                                "{s}" }
++                                        }
++                                    }
++                                }
++                                if picking() == Some(i) {
++                                    span { class: "ts-pick",
++                                        for (tn , tc) in types.iter().cloned() {
++                                            button { key: "{tn}", class: "chip ts-type", style: "--c: {tc};",
++                                                onclick: {
++                                                    let (api, name, word, tag, tn) = (api.clone(), name.clone(), word.clone(), tag.clone(), tn.clone());
++                                                    move |_| {
++                                                        let (api, name, word, tag, tn) = (api.clone(), name.clone(), word.clone(), tag.clone(), tn.clone());
++                                                        spawn(async move {
++                                                            match api.call("tagsets.mark", json!({ "name": name, "word": word, "type": tn })).await {
++                                                                Ok(v) => {
++                                                                    ui.say(if v["taught"] == true { format!("“{word}” is {tn}: marked, and the set was told") } else { format!("“{word}” is {tn}: marked (train it to learn from the marks)") });
++                                                                    on_marked.call(());
++                                                                    tag();
++                                                                }
++                                                                Err(e) => ui.fail(e),
++                                                            }
++                                                        });
++                                                    }
++                                                },
++                                                "{tn}" }
++                                        }
++                                    }
++                                }
++                            }
++                        }
++                    }
++                }
++            }
++            if got().is_some() && words.is_empty() {
++                p { class: "dim small", "no words" }
++            }
++        }
++    }
++}
+diff --git a/core/src/graph/record.rs b/core/src/graph/record.rs
+index 70c406c..e4ab0e5 100644
+--- a/core/src/graph/record.rs
++++ b/core/src/graph/record.rs
+@@ -33,13 +33,15 @@ pub mod mime {
+     pub const TAXONOMY: u16 = 11;
+     /// a pipe: its text the pipe's JSON, a filter and its effects (`ops::pipes`)
+     pub const PIPE: u16 = 12;
++    /// a tag set: its text the set's JSON, word types of one's own (`ops::tagsets`)
++    pub const TAGSET: u16 = 13;
+ 
+     /// entries that are a block's data rather than texts: left out of search and counts
+     pub fn hidden(m: u16) -> bool {
+-        m == ANIMATION || m == WIRING || m == TAXONOMY || m == PIPE
++        m == ANIMATION || m == WIRING || m == TAXONOMY || m == PIPE || m == TAGSET
+     }
+ 
+-    pub const NAMES: [&str; 13] = [
++    pub const NAMES: [&str; 14] = [
+         "text/plain",
+         "text/markdown",
+         "application/x-anend-fn",
+@@ -53,6 +55,7 @@ pub mod mime {
+         "application/x-anend-wiring",
+         "application/x-anend-taxonomy",
+         "application/x-anend-pipe",
++        "application/x-anend-tagset",
+     ];
+ 
+     pub fn builtin(name: &str) -> Option<u16> {
+diff --git a/core/src/kinds.rs b/core/src/kinds.rs
+index 58fc43c..dec753b 100644
+--- a/core/src/kinds.rs
++++ b/core/src/kinds.rs
+@@ -1034,6 +1034,54 @@ pub fn tag(text: &str) -> Vec<Tagged> {
+     out
+ }
+ 
++/// whether a word is English: the bundled lexicon's (`grammar`), or in the browser, where
++/// the lexicon isn't built in, the word lists the types are told by
++#[cfg(not(target_arch = "wasm32"))]
++fn in_lexicon(w: &str) -> bool {
++    crate::grammar::is_word(w)
++}
++
++#[cfg(target_arch = "wasm32")]
++fn in_lexicon(w: &str) -> bool {
++    [PREPOSITIONS, CONJUNCTIONS, AUXILIARIES, VERBS, ADJECTIVES, ADVERBS, NUMBER_WORDS, INTERJECTIONS]
++        .iter()
++        .any(|l| l.contains(&w))
++        || by_form(w).is_some()
++}
++
++/// whether a text reads as English: most of its words (60 %) are in the bundled English
++/// lexicon (or are capitalised, as names are), and a text of four words or more has one of
++/// English's commonest words. Word types by English rules are only given
++/// to texts that do, so other languages aren't labelled as though they were English.
++pub fn looks_english(text: &str) -> bool {
++    let words: Vec<&str> = text
++        .split(|c: char| !c.is_alphabetic() && c != '\'')
++        .map(|w| w.trim_matches('\''))
++        .filter(|w| !w.is_empty())
++        .take(200)
++        .collect();
++    if words.is_empty() {
++        return true;
++    }
++    let known = words
++        .iter()
++        .filter(|w| {
++            let l = w.to_lowercase();
++            in_lexicon(&l)
++                || PRONOUNS.contains(&l.as_str())
++                || DETERMINERS.contains(&l.as_str())
++                || w.chars().next().is_some_and(char::is_uppercase)
++        })
++        .count();
++    // a sentence of English (four words or more) has some of its commonest words
++    const COMMON: [&str; 32] = [
++        "the", "a", "an", "of", "to", "in", "is", "are", "was", "were", "and", "or", "it", "that", "for", "on",
++        "with", "as", "at", "by", "i", "you", "he", "she", "we", "they", "this", "be", "have", "not", "my", "his",
++    ];
++    let common = words.len() < 4 || words.iter().any(|w| COMMON.contains(&w.to_lowercase().as_str()));
++    common && known * 10 >= words.len() * 6
++}
++
+ /// each word of a text and its type ([`tag`])
+ pub fn word_types(text: &str) -> Vec<(String, &'static str)> {
+     tag(text).into_iter().map(|t| (t.word, t.ty)).collect()
+diff --git a/core/src/ops/classify.rs b/core/src/ops/classify.rs
+index 0a5ed36..72ce9d4 100644
+--- a/core/src/ops/classify.rs
++++ b/core/src/ops/classify.rs
+@@ -790,6 +790,24 @@ pub fn call(store: Arc<Store>, op: &str, args: &Value, limits: &Limits) -> Res {
+             details(st, &def)
+         }
+         "classify.get" => details(st, &st.classifier(name_arg(args)?)?),
++        // how it trains from now on: the share of examples held out to stop early by
++        // (0 to 0.5), and how many evaluations without a better one it waits
++        "classify.set_train" => {
++            let name = name_arg(args)?;
++            not_training(st, &[name.to_string()])?;
++            let mut def = st.classifier(name)?;
++            if let Some(v) = args.get("val_fraction").and_then(Value::as_f64) {
++                if !(0.0..=0.5).contains(&v) {
++                    return Err("the share held out goes from 0 to 0.5".into());
++                }
++                def.train.val_fraction = v as f32;
++            }
++            if let Some(p) = args.get("patience").and_then(Value::as_u64) {
++                def.train.patience = (p as usize).clamp(1, 10_000);
++            }
++            st.put_classifier(&mut def, None)?;
++            details(st, &def)
++        }
+         "classify.delete" => {
+             let name = name_arg(args)?;
+             not_training(st, &[name.to_string()])?;
+diff --git a/core/src/ops/mod.rs b/core/src/ops/mod.rs
+index 6afb588..cc981d4 100644
+--- a/core/src/ops/mod.rs
++++ b/core/src/ops/mod.rs
+@@ -28,6 +28,8 @@ pub mod script;
+ #[cfg(not(target_arch = "wasm32"))]
+ pub mod sounds;
+ #[cfg(not(target_arch = "wasm32"))]
++pub mod tagsets;
++#[cfg(not(target_arch = "wasm32"))]
+ pub mod taxonomy;
+ pub mod templates;
+ pub mod texts;
+@@ -206,7 +208,7 @@ pub fn counts(v: &View) -> Result<(u64, u64), String> {
+     };
+     let notes = of(mime::MARKDOWN)?;
+     let tags = of(mime::TAG)?;
+-    let anims = of(mime::ANIMATION)? + of(mime::WIRING)? + of(mime::TAXONOMY)? + of(mime::PIPE)?;
++    let anims = of(mime::ANIMATION)? + of(mime::WIRING)? + of(mime::TAXONOMY)? + of(mime::PIPE)? + of(mime::TAGSET)?;
+     Ok((notes, all.saturating_sub(notes + tags + anims)))
+ }
+ 
+diff --git a/core/src/ops/models/tests.rs b/core/src/ops/models/tests.rs
+index 950c539..4c6217d 100644
+--- a/core/src/ops/models/tests.rs
++++ b/core/src/ops/models/tests.rs
+@@ -969,3 +969,92 @@ fn views_are_presets_and_programs() {
+     drop(ws);
+     let _ = std::fs::remove_dir_all(dir);
+ }
++
++/// tag sets: word types of one's own, learned from marked words; a checker; English only on English
++#[test]
++fn tag_sets_learn_marked_words() {
++    let dir = temp("tagsets");
++    let ws = Saves::new(&dir, "notes").with_models(Limits::NONE);
++    save(&ws);
++    let c = |op: &str, a: Value| ws.call(op, &a);
++    let lists = c("lists.stats", json!({})).unwrap()["lists"].clone();
++    let keys: Vec<Value> = lists.as_array().unwrap().iter().map(|l| l["list"].clone()).collect();
++    c("classify.create", json!({ "name": "sorter", "classes": keys, "preset": "tiny" })).unwrap();
++    c("classify.train", json!({ "name": "sorter", "epochs": 30, "wait": true })).unwrap();
++
++    // checked
++    let one = json!({ "name": "x", "types": [{ "name": "a", "colour": "#112233" }] });
++    assert!(c("tagsets.save", json!({ "set": one })).unwrap_err().contains("two types"));
++    let bad = json!({ "name": "english", "types": [{ "name": "a", "colour": "#112233" }, { "name": "b", "colour": "#112233" }] });
++    assert!(c("tagsets.save", json!({ "set": bad })).is_err());
++    let set = json!({
++        "name": "taste",
++        "types": [{ "name": "sweet", "colour": "#e0a03f" }, { "name": "tart", "colour": "#3fa0e0" }],
++        "for_texts": { "classifier": "sorter", "class": "fruit" },
++        "threshold": 0.0
++    });
++    let mut wrong_class = set.clone();
++    wrong_class["for_texts"]["class"] = json!("pebbles");
++    assert!(c("tagsets.save", json!({ "set": wrong_class })).unwrap_err().contains("no class"));
++    c("tagsets.save", json!({ "set": set, "new": true })).unwrap();
++    assert_eq!(c("tagsets.list", json!({})).unwrap().as_array().unwrap().len(), 2);
++
++    // training waits for words of each type
++    for w in ["banana", "mango", "peach", "melon"] {
++        c("tagsets.mark", json!({ "name": "taste", "word": w, "type": "sweet" })).unwrap();
++    }
++    assert!(c("tagsets.train", json!({ "name": "taste" })).unwrap_err().contains("as tart"));
++    for w in ["cherry", "plum", "grape", "apple"] {
++        c("tagsets.mark", json!({ "name": "taste", "word": w, "type": "tart" })).unwrap();
++    }
++    // a word moves between types
++    c("tagsets.mark", json!({ "name": "taste", "word": "apple", "type": "sweet" })).unwrap();
++    let sc = c("tagsets.score", json!({ "name": "taste" })).unwrap();
++    assert_eq!(sc["marked"][0]["words"], 5, "{sc}");
++    assert_eq!(sc["marked"][1]["words"], 3);
++    let j = c("tagsets.train", json!({ "name": "taste", "wait": true })).unwrap();
++    assert_eq!(j["state"], "done", "{j}");
++    let sc = c("tagsets.score", json!({ "name": "taste" })).unwrap();
++    assert_eq!(sc["trained"], true);
++    assert_eq!(sc["types"].as_array().unwrap().len(), 2, "{sc}");
++    // a mark on a trained set teaches it at once
++    let m = c("tagsets.mark", json!({ "name": "taste", "word": "plum", "type": "tart" })).unwrap();
++    assert_eq!(m["taught"], true);
++
++    // the set reads the texts it's for; English rules read English; other languages get none
++    let t = c("tagsets.tag", json!({ "text": "banana plum cherry" })).unwrap();
++    assert_eq!(t["set"], "taste", "{t}");
++    let ws3 = t["words"].as_array().unwrap();
++    assert_eq!(ws3.len(), 3);
++    assert!(ws3.iter().all(|w| w["type"] == "sweet" || w["type"] == "tart"), "{t}");
++    assert!(ws3[0]["colour"].as_str().unwrap().starts_with('#'));
++    let e = c("tagsets.tag", json!({ "text": "the granite stands tall" })).unwrap();
++    assert_eq!(e["set"], "english");
++    assert!(e["words"].as_array().unwrap().iter().any(|w| w["type"] == "noun"), "{e}");
++    let af = c("tagsets.tag", json!({ "text": "die hond loop vinnig na die huis toe" })).unwrap();
++    assert_eq!(af["english"], false);
++    assert_eq!(af["words"], json!([]));
++
++    // a checker: right and wrong, with the nearest right words for a wrong one
++    c("tagsets.save", json!({ "set": { "name": "elvish", "check": true, "types": [], "threshold": 0.0 }, "new": true })).unwrap();
++    for w in ["mellon", "galadh", "lasse", "aear", "elen"] {
++        c("tagsets.mark", json!({ "name": "elvish", "word": w, "type": "right" })).unwrap();
++    }
++    for w in ["melon", "galad", "lass", "ear", "eln"] {
++        c("tagsets.mark", json!({ "name": "elvish", "word": w, "type": "wrong" })).unwrap();
++    }
++    c("tagsets.train", json!({ "name": "elvish", "wait": true })).unwrap();
++    let k = c("tagsets.tag", json!({ "name": "elvish", "text": "mellon melon" })).unwrap();
++    assert_eq!(k["check"], true);
++    for w in k["words"].as_array().unwrap() {
++        if w["type"] == "wrong" {
++            assert!(w["suggest"].as_array().is_some(), "{k}");
++        }
++    }
++    assert!(k["words"].as_array().unwrap().iter().any(|w| w["type"] == "wrong" && w["suggest"][0] == "mellon") || k["words"][1]["type"] == "right", "{k}");
++
++    c("tagsets.delete", json!({ "name": "taste" })).unwrap();
++    assert!(c("classify.get", json!({ "name": "tags: taste" })).is_err());
++    drop(ws);
++    let _ = std::fs::remove_dir_all(dir);
++}
+diff --git a/core/src/ops/saves.rs b/core/src/ops/saves.rs
+index cbaabf9..436b721 100644
+--- a/core/src/ops/saves.rs
++++ b/core/src/ops/saves.rs
+@@ -523,6 +523,13 @@ impl Saves {
+             let (_, g) = self.current()?;
+             return super::pipes::call(self, &g, op, args);
+         }
++        if super::tagsets::routed(op) {
++            if self.models.is_none() {
++                return Err("these saves keep no models".into());
++            }
++            let (_, g) = self.current()?;
++            return super::tagsets::call(self, &g, op, args);
++        }
+         if super::taxonomy::routed(op) {
+             if self.models.is_none() {
+                 return Err("these saves keep no models".into());
