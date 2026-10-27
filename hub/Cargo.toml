@@ -6,11 +6,24 @@ description = "the anend hub: a self-hosted place to share anend saves"
 license-file = "../LICENSE"
 publish = false
 
+# What a build carries: `hub` (the sharing site: saves, classifiers, their API) and `app`
+# (the web app: members' workspaces and the app's API). Both by default; leave one out
+# with `--no-default-features --features hub` (or `app`). The accounts, the admin panel
+# and the database are in every build, so one data folder works with any of them.
+[features]
+default = ["hub", "app", "gpu", "fetch"]
+hub = []
+app = []
+# training and writing on the GPU (wgpu compute shaders, anend-core's `gpu`); a shared hub
+# still keeps its members on the CPU unless started with `--gpu`
+gpu = ["anend-core/gpu"]
+fetch = ["anend-core/fetch"]
+
 [dependencies]
 anend-core = { path = "../core" }
 futures-util = "0.3"
 rust-embed = "8"
-salvo = { version = "1.0", default-features = false, features = ["server", "http1", "cookie", "fix-http1-request-uri", "test", "websocket", "rustls", "ring"] }
+salvo = { version = "1.0", default-features = false, features = ["server", "http1", "cookie", "fix-http1-request-uri", "test", "websocket", "rustls", "ring", "server-handle"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "signal", "sync"] }
 redb = "4.3"
 serde = { version = "1", features = ["derive"] }
@@ -22,4 +35,4 @@ rand = "0.9"
 sha2 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["json"] }

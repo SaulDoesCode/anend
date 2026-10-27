@@ -12,6 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::device::Runner;
 use super::kernels as k;
 use super::model::{BlockT, HeadKind, Net, Trace};
 use super::pool::Pool;
@@ -163,6 +164,56 @@ impl Graph {
         (clf.read(&r.logits), r.pooled)
     }
 
+    /// `read_node` for many texts: each node reads every text before the next one
+    /// starts, on its runner's device when it has one (all the texts' windows packed),
+    /// else on the pool. The same values as `read_node` text by text, bit for bit on the
+    /// CPU and on a device the probe finds exact.
+    pub fn read_node_many(
+        &self,
+        node: usize,
+        texts: &[&str],
+        runners: &[Option<&Runner>],
+        pool: &Pool,
+    ) -> Vec<(Vec<Output>, Vec<f32>)> {
+        let need = self.needed(node);
+        let n = texts.len();
+        let mut outs: Vec<Vec<Option<Vec<Output>>>> = vec![vec![None; self.nodes.len()]; n];
+        let mut pooled: Vec<Vec<f32>> = vec![Vec::new(); n];
+        for i in 0..=node {
+            if !need[i] {
+                continue;
+            }
+            let clf = &self.nodes[i].clf;
+            let gains = clf.gains();
+            let xs: Vec<Vec<f32>> = outs.iter().map(|o| self.extra_from(i, o)).collect();
+            let runs: Vec<(Vec<Vec<f32>>, Vec<f32>)> = match runners.get(i).copied().flatten() {
+                Some(r) => {
+                    let bytes: Vec<&[u8]> = texts.iter().map(|t| t.as_bytes()).collect();
+                    let xr: Vec<&[f32]> = xs.iter().map(Vec::as_slice).collect();
+                    r.text_runs(&clf.net, &bytes, &xr, &gains)
+                }
+                None => {
+                    let slots: Vec<std::sync::Mutex<Option<_>>> = texts.iter().map(|_| Default::default()).collect();
+                    pool.run(n, &|t| {
+                        let r = clf.run(texts[t], &xs[t], &gains, None);
+                        *slots[t].lock().unwrap() = Some((r.logits, r.pooled));
+                    });
+                    slots.into_iter().map(|s| s.into_inner().unwrap().unwrap()).collect()
+                }
+            };
+            for (t, (logits, p)) in runs.into_iter().enumerate() {
+                outs[t][i] = Some(clf.read(&logits));
+                if i == node {
+                    pooled[t] = p;
+                }
+            }
+        }
+        outs.into_iter()
+            .zip(pooled)
+            .map(|(mut o, p)| (o.swap_remove(node).expect("computed"), p))
+            .collect()
+    }
+
     /// the extra inputs `node` gets for a text
     pub fn extra(&self, node: usize, text: &str) -> Vec<f32> {
         let outs = self.outputs(node, text);
@@ -191,7 +242,7 @@ impl Graph {
             }
             let clf = &self.nodes[i].clf;
             let x = self.extra_from(i, &outs);
-            let (trs, avg) = train::forward_text(&clf.net, text, &x, &clf.gains());
+            let (trs, avg) = train::forward_text(&clf.net, text.as_bytes(), &x, &clf.gains());
             let o = clf.read(&avg);
             outs[i] = Some(o.clone());
             runs[i] = Some((trs, x, avg, o));
@@ -363,6 +414,8 @@ impl Graph {
             target,
             weight: f.weight,
             extra: x,
+            raw: Vec::new(),
+            also: Vec::new(),
         };
         let m = &mut self.nodes[node].clf.meta;
         m.feedback

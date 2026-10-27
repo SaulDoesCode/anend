@@ -1,6 +1,7 @@
-//! The hub's web pages: the grid of saves, a save's page, sharing, joining and logging in,
-//! profiles with their levels and badges, the leaderboard and the admin panel. Pages are
-//! askama templates; forms post back and redirect with a one-line message in a cookie.
+//! The pages every mode has, and what they share: who's asking, the layout, joining and
+//! logging in, profiles (with levels and badges on a hub), app tokens, the admin panel,
+//! the static files. The hub's own pages are in saves.rs and clsweb.rs. Pages are askama
+//! templates; forms post back and redirect with a one-line message in a cookie.
 
 use askama::Template;
 use chrono::{DateTime, Utc};
@@ -12,9 +13,10 @@ use std::sync::OnceLock;
 
 use crate::auth;
 use crate::game;
-use crate::hub::{Details, Hub, Sort, human_size};
+use crate::hub::{Hub, Join, human_size};
 use crate::inspect;
-use crate::store::{Role, Save, Standing, Status, User, unhex};
+use crate::mode::Mode;
+use crate::store::{ClassifierRec, Role, Save, Standing, Status, User, Visibility, unhex};
 
 pub static HUB: OnceLock<Hub> = OnceLock::new();
 
@@ -23,6 +25,24 @@ pub fn hub() -> &'static Hub {
 }
 
 const FLASH: &str = "hub_flash";
+
+/// puts the router's mode where every handler can read it (`mode`)
+pub struct SetMode(pub Mode);
+
+#[handler]
+impl SetMode {
+    async fn handle(&self, depot: &mut Depot) {
+        depot.insert("mode", self.0);
+    }
+}
+
+/// what the server runs, for this request
+pub fn mode(depot: &Depot) -> Mode {
+    depot
+        .get::<Mode>("mode")
+        .copied()
+        .unwrap_or_else(|_| crate::mode::get())
+}
 
 // ------------------------------------------------------------------ who's asking
 
@@ -87,18 +107,17 @@ fn guard_headers(req: &Request, res: &mut Response) {
     h.insert("content-security-policy", HeaderValue::from_static(csp));
 }
 
-/// the web app's policy: its own scripts only; styles inline too (the editor's mirror and
-/// the views set them); pictures in notes from anywhere on the web; calls to the hub
-pub const APP_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' ws: wss:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
+/// the web app's policy: its own scripts, its WebAssembly, and what it builds in the page
+/// (Dioxus's interop evaluates JavaScript it sends; the space loads three.js from a blob);
+/// styles inline too (the views set them); pictures from anywhere on the web; calls to the hub
+pub const APP_CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' ws: wss:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
 
 /// loads the user behind the session cookie (or app token), turns away forms posted from
 /// other sites, and picks up the message left by the last redirect
 #[handler]
 pub async fn who_is_asking(req: &mut Request, depot: &mut Depot, res: &mut Response, ctrl: &mut FlowCtrl) {
     guard_headers(req, res);
-    if *crate::app::LOCAL.get().unwrap_or(&false)
-        && !local_host_ok(&req.header::<String>("host").unwrap_or_default(), &hub().config.url)
-    {
+    if mode(depot).local && !local_host_ok(&req.header::<String>("host").unwrap_or_default(), &hub().config.url) {
         res.status_code(StatusCode::FORBIDDEN);
         res.render(Text::Plain(
             "this hub runs with --local and only answers to localhost, an IP address or its --url",
@@ -256,6 +275,18 @@ pub struct Layout {
     pub flash_bad: bool,
     /// saves and people waiting for an admin
     pub waiting: usize,
+    /// the sharing site is served
+    pub hub_on: bool,
+    /// the web app is served
+    pub app_on: bool,
+    /// the web app alone, for one person, with no login
+    pub local: bool,
+    /// how people join: open, apply or invite
+    pub join: &'static str,
+    /// the asker may make invite codes
+    pub can_invite: bool,
+    /// the server's line about itself, for the pages' description
+    pub about: String,
 }
 
 pub fn layout(depot: &Depot, tab: &'static str) -> Layout {
@@ -264,6 +295,8 @@ pub fn layout(depot: &Depot, tab: &'static str) -> Layout {
         Some(f) => (f.to_string(), true),
         None => (flash, false),
     };
+    let m = mode(depot);
+    let can_invite = me(depot).is_some_and(|u| hub().may_invite(u));
     let me = me(depot).map(|u| {
         let l = game::level(u.points);
         MeView {
@@ -275,12 +308,15 @@ pub fn layout(depot: &Depot, tab: &'static str) -> Layout {
         }
     });
     let waiting = if me.as_ref().is_some_and(|m| m.admin) {
-        let s = hub().store.saves().unwrap_or_default();
         let u = hub().store.users().unwrap_or_default();
-        let c = hub().store.classifiers().unwrap_or_default();
-        s.iter().filter(|s| s.status == Status::Pending).count()
-            + c.iter().filter(|c| c.status == Status::Pending).count()
-            + u.iter().filter(|u| u.standing == Standing::Applied).count()
+        let shared = if m.hub {
+            let s = hub().store.saves().unwrap_or_default();
+            let c = hub().store.classifiers().unwrap_or_default();
+            s.iter().filter(|s| s.waiting()).count() + c.iter().filter(|c| c.waiting()).count()
+        } else {
+            0
+        };
+        shared + u.iter().filter(|u| u.standing == Standing::Applied).count()
     } else {
         0
     };
@@ -291,6 +327,21 @@ pub fn layout(depot: &Depot, tab: &'static str) -> Layout {
         flash,
         flash_bad,
         waiting,
+        hub_on: m.hub,
+        app_on: m.app,
+        local: m.local,
+        join: hub().join_policy().name(),
+        can_invite,
+        about: hub().config.description.clone(),
+    }
+}
+
+/// where "back" goes from a message: the front page, named for what's on it
+fn home_label(depot: &Depot) -> &'static str {
+    if mode(depot).hub {
+        "to the saves"
+    } else {
+        "to the start"
     }
 }
 
@@ -313,7 +364,7 @@ pub fn message(res: &mut Response, depot: &Depot, code: StatusCode, heading: &st
             heading: heading.into(),
             text: text.into(),
             back: "/".into(),
-            back_label: "to the saves".into(),
+            back_label: home_label(depot).into(),
         },
     );
 }
@@ -329,6 +380,7 @@ pub(crate) fn not_found(res: &mut Response, depot: &Depot) {
 }
 
 /// the logged in, active user, or a message saying why not
+#[cfg_attr(not(feature = "hub"), allow(dead_code))]
 pub(crate) fn need_active<'a>(res: &mut Response, depot: &'a Depot) -> Option<&'a User> {
     match me(depot) {
         None => {
@@ -341,7 +393,11 @@ pub(crate) fn need_active<'a>(res: &mut Response, depot: &'a Depot) -> Option<&'
                 depot,
                 StatusCode::FORBIDDEN,
                 "not yet",
-                "Your account is waiting for an admin to let you in. You can share and star saves once they do.",
+                if mode(depot).hub {
+                    "Your account is waiting for an admin to let you in. You can share and star saves once they do."
+                } else {
+                    "Your account is waiting for an admin to let you in. You can use the app once they do."
+                },
             );
             None
         }
@@ -359,7 +415,9 @@ pub fn need_admin<'a>(res: &mut Response, depot: &'a Depot) -> Option<&'a User> 
     }
 }
 
-// ------------------------------------------------------------------ the grid
+// ------------------------------------------------------------------ cards and rows
+//
+// what the grids, profiles and the admin panel show of a save or a classifier
 
 pub struct Card {
     pub id: String,
@@ -399,139 +457,6 @@ pub fn card(s: &Save) -> Card {
     }
 }
 
-pub struct EventView {
-    pub user: String,
-    pub what: String,
-    pub save_name: String,
-    /// where the save or classifier it's about lives
-    pub href: String,
-    pub ago: String,
-}
-
-#[derive(Template)]
-#[template(path = "index.html")]
-struct Index {
-    l: Layout,
-    about: String,
-    q: String,
-    q_url: String,
-    sort: &'static str,
-    sorts: [&'static str; 4],
-    cards: Vec<Card>,
-    page: usize,
-    more: bool,
-    total_saves: usize,
-    total_memories: u64,
-    total_users: usize,
-    events: Vec<EventView>,
-}
-
-#[handler]
-pub async fn index(req: &mut Request, depot: &mut Depot, res: &mut Response) {
-    let q = req.query::<String>("q").unwrap_or_default();
-    let sort = Sort::parse(&req.query::<String>("sort").unwrap_or_default());
-    let page = req.query::<usize>("page").unwrap_or(0).min(10_000);
-    let h = hub();
-    let (saves, more) = h.find(&q, sort, page).unwrap_or_default();
-    let all = h.store.saves().unwrap_or_default();
-    let approved: Vec<&Save> = all.iter().filter(|s| s.status == Status::Approved).collect();
-    let users = h.store.users().unwrap_or_default();
-    let classifiers = h.store.classifiers().unwrap_or_default();
-    let events = h
-        .store
-        .events(30)
-        .unwrap_or_default()
-        .into_iter()
-        // starring, unstarring and starring again is one thing worth telling
-        .fold(Vec::new(), |mut seen: Vec<crate::store::Event>, e| {
-            if !seen
-                .iter()
-                .any(|x| x.user == e.user && x.what == e.what && x.save == e.save && !e.save.is_empty())
-            {
-                seen.push(e);
-            }
-            seen
-        })
-        .into_iter()
-        .filter_map(|e| {
-            // only point at saves and classifiers everyone can see
-            let (save_name, href) = if e.save.is_empty() {
-                (String::new(), String::new())
-            } else if let Some(id) = e.save.strip_prefix(crate::store::CLS) {
-                let c = classifiers
-                    .iter()
-                    .find(|c| c.id == id && c.status == Status::Approved)?;
-                (format!("{} (a classifier)", c.name), format!("/classifiers/{id}"))
-            } else {
-                let s = approved.iter().find(|s| s.id == e.save)?;
-                (s.name.clone(), format!("/saves/{}", s.id))
-            };
-            Some(EventView {
-                user: e.user,
-                what: e.what,
-                save_name,
-                href,
-                ago: ago(e.at),
-            })
-        })
-        .take(12)
-        .collect();
-    render(
-        res,
-        Index {
-            l: layout(depot, "saves"),
-            about: h.config.description.clone(),
-            q_url: url(&q),
-            q,
-            sort: sort.name(),
-            sorts: ["new", "stars", "downloads", "featured"],
-            cards: saves.iter().map(card).collect(),
-            page,
-            more,
-            total_saves: approved.len(),
-            total_memories: approved.iter().map(|s| s.memories).sum(),
-            total_users: users.iter().filter(|u| u.standing == Standing::Active).count(),
-            events,
-        },
-    );
-}
-
-// ------------------------------------------------------------------ a save
-
-pub struct SaveView {
-    pub id: String,
-    pub name: String,
-    pub author: String,
-    pub description: String,
-    pub tags: Vec<String>,
-    pub notes: u64,
-    pub memories: u64,
-    pub stars: u64,
-    pub downloads: u64,
-    pub featured: bool,
-    pub version: u32,
-    pub note: String,
-    pub status_name: &'static str,
-    pub sample: Vec<crate::store::Sample>,
-    pub titles: Vec<String>,
-}
-
-#[derive(Template)]
-#[template(path = "save.html")]
-struct SavePage {
-    l: Layout,
-    s: SaveView,
-    updated: String,
-    size: String,
-    hue: u64,
-    ordinal: u64,
-    reversed: u64,
-    can_star: bool,
-    starred: bool,
-    can_edit: bool,
-    is_admin: bool,
-}
-
 pub fn status_name(s: Status) -> &'static str {
     match s {
         Status::Pending => "pending",
@@ -541,109 +466,137 @@ pub fn status_name(s: Status) -> &'static str {
 }
 
 /// a save the asker may see: approved ones, or their own, or any for an admin
-fn visible(depot: &Depot, id: &str) -> Option<Save> {
-    let s = hub().store.save(id).ok().flatten()?;
-    let mine = me(depot).is_some_and(|u| u.is_admin() || u.name.eq_ignore_ascii_case(&s.author));
-    (s.status == Status::Approved || mine).then_some(s)
+/// a classifier in the grid
+pub struct ClsCard {
+    pub id: String,
+    pub name: String,
+    pub author: String,
+    pub description: String,
+    pub tags: Vec<String>,
+    pub classes: Vec<String>,
+    /// classes not shown on the card
+    pub more: usize,
+    pub n_classes: usize,
+    pub accuracy: String,
+    pub preset: String,
+    pub weights: String,
+    pub stars: u64,
+    pub downloads: u64,
+    pub featured: bool,
+    pub hue: u64,
+    pub ago: String,
 }
 
-#[handler]
-pub async fn save_page(req: &mut Request, depot: &mut Depot, res: &mut Response) {
-    let id = req.param::<String>("id").unwrap_or_default();
-    let Some(s) = visible(depot, &id) else {
-        return not_found(res, depot);
-    };
-    let user = me(depot);
-    let is_admin = user.is_some_and(|u| u.is_admin());
-    let own = user.is_some_and(|u| u.name.eq_ignore_ascii_case(&s.author));
-    let starred = user.is_some_and(|u| hub().store.has_starred(&s.id, &u.name).unwrap_or(false));
-    let (ordinal, reversed) = inspect::sums(&s.name);
-    render(
-        res,
-        SavePage {
-            l: layout(depot, "saves"),
-            updated: ago(s.updated),
-            size: human_size(s.size),
-            hue: hue(&s.name),
-            ordinal,
-            reversed,
-            can_star: user.is_some_and(Hub::active) && !own && s.status == Status::Approved,
-            starred,
-            can_edit: own || is_admin,
-            is_admin,
-            s: SaveView {
-                status_name: status_name(s.status),
-                id: s.id,
-                name: s.name,
-                author: s.author,
-                description: s.description,
-                tags: s.tags,
-                notes: s.notes,
-                memories: s.memories,
-                stars: s.stars,
-                downloads: s.downloads,
-                featured: s.featured,
-                version: s.version,
-                note: s.note,
-                sample: s.sample,
-                titles: s.titles,
-            },
-        },
-    );
+/// a share as a whole percent, or empty
+pub fn percent(x: Option<f64>) -> String {
+    x.filter(|v| v.is_finite())
+        .map(|v| format!("{:.0}%", v * 100.0))
+        .unwrap_or_default()
 }
 
-/// a file name for a save's download
-fn file_name(s: &Save) -> String {
-    let n: String = s
-        .name
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    let n = n.trim();
-    format!("{}.redb", if n.is_empty() { s.id.as_str() } else { n })
-}
-
-#[handler]
-pub async fn download(req: &mut Request, depot: &mut Depot, res: &mut Response) {
-    let id = req.param::<String>("id").unwrap_or_default();
-    let Some(s) = visible(depot, &id) else {
-        return not_found(res, depot);
-    };
-    let who = match me(depot) {
-        Some(u) => u.name.to_lowercase(),
-        None => auth::address_key(client_ip(req)),
-    };
-    if s.status == Status::Approved {
-        hub().downloaded(&s, &who).ok();
+/// a weight count, short
+pub fn count(n: u64) -> String {
+    match n {
+        0..1_000 => n.to_string(),
+        1_000..1_000_000 => format!("{:.0}k", n as f64 / 1e3),
+        _ => format!("{:.1}M", n as f64 / 1e6),
     }
-    salvo::fs::NamedFile::builder(hub().store.save_path(&s.id))
-        .attached_name(file_name(&s))
-        .send(req.headers(), res)
-        .await;
 }
 
-#[handler]
-pub async fn star(req: &mut Request, depot: &mut Depot, res: &mut Response) {
-    let id = req.param::<String>("id").unwrap_or_default();
-    let Some(user) = need_active(res, depot) else { return };
-    let Some(s) = visible(depot, &id) else {
-        return not_found(res, depot);
-    };
-    let back = format!("/saves/{}", s.id);
-    match hub().star(&s, user) {
-        Ok((true, _)) => go(res, &back, "starred"),
-        Ok((false, _)) => go(res, &back, "unstarred"),
-        Err(e) => go(res, &back, &format!("!{e}")),
+pub fn cls_card(c: &ClassifierRec) -> ClsCard {
+    const SHOWN: usize = 6;
+    ClsCard {
+        id: c.id.clone(),
+        name: c.name.clone(),
+        author: c.author.clone(),
+        description: c.description.chars().take(160).collect(),
+        tags: c.tags.clone(),
+        classes: c.classes.iter().take(SHOWN).cloned().collect(),
+        more: c.classes.len().saturating_sub(SHOWN),
+        n_classes: c.classes.len(),
+        accuracy: percent(c.accuracy),
+        preset: c.preset.clone(),
+        weights: count(c.weights),
+        stars: c.stars,
+        downloads: c.downloads,
+        featured: c.featured,
+        hue: hue(&c.name),
+        ago: ago(c.updated),
+    }
+}
+
+/// a classifier's row in the admin panel
+pub struct AdminCls {
+    pub id: String,
+    pub name: String,
+    pub author: String,
+    pub classes: String,
+    pub accuracy: String,
+    pub preset: String,
+    pub size: String,
+    pub ago: String,
+    pub version: u32,
+    pub status: &'static str,
+    pub featured: bool,
+    pub stars: u64,
+    pub downloads: u64,
+    pub needs: usize,
+    pub visibility: &'static str,
+}
+
+pub fn admin_cls(c: &ClassifierRec) -> AdminCls {
+    let mut classes = c.classes.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
+    if c.classes.len() > 5 {
+        classes.push_str(&format!(" +{}", c.classes.len() - 5));
+    }
+    AdminCls {
+        id: c.id.clone(),
+        name: c.name.clone(),
+        author: c.author.clone(),
+        classes,
+        accuracy: percent(c.accuracy),
+        preset: c.preset.clone(),
+        size: human_size(c.size),
+        ago: ago(c.updated),
+        version: c.version,
+        status: status_name(c.status),
+        featured: c.featured,
+        stars: c.stars,
+        downloads: c.downloads,
+        needs: c.upstream.iter().filter(|u| !u.1).count(),
+        visibility: c.visibility.name(),
     }
 }
 
 // ------------------------------------------------------------------ forms
+
+/// one of the three visibilities, as the controls show it
+pub struct VisChoice {
+    pub name: &'static str,
+    pub icon: &'static str,
+    pub tip: &'static str,
+}
+
+/// private, unlisted and public, with their icons and what each means
+pub fn vis_choices() -> [VisChoice; 3] {
+    [
+        VisChoice {
+            name: "private",
+            icon: "eye-off",
+            tip: "private: only you see it, and only you can download it",
+        },
+        VisChoice {
+            name: "unlisted",
+            icon: "link",
+            tip: "unlisted: anyone with its link; never in the grid, search or feeds",
+        },
+        VisChoice {
+            name: "public",
+            icon: "hub",
+            tip: "public: in the grid once an admin lets it in",
+        },
+    ]
+}
 
 pub struct Field {
     pub name: &'static str,
@@ -678,257 +631,82 @@ pub(crate) struct Form {
     pub after: String,
 }
 
-fn upload_form(depot: &Depot, action: String, heading: String, s: Option<&Save>, intro: String) -> Form {
-    let max = human_size(hub().config.max_upload);
-    Form {
-        l: layout(depot, "upload"),
-        heading,
-        intro,
-        action,
-        multipart: true,
-        fields: vec![
-            Field {
-                required: true,
-                ..field("name", "name", "text", s.map(|s| s.name.as_str()).unwrap_or(""))
-            },
-            field(
-                "description",
-                "what's in it",
-                "textarea",
-                s.map(|s| s.description.as_str()).unwrap_or(""),
-            ),
-            Field {
-                hint: "a few words, comma separated",
-                ..field(
-                    "tags",
-                    "tags",
-                    "text",
-                    &s.map(|s| s.tags.join(", ")).unwrap_or_default(),
-                )
-            },
-            Field {
-                required: s.is_none(),
-                hint: if s.is_some() {
-                    "leave empty to keep the file and only change the words"
-                } else {
-                    "a save: a .redb file from the app's saves folder"
-                },
-                ..field("file", "the save", "file", "")
-            },
-        ],
-        submit: if s.is_some() { "save" } else { "share" },
-        after: format!(
-            "Up to {max}. {}",
-            if me(depot).is_some_and(|u| matches!(u.role, Role::Trusted | Role::Admin)) {
-                "Yours go straight in."
-            } else {
-                "An admin looks at each save before it shows in the grid."
-            }
-        ),
-    }
-}
-
-#[handler]
-pub async fn upload_page(depot: &mut Depot, res: &mut Response) {
-    if need_active(res, depot).is_none() {
-        return;
-    }
-    let f = upload_form(
-        depot,
-        "/upload".into(),
-        "share a save".into(),
-        None,
-        "Share one of your saves: its memories and notes, for anyone to download into the app.".into(),
-    );
-    render(res, f);
-}
-
-/// what an upload form sent
-pub(crate) struct Sent {
-    pub name: String,
-    pub description: String,
-    pub tags: String,
-    pub file: Option<(std::path::PathBuf, u64)>,
-}
-
-pub(crate) async fn read_upload(req: &mut Request) -> Result<Sent, String> {
-    let limit = hub().config.max_upload as usize + 256 * 1024;
-    let form = req.form_data_max_size(limit).await.map_err(|e| {
-        let e = e.to_string();
-        if e.contains("limit") || e.contains("large") || e.contains("size") {
-            format!(
-                "that file is over the hub's {} limit",
-                human_size(hub().config.max_upload)
-            )
-        } else {
-            format!("couldn't read the form: {e}")
-        }
-    })?;
-    let get = |k: &str| form.fields.get(k).cloned().unwrap_or_default();
-    Ok(Sent {
-        name: get("name"),
-        description: get("description"),
-        tags: get("tags"),
-        file: form
-            .files
-            .get("file")
-            .filter(|f| f.size() > 0)
-            .map(|f| (f.path().clone(), f.size())),
-    })
-}
-
-#[handler]
-pub async fn upload(req: &mut Request, depot: &mut Depot, res: &mut Response) {
-    let Some(user) = need_active(res, depot).cloned() else {
-        return;
-    };
-    if !hub().limiter.allow(client_ip(req), "upload", 20, 3600) {
-        return go(res, "/upload", "!that's a lot of uploads; try again in a while");
-    }
-    let sent = match read_upload(req).await {
-        Ok(s) => s,
-        Err(e) => return go(res, "/upload", &format!("!{e}")),
-    };
-    let details = match Details::new(&sent.name, &sent.description, &sent.tags) {
-        Ok(d) => d,
-        Err(e) => return go(res, "/upload", &format!("!{e}")),
-    };
-    let Some((path, _)) = sent.file else {
-        return go(res, "/upload", "!pick a save to share");
-    };
-    match hub().accept(&user, details, &path, None).await {
-        Ok(s) if s.status == Status::Approved => go(res, &format!("/saves/{}", s.id), "shared: it's in the grid"),
-        Ok(s) => go(
-            res,
-            &format!("/saves/{}", s.id),
-            "sent in: an admin will look at it, then it shows in the grid",
-        ),
-        Err(e) => go(res, "/upload", &format!("!{e}")),
-    }
-}
-
-fn own_save(depot: &Depot, id: &str) -> Option<Save> {
-    let u = me(depot)?;
-    let s = hub().store.save(id).ok().flatten()?;
-    (u.is_admin() || u.name.eq_ignore_ascii_case(&s.author)).then_some(s)
-}
-
-#[handler]
-pub async fn edit_page(req: &mut Request, depot: &mut Depot, res: &mut Response) {
-    let id = req.param::<String>("id").unwrap_or_default();
-    let Some(s) = own_save(depot, &id) else {
-        return not_found(res, depot);
-    };
-    let f = upload_form(
-        depot,
-        format!("/saves/{}/edit", s.id),
-        format!("edit “{}”", s.name),
-        Some(&s),
-        "Change its words, or send a new version of the file (it keeps its stars and downloads).".into(),
-    );
-    render(res, f);
-}
-
-#[handler]
-pub async fn edit(req: &mut Request, depot: &mut Depot, res: &mut Response) {
-    let id = req.param::<String>("id").unwrap_or_default();
-    let Some(s) = own_save(depot, &id) else {
-        return not_found(res, depot);
-    };
-    let Some(user) = need_active(res, depot).cloned() else {
-        return;
-    };
-    let back = format!("/saves/{}/edit", s.id);
-    let sent = match read_upload(req).await {
-        Ok(x) => x,
-        Err(e) => return go(res, &back, &format!("!{e}")),
-    };
-    let details = match Details::new(&sent.name, &sent.description, &sent.tags) {
-        Ok(d) => d,
-        Err(e) => return go(res, &back, &format!("!{e}")),
-    };
-    let page = format!("/saves/{}", s.id);
-    match sent.file {
-        Some((path, _)) => {
-            // the new version is the author's, even when an admin sends it
-            let author = hub().store.user(&s.author).ok().flatten().unwrap_or(user);
-            match hub().accept(&author, details, &path, Some(&s)).await {
-                Ok(n) if n.status == Status::Approved => go(res, &page, "new version is in"),
-                Ok(_) => go(res, &page, "new version sent in: an admin will look at it"),
-                Err(e) => go(res, &back, &format!("!{e}")),
-            }
-        }
-        None => {
-            let r = hub().store.update_save(&s.id, |x| {
-                x.name = details.name;
-                x.description = details.description;
-                x.tags = details.tags;
-            });
-            match r {
-                Ok(_) => go(res, &page, "saved"),
-                Err(e) => go(res, &back, &format!("!{e}")),
-            }
-        }
-    }
-}
-
-#[handler]
-pub async fn delete(req: &mut Request, depot: &mut Depot, res: &mut Response) {
-    let id = req.param::<String>("id").unwrap_or_default();
-    let Some(s) = own_save(depot, &id) else {
-        return not_found(res, depot);
-    };
-    let who = me(depot).map(|u| u.name.clone()).unwrap_or_default();
-    match hub().remove(&s.id) {
-        Ok(()) => {
-            hub().store.log(&who, "deleted a save", "").ok();
-            go(res, &format!("/u/{}", s.author), &format!("deleted “{}”", s.name))
-        }
-        Err(e) => go(res, &format!("/saves/{}", s.id), &format!("!{e}")),
-    }
-}
-
 // ------------------------------------------------------------------ joining and logging in
 
 #[handler]
-pub async fn join_page(depot: &mut Depot, res: &mut Response) {
-    let open = hub().config.open;
+pub async fn join_page(req: &mut Request, depot: &mut Depot, res: &mut Response) {
+    let code = req.query::<String>("invite").unwrap_or_default();
+    join_form(depot, res, &code);
+}
+
+/// the join form, with an invite code filled in when there is one
+pub fn join_form(depot: &Depot, res: &mut Response, code: &str) {
+    let policy = hub().join_policy();
+    let m = mode(depot);
+    let what = match (m.hub, m.app) {
+        (true, true) => {
+            "to keep your saves here and use the app in the browser, share saves, star the ones you like and climb the levels"
+        }
+        (true, false) => "to share saves, star the ones you like and climb the levels",
+        _ => "to keep your saves here and use the app in the browser",
+    };
+    // who sent the invite, when it's good
+    let from = (!code.is_empty())
+        .then(|| hub().store.invite(&crate::invites::hash(code)).ok().flatten())
+        .flatten()
+        .filter(|i| i.spent().is_none())
+        .map(|i| i.by);
+    let intro = match (policy, &from) {
+        (_, Some(by)) => format!("{by} invited you. Make an account {what}."),
+        (Join::Open, _) => format!("Make an account {what}."),
+        (Join::Apply, _) => format!(
+            "Apply for an account {what}: an admin lets people in. Say a little about why you'd like to join. (With an invite code you're in at once.)"
+        ),
+        (Join::Invite, _) => {
+            format!("This server is invite-only: you need an invite code from a member. Make an account {what}.")
+        }
+    };
+    let mut f = vec![
+        Field {
+            required: true,
+            hint: "letters, digits, - and _",
+            ..field("name", "name", "text", "")
+        },
+        Field {
+            hint: "optional; only admins see it, and nothing is ever sent to it",
+            ..field("email", "email", "email", "")
+        },
+        Field {
+            required: true,
+            hint: "8 characters or more",
+            ..field("password", "password", "password", "")
+        },
+    ];
+    if policy != Join::Open {
+        f.push(Field {
+            required: policy == Join::Invite,
+            hint: if policy == Join::Invite {
+                "from the invite link you were given"
+            } else {
+                "optional: with one you're in at once"
+            },
+            ..field("invite", "invite code", "text", code.trim())
+        });
+    }
+    if policy == Join::Apply && from.is_none() {
+        f.push(field("why", "why you'd like to join", "textarea", ""));
+    }
     render(
         res,
         Form {
             l: layout(depot, "join"),
             heading: "join".into(),
-            intro: if open {
-                "Make an account to share saves, star the ones you like and climb the levels.".into()
-            } else {
-                "Apply for an account: an admin lets people in. Say a little about why you'd like to join.".into()
-            },
+            intro,
             action: "/join".into(),
             multipart: false,
-            fields: {
-                let mut f = vec![
-                    Field {
-                        required: true,
-                        hint: "letters, digits, - and _",
-                        ..field("name", "name", "text", "")
-                    },
-                    Field {
-                        hint: "optional; only admins see it",
-                        ..field("email", "email", "email", "")
-                    },
-                    Field {
-                        required: true,
-                        hint: "8 characters or more",
-                        ..field("password", "password", "password", "")
-                    },
-                ];
-                if !open {
-                    f.push(field("why", "why you'd like to join", "textarea", ""));
-                }
-                f
-            },
-            submit: if open { "join" } else { "apply" },
-            after: String::new(),
+            fields: f,
+            submit: if policy == Join::Apply && from.is_none() { "apply" } else { "join" },
+            after: "By joining you agree to the terms (see the foot of the page). Lost your password? An admin can make you a login link.".into(),
         },
     );
 }
@@ -941,6 +719,12 @@ pub async fn join(req: &mut Request, res: &mut Response) {
     let name = req.form::<String>("name").await.unwrap_or_default().trim().to_string();
     let email = req.form::<String>("email").await.unwrap_or_default().trim().to_string();
     let password = req.form::<String>("password").await.unwrap_or_default();
+    let code = req
+        .form::<String>("invite")
+        .await
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let why: String = req
         .form::<String>("why")
         .await
@@ -948,43 +732,86 @@ pub async fn join(req: &mut Request, res: &mut Response) {
         .chars()
         .take(1000)
         .collect();
+    let back = if code.is_empty() {
+        "/join".to_string()
+    } else {
+        format!("/join?invite={}", url(&code))
+    };
     if let Err(e) = auth::name_ok(&name).and(auth::password_ok(&password)) {
-        return go(res, "/join", &format!("!{e}"));
+        return go(res, &back, &format!("!{e}"));
     }
     if email.len() > 200 || (!email.is_empty() && !email.contains('@')) {
-        return go(res, "/join", "!that email doesn't look right");
+        return go(res, &back, "!that email doesn't look right");
     }
     if !email.is_empty() && hub().store.user_by_email(&email).ok().flatten().is_some() {
-        return go(res, "/join", "!that email has an account already");
+        return go(res, &back, "!that email has an account already");
     }
-    let hash = match auth::hash_password(&password) {
-        Ok(h) => h,
-        Err(e) => return go(res, "/join", &format!("!{e}")),
+    let policy = hub().join_policy();
+    // an invite code: checked before anything is made (a wrong one counts against the
+    // address, so codes can't be guessed)
+    let hash = crate::invites::hash(&code);
+    let invited = if policy == Join::Open || code.is_empty() {
+        None
+    } else {
+        if !hub().limiter.allow(client_ip(req), "invite", 10, 3600) {
+            return go(res, &back, "!too many invite codes tried from here; try again later");
+        }
+        match hub().store.invite(&hash).ok().flatten() {
+            Some(i) => match i.spent() {
+                None => Some(i),
+                Some(why) => return go(res, &back, &format!("!{why}")),
+            },
+            None => return go(res, &back, "!that invite code isn't known here"),
+        }
     };
-    let open = hub().config.open;
+    if policy == Join::Invite && invited.is_none() {
+        return go(res, &back, "!this server is invite-only: you need an invite code");
+    }
+    if hub().store.user(&name).ok().flatten().is_some() {
+        return go(res, &back, "!that name is taken");
+    }
+    let pw = match auth::hash_password(&password) {
+        Ok(h) => h,
+        Err(e) => return go(res, &back, &format!("!{e}")),
+    };
+    // the invite's use is taken before the account is made: two people can't share its last use
+    let invited_by = match invited {
+        Some(_) => match hub().store.use_invite(&hash, &name) {
+            Ok(i) => i.by,
+            Err(e) => return go(res, &back, &format!("!{e}")),
+        },
+        None => String::new(),
+    };
+    let active = policy == Join::Open || !invited_by.is_empty();
     let user = User {
         name: name.clone(),
         email,
-        password: hash,
+        password: pw,
         why: why.trim().to_string(),
-        standing: if open { Standing::Active } else { Standing::Applied },
+        standing: if active { Standing::Active } else { Standing::Applied },
         joined: Utc::now(),
+        invited_by,
         ..Default::default()
     };
     match hub().store.add_user(user) {
         Ok(u) => {
-            if open {
+            if active {
                 hub().store.log(&u.name, "joined", "").ok();
             }
             log_in(res, &u.name);
-            if open {
-                go(res, &format!("/u/{}", u.name), "welcome! you're level 1, a seeker");
+            if active {
+                go(res, &format!("/u/{}", u.name), "welcome! you're in");
             } else {
-                go(res, "/", "applied: you can look around while an admin considers it");
+                go(res, "/", "applied: an admin will look at it soon");
             }
         }
-        Err(e) => go(res, "/join", &format!("!{e}")),
+        Err(e) => go(res, &back, &format!("!{e}")),
     }
+}
+
+/// a page on this server to go to after logging in (`next`), or none
+fn local_next(next: &str) -> Option<&str> {
+    (next.starts_with('/') && !next.starts_with("//") && !next.contains('\\') && next.len() < 200).then_some(next)
 }
 
 fn log_in(res: &mut Response, name: &str) {
@@ -1003,14 +830,20 @@ fn log_in(res: &mut Response, name: &str) {
 }
 
 #[handler]
-pub async fn login_page(depot: &mut Depot, res: &mut Response) {
+pub async fn login_page(req: &mut Request, depot: &mut Depot, res: &mut Response) {
+    let next = req.query::<String>("next").unwrap_or_default();
+    let next = local_next(&next).unwrap_or("").to_string();
     render(
         res,
         Form {
             l: layout(depot, "login"),
             heading: "log in".into(),
             intro: String::new(),
-            action: "/login".into(),
+            action: if next.is_empty() {
+                "/login".into()
+            } else {
+                format!("/login?next={}", url(&next))
+            },
             multipart: false,
             fields: vec![
                 Field {
@@ -1033,6 +866,8 @@ pub async fn login(req: &mut Request, res: &mut Response) {
     if !hub().limiter.allow(client_ip(req), "login", 10, 600) {
         return go(res, "/login", "!too many tries; wait a few minutes");
     }
+    let next = req.query::<String>("next").unwrap_or_default();
+    let next = local_next(&next).unwrap_or("/").to_string();
     let name = req.form::<String>("name").await.unwrap_or_default();
     let password = req.form::<String>("password").await.unwrap_or_default();
     let user = match hub().store.user(name.trim()) {
@@ -1046,14 +881,19 @@ pub async fn login(req: &mut Request, res: &mut Response) {
                 && auth::check_password(&password, &u.password) =>
         {
             log_in(res, &u.name);
-            go(res, "/", &format!("welcome back, {}", u.name));
+            go(res, &next, &format!("welcome back, {}", u.name));
         }
         other => {
             // as slow as a real check, so the answer's time doesn't say who has an account
             if other.is_none_or(|u| u.password.is_empty()) {
                 auth::check_password(&password, auth::dummy_hash());
             }
-            go(res, "/login", "!that name and password don't match")
+            let back = if next == "/" {
+                "/login".to_string()
+            } else {
+                format!("/login?next={}", url(&next))
+            };
+            go(res, &back, "!that name and password don't match")
         }
     }
 }
@@ -1118,7 +958,7 @@ struct Profile {
     standing: &'static str,
     badges: Vec<BadgeView>,
     cards: Vec<Card>,
-    cls_cards: Vec<crate::clsweb::ClsCard>,
+    cls_cards: Vec<ClsCard>,
     shared: usize,
     shared_cls: usize,
     stars: u64,
@@ -1161,23 +1001,15 @@ fn show_profile(name: &str, depot: &Depot, res: &mut Response) {
     }
     let all = hub().store.saves().unwrap_or_default();
     let theirs: Vec<&Save> = all.iter().filter(|s| s.author.eq_ignore_ascii_case(&u.name)).collect();
-    let mut approved: Vec<&Save> = theirs
-        .iter()
-        .copied()
-        .filter(|s| s.status == Status::Approved)
-        .collect();
+    let mut approved: Vec<&Save> = theirs.iter().copied().filter(|s| s.listed()).collect();
     approved.sort_by(|a, b| b.stars.cmp(&a.stars).then(b.updated.cmp(&a.updated)));
     let given = hub().store.stars_given(&u.name).unwrap_or(0);
     let all_cls = hub().store.classifiers().unwrap_or_default();
-    let their_cls: Vec<&crate::store::ClassifierRec> = all_cls
+    let their_cls: Vec<&ClassifierRec> = all_cls
         .iter()
         .filter(|c| c.author.eq_ignore_ascii_case(&u.name))
         .collect();
-    let mut cls_approved: Vec<&crate::store::ClassifierRec> = their_cls
-        .iter()
-        .copied()
-        .filter(|c| c.status == Status::Approved)
-        .collect();
+    let mut cls_approved: Vec<&ClassifierRec> = their_cls.iter().copied().filter(|c| c.listed()).collect();
     cls_approved.sort_by(|a, b| b.stars.cmp(&a.stars).then(b.updated.cmp(&a.updated)));
     let level = game::level(u.points);
     let new_token = depot.get::<String>("new_token").cloned().unwrap_or_default();
@@ -1192,26 +1024,40 @@ fn show_profile(name: &str, depot: &Depot, res: &mut Response) {
     } else {
         Vec::new()
     };
-    let pending = theirs
-        .iter()
-        .filter(|s| s.status != Status::Approved)
-        .map(|s| {
-            (
-                format!("/saves/{}", s.id),
-                s.name.clone(),
-                status_name(s.status),
-                s.note.clone(),
-            )
-        })
-        .chain(their_cls.iter().filter(|c| c.status != Status::Approved).map(|c| {
-            (
-                format!("/classifiers/{}", c.id),
-                format!("{} (a classifier)", c.name),
-                status_name(c.status),
-                c.note.clone(),
-            )
-        }))
-        .collect();
+    // the owner's own that aren't in the grid: private, unlisted, waiting or turned down
+    let pill = |v: Visibility, st: Status| {
+        if v == Visibility::Public {
+            status_name(st)
+        } else {
+            v.name()
+        }
+    };
+    let pending = if own {
+        theirs
+            .iter()
+            .filter(|s| !s.listed())
+            .map(|s| {
+                (
+                    format!("/saves/{}", s.id),
+                    s.name.clone(),
+                    pill(s.visibility, s.status),
+                    s.note.clone(),
+                )
+            })
+            .chain(their_cls.iter().filter(|c| !c.listed()).map(|c| {
+                (
+                    format!("/classifiers/{}", c.id),
+                    format!("{} (a classifier)", c.name),
+                    pill(c.visibility, c.status),
+                    c.note.clone(),
+                )
+            }))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let listed_saves: Vec<&Save> = theirs.iter().copied().filter(|s| s.listed()).collect();
+    let listed_cls: Vec<&ClassifierRec> = their_cls.iter().copied().filter(|c| c.listed()).collect();
     let no_password = u.password.is_empty();
     if !own && !admin {
         u.email.clear();
@@ -1234,7 +1080,7 @@ fn show_profile(name: &str, depot: &Depot, res: &mut Response) {
             next: game::points_for(level + 1) - u.points,
             joined: ago(u.joined),
             standing: standing_name(u.standing),
-            badges: game::badges(&u, &theirs, &their_cls, given)
+            badges: game::badges(&u, &listed_saves, &listed_cls, given)
                 .into_iter()
                 .map(|b| BadgeView {
                     name: b.name,
@@ -1243,7 +1089,7 @@ fn show_profile(name: &str, depot: &Depot, res: &mut Response) {
                 })
                 .collect(),
             cards: approved.iter().map(|s| card(s)).collect(),
-            cls_cards: cls_approved.iter().map(|c| crate::clsweb::cls_card(c)).collect(),
+            cls_cards: cls_approved.iter().map(|c| cls_card(c)).collect(),
             shared: approved.len(),
             shared_cls: cls_approved.len(),
             stars: approved.iter().map(|s| s.stars).sum::<u64>() + cls_approved.iter().map(|c| c.stars).sum::<u64>(),
@@ -1366,74 +1212,29 @@ pub async fn revoke_token(req: &mut Request, depot: &mut Depot, res: &mut Respon
     }
 }
 
-// ------------------------------------------------------------------ the leaderboard
-
-pub struct Ranked {
-    pub name: String,
-    pub hue: u64,
-    pub initial: String,
-    pub level: u32,
-    pub title: &'static str,
-    pub points: i64,
-    pub saves: usize,
-    pub stars: u64,
-}
-
-#[derive(Template)]
-#[template(path = "leaderboard.html")]
-struct Leaderboard {
-    l: Layout,
-    people: Vec<Ranked>,
-    top: Vec<Card>,
-    levels: Vec<(u32, &'static str, i64)>,
-}
-
+/// `GET /api/me` (every mode): who the token or session belongs to
 #[handler]
-pub async fn leaderboard(depot: &mut Depot, res: &mut Response) {
-    let saves = hub().store.saves().unwrap_or_default();
-    let approved: Vec<&Save> = saves.iter().filter(|s| s.status == Status::Approved).collect();
-    let mut people: Vec<Ranked> = hub()
-        .store
-        .users()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|u| u.standing == Standing::Active)
-        .map(|u| {
-            let theirs: Vec<&&Save> = approved
-                .iter()
-                .filter(|s| s.author.eq_ignore_ascii_case(&u.name))
-                .collect();
+pub async fn whoami(depot: &mut Depot, res: &mut Response) {
+    match me(depot) {
+        Some(u) => {
             let level = game::level(u.points);
-            Ranked {
-                hue: hue(&u.name),
-                initial: u
-                    .name
-                    .chars()
-                    .next()
-                    .map(|c| c.to_uppercase().to_string())
-                    .unwrap_or_default(),
-                level,
-                title: game::title(level),
-                points: u.points,
-                saves: theirs.len(),
-                stars: theirs.iter().map(|s| s.stars).sum(),
-                name: u.name,
-            }
-        })
-        .collect();
-    people.sort_by(|a, b| b.points.cmp(&a.points).then(a.name.cmp(&b.name)));
-    people.truncate(50);
-    let mut top: Vec<&Save> = approved.clone();
-    top.sort_by(|a, b| b.stars.cmp(&a.stars).then(b.downloads.cmp(&a.downloads)));
-    render(
-        res,
-        Leaderboard {
-            l: layout(depot, "leaderboard"),
-            people,
-            top: top.iter().take(10).map(|s| card(s)).collect(),
-            levels: (1..=10).map(|l| (l, game::title(l), game::points_for(l))).collect(),
-        },
-    );
+            res.render(salvo::writing::Json(serde_json::json!({
+                "username": u.name,
+                "points": u.points,
+                "level": level,
+                "title": game::title(level),
+                "active": Hub::active(u),
+                "admin": u.is_admin(),
+                "can_invite": hub().may_invite(u),
+            })));
+        }
+        None => {
+            res.status_code(StatusCode::UNAUTHORIZED);
+            res.render(salvo::writing::Json(
+                serde_json::json!({ "error": "that token isn't known here" }),
+            ));
+        }
+    }
 }
 
 // ------------------------------------------------------------------ the admin panel
@@ -1451,6 +1252,7 @@ pub struct AdminSave {
     pub featured: bool,
     pub stars: u64,
     pub downloads: u64,
+    pub visibility: &'static str,
 }
 
 pub struct AdminUser {
@@ -1461,6 +1263,7 @@ pub struct AdminUser {
     pub role: &'static str,
     pub standing: &'static str,
     pub points: i64,
+    pub invited_by: String,
 }
 
 #[derive(Template)]
@@ -1471,9 +1274,13 @@ struct Admin {
     applied: Vec<AdminUser>,
     users: Vec<AdminUser>,
     all_saves: Vec<AdminSave>,
-    waiting_cls: Vec<crate::clsweb::AdminCls>,
-    all_cls: Vec<crate::clsweb::AdminCls>,
-    open: bool,
+    waiting_cls: Vec<AdminCls>,
+    all_cls: Vec<AdminCls>,
+    join: &'static str,
+    join_about: &'static str,
+    trusted_invite: bool,
+    invites: Vec<crate::invites::InviteRow>,
+    new_invite: String,
 }
 
 fn admin_save(s: &Save) -> AdminSave {
@@ -1490,6 +1297,7 @@ fn admin_save(s: &Save) -> AdminSave {
         featured: s.featured,
         stars: s.stars,
         downloads: s.downloads,
+        visibility: s.visibility.name(),
     }
 }
 
@@ -1506,11 +1314,17 @@ fn admin_user(u: &User) -> AdminUser {
         },
         standing: standing_name(u.standing),
         points: u.points,
+        invited_by: u.invited_by.clone(),
     }
 }
 
 #[handler]
 pub async fn admin_page(depot: &mut Depot, res: &mut Response) {
+    show_admin(depot, res);
+}
+
+/// the admin panel (with a just-made invite link shown once, when there is one)
+pub fn show_admin(depot: &Depot, res: &mut Response) {
     if need_admin(res, depot).is_none() {
         return;
     }
@@ -1524,11 +1338,7 @@ pub async fn admin_page(depot: &mut Depot, res: &mut Response) {
         res,
         Admin {
             l: layout(depot, "admin"),
-            waiting_saves: saves
-                .iter()
-                .filter(|s| s.status == Status::Pending)
-                .map(admin_save)
-                .collect(),
+            waiting_saves: saves.iter().filter(|s| s.waiting()).map(admin_save).collect(),
             applied: users
                 .iter()
                 .filter(|u| u.standing == Standing::Applied)
@@ -1540,41 +1350,21 @@ pub async fn admin_page(depot: &mut Depot, res: &mut Response) {
                 .map(admin_user)
                 .collect(),
             all_saves: saves.iter().map(admin_save).collect(),
-            waiting_cls: cls
+            waiting_cls: cls.iter().filter(|c| c.waiting()).map(admin_cls).collect(),
+            all_cls: cls.iter().map(admin_cls).collect(),
+            join: hub().join_policy().name(),
+            join_about: hub().join_policy().about(),
+            trusted_invite: hub().trusted_invite(),
+            invites: hub()
+                .store
+                .invites()
+                .unwrap_or_default()
                 .iter()
-                .filter(|c| c.status == Status::Pending)
-                .map(crate::clsweb::admin_cls)
+                .map(crate::invites::row)
                 .collect(),
-            all_cls: cls.iter().map(crate::clsweb::admin_cls).collect(),
-            open: hub().config.open,
+            new_invite: depot.get::<String>("new_invite").cloned().unwrap_or_default(),
         },
     );
-}
-
-#[handler]
-pub async fn admin_save_action(req: &mut Request, depot: &mut Depot, res: &mut Response) {
-    let Some(admin) = need_admin(res, depot).cloned() else {
-        return;
-    };
-    let id = req.param::<String>("id").unwrap_or_default();
-    let action = req.form::<String>("action").await.unwrap_or_default();
-    let note = req.form::<String>("note").await.unwrap_or_default();
-    if action.is_empty() {
-        return go(res, "/admin", "");
-    }
-    // back where the admin came from, unless the save is gone
-    let back = if action == "remove" {
-        "/admin".to_string()
-    } else {
-        req.header::<String>("referer")
-            .filter(|r| r.contains("/saves/"))
-            .map(|_| format!("/saves/{id}"))
-            .unwrap_or_else(|| "/admin".into())
-    };
-    match hub().review(&admin, &id, &action, &note) {
-        Ok(m) => go(res, &back, &m),
-        Err(e) => go(res, &back, &format!("!{e}")),
-    }
 }
 
 #[handler]
@@ -1669,7 +1459,7 @@ pub fn submit_icon(submit: &str) -> &'static str {
     }
 }
 
-/// the shared icon set (assets/icons) as a sprite, made by hub/web/tools/icons.mjs
+/// the shared icon set (assets/icons) as a sprite, made by scripts/icons.mjs
 #[handler]
 pub async fn icons(req: &mut Request, res: &mut Response) {
     res.headers_mut()
@@ -1734,7 +1524,7 @@ mod tests {
         assert_eq!(decode("%zz"), "%zz");
     }
 
-    /// every icon a page asks for is in the sprite (hub/web/tools/icons.mjs makes it from
+    /// every icon a page asks for is in the sprite (scripts/icons.mjs makes it from
     /// assets/icons), and the sprite is only shapes
     #[test]
     fn icons_in_the_sprite() {
@@ -1758,14 +1548,14 @@ mod tests {
                 "no icon {name} in the sprite"
             );
         }
-        // the sprite has the whole set: run hub/web/tools/icons.mjs when it changes
+        // the sprite has the whole set: run scripts/icons.mjs when it changes
         let set = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/icons");
         for e in std::fs::read_dir(set).unwrap() {
             let f = e.unwrap().file_name().into_string().unwrap();
             if let Some(name) = f.strip_suffix(".svg") {
                 assert!(
                     sprite.contains(&format!("<symbol id=\"i-{name}\"")),
-                    "{name} isn't in the sprite: run node hub/web/tools/icons.mjs"
+                    "{name} isn't in the sprite: run node scripts/icons.mjs"
                 );
             }
         }

@@ -17,7 +17,7 @@ jobs:
       - name: system packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pkg-config libwayland-dev libxkbcommon-dev libfontconfig1-dev
+          sudo apt-get install -y --no-install-recommends pkg-config libwebkit2gtk-4.1-dev libxdo-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -25,12 +25,7 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: the web app's offline engine matches the hub, and markdown stays safe
+      - name: the Dioxus app builds for the web too
         run: |
-          cargo build -p anend-hub
-          node hub/web/test/parity.mjs | tee parity.log
-          grep -q "all the same" parity.log
-          node hub/web/test/markdown.mjs
+          rustup target add wasm32-unknown-unknown
+          cargo build -p anend-app --target wasm32-unknown-unknown --no-default-features --features web

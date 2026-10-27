@@ -15,27 +15,44 @@
 //! | `metrics` | accuracy, F1, confusion, log-loss, calibration |
 //! | `steer` | the player's knobs (bias, temperature, threshold, gains) and the bias metric |
 //! | `grow` | widening, deepening and pruning, and the policy deciding when |
+//! | `codec` | numbers and pictures (patch codebooks) as bytes, a minimal PNG writer |
 //! | `compose` | classifiers feeding classifiers, outputs as lists, feedback through a stack |
+//! | `generate` | sampling from a generative head, critics, constraints, guidance, reinforcement |
 //! | `io` | the versioned binary file format |
+//! | `spec` | the declarative model spec: inputs, trunk, heads, data queries, critics; build, train, run |
+//! | `bench` | a one-time machine benchmark suggesting model sizes for this hardware |
 //!
 //! Every numeric operation goes through `kernels` and `math`: they are the backend
 //! boundary a GPU implementation would replace.
 
+pub mod bench;
+pub mod bpe;
+pub mod codec;
 pub mod compose;
+pub mod device;
+pub mod generate;
+#[cfg(feature = "gpu")]
+pub mod gpu;
 pub mod grow;
 pub mod io;
 pub mod kernels;
 pub mod math;
 pub mod metrics;
 pub mod model;
+pub mod pattern;
 pub mod pool;
+pub mod pretrained;
+pub mod report;
+pub mod safetensors;
+pub mod spec;
+pub mod speed;
 pub mod steer;
 pub mod text;
 pub mod train;
 
 use serde::{Deserialize, Serialize};
 
-pub use model::{Config, Gains, HeadKind, HeadSpec, Net, Pooling};
+pub use model::{Config, Gains, GenSpec, HeadKind, HeadSpec, Net, Pooling};
 pub use pool::Pool;
 pub use steer::{BiasReport, HeadSteer, Output, Steer};
 pub use train::{Example, Flow, Progress, Target, TrainOpts, TrainReport};
@@ -56,6 +73,10 @@ pub struct Meta {
     pub feedback: Vec<Example>,
     /// growth and pruning events, oldest first
     pub log: Vec<String>,
+    /// the declarative spec the model was built from, and anything it learned besides
+    /// weights (a picture codebook); see `spec::Model`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spec: Option<serde_json::Value>,
 }
 
 /// how many feedback examples a classifier keeps
@@ -82,7 +103,17 @@ pub struct Run {
 
 impl Classifier {
     pub fn new(cfg: Config, heads: &[HeadSpec], seed: u64) -> Result<Classifier, String> {
-        let net = Net::new(cfg, heads, seed)?;
+        Classifier::with_gen(cfg, heads, None, seed)
+    }
+
+    /// a model with pooled heads and optionally a generative head (causal configs only)
+    pub fn with_gen(
+        cfg: Config,
+        heads: &[HeadSpec],
+        generator: Option<GenSpec>,
+        seed: u64,
+    ) -> Result<Classifier, String> {
+        let net = Net::with_gen(cfg, heads, generator, seed)?;
         let steer = Steer::neutral(&net.heads);
         Ok(Classifier {
             meta: Meta {
@@ -111,13 +142,23 @@ impl Classifier {
     }
 
     pub fn windows(&self, text: &str) -> Vec<Window> {
-        text::windows(text, self.net.cfg.max_len, self.net.cfg.stride)
+        self.windows_of(text.as_bytes())
+    }
+
+    /// the windows of any bytes (causal windows for a causal model)
+    pub fn windows_of(&self, data: &[u8]) -> Vec<Window> {
+        self.net.windows_of(data).0
     }
 
     /// every window of a text through the net with the given gains, averaged in window
     /// order; windows run in parallel on the pool, or a lone window's big products do
     pub fn run(&self, text: &str, extra: &[f32], gains: &Gains, pool: Option<&Pool>) -> Run {
-        let ws = self.windows(text);
+        self.run_bytes(text.as_bytes(), extra, gains, pool)
+    }
+
+    /// `run` over any bytes
+    pub fn run_bytes(&self, data: &[u8], extra: &[f32], gains: &Gains, pool: Option<&Pool>) -> Run {
+        let ws = self.windows_of(data);
         let heads = self.net.heads.len();
         let one = |w: &Window, p: Option<&Pool>| {
             let mut tr = self.net.forward(w, extra, gains, Mode::EVAL, p);
@@ -161,8 +202,22 @@ impl Classifier {
     }
 
     pub fn predict_on(&self, text: &str, extra: &[f32], pool: Option<&Pool>) -> Vec<Output> {
-        let r = self.run(text, extra, &self.gains(), pool);
+        self.predict_bytes(text.as_bytes(), extra, pool)
+    }
+
+    /// every head's steered output on any bytes
+    pub fn predict_bytes(&self, data: &[u8], extra: &[f32], pool: Option<&Pool>) -> Vec<Output> {
+        let r = self.run_bytes(data, extra, &self.gains(), pool);
         self.read(&r.logits)
+    }
+
+    /// `predict_bytes` with the trunk on the runner's device (the CPU without one); the
+    /// same outputs, bit for bit on a device the probe finds exact
+    pub fn predict_bytes_with(&self, data: &[u8], extra: &[f32], runner: Option<&device::Runner>) -> Vec<Output> {
+        match runner {
+            Some(r) => self.read(&r.text_logits(&self.net, data, extra, &self.gains())),
+            None => self.predict_bytes(data, extra, None),
+        }
     }
 
     /// steered outputs from window-averaged logits

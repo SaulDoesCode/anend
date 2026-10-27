@@ -1,0 +1,3506 @@
+//! The space: the three.js room (app/src/space.js, over the vendored three.js in app/vendor)
+//! hosted through Dioxus's JS interop. Rust searches and gathers what each text is
+//! (`space.features`: its sums, length, kind, word types, lists, time; the colouring
+//! classifier's class), space.js runs the free spread and draws, and they talk over one
+//! eval channel.
+//!
+//! As the Bevy app's space had it: the terminal (the command bar: Enter, Ctrl+Enter,
+//! Shift+Enter, Delete, ↑ ↓ history, `#123` `#r123` `#name`, the words Enlist List Delist
+//! Unlist Count Backup Clear ClearAll Settle Maps `Save name` Help); texts dragged (then
+//! pinned), pushed and pulled with the wheel, pinned (U), new (N, a double click on empty
+//! room), edited (Enter), removed (Delete), copied (Ctrl+C), undone (Ctrl+Z); maps saved
+//! (Shift+X) and exported (X); the physics panel (O) with pause (P) and settle (K); the
+//! position card (I), help (H), and the details of the text under the pointer in a window
+//! that moves (M), its close button showing on hover.
+
+use std::collections::{BTreeMap, HashMap};
+
+use dioxus::prelude::*;
+use futures_util::{StreamExt, future::Either};
+use serde_json::{Value, json};
+
+use crate::backend::Hit;
+use crate::gem::{self, Mode};
+use crate::keys::Action;
+use crate::shell::set_pref;
+use crate::ui::*;
+use crate::views::{TChip, use_keys};
+
+mod animwin;
+mod flightwin;
+mod lightwin;
+mod prefabwin;
+mod soundwin;
+mod texwin;
+mod wirewin;
+
+const THREE: &str = include_str!("../../vendor/three.module.min.js");
+const ENGINE: &str = include_str!("../space.js");
+
+/// a physics slider: its key (space.js `PHYSICS`), label, range, step, default and group
+pub struct Slider {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub min: f64,
+    pub max: f64,
+    pub step: f64,
+    pub def: f64,
+    pub group: &'static str,
+}
+
+const fn sl(
+    key: &'static str,
+    label: &'static str,
+    min: f64,
+    max: f64,
+    step: f64,
+    def: f64,
+    group: &'static str,
+) -> Slider {
+    Slider {
+        key,
+        label,
+        min,
+        max,
+        step,
+        def,
+        group,
+    }
+}
+
+/// the physics panel; a weight runs from −1 (texts alike that way push apart) to +1 (they
+/// pull together)
+pub const SLIDERS: [Slider; 26] = [
+    sl(
+        "w_ordinal",
+        "ordinal sums",
+        -1.0,
+        1.0,
+        0.05,
+        0.6,
+        "what pulls texts together",
+    ),
+    sl(
+        "w_reversed",
+        "reversed sums",
+        -1.0,
+        1.0,
+        0.05,
+        0.3,
+        "what pulls texts together",
+    ),
+    sl(
+        "w_bucket",
+        "the same bucket",
+        -1.0,
+        1.0,
+        0.05,
+        0.8,
+        "what pulls texts together",
+    ),
+    sl("w_length", "length", -1.0, 1.0, 0.05, 0.2, "what pulls texts together"),
+    sl(
+        "w_types",
+        "kind and word types",
+        -1.0,
+        1.0,
+        0.05,
+        0.3,
+        "what pulls texts together",
+    ),
+    sl(
+        "w_lists",
+        "shared lists",
+        -1.0,
+        1.0,
+        0.05,
+        0.7,
+        "what pulls texts together",
+    ),
+    sl(
+        "w_class",
+        "the colouring classifier's class",
+        -1.0,
+        1.0,
+        0.05,
+        0.5,
+        "what pulls texts together",
+    ),
+    sl(
+        "w_time",
+        "written near in time",
+        -1.0,
+        1.0,
+        0.05,
+        0.2,
+        "what pulls texts together",
+    ),
+    sl(
+        "w_letters",
+        "the same letters",
+        -1.0,
+        1.0,
+        0.05,
+        0.4,
+        "what pulls texts together",
+    ),
+    sl(
+        "qscale",
+        "how near sums count as alike",
+        1.0,
+        100.0,
+        1.0,
+        12.0,
+        "what pulls texts together",
+    ),
+    sl("attract", "attraction", 0.0, 4.0, 0.05, 0.9, "motion"),
+    sl("repel", "repulsion", 0.0, 60.0, 0.5, 9.0, "motion"),
+    sl("link", "distance between alike texts", 0.5, 20.0, 0.1, 4.0, "motion"),
+    sl("gravity", "gravity to the centre", 0.0, 1.0, 0.005, 0.06, "motion"),
+    sl("pad", "gap between texts", 0.0, 2.0, 0.05, 0.3, "motion"),
+    sl("damping", "damping", 0.0, 10.0, 0.1, 2.2, "motion"),
+    sl("cool", "cooling", 0.001, 0.08, 0.001, 0.012, "motion"),
+    sl("substeps", "speed (steps per frame)", 0.0, 8.0, 1.0, 2.0, "motion"),
+    sl("depth", "depth by the measure", 0.0, 20.0, 0.25, 0.0, "depth"),
+    sl("flat", "flatness", 0.0, 5.0, 0.05, 1.5, "depth"),
+    sl("distance", "spread distance", 5.0, 200.0, 1.0, 26.0, "depth"),
+    sl("look", "look sensitivity", 0.2, 3.0, 0.05, 1.0, "camera"),
+    sl(
+        "smooth",
+        "look smoothness (higher: snappier)",
+        2.0,
+        40.0,
+        1.0,
+        14.0,
+        "camera",
+    ),
+    sl("size", "text size", 0.1, 3.0, 0.05, 0.5, "texts"),
+    sl("wrap", "text wrap (characters)", 16.0, 160.0, 1.0, 60.0, "texts"),
+    sl("minPx", "hide texts under px", 0.0, 8.0, 0.1, 1.2, "texts"),
+];
+
+pub const DEPTH_BY: [&str; 4] = ["none", "ordinal", "length", "time"];
+
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+struct SpaceEvent {
+    kind: String,
+    #[serde(default)]
+    key: String,
+    #[serde(default)]
+    text: String,
+    #[serde(default)]
+    note: bool,
+    #[serde(default)]
+    free: bool,
+    #[serde(default)]
+    x: f64,
+    #[serde(default)]
+    y: f64,
+    #[serde(default)]
+    ctrl: bool,
+    #[serde(default)]
+    shift: bool,
+    #[serde(default)]
+    alt: bool,
+    #[serde(default)]
+    q: f64,
+    #[serde(default)]
+    hue: f64,
+    #[serde(default)]
+    pinned: bool,
+    #[serde(default)]
+    data: Value,
+    /// the placement in the room (a copy's own key); `key` is the entry's
+    #[serde(default)]
+    node: String,
+    /// how many placements the entry has in the room, and whether this is the first
+    #[serde(default)]
+    copies: u32,
+    #[serde(default)]
+    primary: bool,
+    /// a detached placement: the entry's version it keeps (its edited time, ms)
+    #[serde(default)]
+    det: u64,
+    /// an inheriting placement's own text, shadowing its entry's
+    #[serde(default)]
+    own: Option<String>,
+    /// the entry's text (what an inheriting placement shows without its own)
+    #[serde(default)]
+    entry_text: String,
+    /// the chain it heads or is in (the chain entry's key), its place among the members
+    /// (-1: the head), how many members a head has, and the node of its head
+    #[serde(default)]
+    chain: String,
+    #[serde(default = "minus_one")]
+    idx: i64,
+    #[serde(default)]
+    members: u32,
+    #[serde(default)]
+    head_node: String,
+    /// a note's body shown as the second of a chain of two (no entry of its own)
+    #[serde(default)]
+    virt: bool,
+    /// its font size in steps of 1/50 unit (0: the default), and the default's step
+    #[serde(default)]
+    font: u32,
+    #[serde(default)]
+    font_default: u32,
+}
+
+/// a placement's size, − and + a step, and back to the default (the details window and
+/// the menu)
+#[component]
+fn SizeRow(ev: SpaceEvent, on_send: EventHandler<Value>) -> Element {
+    let shown = if ev.font == 0 {
+        format!("default ({:.2})", ev.font_default as f64 / 50.0)
+    } else {
+        format!("{:.2}", ev.font as f64 / 50.0)
+    };
+    let node = ev.node.clone();
+    let step = move |by: i32| {
+        let n = node.clone();
+        move |_| on_send.call(json!({ "cmd": "size", "node": n, "by": by }))
+    };
+    let n0 = ev.node.clone();
+    rsx! {
+        div { class: "row size-row",
+            span { class: "dim small", "size " }
+            button { class: "btn small", title: "smaller by 0.1 (sizes go in steps of 0.02)", onclick: step(-5), "−" }
+            span { class: "num", title: "units per em; the default is the physics window's text size", "{shown}" }
+            button { class: "btn small", title: "larger by 0.1", onclick: step(5), "+" }
+            if ev.font != 0 {
+                button { class: "btn small", title: "back to the default size", onclick: move |_| on_send.call(json!({ "cmd": "size", "node": n0, "to": 0 })), "default" }
+            }
+        }
+    }
+}
+
+fn minus_one() -> i64 {
+    -1
+}
+
+impl SpaceEvent {
+    /// how this placement relates to its entry, in words
+    fn relation(&self) -> String {
+        if self.free {
+            return String::new();
+        }
+        if self.virt {
+            return "a note's body, shown under its title as a chain of two".into();
+        }
+        if self.idx >= 0 {
+            return format!(
+                "text {} of a chain under its title (drag any of it to move it)",
+                self.idx + 1
+            );
+        }
+        if !self.chain.is_empty() {
+            return format!("heads a chain of {} texts", self.members);
+        }
+        if self.det > 0 {
+            let when = chrono_date(self.det);
+            return format!("detached on {when}: keeps the text as it read then");
+        }
+        if self.own.is_some() {
+            return "its own text over the entry's".into();
+        }
+        "inherits: shows the entry's text as it is now".into()
+    }
+}
+
+/// what a chain op does to the room once it's done
+#[derive(Clone, PartialEq)]
+enum ChainThen {
+    /// the text becomes the new chain's head, and the chain is the one to add to
+    Start(String),
+    /// the chain changed (cut: a new one starts beside it); the node, when given, leaves
+    /// the room (it went into the chain)
+    Changed(Option<String>),
+    /// the chain broke: its head shows its title again
+    Broke,
+}
+
+/// a change to a chain's members' keys
+type MembersEdit = std::rc::Rc<dyn Fn(&mut Vec<Value>)>;
+
+/// the right-click menu's chain items: start one, add to the chain being built, move a
+/// member, cut, take out, break (docs/format.md answer 4, queued #8)
+#[component]
+fn ChainItems(ev: SpaceEvent, sp_menu: Signal<Option<SpaceEvent>>, on_send: EventHandler<Value>) -> Element {
+    let ui = ui();
+    let api = api();
+    if ev.free || ev.virt {
+        return rsx! {};
+    }
+    let building = ui.picks.read().chain.clone();
+    // runs a chain op, tells the room, then closes the menu (its handler goes with it)
+    let run = {
+        let api = api.clone();
+        move |op: &'static str, args: Value, then: ChainThen| {
+            let api = api.clone();
+            let mut sm = sp_menu;
+            spawn(async move {
+                match api.call(op, args).await {
+                    Ok(r) => match then {
+                        ChainThen::Start(node) => {
+                            on_send.call(json!({ "cmd": "chainify", "node": node, "chain": r }));
+                            let mut p = ui.picks;
+                            p.write().chain = Some(Hit {
+                                key: r["key"].as_str().unwrap_or("").to_string(),
+                                text: r["title"]["text"].as_str().unwrap_or("").to_string(),
+                                note: false,
+                            });
+                            ui.say("a chain: right-click other texts to add them to it");
+                        }
+                        ChainThen::Changed(gone) => {
+                            let (chain, new) = if r.get("chain").is_some() {
+                                (r["chain"].clone(), r["new"].clone())
+                            } else {
+                                (r.clone(), Value::Null)
+                            };
+                            on_send.call(json!({ "cmd": "chain", "key": chain["key"], "chain": chain }));
+                            if !new.is_null() {
+                                on_send.call(json!({ "cmd": "addchain", "near": chain["key"], "chain": new }));
+                            }
+                            if let Some(n) = gone {
+                                on_send.call(json!({ "cmd": "removenode", "node": n, "quiet": true }));
+                                ui.say(format!(
+                                    "added to the chain “{}”",
+                                    chain["title"]["text"].as_str().unwrap_or("")
+                                ));
+                            }
+                        }
+                        ChainThen::Broke => {
+                            on_send.call(json!({ "cmd": "chain", "key": r["key"], "chain": Value::Null }));
+                            let mut p = ui.picks;
+                            if p.peek()
+                                .chain
+                                .as_ref()
+                                .is_some_and(|c| Some(c.key.as_str()) == r["key"].as_str())
+                            {
+                                p.write().chain = None;
+                            }
+                            ui.say("the chain broke: its texts stay");
+                        }
+                    },
+                    Err(e) => ui.fail(e),
+                }
+                sm.set(None);
+            });
+        }
+    };
+    // the chain's members' keys with one change made
+    let reorder = {
+        let api = api.clone();
+        let run = run.clone();
+        move |chain: String, f: MembersEdit| {
+            let (api, run) = (api.clone(), run.clone());
+            spawn(async move {
+                match api.call("chains.get", json!({ "key": chain })).await {
+                    Ok(c) => {
+                        let mut keys: Vec<Value> = c["members"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .map(|m| m["key"].clone())
+                            .collect();
+                        f(&mut keys);
+                        run(
+                            "chains.set",
+                            json!({ "key": chain, "members": keys }),
+                            ChainThen::Changed(None),
+                        );
+                    }
+                    Err(e) => ui.fail(e),
+                }
+            });
+        }
+    };
+    let idx = ev.idx;
+    let member = ev.idx >= 0;
+    let head = ev.idx < 0 && !ev.chain.is_empty();
+    let chain = ev.chain.clone();
+    rsx! {
+        if !member && !head && !ev.note {
+            button { role: "menuitem", onclick: { let run = run.clone(); let (k, n) = (ev.key.clone(), ev.node.clone()); move |_| run("chains.make", json!({ "title": k, "members": [] }), ChainThen::Start(n.clone())) },
+                Icon { name: "list" } "start a chain with this as its title" }
+        }
+        if let Some(b) = building.clone().filter(|b| !member && b.key != ev.key && b.key != chain) {
+            button { role: "menuitem", onclick: { let api = api.clone(); let run = run.clone(); let (k, n) = (ev.key.clone(), ev.node.clone()); let b = b.clone(); move |_| {
+                    let (api, run, k, n, b) = (api.clone(), run.clone(), k.clone(), n.clone(), b.clone());
+                    spawn(async move {
+                        match api.call("chains.get", json!({ "key": b.key })).await {
+                            Ok(c) => {
+                                let mut keys: Vec<Value> = c["members"].as_array().into_iter().flatten().map(|m| m["key"].clone()).collect();
+                                keys.push(json!(k));
+                                run("chains.set", json!({ "key": b.key, "members": keys }), ChainThen::Changed(Some(n)));
+                            }
+                            Err(e) => ui.fail(e),
+                        }
+                    });
+                } },
+                Icon { name: "list" } "add it to the chain “{b.text}”" }
+        }
+        if head {
+            button { role: "menuitem", onclick: { let (k, t) = (chain.clone(), ev.text.clone()); move |_| {
+                    let mut p = ui.picks; p.write().chain = Some(Hit { key: k.clone(), text: t.clone(), note: false });
+                    ui.say("right-click other texts to add them to this chain");
+                    let mut sm = sp_menu; sm.set(None);
+                } },
+                Icon { name: "list" } "add texts to this chain" span { class: "dim small", " ({ev.members} now)" } }
+            button { role: "menuitem", onclick: { let run = run.clone(); let k = chain.clone(); move |_| run("chains.break", json!({ "key": k }), ChainThen::Broke) },
+                Icon { name: "close" } "break the chain" span { class: "dim small", " (its texts stay)" } }
+        }
+        if member {
+            if idx > 0 {
+                button { role: "menuitem", onclick: { let r = reorder.clone(); let k = chain.clone(); move |_| r(k.clone(), std::rc::Rc::new(move |v: &mut Vec<Value>| v.swap(idx as usize - 1, idx as usize))) },
+                    Icon { name: "chevron-right", class: "rot-up" } "earlier in the chain" }
+            }
+            button { role: "menuitem", onclick: { let r = reorder.clone(); let k = chain.clone(); move |_| r(k.clone(), std::rc::Rc::new(move |v: &mut Vec<Value>| if (idx as usize) + 1 < v.len() { v.swap(idx as usize, idx as usize + 1) })) },
+                Icon { name: "chevron-right", class: "rot-down" } "later in the chain" }
+            button { role: "menuitem", onclick: { let run = run.clone(); let k = chain.clone(); move |_| run("chains.cut", json!({ "key": k, "at": idx }), ChainThen::Changed(None)) },
+                Icon { name: "close" } "cut the chain before this" span { class: "dim small", " (this heads a new one)" } }
+            button { role: "menuitem", onclick: { let r = reorder.clone(); let k = chain.clone(); move |_| r(k.clone(), std::rc::Rc::new(move |v: &mut Vec<Value>| { if (idx as usize) < v.len() { v.remove(idx as usize); } })) },
+                Icon { name: "close" } "take it out of the chain" }
+        }
+    }
+}
+
+/// a date from ms since 1970, as "2026-10-25 14:03 UTC"
+fn chrono_date(ms: u64) -> String {
+    let secs = (ms / 1000) as i64;
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    // days since 1970-01-01 to a civil date (Howard Hinnant's algorithm)
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y}-{m:02}-{d:02} {:02}:{:02} UTC", rem / 3600, rem % 3600 / 60)
+}
+
+fn boot_js() -> String {
+    format!(
+        r#"
+const THREE_SRC = {three};
+const ENGINE_SRC = {engine};
+window.__anendNoLock = {no_lock};
+const url = (src) => URL.createObjectURL(new Blob([src], {{ type: 'text/javascript' }}));
+const tu = url(THREE_SRC);
+const eu = url(ENGINE_SRC.split("'__THREE__'").join(JSON.stringify(tu)));
+let host = null;
+for (let i = 0; i < 100 && !host; i++) {{ host = document.getElementById('space-host'); if (!host) await new Promise((r) => setTimeout(r, 20)); }}
+try {{
+  const mod = await import(eu);
+  const sp = new mod.Space(host, (m) => dioxus.send(m));
+  window.__anendSpace = sp;
+  dioxus.send({{ kind: 'ready' }});
+  while (true) {{
+    const c = await dioxus.recv();
+    if (c.cmd === 'place') sp.place(c.texts, c.again);
+    else if (c.cmd === 'effects') sp.effects(c.fx);
+    else if (c.cmd === 'copies') sp.setCopies(c.list || []);
+    else if (c.cmd === 'copygone') sp.copyGone(c.ids || [], c.restore);
+    else if (c.cmd === 'opencopy') sp.openCopyNamed(c.id);
+    else if (c.cmd === 'closecopy') sp.closeCopy();
+    else if (c.cmd === 'pickcopy') sp.pickCopy(c.id);
+    else if (c.cmd === 'clear') sp.clear(!!c.all);
+    else if (c.cmd === 'room') sp.setRoom(c.bg, c.ink);
+    else if (c.cmd === 'start') sp.start();
+    else if (c.cmd === 'stop') sp.stop();
+    else if (c.cmd === 'mark') sp.mark(c.list, c.candidate);
+    else if (c.cmd === 'focus') host.focus();
+    else if (c.cmd === 'keys') sp.setKeys(c.map);
+    else if (c.cmd === 'physics') sp.setPhysics(c.p);
+    else if (c.cmd === 'pause') sp.paused = !!c.on;
+    else if (c.cmd === 'settle') dioxus.send({{ kind: 'settled', data: sp.settle() }});
+    else if (c.cmd === 'undo') dioxus.send({{ kind: 'undone', data: sp.undoLast() }});
+    else if (c.cmd === 'pin') dioxus.send({{ kind: 'toast', text: sp.pinSelected() || 'select a text first' }});
+    else if (c.cmd === 'remove') {{ const k = sp.removeSelected(); dioxus.send({{ kind: 'toast', text: k ? 'text removed · Ctrl+Z puts it back' : 'select a text first' }}); }}
+    else if (c.cmd === 'free') dioxus.send({{ kind: 'made', key: sp.addFree(c.text), text: c.text || 'text', free: true }});
+    else if (c.cmd === 'retext') sp.editFree(c.key, c.text);
+    else if (c.cmd === 'rows') dioxus.send({{ kind: 'rows', data: {{ why: c.why, name: c.name || '', rows: sp.rows() }} }});
+    else if (c.cmd === 'load') sp.loadRows(c.rows, c.feats || {{}});
+    else if (c.cmd === 'colours') sp.colours(c.map || {{}});
+    else if (c.cmd === 'blocks') {{
+      sp.setBlocks(c.blocks, c.textures || {{}}, !!c.replace);
+      if (c.added) sp.record({{ kind: 'blockadd', ids: c.added }});
+      if (c.select != null) sp.pickBlock(c.select);
+    }}
+    else if (c.cmd === 'unblock') sp.unblock(c.ids || []);
+    else if (c.cmd === 'sky') sp.setSky(c.about || null);
+    else if (c.cmd === 'anims') sp.setAnims(c.anims || [], c.textures || {{}});
+    else if (c.cmd === 'playanims') sp.playAnims(!!c.on);
+    else if (c.cmd === 'wires') sp.setWires(c.wires || [], !!c.live);
+    else if (c.cmd === 'thumbs') dioxus.send({{ kind: 'thumbs', data: sp.thumbs(c.prefabs || [], c.textures || {{}}) }});
+    else if (c.cmd === 'prefabspot') dioxus.send({{ kind: 'prefabspot', data: {{ ...sp.blockSpot(), want: c.want }} }});
+    else if (c.cmd === 'rays') sp.showRays(c.rays || []);
+    else if (c.cmd === 'sounddata') sp.soundData(c.id, c.data || '');
+    else if (c.cmd === 'sounds') sp.sounds(c.sounds || []);
+    else if (c.cmd === 'soundpreview') sp.previewSound(c.id);
+    else if (c.cmd === 'clearcollected') sp.clearCollected();
+    else if (c.cmd === 'ghost') sp.startGhost(c.prefab, c.parts || [], c.textures || {{}}, c.name);
+    else if (c.cmd === 'noghost') sp.stopGhost();
+    else if (c.cmd === 'animpreview') sp.previewAnim(c.id, c.anim || null, c.p);
+    else if (c.cmd === 'lights') sp.setLights(c.lights || [], c.changed || null);
+    else if (c.cmd === 'showlights') sp.showLights(!!c.on, c.picked);
+    else if (c.cmd === 'lightspot') dioxus.send({{ kind: 'lightspot', data: {{ ...sp.lightSpot(), want: c.want }} }});
+    else if (c.cmd === 'preview') sp.preview(c.id, c.about || {{}}, c.tiles || 1, !!c.variants);
+    else if (c.cmd === 'blockspot') dioxus.send({{ kind: 'spot', data: {{ ...sp.blockSpot(), want: c.want }} }});
+    else if (c.cmd === 'blockfields') sp.setBlockFields(c.id, c.t);
+    else if (c.cmd === 'pickblock') sp.pickBlock(c.id);
+    else if (c.cmd === 'dup') {{ const k = sp.duplicate(c.node, c.det || 0); dioxus.send({{ kind: 'toast', text: !k ? 'select a text first' : c.det ? 'a detached copy: it keeps the text as it reads now · Ctrl+Z takes it away' : 'a copy that inherits: it shows the entry as it changes · Ctrl+Z takes it away' }}); }}
+    else if (c.cmd === 'size') sp.setSize(c.node, c.by || 0, c.to);
+    else if (c.cmd === 'chain') sp.setChain(c.key, c.chain);
+    else if (c.cmd === 'chainify') sp.chainify(c.node, c.chain);
+    else if (c.cmd === 'addchain') sp.addChain(c.near, c.chain);
+    else if (c.cmd === 'own') {{ const k = sp.setOwn(c.node, c.text); dioxus.send({{ kind: 'toast', text: !k ? 'that placement can\'t have its own text' : c.text ? 'this placement has its own text now; the entry is unchanged · Ctrl+Z undoes it' : 'it follows the entry again · Ctrl+Z undoes it' }}); }}
+    else if (c.cmd === 'removenode') {{ const k = sp.removeNode(c.node); if (!c.quiet) dioxus.send({{ kind: 'toast', text: k ? 'taken out of the room (the entry stays) · Ctrl+Z puts it back' : 'gone already' }}); }}
+    else if (c.cmd === 'pinnode') dioxus.send({{ kind: 'toast', text: sp.pinNode(c.node) || 'gone already' }});
+  }}
+}} catch (e) {{
+  dioxus.send({{ kind: 'error', text: String(e && e.message || e) }});
+}}
+"#,
+        three = serde_json::to_string(THREE).unwrap_or_default(),
+        engine = serde_json::to_string(ENGINE).unwrap_or_default(),
+        no_lock = cfg!(feature = "desktop"),
+    )
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct Sp {
+    tx: Signal<Option<futures_channel::mpsc::UnboundedSender<Value>>>,
+    /// the texts in the room (memory texts and notes), by key
+    texts: Signal<Vec<Hit>>,
+    /// what the details window shows: the text under the pointer, else the selected one
+    card: Signal<Option<SpaceEvent>>,
+    selected: Signal<Option<SpaceEvent>>,
+    pos: Signal<String>,
+    /// ↑ ↓ in the bar: where in the history
+    hist_at: Signal<Option<usize>>,
+    paused: Signal<bool>,
+    /// each text's bucket axis Q, for the shared-bucket underlines
+    q_bucket: Signal<HashMap<String, u64>>,
+    /// the selected block: `{id, kind, texture, x, y, z, w, h, d, about}`
+    block: Signal<Option<Value>>,
+    /// how many blocks and textures the save has
+    block_use: Signal<(u64, u64)>,
+    /// the room's lights (`lights.list`), as the room bakes them
+    lights: Signal<Vec<Value>>,
+    /// the right-click menu on a text
+    menu: Signal<Option<SpaceEvent>>,
+    /// bumped when a scene is saved, so the scenes window reads them again
+    scenes_rev: Signal<u64>,
+    /// the right-click menu on a block: where
+    bmenu: Signal<Option<(f64, f64)>>,
+    /// the blocks window shows the selected block's bend editor open
+    bend_open: Signal<bool>,
+    /// the room is live: clicks fire wired blocks, timers run (the wiring window's play)
+    live: Signal<bool>,
+    /// what the last cause set off (`wiring.fire`'s events)
+    fired: Signal<Vec<Value>>,
+    /// the save's prefabs (`prefabs.list`), their copies, and each one's picture
+    prefabs: Signal<Vec<Value>>,
+    copies: Signal<Vec<Value>>,
+    thumbs: Signal<HashMap<u64, String>>,
+    /// how the camera moves: `fly` (the default), `walk` or `super` (superflight)
+    mode: Signal<String>,
+    /// the texts superflight flew through, in order: `{key, text}`
+    collected: Signal<Vec<Value>>,
+}
+
+impl Sp {
+    fn send(&self, v: Value) {
+        if let Some(tx) = self.tx.peek().as_ref() {
+            let _ = tx.unbounded_send(v);
+        }
+    }
+}
+
+/// the physics' settings for space.js: the sliders (defaults and the person's changes)
+fn physics(ui: Ui) -> Value {
+    let p = ui.prefs.peek();
+    let mut o = serde_json::Map::new();
+    for s in &SLIDERS {
+        o.insert(
+            s.key.into(),
+            json!(p.space.physics.get(s.key).copied().unwrap_or(s.def)),
+        );
+    }
+    o.insert("depth_by".into(), json!(p.space.depth_by));
+    o.insert("reversed".into(), json!(p.space_reversed as u8));
+    Value::Object(o)
+}
+
+/// the letters of a text as counts a–z, for the "same letters" weight
+fn letter_counts(t: &str) -> Vec<u32> {
+    let mut v = vec![0u32; 26];
+    for c in t.bytes() {
+        let c = c | 32;
+        if c.is_ascii_lowercase() {
+            v[(c - b'a') as usize] += 1;
+        }
+    }
+    v
+}
+
+/// lays hits out: in place of what's there (pinned and free texts stay), or (keep) added
+/// to it; each with what it is, from `space.features` and the colouring classifier
+fn show(ui: Ui, api: Api, sp: Sp, hits: Vec<Hit>) {
+    let (keep, reversed, tint) = {
+        let p = ui.prefs.peek();
+        (p.space_keep, p.space_reversed, p.tint.clone())
+    };
+    let mut all = if keep { sp.texts.peek().clone() } else { vec![] };
+    let again = keep && !all.is_empty();
+    let mut fresh = Vec::new();
+    for h in hits {
+        if !all.iter().any(|x| x.key == h.key) {
+            all.push(h.clone());
+            fresh.push(h);
+        }
+    }
+    let mut texts = sp.texts;
+    if all.is_empty() {
+        texts.set(vec![]);
+        sp.send(json!({ "cmd": "clear", "all": false }));
+        return;
+    }
+    dioxus::dioxus_core::spawn_forever(async move {
+        let keys: Vec<String> = fresh.iter().map(|h| h.key.clone()).collect();
+        let feats = api
+            .call("space.features", json!({ "keys": keys }))
+            .await
+            .unwrap_or(Value::Null);
+        let mut by: HashMap<String, Value> = HashMap::new();
+        for f in feats["features"].as_array().into_iter().flatten() {
+            by.insert(f["key"].as_str().unwrap_or("").to_string(), f.clone());
+        }
+        let mut tints: HashMap<String, (Value, Value, String)> = HashMap::new();
+        if !tint.is_empty()
+            && let Ok(t) = api.call("classify.tints", json!({ "name": tint, "keys": keys })).await
+        {
+            let palette = crate::views::classifiers::strs(&t["palette"]);
+            for x in t["tints"].as_array().into_iter().flatten() {
+                let c = x["class"].as_u64().map(|c| c as usize);
+                let colour = c.and_then(|c| palette.get(c).cloned()).unwrap_or_default();
+                tints.insert(
+                    x["key"].as_str().unwrap_or("").to_string(),
+                    (x["class"].clone(), x["strength"].clone(), colour),
+                );
+            }
+        }
+        // the bucket axis Q (r, or s when reversed) and how many of the room share it
+        let mut qs = sp.q_bucket.peek().clone();
+        if !again {
+            qs.clear();
+        }
+        for h in &fresh {
+            let (s, r) = gem::sums(&h.text);
+            qs.insert(h.key.clone(), if reversed { s } else { r });
+        }
+        let mut count: HashMap<u64, usize> = HashMap::new();
+        for q in qs.values() {
+            *count.entry(*q).or_default() += 1;
+        }
+        let payload: Vec<Value> = fresh
+            .iter()
+            .map(|h| {
+                let f = by.get(&h.key).cloned().unwrap_or(Value::Null);
+                let (s, r) = gem::sums(&h.text);
+                let q = if reversed { s } else { r };
+                let mut v = json!({
+                    "key": h.key, "text": h.text, "note": h.note, "shown": first_piece(ui, &h.text),
+                    "s": s, "r": r, "q": q, "hue": anend_core::spread::seed_hue(q as i64),
+                    "shared": count.get(&q).copied().unwrap_or(0) >= 2,
+                    // the gematria grouping underline, the memory view's colour for it
+                    "under": gem::underline(&h.text, if reversed { Mode::Reversed } else { Mode::Ordinal }),
+                    "chars": f["chars"], "words": f["words"], "kind": f["kind"], "types": f["types"],
+                    "created": f["created"], "lists": f["lists"], "freq": letter_counts(&h.text),
+                    "chain": f["chain"], "isChain": f["isChain"], "titleKey": f["titleKey"],
+                });
+                if let Some((c, st, colour)) = tints.get(&h.key) {
+                    v["cls"] = c.clone();
+                    v["strength"] = st.clone();
+                    if !colour.is_empty() {
+                        v["colour"] = json!(colour);
+                    }
+                }
+                v
+            })
+            .collect();
+        // the room's counts in the search line
+        let mut tl = ui.topline;
+        if let Some(l) = tl.write().as_mut() {
+            l.counts = Some((qs.len(), count.len()));
+        }
+        let mut q_bucket = sp.q_bucket;
+        q_bucket.set(qs);
+        sp.send(json!({ "cmd": "place", "texts": payload, "again": again }));
+        texts.set(all);
+    });
+}
+
+/// the space's search line: what was searched and its mode; the room's counts follow
+/// when the texts are placed (`place`), with icons
+fn topline(ui: Ui, title: String, mode: Mode, text: Option<&str>, n: usize) {
+    topline_pf(ui, title, mode, text, n, None);
+}
+
+fn topline_pf(mut ui: Ui, title: String, mode: Mode, text: Option<&str>, n: usize, pf: Option<u64>) {
+    let (s, r) = text.map(gem::sums).unwrap_or((0, 0));
+    ui.topline.set(Some(TopLine {
+        title,
+        detail: mode.name().to_string(),
+        s,
+        r,
+        counts: (n == 0).then_some((0, 0)),
+        pf,
+    }));
+}
+
+fn space_mode(ui: Ui) -> Mode {
+    if ui.prefs.peek().space_reversed {
+        Mode::Reversed
+    } else {
+        Mode::Ordinal
+    }
+}
+
+async fn gsearch(ui: Ui, api: Api, sp: Sp, n: u64, mode: Mode, text: Option<String>) {
+    set_pref(ui, |p| {
+        p.space.address = format!("{}{n}", if mode == Mode::Reversed { "r" } else { "" })
+    });
+    match api.gsearch(mode, &n.to_string()).await {
+        Ok(hits) => {
+            let t = text.or_else(|| hits.first().map(|h| h.text.clone()));
+            topline_pf(ui, n.to_string(), mode, t.as_deref(), hits.len(), (n > 1).then_some(n));
+            if hits.is_empty() {
+                ui.say(format!("nothing in {} {n} yet", mode.name()));
+            }
+            show(ui, api, sp, hits);
+        }
+        Err(e) => ui.fail(e),
+    }
+}
+
+/// a value into the bar, and gsearch it (remem's `envale`)
+fn envale(ui: Ui, api: Api, sp: Sp, n: u64, mode: Mode) {
+    ui.set_bar(&n.to_string());
+    dioxus::dioxus_core::spawn_forever(gsearch(ui, api, sp, n, mode, None));
+}
+
+/// the scenes saved in the save: name → rows (`scenes.maps`)
+async fn maps(api: &Api) -> BTreeMap<String, Value> {
+    match api.call("scenes.maps", json!({})).await {
+        Ok(v) => serde_json::from_value(v).unwrap_or_default(),
+        Err(_) => BTreeMap::new(),
+    }
+}
+
+/// `#123` an ordinal bucket, `#r123` a reversed one, `#name` a map
+async fn route(ui: Ui, api: Api, sp: Sp, addr: &str) {
+    let addr = addr.trim();
+    let (rev, digits) = match addr.strip_prefix('r') {
+        Some(d) => (true, d),
+        None => (false, addr),
+    };
+    if !digits.is_empty()
+        && digits.bytes().all(|b| b.is_ascii_digit())
+        && let Ok(n) = digits.parse::<u64>()
+    {
+        if ui.prefs.peek().space_reversed != rev {
+            set_pref(ui, |p| p.space_reversed = rev);
+        }
+        gsearch(ui, api, sp, n, if rev { Mode::Reversed } else { Mode::Ordinal }, None).await;
+        return;
+    }
+    let all = maps(&api).await;
+    let Some(rows) = all.get(addr).cloned() else {
+        ui.fail(format!("there's no map named {addr}"));
+        return;
+    };
+    // the memory texts of the map, with what they are
+    let keys: Vec<String> = rows
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|r| r[4]["key"].as_str().map(str::to_string))
+        .collect();
+    let feats = api
+        .call("space.features", json!({ "keys": keys }))
+        .await
+        .unwrap_or(Value::Null);
+    let reversed = ui.prefs.peek().space_reversed;
+    let mut fm = serde_json::Map::new();
+    for f in feats["features"].as_array().into_iter().flatten() {
+        let k = f["key"].as_str().unwrap_or("").to_string();
+        let mut f = f.clone();
+        let (s, r) = (f["s"].as_u64().unwrap_or(0), f["r"].as_u64().unwrap_or(0));
+        let q = if reversed { s } else { r };
+        f["q"] = json!(q);
+        f["hue"] = json!(anend_core::spread::seed_hue(q as i64));
+        let text = rows
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|r| r[4]["key"].as_str() == Some(k.as_str()))
+            .and_then(|r| r[0].as_str())
+            .unwrap_or("")
+            .to_string();
+        f["under"] = json!(gem::underline(
+            &text,
+            if reversed { Mode::Reversed } else { Mode::Ordinal }
+        ));
+        f["shown"] = json!(first_piece(ui, &text));
+        fm.insert(k, f);
+    }
+    let hits: Vec<Hit> = rows
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|r| {
+            Some(Hit {
+                key: r[4]["key"].as_str()?.to_string(),
+                text: r[0].as_str().unwrap_or("").to_string(),
+                note: r[4]["key"].as_str()?.starts_with("note:"),
+            })
+        })
+        .collect();
+    let mut texts = sp.texts;
+    texts.set(hits);
+    sp.send(json!({ "cmd": "load", "rows": rows, "feats": fm }));
+    set_pref(ui, |p| p.space.address = addr.to_string());
+    let mut tl = ui.topline;
+    tl.set(Some(TopLine {
+        title: format!("map {addr}"),
+        detail: format!("{} texts", rows.as_array().map(|a| a.len()).unwrap_or(0)),
+        s: 0,
+        r: 0,
+        ..Default::default()
+    }));
+}
+
+fn push_history(ui: Ui, sp: Sp, v: &str) {
+    set_pref(ui, |p| {
+        let h = &mut p.space.history;
+        if h.last().map(String::as_str) != Some(v) {
+            h.push(v.to_string());
+        }
+        let n = h.len();
+        if n > 300 {
+            h.drain(0..n - 300);
+        }
+    });
+    let mut at = sp.hist_at;
+    at.set(None);
+}
+
+fn need(ui: Ui, h: Option<Hit>, what: &str) -> Option<Hit> {
+    if h.is_none() {
+        ui.fail(format!(
+            "no {what}: {} a text to set it",
+            if what == "list" { "Shift+click" } else { "Ctrl+click" }
+        ));
+    }
+    h
+}
+
+/// the space's words (the Bevy terminal's commands)
+async fn command(ui: Ui, api: Api, sp: Sp, word: &str, rest: &str) {
+    let picks = ui.picks.peek().clone();
+    match word {
+        "Enlist" => {
+            if let (Some(l), Some(c)) = (need(ui, picks.list, "list"), need(ui, picks.candidate, "candidate")) {
+                match api.enlist(&l.key, &c.key).await {
+                    Ok(()) => {
+                        ui.did(Did::Enlisted {
+                            list: l.key.clone(),
+                            member: c.key.clone(),
+                        });
+                        ui.say(format!("enlisted “{}” in “{}”", c.text, l.text));
+                        ui.touched();
+                    }
+                    Err(e) => ui.fail(e),
+                }
+            }
+        }
+        "Delist" => {
+            if let (Some(l), Some(c)) = (need(ui, picks.list, "list"), need(ui, picks.candidate, "candidate")) {
+                match api.delist(&l.key, &c.key).await {
+                    Ok(()) => {
+                        ui.did(Did::Delisted {
+                            list: l.key.clone(),
+                            member: c.key.clone(),
+                        });
+                        ui.say(format!("delisted “{}” from “{}”", c.text, l.text));
+                        ui.touched();
+                    }
+                    Err(e) => ui.fail(e),
+                }
+            }
+        }
+        "List" => {
+            if let Some(l) = need(ui, picks.list, "list") {
+                match api.lists().await {
+                    Ok(all) => {
+                        let members = all
+                            .lists
+                            .into_iter()
+                            .find(|x| x.list == l.key)
+                            .map(|x| x.members)
+                            .unwrap_or_default();
+                        let mut tl = ui.topline;
+                        tl.set(Some(TopLine {
+                            title: format!("list {}", l.text),
+                            detail: String::new(),
+                            s: 0,
+                            r: 0,
+                            ..Default::default()
+                        }));
+                        show(ui, api, sp, members);
+                    }
+                    Err(e) => ui.fail(e),
+                }
+            }
+        }
+        "Unlist" => {
+            if let Some(l) = need(ui, picks.list, "list") {
+                let members: Vec<String> = api
+                    .lists()
+                    .await
+                    .ok()
+                    .and_then(|a| a.lists.into_iter().find(|x| x.list == l.key))
+                    .map(|x| x.members.into_iter().map(|m| m.key).collect())
+                    .unwrap_or_default();
+                match api.unlist(&l.key).await {
+                    Ok(n) => {
+                        ui.did(Did::Unlisted {
+                            list: l.key.clone(),
+                            members,
+                        });
+                        ui.say(format!("unlisted “{}” ({n} members) · Ctrl+Z brings it back", l.text));
+                        ui.touched();
+                    }
+                    Err(e) => ui.fail(e),
+                }
+            }
+        }
+        "Count" => {
+            let h = ui.hello.peek().clone();
+            ui.toast(format!("{} texts · {} notes", h.counts.memories, h.counts.notes));
+        }
+        "Backup" => {
+            let name = ui.hello.peek().save.clone();
+            match api.backup(&name).await {
+                Ok(b) if !b.paths.is_empty() => ui.say(format!("backed up: {}", b.paths.join(" and "))),
+                Ok(_) => ui.say("backed up"),
+                Err(e) => ui.fail(e),
+            }
+        }
+        "Clear" | "ClearAll" => {
+            let mut texts = sp.texts;
+            texts.set(vec![]);
+            sp.send(json!({ "cmd": "clear", "all": word == "ClearAll" }));
+        }
+        "Settle" => sp.send(json!({ "cmd": "settle" })),
+        "Help" => set_pref(ui, |p| p.space.show_help = !p.space.show_help),
+        "Maps" => {
+            let all = maps(&api).await;
+            if all.is_empty() {
+                ui.say("no maps yet: Save name (or Shift+X) keeps the room as one");
+            } else {
+                ui.toast(format!(
+                    "maps: {}  (#name opens one)",
+                    all.keys().map(|k| format!("#{k}")).collect::<Vec<_>>().join("  ")
+                ));
+            }
+        }
+        "Save" => {
+            let name = rest.trim();
+            let name = if name.is_empty() {
+                default_map_name(ui)
+            } else {
+                name.to_string()
+            };
+            sp.send(json!({ "cmd": "rows", "why": "save", "name": name }));
+        }
+        _ => {}
+    }
+}
+
+/// what a text's label in the space shows: a long text's first piece (lines at word
+/// boundaries, `anend_core::pieces`) and how many more there are; None for a short text
+fn first_piece(ui: Ui, text: &str) -> Option<String> {
+    let (w, l) = {
+        let p = ui.prefs.peek();
+        (p.piece_line, p.piece_lines)
+    };
+    let n = anend_core::pieces::count(text, w, l);
+    (n > 1).then(|| {
+        let first = anend_core::pieces::pieces(text, w, l)[0].trim_end();
+        format!("{first} … ({} more pieces, {} KB)", n - 1, text.len().div_ceil(1000))
+    })
+}
+
+fn default_map_name(ui: Ui) -> String {
+    let a = ui.prefs.peek().space.address.clone();
+    let rev = a.starts_with('r');
+    let digits = a.trim_start_matches('r');
+    if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
+        format!("spread-{}{digits}", if rev { "r" } else { "" })
+    } else if a.is_empty() {
+        "untitled".into()
+    } else {
+        a
+    }
+}
+
+const COMMANDS: [&str; 14] = [
+    "Enlist", "List", "Delist", "Unlist", "Count", "Backup", "Clear", "ClearAll", "Settle", "Maps", "Save", "Help",
+    "Note", "Notes",
+];
+
+async fn enter(mut ui: Ui, api: Api, sp: Sp, raw: String, ctrl: bool, shift: bool) {
+    let t = raw.trim().to_string();
+    // an edit started from the right-click menu or Enter on a text
+    let pending = ui.pending.peek().clone();
+    if let Pending::EditOwn { node, .. } = &pending {
+        ui.pending.set(Pending::None);
+        if !t.is_empty() {
+            sp.send(json!({ "cmd": "own", "node": node, "text": t }));
+        }
+        ui.set_bar("");
+        return;
+    }
+    if let Pending::Edit(h) = pending {
+        ui.pending.set(Pending::None);
+        if t.is_empty() {
+            return;
+        }
+        if h.key.starts_with("t:") {
+            sp.send(json!({ "cmd": "retext", "key": h.key, "text": t }));
+        } else {
+            match api.put_memory(&h.key, &t).await {
+                Ok(()) => {
+                    ui.did(Did::Edited {
+                        key: h.key.clone(),
+                        old: h.text.clone(),
+                    });
+                    sp.send(json!({ "cmd": "retext", "key": h.key, "text": t }));
+                    ui.say(format!("{} now reads “{t}”", h.key));
+                    ui.touched();
+                }
+                Err(e) => ui.fail(e),
+            }
+        }
+        ui.set_bar("");
+        return;
+    }
+    if t.is_empty() {
+        return;
+    }
+    push_history(ui, sp, &t);
+    let mut words = t.split_whitespace();
+    let word = words.next().unwrap_or_default().to_string();
+    let rest: Vec<&str> = words.collect();
+    // `Run <program> [arguments]`: an s program of the save
+    if word == "Run" && crate::views::scode::run_from_bar(ui, &api, &t).await {
+        return;
+    }
+    if COMMANDS.contains(&word.as_str()) && (rest.is_empty() || word == "Save") {
+        if matches!(word.as_str(), "Note" | "Notes") {
+            ui.say("weum's notes on memories aren't part of anend; lists are");
+        } else {
+            command(ui, api, sp, &word, &rest.join(" ")).await;
+        }
+        return;
+    }
+    if let Some(addr) = t.strip_prefix('#') {
+        route(ui, api, sp, addr).await;
+        return;
+    }
+    let (gs, sat) = {
+        let p = ui.prefs.peek();
+        (p.gsearch_text, p.saturate)
+    };
+    let mode = space_mode(ui);
+    if shift {
+        // recall by key
+        match api.remember(&t).await {
+            Ok(h) => {
+                let mut tl = ui.topline;
+                tl.set(Some(TopLine {
+                    title: format!("key {}", h.key),
+                    detail: String::new(),
+                    s: 0,
+                    r: 0,
+                    ..Default::default()
+                }));
+                show(ui, api, sp, vec![h]);
+            }
+            Err(e) => ui.fail(e),
+        }
+        return;
+    }
+    // the search modes: by the colouring classifier (a class's name, then words), or
+    // weum's random hashmap search (texts sharing a word, in no order)
+    let how = if ctrl {
+        "normal".to_string()
+    } else {
+        ui.prefs.peek().space_search.clone()
+    };
+    if how == "classifier" {
+        classifier_search(ui, api, sp, &t).await;
+        return;
+    }
+    if how == "random" {
+        match api
+            .call(
+                "mem.random",
+                json!({ "q": if t == "*" { "" } else { t.as_str() }, "limit": 60 }),
+            )
+            .await
+        {
+            Ok(v) => {
+                let hits: Vec<Hit> = serde_json::from_value(v).unwrap_or_default();
+                topline(ui, format!("random “{t}”"), mode, None, hits.len());
+                if hits.is_empty() {
+                    ui.say(format!("no text shares a word with {t} (* takes any)"));
+                }
+                show(ui, api, sp, hits);
+            }
+            Err(e) => ui.fail(e),
+        }
+        return;
+    }
+    if let Ok(n) = t.parse::<u64>() {
+        gsearch(ui, api, sp, n, mode, None).await;
+        return;
+    }
+    if !gs && !ctrl {
+        match api.search(&t, true).await {
+            Ok(hits) => {
+                topline(ui, format!("search “{t}”"), mode, Some(&t), hits.len());
+                if hits.is_empty() {
+                    ui.say(format!("didn't find anything for {t}"));
+                }
+                show(ui, api, sp, hits);
+            }
+            Err(e) => ui.fail(e),
+        }
+        return;
+    }
+    if sat || ctrl {
+        match api.saturate(&t).await {
+            Ok((key, new)) => {
+                if new {
+                    ui.did(Did::Remembered {
+                        key: key.clone(),
+                        text: t.clone(),
+                    });
+                    ui.say(format!("remembered “{t}” under {key}"));
+                    ui.touched();
+                }
+            }
+            Err(e) => ui.fail(e),
+        }
+    }
+    gsearch(ui, api, sp, gem::sum_in(&t, mode), mode, Some(t)).await;
+}
+
+/// the bar's text as a class of the colouring classifier (and words after it): the texts
+/// it counts in that class, or the likeliest when it counts none
+async fn classifier_search(ui: Ui, api: Api, sp: Sp, t: &str) {
+    let name = ui.prefs.peek().tint.clone();
+    if name.is_empty() {
+        ui.fail("pick a colouring classifier first (the palette in the memory view's strip)");
+        return;
+    }
+    let classes: Vec<String> = match api.call("classify.get", json!({ "name": name })).await {
+        Ok(v) => v["classes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c.as_str().map(str::to_string))
+            .collect(),
+        Err(e) => return ui.fail(e),
+    };
+    let lower = t.to_lowercase();
+    let Some(c) = classes.iter().find(|c| {
+        let c = c.to_lowercase();
+        lower == c || lower.starts_with(&format!("{c} "))
+    }) else {
+        ui.fail(format!(
+            "{name}'s classes: {} (type one, then words if you like)",
+            classes.join(", ")
+        ));
+        return;
+    };
+    let words = t[c.len()..].trim().to_string();
+    match api.model_search(&name, c, &words).await {
+        Ok(found) => {
+            let members = found.iter().filter(|s| s.member).count();
+            if members == 0 {
+                ui.say(format!("{name} counts nothing here as {c}; these are the likeliest"));
+            }
+            let hits: Vec<Hit> = found
+                .into_iter()
+                .filter(|s| s.member || members == 0)
+                .take(if members == 0 { 24 } else { 400 })
+                .filter_map(|s| {
+                    Some(Hit {
+                        key: s.key?,
+                        text: s.text,
+                        note: s.note,
+                    })
+                })
+                .collect();
+            topline(ui, format!("{name}: {c}"), space_mode(ui), None, hits.len());
+            show(ui, api, sp, hits);
+        }
+        Err(e) => ui.fail(e),
+    }
+}
+
+/// the bar's Delete: forget the memory under the key typed
+async fn forget_typed(ui: Ui, api: Api, sp: Sp, raw: String) {
+    let key = raw.trim().to_string();
+    match api.forget(&key).await {
+        Ok(text) => {
+            ui.did(Did::Forgot {
+                key: key.clone(),
+                text: text.clone(),
+            });
+            ui.say(format!("forgot {key}: “{text}” · Ctrl+Z puts it back"));
+            let mut texts = sp.texts;
+            texts.write().retain(|h| h.key != key);
+            ui.touched();
+        }
+        Err(e) => ui.fail(e),
+    }
+}
+
+fn copy_text(ui: Ui, text: &str) {
+    let js = format!(
+        "(async () => {{ const t = {}; try {{ await navigator.clipboard.writeText(t); }} catch {{ const a = document.createElement('textarea'); a.value = t; document.body.append(a); a.select(); document.execCommand('copy'); a.remove(); }} }})();",
+        serde_json::to_string(text).unwrap_or_default()
+    );
+    document::eval(&js);
+    ui.say("copied");
+}
+
+/// the room's texts to a file: a download on the web, a file in the data folder on the
+/// desktop
+fn export(ui: Ui, name: &str, rows: &Value) {
+    let text = serde_json::to_string_pretty(rows).unwrap_or_default();
+    let file = format!("{name}.json");
+    let n = rows.as_array().map(|a| a.len()).unwrap_or(0);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let dir = crate::prefs::data_dir().join("exports");
+        let path = dir.join(&file);
+        match std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, &text)) {
+            Ok(()) => ui.say(format!("{n} texts to {}", path.display())),
+            Err(e) => ui.fail(format!("couldn't write {}: {e}", path.display())),
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::views::settings::download(&file, &text);
+        ui.say(format!("{n} texts to {file}"));
+    }
+}
+
+#[component]
+pub fn Space() -> Element {
+    let ui = ui();
+    let api = api();
+    let sp = Sp {
+        tx: use_signal(|| None),
+        texts: use_signal(Vec::new),
+        card: use_signal(|| None),
+        selected: use_signal(|| None),
+        pos: use_signal(String::new),
+        hist_at: use_signal(|| None),
+        paused: use_signal(|| false),
+        q_bucket: use_signal(HashMap::new),
+        block: use_signal(|| None),
+        block_use: use_signal(|| (0, 0)),
+        lights: use_signal(Vec::new),
+        menu: use_signal(|| None),
+        scenes_rev: use_signal(|| 0),
+        bmenu: use_signal(|| None),
+        bend_open: use_signal(|| false),
+        live: use_signal(|| false),
+        fired: use_signal(Vec::new),
+        prefabs: use_signal(Vec::new),
+        copies: use_signal(Vec::new),
+        thumbs: use_signal(HashMap::new),
+        mode: use_signal(|| "fly".to_string()),
+        collected: use_signal(Vec::new),
+    };
+    // the pipes turned on: their effects on the room's texts, sent whenever they or the texts change
+    {
+        let api = api.clone();
+        let texts = sp.texts;
+        let _fx = use_resource(move || {
+            let api = api.clone();
+            let names = ui.prefs.read().pipes.clone();
+            let keys: Vec<String> = texts.read().iter().map(|h| h.key.clone()).take(5000).collect();
+            let _ = (ui.changed)();
+            async move {
+                let fx = if names.is_empty() || keys.is_empty() {
+                    json!({})
+                } else {
+                    let v = api
+                        .call("pipes.effects", json!({ "names": names, "keys": keys }))
+                        .await
+                        .unwrap_or_default();
+                    let mut m = serde_json::Map::new();
+                    for e in v["effects"].as_array().into_iter().flatten() {
+                        m.insert(e["key"].as_str().unwrap_or("").to_string(), e.clone());
+                    }
+                    Value::Object(m)
+                };
+                sp.send(json!({ "cmd": "effects", "fx": fx }));
+            }
+        });
+    }
+    // the engine and its channel
+    {
+        let api = api.clone();
+        use_hook(move || {
+            let (tx, mut rx) = futures_channel::mpsc::unbounded::<Value>();
+            let mut stx = sp.tx;
+            stx.set(Some(tx));
+            spawn(async move {
+                let mut ev = document::eval(&boot_js());
+                loop {
+                    let got = {
+                        let recv = ev.recv::<SpaceEvent>();
+                        let next = rx.next();
+                        futures_util::pin_mut!(recv, next);
+                        match futures_util::future::select(recv, next).await {
+                            Either::Left((r, _)) => Either::Left(r),
+                            Either::Right((c, _)) => Either::Right(c),
+                        }
+                    };
+                    match got {
+                        Either::Left(Ok(e)) => on_event(ui, api.clone(), sp, e),
+                        Either::Left(Err(_)) => break,
+                        Either::Right(Some(c)) => {
+                            let _ = ev.send(c);
+                        }
+                        Either::Right(None) => break,
+                    }
+                }
+            });
+        });
+    }
+    // the save's blocks, whenever another save opens
+    {
+        let api = api.clone();
+        use_effect(move || {
+            let save = (ui.hello)().save;
+            let api = api.clone();
+            dioxus::dioxus_core::spawn_forever(async move {
+                let _ = save;
+                load_blocks(ui, api, sp).await;
+            });
+        });
+    }
+    // running only while shown; the room's colour and ink from the settings
+    use_effect(move || {
+        let shown = (ui.view)() == View::Space;
+        sp.send(json!({ "cmd": if shown { "start" } else { "stop" } }));
+    });
+    // the flying keys as the keymap binds them
+    use_effect(move || {
+        let map = crate::keys::Keymap::from_changes(&ui.prefs.read().keymap).flying();
+        sp.send(json!({ "cmd": "keys", "map": map }));
+    });
+    // the physics, whenever a slider moves
+    use_effect(move || {
+        let p = ui.prefs.read();
+        let _ = (&p.space.physics, &p.space.depth_by, p.space_reversed);
+        drop(p);
+        sp.send(json!({ "cmd": "physics", "p": physics(ui) }));
+    });
+    use_effect(move || {
+        let bg = ui.prefs.read().space_bg.clone();
+        sp.send(json!({ "cmd": "room", "bg": bg, "ink": crate::theme::ink_on(&bg) }));
+    });
+    use_effect(move || {
+        let p = (ui.picks)();
+        sp.send(json!({ "cmd": "mark", "list": p.list.map(|h| h.key), "candidate": p.candidate.map(|h| h.key) }));
+    });
+    {
+        let api = api.clone();
+        use_keys(View::Space, move |k: KeyPress| {
+            if k.bar {
+                match k.key.as_str() {
+                    "Enter" => {
+                        dioxus::dioxus_core::spawn_forever(enter(ui, api.clone(), sp, k.text.clone(), k.ctrl, k.shift));
+                        // the bar lets go, so the flying keys move again; a click on the bar
+                        // (or the focus key) types again
+                        document::eval(
+                            "const b = document.getElementById('bar'); if (b) b.blur(); const h = document.getElementById('space-host'); if (h) h.focus({ preventScroll: true });",
+                        );
+                        return true;
+                    }
+                    "Delete" => {
+                        dioxus::dioxus_core::spawn_forever(forget_typed(ui, api.clone(), sp, k.text.clone()));
+                        return true;
+                    }
+                    "ArrowUp" | "ArrowDown" => {
+                        let h = ui.prefs.peek().space.history.clone();
+                        if h.is_empty() || k.text.contains('\n') {
+                            return true;
+                        }
+                        let n = h.len();
+                        let cur = sp.hist_at.peek().unwrap_or(n);
+                        let i = if k.key == "ArrowUp" {
+                            cur.saturating_sub(1)
+                        } else {
+                            (cur + 1).min(n)
+                        };
+                        let mut at = sp.hist_at;
+                        at.set(Some(i));
+                        ui.set_bar(h.get(i).map(String::as_str).unwrap_or(""));
+                        return true;
+                    }
+                    _ => return false,
+                }
+            }
+            if k.key == "Escape" {
+                let mut s = sp.selected;
+                s.set(None);
+                return true;
+            }
+            let sel = sp.selected.peek().clone();
+            match k.action {
+                Some(Action::Help) => set_pref(ui, |p| p.space.show_help = !p.space.show_help),
+                Some(Action::Hud) => set_pref(ui, |p| p.space.show_hud = !p.space.show_hud),
+                Some(Action::Details) => set_pref(ui, |p| p.space.show_details = !p.space.show_details),
+                Some(Action::Physics) => set_pref(ui, |p| p.space.show_physics = !p.space.show_physics),
+                Some(Action::Reversed) => set_pref(ui, |p| p.space_reversed = !p.space_reversed),
+                Some(Action::Pause) => {
+                    let on = !*sp.paused.peek();
+                    let mut p = sp.paused;
+                    p.set(on);
+                    sp.send(json!({ "cmd": "pause", "on": on }));
+                    ui.say(if on { "physics paused" } else { "physics running" });
+                }
+                Some(Action::Settle) => sp.send(json!({ "cmd": "settle" })),
+                Some(Action::Pin) => sp.send(json!({ "cmd": "pin" })),
+                Some(Action::DeleteText) => match sp
+                    .block
+                    .peek()
+                    .as_ref()
+                    .and_then(|b| b["id"].as_str().map(str::to_string))
+                {
+                    Some(id) => delete_block(ui, api.clone(), sp, id),
+                    None => sp.send(json!({ "cmd": "remove" })),
+                },
+                Some(Action::NewText) => {
+                    let t = ui.bar.peek().trim().to_string();
+                    sp.send(json!({ "cmd": "free", "text": if t.is_empty() { "text".to_string() } else { t } }));
+                }
+                Some(Action::EditText) => match sel {
+                    Some(s) => start_edit(ui, &s),
+                    None => ui.focus_bar(),
+                },
+                Some(Action::CopyText) => match sel {
+                    Some(s) => copy_text(ui, &s.text),
+                    None => ui.say("select a text first"),
+                },
+                Some(Action::Undo) => sp.send(json!({ "cmd": "undo" })),
+                Some(Action::Export) => {
+                    sp.send(json!({ "cmd": "rows", "why": "export", "name": default_map_name(ui) }))
+                }
+                Some(Action::SaveMap) => sp.send(json!({ "cmd": "rows", "why": "save", "name": default_map_name(ui) })),
+                Some(Action::SideSum) | Some(Action::SideReversedSum) => {
+                    let t = ui.bar.peek().clone();
+                    let (s, r) = gem::sums(&t);
+                    if k.action == Some(Action::SideSum) {
+                        envale(ui, api.clone(), sp, s, Mode::Ordinal);
+                    } else {
+                        envale(ui, api.clone(), sp, r, Mode::Reversed);
+                    }
+                }
+                // the engine flies and hops on the rest itself
+                _ => {
+                    return matches!(
+                        k.key.as_str(),
+                        "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" | " "
+                    );
+                }
+            }
+            true
+        });
+    }
+    // the last address, opened the first time the space is shown
+    {
+        let api = api.clone();
+        use_hook(move || {
+            let a = ui.prefs.peek().space.address.clone();
+            if !a.is_empty() {
+                dioxus::dioxus_core::spawn_forever(async move {
+                    // the engine boots first
+                    sleep_ms(500).await;
+                    route(ui, api, sp, &a).await;
+                });
+            }
+        });
+    }
+    let card = (sp.card)();
+    let n = sp.texts.read().len();
+    let p = ui.prefs.read().clone();
+    let bg = p.space_bg.clone();
+    let ink = crate::theme::ink_on(&bg);
+    let api_g = api.clone();
+    let api_b = api.clone();
+    rsx! {
+        div { class: "space", style: "position: absolute; inset: 0; --room-bg: {bg}; --room-ink: {ink};",
+            div { id: "space-host", class: "space-host", tabindex: "0", "aria-label": "the space: right drag looks, W A S D fly, arrows hop between texts" }
+            if p.space.show_hud {
+                PosCard { pos: sp.pos }
+            }
+            // the hint while the room has nothing in it: no texts and no blocks
+            if n == 0 && (sp.block_use)().0 == 0 {
+                div { class: "space-empty",
+                    p { "The room is empty." }
+                    p { class: "small", "Type a word, a number or a key in the bar and press Enter: its bucket spreads out here, pulled together by how alike the texts are. Hold the right mouse button to look around, W A S D to fly, the arrow keys hop from text to text; H for help." }
+                }
+            }
+            if p.space.show_help {
+                Help {}
+            }
+            if p.space.show_physics {
+                PhysicsPanel {
+                    paused: (sp.paused)(),
+                    on_settle: move |_| sp.send(json!({ "cmd": "settle" })),
+                    on_pause: move |on: bool| {
+                        let mut ps = sp.paused;
+                        ps.set(on);
+                        sp.send(json!({ "cmd": "pause", "on": on }));
+                    },
+                }
+            }
+            if let (Some((x, y)), Some(b)) = ((sp.bmenu)(), (sp.block)().filter(|b| b["copy"] == true)) {
+                prefabwin::CopyMenu { c: b, x, y, sp }
+            } else if let (Some((x, y)), Some(b)) = ((sp.bmenu)(), (sp.block)()) {
+                BlockMenu { b, x, y, sp_bmenu: sp.bmenu, bend_open: sp.bend_open,
+                    on_send: move |v: Value| sp.send(v),
+                    on_duplicate: { let api = api_b.clone(); move |b: Value| duplicate_block(ui, api.clone(), sp, b) },
+                    on_delete: { let api = api_b.clone(); move |id: String| delete_block(ui, api.clone(), sp, id) },
+                }
+            }
+            if let Some(m) = (sp.menu)() {
+                SpaceMenu { ev: m, sp_menu: sp.menu, on_send: move |v: Value| sp.send(v), on_gsearch: { let api = api_b.clone(); move |(n, md): (u64, Mode)| envale(ui, api.clone(), sp, n, md) } }
+            }
+            if p.space.show_scenes {
+                Scenes {
+                    rev: sp.scenes_rev,
+                    on_open: { let api = api_b.clone(); move |name: String| { let api = api.clone(); dioxus::dioxus_core::spawn_forever(async move { route(ui, api, sp, &name).await; }); } },
+                    on_save: move |name: String| sp.send(json!({ "cmd": "rows", "why": "save", "name": name })),
+                }
+            }
+            if p.space.show_blocks {
+                Blocks {
+                    selected: (sp.selected)(),
+                    block: (sp.block)().filter(|b| b["copy"] != true),
+                    counts: (sp.block_use)(),
+                    on_send: move |v: Value| sp.send(v),
+                    on_duplicate: { let api = api_b.clone(); move |b: Value| duplicate_block(ui, api.clone(), sp, b) },
+                    on_delete: { let api = api_b.clone(); move |id: String| delete_block(ui, api.clone(), sp, id) },
+                    bend_open: sp.bend_open,
+                }
+            }
+            if p.space.show_anims {
+                animwin::Anims { sp, block: (sp.block)().filter(|b| b["copy"] != true), on_changed: { let api = api_b.clone(); move |_| { let api = api.clone(); dioxus::dioxus_core::spawn_forever(count_blocks(api, sp)); } } }
+            }
+            if !(sp.collected)().is_empty() {
+                flightwin::Collected { sp }
+            }
+            if p.space.show_sounds {
+                soundwin::Sounds { sp }
+            }
+            if p.space.show_prefabs {
+                prefabwin::Prefabs { sp }
+            }
+            if p.space.show_wiring {
+                wirewin::Wires { sp }
+            }
+            if p.space.show_lights {
+                lightwin::Lights { sp }
+            }
+            if p.space.show_textures {
+                texwin::Textures {
+                    selected: (sp.selected)(),
+                    block: (sp.block)().filter(|b| b["copy"] != true),
+                    on_send: move |v: Value| sp.send(v),
+                    on_changed: { let api = api_b.clone(); move |_| { let api = api.clone(); dioxus::dioxus_core::spawn_forever(count_blocks(api, sp)); } },
+                }
+            }
+            if p.space.show_details {
+                if let Some(c) = card {
+                    Details { ev: c, on_gsearch: move |(n, m): (u64, Mode)| envale(ui, api_g.clone(), sp, n, m), on_send: move |v: Value| sp.send(v) }
+                }
+            }
+        }
+    }
+}
+
+/// puts a text in the bar to edit: Enter puts it back (a memory under its key, a free text
+/// in its place)
+fn start_edit(mut ui: Ui, s: &SpaceEvent) {
+    ui.set_bar(&s.text);
+    ui.pending.set(Pending::Edit(Hit {
+        key: s.key.clone(),
+        text: s.text.clone(),
+        note: s.note,
+    }));
+    ui.focus_bar();
+    ui.say("edit it in the bar; Enter puts it back, Esc leaves it");
+}
+
+fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
+    let hit = Hit {
+        key: e.key.clone(),
+        text: e.text.clone(),
+        note: e.note,
+    };
+    let mut card = sp.card;
+    let mut pos = sp.pos;
+    let mut selected = sp.selected;
+    match e.kind.as_str() {
+        "info" => pos.set(e.text),
+        "error" => ui.fail(format!("the space couldn't start: {}", e.text)),
+        "fault" => ui.fail(e.text.clone()),
+        "toast" => ui.say(e.text),
+        "hover" | "focus" => card.set(Some(e.clone())),
+        "select" => {
+            // an open menu on the same placement shows its new values (its size)
+            let mut m = sp.menu;
+            let open = m
+                .peek()
+                .as_ref()
+                .filter(|o| o.node == e.node && !e.node.is_empty())
+                .cloned();
+            if let Some(o) = open {
+                m.set(Some(SpaceEvent {
+                    x: o.x,
+                    y: o.y,
+                    ..e.clone()
+                }));
+            }
+            // and so does the details window
+            if card
+                .peek()
+                .as_ref()
+                .is_some_and(|c| c.node == e.node && !e.node.is_empty())
+            {
+                card.set(Some(e.clone()));
+            }
+            selected.set((!e.key.is_empty()).then(|| e.clone()))
+        }
+        "settled" => ui.say(format!("settled in {} steps", e.data)),
+        "block" => {
+            let mut b = sp.block;
+            b.set((!e.data.is_null()).then(|| e.data.clone()));
+        }
+        "blockset" => {
+            let mut b = sp.block;
+            if b.peek().as_ref().map(|x| &x["id"]) == Some(&e.data["id"]) {
+                let mut v = e.data.clone();
+                if let Some(old) = b.peek().as_ref() {
+                    v["about"] = old["about"].clone();
+                }
+                b.set(Some(v));
+            }
+            let args = e.data.clone();
+            dioxus::dioxus_core::spawn_forever(async move {
+                if let Err(err) = api.call("blocks.set", args).await {
+                    ui.fail(err);
+                }
+            });
+        }
+        "spot" => {
+            let want = e.data["want"].clone();
+            let mut args = want.clone();
+            for k in ["x", "y", "z"] {
+                args[k] = e.data[k].clone();
+            }
+            dioxus::dioxus_core::spawn_forever(async move {
+                match api.call("blocks.add", args).await {
+                    Ok(r) => {
+                        let id = r["ids"][0].clone();
+                        let textures = dress(ui, &api, r["textures"].clone()).await;
+                        sp.send(json!({ "cmd": "blocks", "blocks": r["blocks"], "textures": textures, "added": r["ids"], "select": id }));
+                        count_blocks(api, sp).await;
+                        ui.say("a block · drag its arrows to move it, the knobs on its faces to resize it · Ctrl+Z takes it back");
+                    }
+                    Err(err) => ui.fail(err),
+                }
+            });
+        }
+        // an undo took back blocks just added, or put back blocks just deleted
+        "lightspot" => lightwin::light_spot(ui, api, sp, e.data.clone()),
+        "prefabspot" => prefabwin::place_at(ui, api, sp, e.data.clone()),
+        // placing a prefab by hand: a copy where the ghost was
+        "ghostplace" => prefabwin::place_exactly(ui, api, sp, e.data.clone()),
+        // a prefab's copy, as one group
+        "copyset" => prefabwin::copy_set(ui, api, sp, e.data.clone()),
+        "copyrestore" => prefabwin::copy_restore(ui, api, sp, e.data.clone()),
+        "copyopen" => ui.say("the copy is open: its parts are picked one by one, their changes kept as the copy's own · Esc or a click outside closes it"),
+        "ghostdone" => ui.say("placing stopped"),
+        "mode" => {
+            let m = e.data.as_str().unwrap_or("fly").to_string();
+            ui.say(match m.as_str() {
+                "walk" => format!("walking · {} jumps, {} crouches, {} {} lean, {} hooks the grapple · {} flies again", ui.key_of(Action::FlyUp), ui.key_of(Action::FlyDown), ui.key_of(Action::RollLeft), ui.key_of(Action::RollRight), ui.key_of(Action::Grapple), ui.key_of(Action::Walk)),
+                "super" => format!("superflight · {} thrusts where you look, Shift boosts; texts you fly through are collected · {} flies again", ui.key_of(Action::FlyForward), ui.key_of(Action::SuperFlight)),
+                _ => "flying".to_string(),
+            });
+            let mut s = sp.mode;
+            s.set(m);
+        }
+        "collected" => {
+            let mut c = sp.collected;
+            c.set(e.data.as_array().cloned().unwrap_or_default());
+        }
+        // the room needs a sound's bytes to play it
+        "soundwant" => {
+            let id = e.data.as_str().unwrap_or("").to_string();
+            dioxus::dioxus_core::spawn_forever(async move {
+                match api.call("sounds.get", json!({ "id": id })).await {
+                    Ok(r) => sp.send(json!({ "cmd": "sounddata", "id": id, "data": r["data"] })),
+                    Err(e) => ui.fail(e),
+                }
+            });
+        }
+        "thumbs" => {
+            let mut t = sp.thumbs;
+            let mut m = t.peek().clone();
+            for (k, v) in e.data.as_object().into_iter().flatten() {
+                if let (Ok(k), Some(v)) = (k.parse::<u64>(), v.as_str()) {
+                    m.insert(k, v.to_string());
+                }
+            }
+            t.set(m);
+        }
+        // a wired block fired in the room (a click while playing, a timer, a zone)
+        "blockfire" => {
+            let ev = match e.data["event"].as_str().unwrap_or("") {
+                "click" => "click",
+                "timer" => "timer",
+                "enter" => "enter",
+                "leave" => "leave",
+                _ => return,
+            };
+            let id = e.data["id"].as_str().unwrap_or("").to_string();
+            let from = e.data["from"].as_str().unwrap_or("").to_string();
+            wirewin::fire(ui, api.clone(), sp, id, ev, from);
+        }
+        "blockmenu" => {
+            let mut m = sp.bmenu;
+            m.set(Some((e.x, e.y)));
+        }
+        "blockgone" => {
+            let ids = e.data.clone();
+            dioxus::dioxus_core::spawn_forever(async move {
+                match api.call("blocks.delete", json!({ "ids": ids })).await {
+                    Ok(_) => count_blocks(api, sp).await,
+                    Err(err) => ui.fail(err),
+                }
+            });
+        }
+        "blockrestore" => {
+            let blocks = e.data.clone();
+            dioxus::dioxus_core::spawn_forever(async move {
+                match api.call("blocks.restore", json!({ "blocks": blocks })).await {
+                    Ok(_) => count_blocks(api, sp).await,
+                    Err(err) => ui.fail(err),
+                }
+            });
+        }
+        "undone" => {
+            if e.data == "nothing" {
+                undo_last(ui, api);
+            } else {
+                ui.say("undone");
+            }
+        }
+        "made" => {
+            selected.set(Some(e.clone()));
+            start_edit(ui, &e);
+        }
+        // a double click on the empty room makes a new free text: an empty one to type in,
+        // or with Shift the bar's text (deliberately: it used to copy the bar's text, which
+        // after a click is the text clicked)
+        "newtext" => {
+            let t = ui.bar.peek().trim().to_string();
+            let t = if e.shift && !t.is_empty() {
+                t
+            } else {
+                "text".to_string()
+            };
+            sp.send(json!({ "cmd": "free", "text": t }));
+        }
+        "dblclick" => {
+            if e.free {
+                start_edit(ui, &e);
+            } else {
+                ui.set_bar(&e.key);
+            }
+        }
+        "rows" => {
+            let rows = e.data["rows"].clone();
+            let name = e.data["name"].as_str().unwrap_or("untitled").to_string();
+            if e.data["why"] == "export" {
+                export(ui, &name, &rows);
+            } else {
+                let ok = (1..=96).contains(&name.len())
+                    && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+                if !ok {
+                    ui.fail("a map's name: 1 to 96 of letters, digits, _ and -");
+                    return;
+                }
+                dioxus::dioxus_core::spawn_forever(async move {
+                    let n = rows.as_array().map(|a| a.len()).unwrap_or(0);
+                    match api.call("scenes.save", json!({ "name": name, "rows": rows })).await {
+                        Ok(_) => {
+                            let mut r = sp.scenes_rev;
+                            r += 1;
+                            set_pref(ui, |p| p.space.address = name.clone());
+                            ui.say(format!("saved the map {name} · {n} texts · #{name} opens it"));
+                        }
+                        Err(e) => ui.fail(e),
+                    }
+                });
+            }
+        }
+        "click" => {
+            if e.free {
+                ui.set_bar(&e.text);
+                return;
+            }
+            if e.ctrl {
+                ui.picks.write().candidate = Some(hit.clone());
+                ui.say(format!("candidate: {}", hit.text));
+            } else if e.shift {
+                let mut p = ui.picks.write();
+                p.candidate = None;
+                p.list = Some(hit.clone());
+                drop(p);
+                ui.say(format!("list: {}", hit.text));
+            } else {
+                ui.set_bar(&hit.text);
+                let mode = space_mode(ui);
+                // its triangle in the top bar
+                let (s, r) = gem::sums(&hit.text);
+                ui.topline.set(Some(TopLine {
+                    title: hit.text.clone(),
+                    detail: format!("{} {}", mode.name(), gem::sum_in(&hit.text, mode)),
+                    s,
+                    r,
+                    ..Default::default()
+                }));
+                card.set(Some(e.clone()));
+            }
+        }
+        "menu" => {
+            if e.ctrl && !e.free {
+                let m = gem::Measure::of(&hit.text);
+                dioxus::dioxus_core::spawn_forever(gsearch(ui, api, sp, m.triangle(), space_mode(ui), Some(hit.text)));
+            } else {
+                let mut m = sp.menu;
+                m.set(Some(e.clone()));
+            }
+        }
+        _ => {}
+    }
+}
+
+// ------------------------------------------------------------------ blocks
+
+/// what the engine needs to draw the textures: a text's grouping colour (its labels'
+/// underline), a picture's thumbnail as a data URL
+async fn dress(ui: Ui, api: &Api, textures: Value) -> Value {
+    let mode = space_mode(ui);
+    let mut out = textures;
+    if let Some(o) = out.as_object_mut() {
+        for (k, about) in o.iter_mut() {
+            if let Some(t) = k.strip_prefix("text:").and(about["text"].as_str().map(str::to_string)) {
+                about["colour"] = json!(gem::underline(&t, mode));
+            } else if let Some(id) = k.strip_prefix("picture:")
+                && about.get("gone").is_none()
+                && let Ok(p) = api.call("pictures.get", json!({ "id": id, "thumb": 256 })).await
+                && let Some(t) = p["thumb"].as_str()
+            {
+                about["src"] = json!(format!("data:image/png;base64,{t}"));
+            } else if k.starts_with("texture:") {
+                // a recipe: its text's colour, its picture's thumbnail
+                if let Some(t) = about["text"].as_str().map(str::to_string) {
+                    about["colour"] = json!(gem::underline(&t, mode));
+                }
+                if let Some(id) = about["recipe"]["source"]["picture"].as_str().map(str::to_string)
+                    && about.get("picture_gone").is_none()
+                    && let Ok(p) = api.call("pictures.get", json!({ "id": id, "thumb": 512 })).await
+                    && let Some(t) = p["thumb"].as_str()
+                {
+                    about["src"] = json!(format!("data:image/png;base64,{t}"));
+                }
+            }
+        }
+    }
+    out
+}
+
+async fn count_blocks(api: Api, sp: Sp) {
+    if let Ok(u) = api.call("blocks.stats", json!({})).await {
+        let mut c = sp.block_use;
+        c.set((u["blocks"].as_u64().unwrap_or(0), u["textures"].as_u64().unwrap_or(0)));
+    }
+}
+
+/// the open save's blocks into the room, in place of what was there
+async fn load_blocks(ui: Ui, api: Api, sp: Sp) {
+    match api.call("blocks.list", json!({})).await {
+        Ok(r) => {
+            let textures = dress(ui, &api, r["textures"].clone()).await;
+            sp.send(json!({ "cmd": "blocks", "blocks": r["blocks"], "textures": textures, "replace": true }));
+            let mut b = sp.block;
+            b.set(None);
+            texwin::load_sky(ui, &api, EventHandler::new(move |v: Value| sp.send(v))).await;
+            lightwin::load_lights(&api, sp).await;
+            animwin::load_anims(ui, &api, sp).await;
+            wirewin::load_wires(&api, sp).await;
+            // the prefabs' copies: each one a group in the room
+            prefabwin::load_prefabs(ui, &api, sp).await;
+            count_blocks(api, sp).await;
+        }
+        // a hub from before blocks: the room has none
+        Err(_) => sp.send(json!({ "cmd": "blocks", "blocks": [], "replace": true })),
+    }
+}
+
+fn delete_block(ui: Ui, api: Api, sp: Sp, id: String) {
+    // a copy goes as a whole
+    if prefabwin::is_copy(&id) {
+        prefabwin::copy_remove(ui, api, sp, id);
+        return;
+    }
+    // a part of an open copy: the whole copy goes, or the part after detaching it
+    if id.starts_with("prefab:") {
+        ui.say("a part of a prefab's copy: remove the whole copy, or detach it, in the prefabs window");
+        return;
+    }
+    dioxus::dioxus_core::spawn_forever(async move {
+        match api.call("blocks.delete", json!({ "ids": [id] })).await {
+            Ok(_) => {
+                sp.send(json!({ "cmd": "unblock", "ids": [id] }));
+                let mut b = sp.block;
+                b.set(None);
+                count_blocks(api, sp).await;
+                ui.say("block deleted · Ctrl+Z puts it back");
+            }
+            Err(e) => ui.fail(e),
+        }
+    });
+}
+
+fn duplicate_block(ui: Ui, api: Api, sp: Sp, b: Value) {
+    let id = b["id"].as_str().unwrap_or("").to_string();
+    if prefabwin::is_copy(&id) {
+        prefabwin::copy_duplicate(ui, api, sp, id);
+        return;
+    }
+    // side by side, along its width
+    let by = b["w"].as_f64().unwrap_or(1.0) + 0.1;
+    dioxus::dioxus_core::spawn_forever(async move {
+        match api
+            .call("blocks.duplicate", json!({ "ids": [id], "by": [by, 0, 0] }))
+            .await
+        {
+            Ok(r) => {
+                let textures = dress(ui, &api, r["textures"].clone()).await;
+                sp.send(json!({ "cmd": "blocks", "blocks": r["blocks"], "textures": textures, "added": r["ids"], "select": r["ids"][0] }));
+                count_blocks(api, sp).await;
+                ui.say("a copy: the same texture, stored once");
+            }
+            Err(e) => ui.fail(e),
+        }
+    });
+}
+
+/// the blocks window: make blocks from the selected text, a picture or a colour; the
+/// selected block's place and size; copy, delete
+#[component]
+fn Blocks(
+    selected: Option<SpaceEvent>,
+    block: Option<Value>,
+    counts: (u64, u64),
+    on_send: EventHandler<Value>,
+    on_duplicate: EventHandler<Value>,
+    on_delete: EventHandler<String>,
+    bend_open: Signal<bool>,
+) -> Element {
+    let ui = ui();
+    let api = api();
+    let mut pictures: Signal<Vec<(String, String)>> = use_signal(Vec::new);
+    let mut picture = use_signal(String::new);
+    let mut colour = use_signal(|| "#b49a6c".to_string());
+    use_hook(move || {
+        let api = api.clone();
+        spawn(async move {
+            if let Ok(v) = api.call("pictures.list", json!({})).await {
+                let all: Vec<(String, String)> = v
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|p| {
+                        let id = p["id"].as_str().unwrap_or("").to_string();
+                        let name = p["name"]
+                            .as_str()
+                            .filter(|n| !n.is_empty())
+                            .unwrap_or(&id[..id.len().min(8)])
+                            .to_string();
+                        (id, name)
+                    })
+                    .collect();
+                if let Some((id, _)) = all.first() {
+                    picture.set(id.clone());
+                }
+                pictures.set(all);
+            }
+        });
+    });
+    let text = selected.clone().filter(|s| !s.free && !s.key.is_empty());
+    let w = window_width();
+    let field = move |b: Value, k: &'static str| {
+        let v = b[k].as_f64().unwrap_or(0.0);
+        let id = b["id"].as_str().unwrap_or("").to_string();
+        rsx! {
+            label { class: "bfield", title: if "whd".contains(k) { "a side, in units (the texture tiles once per unit)" } else { "its centre, in units" },
+                span { "{k}" }
+                input {
+                    r#type: "number",
+                    step: "0.25",
+                    value: "{v:.2}",
+                    onchange: move |e| {
+                        if let Ok(x) = e.value().parse::<f64>() {
+                            on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { k: x } }));
+                        }
+                    },
+                }
+            }
+        }
+    };
+    rsx! {
+        Win {
+            id: "blocks",
+            at: ((w - 330.0).max(8.0), 420.0),
+            on_close: move |_| set_pref(ui, |p| p.space.show_blocks = false),
+            title: rsx! {
+                span { class: "win-title",
+                    Icon { name: "cube" }
+                    "blocks"
+                    span { class: "dim small", style: "font-weight: 400;", "{counts.0} in this save · {counts.1} textures" }
+                }
+            },
+            div { class: "blocks-add",
+                button {
+                    class: "btn small",
+                    disabled: text.is_none(),
+                    title: "a block showing the selected text, where it is",
+                    onclick: move |_| {
+                        if let Some(t) = &text {
+                            add_block_from(on_send, "text", &t.key)
+                        }
+                    },
+                    Icon { name: "text" }
+                    "the selected text"
+                }
+                if pictures.read().is_empty() {
+                    span { class: "dim small", title: "add pictures in the models view (spec models, pictures)", "no pictures yet" }
+                } else {
+                    span { class: "row",
+                        select {
+                            "aria-label": "a picture",
+                            value: "{picture}",
+                            onchange: move |e| picture.set(e.value()),
+                            for (id , name) in pictures.read().iter() {
+                                option { key: "{id}", value: "{id}", selected: *id == picture(), "{name}" }
+                            }
+                        }
+                        button { class: "btn small", onclick: move |_| add_block_from(on_send, "picture", &picture()), Icon { name: "image" } "picture" }
+                    }
+                }
+                span { class: "row",
+                    input { r#type: "color", "aria-label": "a colour", value: "{colour}", oninput: move |e| colour.set(e.value()) }
+                    button { class: "btn small", onclick: move |_| add_block_from(on_send, "plain", &colour()), Icon { name: "palette" } "colour" }
+                }
+            }
+            if let Some(b) = block {
+                div { class: "blocks-sel",
+                    div { class: "small",
+                        b {
+                            {
+                                match b["kind"].as_str().unwrap_or("") {
+                                    "text" => format!("“{}”", b["about"]["text"].as_str().unwrap_or("a text")),
+                                    "picture" => format!("picture {}", b["about"]["name"].as_str().unwrap_or("")),
+                                    "texture" => match b["about"]["name"].as_str().filter(|n| !n.is_empty()) {
+                                        Some(n) => format!("the recipe {n}"),
+                                        None => "a texture recipe".to_string(),
+                                    },
+                                    _ => format!("colour {}", b["texture"].as_str().unwrap_or("")),
+                                }
+                            }
+                        }
+                        span { class: "dim", title: "{b[\"id\"].as_str().unwrap_or(\"\")}", {format!(" · block {} of this texture", b["id"].as_str().and_then(|i| i.rsplit_once('#')).map_or("", |x| x.1))} }
+                    }
+                    div { class: "bfields",
+                        {field(b.clone(), "x")}
+                        {field(b.clone(), "y")}
+                        {field(b.clone(), "z")}
+                        {field(b.clone(), "w")}
+                        {field(b.clone(), "h")}
+                        {field(b.clone(), "d")}
+                    }
+                    TurnRow { b: b.clone(), on_send }
+                    ShapeRow { b: b.clone(), on_send }
+                    ZoneRow { b: b.clone(), on_send }
+                    details { class: "bend", open: bend_open(), hidden: b["shape"].as_str() == Some("sphere"),
+                        summary { onclick: move |e| { e.prevent_default(); let o = bend_open(); let mut bo = bend_open; bo.set(!o); }, "bend" span { class: "dim small", {bend_words(&b["bend"])} } }
+                        if bend_open() {
+                            BendEditor { b: b.clone(), on_send }
+                        }
+                    }
+                    div { class: "row",
+                        button { class: "btn small", title: "a copy beside it (the texture is stored once)", onclick: { let b = b.clone(); move |_| on_duplicate.call(b.clone()) }, Icon { name: "copy" } "copy" }
+                        button { class: "btn small", title: "the textures window: a recipe for this block or one of its faces", onclick: move |_| set_pref(ui, |p| p.space.show_textures = true), Icon { name: "image" } "texture…" }
+                        button { class: "btn small", title: "{ui.key_of(Action::DeleteText)}", onclick: { let id = b["id"].as_str().unwrap_or("").to_string(); move |_| on_delete.call(id.clone()) }, Icon { name: "delete" } "delete" }
+                    }
+                }
+            } else {
+                p { class: "dim small", "Click a block to select it: its arrows move it, the knobs on its faces resize it (the texture tiles, it doesn't stretch), the rings turn it, the ball moves it across the view. Shift snaps to quarter units and 15° turns. Right-click a block for its menu (bend, straighten, turn)." }
+            }
+        }
+    }
+}
+
+/// a block's turn in words: the angle and the axis
+fn turn_words(rot: &Value) -> String {
+    let q: Vec<f64> = rot
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_f64).collect())
+        .unwrap_or_default();
+    if q.len() != 4 || (q[3] - 1.0).abs() < 1e-6 {
+        return "not turned".into();
+    }
+    let angle = 2.0 * q[3].clamp(-1.0, 1.0).acos();
+    let s = (1.0 - q[3] * q[3]).sqrt().max(1e-9);
+    format!(
+        "turned {:.0}° about ({:.2}, {:.2}, {:.2})",
+        angle.to_degrees(),
+        q[0] / s,
+        q[1] / s,
+        q[2] / s
+    )
+}
+
+/// the quaternion product a·b, as [x, y, z, w]
+fn qmul(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
+    [
+        a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+        a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+        a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+        a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+    ]
+}
+
+fn rot_of(b: &Value) -> [f64; 4] {
+    let q: Vec<f64> = b["rot"]
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_f64).collect())
+        .unwrap_or_default();
+    if q.len() == 4 {
+        [q[0], q[1], q[2], q[3]]
+    } else {
+        [0.0, 0.0, 0.0, 1.0]
+    }
+}
+
+/// whether a block is a staging zone (texts inside it spread among themselves, bounded
+/// by it), and its own physics: each slider starts at the room's value, and "as the room"
+/// lets a setting follow the room's again
+#[component]
+fn ZoneRow(b: Value, on_send: EventHandler<Value>) -> Element {
+    let ui = ui();
+    let id = b["id"].as_str().unwrap_or("").to_string();
+    let zone = b["zone"].clone();
+    let on = zone.is_object();
+    let room = ui.prefs.read().space.physics.clone();
+    let send = move |id: &str, z: Value| on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "zone": z } }));
+    rsx! {
+        div { class: "zone-row",
+            label { class: "row small", title: "texts inside it spread among themselves, kept inside it, under physics of its own (zones can nest)",
+                input { r#type: "checkbox", checked: on,
+                    oninput: { let id = id.clone(); move |e: FormEvent| send(&id, if e.checked() { json!({}) } else { Value::Null }) } }
+                "a staging zone"
+            }
+            if on {
+                for (key , short) in [("repel", "push apart"), ("attract", "pull together"), ("link", "spacing"), ("gravity", "to the centre"), ("damping", "damping")] {
+                    {
+                        let s = SLIDERS.iter().find(|s| s.key == key).expect("a physics slider");
+                        let own = zone[key].as_f64();
+                        let v = own.unwrap_or_else(|| room.get(key).copied().unwrap_or(s.def));
+                        let id = id.clone();
+                        let id2 = id.clone();
+                        let zone2 = zone.clone();
+                        let zone3 = zone.clone();
+                        rsx! {
+                            label { key: "{key}", class: "lt-slider", title: "{s.label}",
+                                span { "{short}" }
+                                input { r#type: "range", min: "{s.min}", max: "{s.max}", step: "{s.step}", value: "{v}",
+                                    onchange: move |e| {
+                                        let mut z = zone2.clone();
+                                        z[key] = json!(e.value().parse::<f64>().unwrap_or(v));
+                                        send(&id, z);
+                                    } }
+                                if own.is_some() {
+                                    button { class: "plain small", title: "follow the room's setting again",
+                                        onclick: move |_| {
+                                            let mut z = zone3.clone();
+                                            if let Some(o) = z.as_object_mut() { o.remove(key); }
+                                            send(&id2, z);
+                                        },
+                                        "as the room" }
+                                } else {
+                                    span { class: "dim small", "the room's" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// a block's shape: a box or a sphere (its sides become the sphere's diameters)
+#[component]
+fn ShapeRow(b: Value, on_send: EventHandler<Value>) -> Element {
+    let id = b["id"].as_str().unwrap_or("").to_string();
+    let now = b["shape"].as_str().unwrap_or("box").to_string();
+    rsx! {
+        div { class: "row turn-row",
+            span { class: "dim small", "shape" }
+            for (shape , label , tip) in [("box", "box", "six faces, which can bend"), ("sphere", "sphere", "round, its sides its diameters; it doesn't bend and has no faces of its own")] {
+                button { key: "{shape}", class: if now == shape { "btn small on" } else { "plain small" }, title: "{tip}",
+                    onclick: { let id = id.clone(); move |_| on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "shape": shape } })) },
+                    "{label}" }
+            }
+        }
+    }
+}
+
+/// a block's turn and buttons to turn it a quarter about each axis or not at all (the
+/// rings on the gizmo turn it freely)
+#[component]
+fn TurnRow(b: Value, on_send: EventHandler<Value>) -> Element {
+    let id = b["id"].as_str().unwrap_or("").to_string();
+    let q = rot_of(&b);
+    let quarter = move |axis: usize| {
+        let h = std::f64::consts::FRAC_PI_4;
+        let mut r = [0.0, 0.0, 0.0, h.cos()];
+        r[axis] = h.sin();
+        qmul(r, q)
+    };
+    let turn = |r: [f64; 4]| json!({ "rot": r });
+    rsx! {
+        div { class: "row turn-row",
+            span { class: "dim small", "{turn_words(&b[\"rot\"])}" }
+            for (i, name) in ["x", "y", "z"].into_iter().enumerate() {
+                button { key: "{name}", class: "btn small", title: "a quarter turn about {name} (the rings turn it freely)",
+                    onclick: { let id = id.clone(); move |_| on_send.call(json!({ "cmd": "blockfields", "id": id, "t": turn(quarter(i)) })) },
+                    "↻ {name}" }
+            }
+            button { class: "btn small", title: "back to not turned",
+                onclick: { let id = id.clone(); move |_| on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "rot": [0, 0, 0, 1] } })) },
+                "no turn" }
+        }
+    }
+}
+
+/// a bend in words
+fn bend_words(b: &Value) -> String {
+    let r = b["ripple"]["amount"].as_f64().unwrap_or(0.0);
+    let f = b["fold"]["amount"].as_f64().unwrap_or(0.0);
+    match (r != 0.0, f != 0.0) {
+        (false, false) => " · straight".into(),
+        (true, false) => format!(" · a ripple of {r:.2}"),
+        (false, true) => format!(" · a fold of {f:.2}"),
+        (true, true) => format!(" · a ripple of {r:.2} and a fold of {f:.2}"),
+    }
+}
+
+/// a bend with its defaults filled in (the block's, or straight)
+fn bend_of(b: &Value) -> Value {
+    let d = json!({
+        "ripple": { "amount": 0.0, "freq": 2.0, "phase": 0.0, "c1": 1.0, "c2": -1.0 },
+        "fold": { "amount": 0.0, "at": 0.0, "c1": 0.0, "c2": 1.0 },
+    });
+    let mut out = d.clone();
+    for part in ["ripple", "fold"] {
+        if let Some(o) = b["bend"][part].as_object() {
+            for (k, v) in o {
+                out[part][k] = v.clone();
+            }
+        }
+    }
+    out
+}
+
+/// the bend editor: each shape's curve drawn with its two control points to drag up and
+/// down (the cubic bezier's c1 and c2), and sliders for how much, how often and where;
+/// every change shows on the block as it's made
+#[component]
+fn BendEditor(b: Value, on_send: EventHandler<Value>) -> Element {
+    let id = b["id"].as_str().unwrap_or("").to_string();
+    let bend = bend_of(&b);
+    // which control point is being dragged: (shape, 1 or 2)
+    let mut dragging: Signal<Option<(&'static str, u8)>> = use_signal(|| None);
+    let send = {
+        let id = id.clone();
+        move |nb: Value| on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "bend": nb } }))
+    };
+    let set = {
+        let bend = bend.clone();
+        let send = send.clone();
+        move |part: &'static str, key: &'static str, v: f64| {
+            let mut nb = bend.clone();
+            nb[part][key] = json!(v);
+            send(nb);
+        }
+    };
+    let slider = {
+        let bend = bend.clone();
+        let set = set.clone();
+        move |part: &'static str, key: &'static str, label: &'static str, lo: f64, hi: f64, step: f64| {
+            let v = bend[part][key].as_f64().unwrap_or(0.0);
+            let set = set.clone();
+            rsx! {
+                label { class: "bend-slider",
+                    span { "{label}" }
+                    input { r#type: "range", min: "{lo}", max: "{hi}", step: "{step}", value: "{v}",
+                        oninput: move |e| { if let Ok(x) = e.value().parse::<f64>() { set(part, key, x) } } }
+                    span { class: "num", "{v:.2}" }
+                }
+            }
+        }
+    };
+    // the curves: (x, y) points of a cubic bezier with ends p0, p3 and controls c1, c2
+    let (w, h) = (220.0f64, 90.0f64);
+    let ry = |v: f64| h / 2.0 - v * 28.0;
+    let fy = |v: f64| h - 12.0 - v * 56.0;
+    let path = |p0: f64, c1: f64, c2: f64, p3: f64, y: &dyn Fn(f64) -> f64| {
+        let mut d = String::new();
+        for i in 0..=40 {
+            let t = i as f64 / 40.0;
+            let v = (1.0 - t).powi(3) * p0
+                + 3.0 * (1.0 - t).powi(2) * t * c1
+                + 3.0 * (1.0 - t) * t * t * c2
+                + t.powi(3) * p3;
+            d += &format!(
+                "{}{:.1},{:.1} ",
+                if i == 0 { "M" } else { "L" },
+                10.0 + t * (w - 20.0),
+                y(v)
+            );
+        }
+        d
+    };
+    let r = &bend["ripple"];
+    let f = &bend["fold"];
+    let (rc1, rc2) = (r["c1"].as_f64().unwrap_or(1.0), r["c2"].as_f64().unwrap_or(-1.0));
+    let (fc1, fc2) = (f["c1"].as_f64().unwrap_or(0.0), f["c2"].as_f64().unwrap_or(1.0));
+    let ripple_path = path(0.0, rc1, rc2, 0.0, &ry);
+    let fold_path = path(0.0, fc1, fc2, 1.0, &fy);
+    let x1 = 10.0 + (w - 20.0) / 3.0;
+    let x2 = 10.0 + 2.0 * (w - 20.0) / 3.0;
+    // a drag moves the dragged control point to the pointer's height
+    let drag_to = {
+        let set = set.clone();
+        move |y: f64| {
+            if let Some((part, n)) = dragging() {
+                let v = if part == "ripple" {
+                    (h / 2.0 - y) / 28.0
+                } else {
+                    (h - 12.0 - y) / 56.0
+                };
+                let v = (v.clamp(-3.0, 3.0) * 100.0).round() / 100.0;
+                set(part, if n == 1 { "c1" } else { "c2" }, v);
+            }
+        }
+    };
+    let curve = |part: &'static str, d: String, c1: f64, c2: f64, y: &dyn Fn(f64) -> f64, base: f64| {
+        let drag_to = drag_to.clone();
+        let (y1, y2, yb) = (y(c1), y(c2), base);
+        let y_end = y(if part == "fold" { 1.0 } else { 0.0 });
+        rsx! {
+            svg { class: "bend-curve", width: "{w}", height: "{h}", view_box: "0 0 {w} {h}",
+                line { x1: "10", y1: "{yb}", x2: "{w - 10.0}", y2: "{yb}", class: "axis" }
+                line { x1: "10", y1: "{yb}", x2: "{x1}", y2: "{y1}", class: "handle" }
+                line { x1: "{w - 10.0}", y1: "{y_end}", x2: "{x2}", y2: "{y2}", class: "handle" }
+                path { d: "{d}", class: "curve" }
+                circle { cx: "{x1}", cy: "{y1}", r: "7", class: "ctl", onmousedown: move |e| { e.prevent_default(); dragging.set(Some((part, 1))) } }
+                circle { cx: "{x2}", cy: "{y2}", r: "7", class: "ctl", onmousedown: move |e| { e.prevent_default(); dragging.set(Some((part, 2))) } }
+                if dragging().is_some_and(|(p, _)| p == part) {
+                    rect { x: "0", y: "0", width: "{w}", height: "{h}", class: "catch",
+                        onmousemove: move |e| drag_to(e.element_coordinates().y),
+                        onmouseup: move |_| dragging.set(None),
+                        onmouseleave: move |_| dragging.set(None),
+                    }
+                }
+            }
+        }
+    };
+    rsx! {
+        div { class: "bend-editor",
+            div { class: "bend-part",
+                b { "curtain ripple" } span { class: "dim small", " a wave across its width; drag the dots to shape one period" }
+                {curve("ripple", ripple_path, rc1, rc2, &ry, h / 2.0)}
+                {slider("ripple", "amount", "how much", -2.0, 2.0, 0.01)}
+                {slider("ripple", "freq", "how many waves", 0.5, 16.0, 0.5)}
+                {slider("ripple", "phase", "shifted by", 0.0, 1.0, 0.01)}
+            }
+            div { class: "bend-part",
+                b { "fold" } span { class: "dim small", " a curve across the middle, from the fold line to the edges" }
+                {curve("fold", fold_path, fc1, fc2, &fy, h - 12.0)}
+                {slider("fold", "amount", "how much", -3.0, 3.0, 0.01)}
+                {slider("fold", "at", "fold line", -1.0, 1.0, 0.01)}
+            }
+            button { class: "btn small", onclick: { let id = id.clone(); move |_| on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "bend": Value::Null } })) }, "straighten" }
+        }
+    }
+}
+
+/// the right-click menu on a block: bend it (the blocks window's bend editor), straighten
+/// it, turn it, copy, delete
+#[component]
+fn BlockMenu(
+    b: Value,
+    x: f64,
+    y: f64,
+    sp_bmenu: Signal<Option<(f64, f64)>>,
+    bend_open: Signal<bool>,
+    on_send: EventHandler<Value>,
+    on_duplicate: EventHandler<Value>,
+    on_delete: EventHandler<String>,
+) -> Element {
+    let ui = ui();
+    let mut close = move || sp_bmenu.set(None);
+    let id = b["id"].as_str().unwrap_or("").to_string();
+    let title = match b["kind"].as_str().unwrap_or("") {
+        "text" => format!("a block of “{}”", b["about"]["text"].as_str().unwrap_or("a text")),
+        "picture" => "a picture block".to_string(),
+        "texture" => match b["about"]["name"].as_str().filter(|n| !n.is_empty()) {
+            Some(n) => format!("a block of the recipe {n}"),
+            None => "a block of a texture recipe".to_string(),
+        },
+        _ => format!("a block of colour {}", b["texture"].as_str().unwrap_or("")),
+    };
+    // a sphere doesn't bend
+    let round = b["shape"].as_str() == Some("sphere");
+    let q = rot_of(&b);
+    let quarter_y = {
+        let h = std::f64::consts::FRAC_PI_4;
+        qmul([0.0, h.sin(), 0.0, h.cos()], q)
+    };
+    rsx! {
+        div { class: "backdrop", onclick: move |_| close(), oncontextmenu: move |e| { e.prevent_default(); close() } }
+        div { class: "menu smenu", role: "menu",
+            style: "left: min({x}px, calc(100vw - 330px)); top: max(8px, min({y}px, calc(100vh - 300px)));",
+            div { class: "title", "{title}" }
+            div { class: "title dim small", {if round { format!("{} · a sphere", turn_words(&b["rot"])) } else { format!("{}{}", turn_words(&b["rot"]), bend_words(&b["bend"])) }} }
+            button { role: "menuitem", hidden: round, onclick: move |_| { set_pref(ui, |p| p.space.show_blocks = true); let mut bo = bend_open; bo.set(true); close(); },
+                Icon { name: "edit" } "bend it…" span { class: "dim small", " (the curves in the blocks window)" } }
+            button { role: "menuitem", onclick: { let id = id.clone(); let to = if b["shape"].as_str() == Some("sphere") { "box" } else { "sphere" }; move |_| { on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "shape": to } })); close(); } },
+                Icon { name: "cube" } {if b["shape"].as_str() == Some("sphere") { "make it a box" } else { "make it a sphere" }} }
+            button { role: "menuitem", onclick: move |_| { set_pref(ui, |p| p.space.show_textures = true); close(); },
+                Icon { name: "image" } "texture it…" span { class: "dim small", " (a recipe for it or one face)" } }
+            button { role: "menuitem", hidden: round, onclick: { let id = id.clone(); move |_| { on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "bend": Value::Null } })); close(); } },
+                Icon { name: "close" } "straighten" }
+            button { role: "menuitem", onclick: { let id = id.clone(); move |_| { on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "rot": quarter_y } })); close(); } },
+                Icon { name: "refresh" } "a quarter turn about the upright" }
+            button { role: "menuitem", onclick: { let id = id.clone(); move |_| { on_send.call(json!({ "cmd": "blockfields", "id": id, "t": { "rot": [0, 0, 0, 1] } })); close(); } },
+                Icon { name: "undo" } "no turn" }
+            button { role: "menuitem", onclick: { let b = b.clone(); move |_| { on_duplicate.call(b.clone()); close(); } },
+                Icon { name: "copy" } "a copy beside it" }
+            button { role: "menuitem", onclick: { let id = id.clone(); move |_| { on_delete.call(id.clone()); close(); } },
+                Icon { name: "delete" } "delete it" kbd { "{ui.key_of(Action::DeleteText)}" } }
+        }
+    }
+}
+
+fn add_block_from(on_send: EventHandler<Value>, kind: &str, texture: &str) {
+    if texture.is_empty() {
+        return;
+    }
+    on_send.call(json!({ "cmd": "blockspot", "want": { "kind": kind, "texture": texture } }));
+}
+
+/// the right-click menu on a text in the room: what the details window offers and more;
+/// a copy is another placement of the same entry, so taking one out of the room never
+/// touches the entry, and forgetting the entry itself is its own, confirmed, item
+#[component]
+fn SpaceMenu(
+    ev: SpaceEvent,
+    sp_menu: Signal<Option<SpaceEvent>>,
+    on_send: EventHandler<Value>,
+    on_gsearch: EventHandler<(u64, Mode)>,
+) -> Element {
+    let ui = ui();
+    let api = api();
+    let mut armed = use_signal(|| false);
+    let mut close = move || sp_menu.set(None);
+    let hit = Hit {
+        key: ev.key.clone(),
+        text: ev.text.clone(),
+        note: ev.note,
+    };
+    let node = ev.node.clone();
+    let m = gem::Measure::of(&ev.text);
+    let list = ui.picks.read().list.clone();
+    let (x, y) = (ev.x, ev.y);
+    // a note's body under its title: it isn't an entry of its own, so the menu only opens
+    // the note (editing it here would put the body in place of the whole note)
+    if ev.virt {
+        let k = ev.key.clone();
+        return rsx! {
+            div { class: "backdrop", onclick: move |_| close(), oncontextmenu: move |e| { e.prevent_default(); close() } }
+            div { class: "menu smenu", role: "menu",
+                style: "left: min({x}px, calc(100vw - 330px)); top: max(8px, min({y}px, calc(100vh - 160px)));",
+                div { class: "title", "{ev.text}" }
+                div { class: "title dim small", "{ev.relation()}" }
+                button { role: "menuitem", onclick: move |_| { let mut o = ui.open_note; o.set(Some(k.clone())); crate::shell::go(ui, View::Notes); close(); },
+                    Icon { name: "editor" } "open the note" }
+            }
+        };
+    }
+    let copies = ev.copies.max(1);
+    let which = if ev.free {
+        "a free text (in this room only)".to_string()
+    } else if copies > 1 {
+        format!(
+            "{} · {} placements in the room · {}",
+            if ev.primary { "the first placement" } else { "a copy" },
+            copies,
+            ev.relation()
+        )
+    } else {
+        format!("its only placement in the room · {}", ev.relation())
+    };
+    rsx! {
+        div { class: "backdrop", onclick: move |_| close(), oncontextmenu: move |e| { e.prevent_default(); close() } }
+        div {
+            class: "menu smenu",
+            role: "menu",
+            style: "left: min({x}px, calc(100vw - 330px)); top: max(8px, min({y}px, calc(100vh - 560px)));",
+            div { class: "title", "{ev.text}" }
+            div { class: "title dim small", "{which}" }
+            SizeRow { ev: ev.clone(), on_send: move |v: Value| on_send.call(v) }
+            button { role: "menuitem", onclick: { let ev = ev.clone(); let h = hit.clone(); move |_| {
+                    if ev.free { start_edit(ui, &ev); } else {
+                        ui.set_bar(&h.text);
+                        let mut p = ui.pending; p.set(Pending::Edit(h.clone()));
+                        ui.focus_bar();
+                        ui.say("edit it in the bar; Enter puts it back under the same key, Esc leaves it");
+                    }
+                    close();
+                } }, Icon { name: "edit" } "edit"
+                if !ev.free && ev.det > 0 { span { class: "dim small", " the entry (this copy keeps its text)" } }
+                else if !ev.free && copies > 1 { span { class: "dim small", " the entry (inheriting copies follow)" } }
+                kbd { "{ui.key_of(Action::EditText)}" } }
+            button { role: "menuitem", onclick: { let n = node.clone(); move |_| { on_send.call(json!({ "cmd": "pinnode", "node": n })); close(); } },
+                Icon { name: "pin" } if ev.pinned { "unpin" } else { "pin" } kbd { "{ui.key_of(Action::Pin)}" } }
+            button { role: "menuitem", onclick: { let n = node.clone(); move |_| { on_send.call(json!({ "cmd": "dup", "node": n })); close(); } },
+                Icon { name: "copy" } "a copy that inherits" span { class: "dim small", " (follows the entry)" } }
+            if !ev.free {
+                button { role: "menuitem", onclick: { let n = node.clone(); let k = ev.key.clone(); let api = api.clone(); move |_| {
+                        let (n, k, api) = (n.clone(), k.clone(), api.clone());
+                        // the menu stays until the answer is in: its handler goes with it
+                        let mut sm = sp_menu;
+                        spawn(async move {
+                            match api.call("entries.info", json!({ "key": k })).await {
+                                Ok(i) => on_send.call(json!({ "cmd": "dup", "node": n, "det": i["edited_ms"] })),
+                                Err(e) => ui.fail(e),
+                            }
+                            sm.set(None);
+                        });
+                    } },
+                    Icon { name: "copy" } "a detached copy" span { class: "dim small", " (keeps the text as it reads now)" } }
+                if ev.det == 0 {
+                    button { role: "menuitem", onclick: { let n = node.clone(); let t = ev.text.clone(); move |_| {
+                            ui.set_bar(&t);
+                            let mut p = ui.pending; p.set(Pending::EditOwn { node: n.clone(), text: t.clone() });
+                            ui.focus_bar();
+                            ui.say("this placement's own text: Enter sets it, Esc leaves it; the entry and its other placements stay");
+                            close();
+                        } },
+                        Icon { name: "edit" } "edit this placement only" }
+                }
+                if ev.own.is_some() {
+                    button { role: "menuitem", onclick: { let n = node.clone(); move |_| { on_send.call(json!({ "cmd": "own", "node": n, "text": Value::Null })); close(); } },
+                        Icon { name: "undo" } "follow the entry again" span { class: "dim small", " (drops its own text)" } }
+                }
+            }
+            ChainItems { ev: ev.clone(), sp_menu, on_send: move |v: Value| on_send.call(v) }
+            button { role: "menuitem", onclick: { let t = ev.text.clone(); move |_| { copy_text(ui, &t); close(); } },
+                Icon { name: "copy" } "copy the text" kbd { "{ui.key_of(Action::CopyText)}" } }
+            if !ev.free {
+                if ev.note {
+                    button { role: "menuitem", onclick: { let k = ev.key.clone(); move |_| { let mut o = ui.open_note; o.set(Some(k.clone())); crate::shell::go(ui, View::Notes); close(); } },
+                        Icon { name: "editor" } "open in notes" }
+                } else {
+                    button { role: "menuitem", onclick: { let t = ev.text.clone(); move |_| { crate::shell::go(ui, View::Memory); ui.set_bar(&t); close(); } },
+                        Icon { name: "memory" } "into the memory view's bar" }
+                }
+                if let Some(l) = list.clone().filter(|l| l.key != ev.key) {
+                    button { role: "menuitem", onclick: { let api = api.clone(); let k = ev.key.clone(); let l = l.clone(); move |_| {
+                            let api = api.clone(); let k = k.clone(); let l = l.clone();
+                            dioxus::dioxus_core::spawn_forever(async move {
+                                match api.enlist(&l.key, &k).await {
+                                    Ok(()) => { ui.say(format!("put into the list {}", l.text)); ui.touched(); }
+                                    Err(e) => ui.fail(e),
+                                }
+                            });
+                            close();
+                        } },
+                        Icon { name: "list" } "put it in the list “{l.text}”" }
+                }
+                button { role: "menuitem", onclick: { let h = hit.clone(); move |_| { let mut p = ui.picks; p.write().list = Some(h.clone()); ui.say(format!("list: {}", h.text)); close(); } },
+                    Icon { name: "list" } "make it the list" kbd { "Shift+click" } }
+                button { role: "menuitem", onclick: { let h = hit.clone(); move |_| { let mut p = ui.picks; p.write().candidate = Some(h.clone()); ui.say(format!("candidate: {}", h.text)); close(); } },
+                    Icon { name: "pick" } "make it the candidate" kbd { "Ctrl+click" } }
+                button { role: "menuitem", onclick: { let h = hit.clone(); move |_| {
+                        let mut p = ui.pending; p.set(Pending::Tag(vec![h.clone()]));
+                        ui.set_bar(""); ui.focus_bar(); ui.say("type a tag and press Enter"); close();
+                    } }, Icon { name: "tag" } "tag…" }
+                button { role: "menuitem", onclick: move |_| { on_gsearch.call((m.ordinal, Mode::Ordinal)); close(); }, Icon { name: "search" } "gsearch its sum {m.ordinal}" }
+                button { role: "menuitem", onclick: move |_| { on_gsearch.call((m.reversed, Mode::Reversed)); close(); }, Icon { name: "search" } "gsearch its reversed sum {m.reversed}" }
+                button { role: "menuitem", onclick: move |_| { on_gsearch.call((m.triangle(), space_mode(ui))); close(); }, Icon { name: "search" } "gsearch ⌊√(s·r)⌋ {m.triangle()}" kbd { "Ctrl+right click" } }
+                button { role: "menuitem", onclick: { let k = ev.key.clone(); move |_| { ui.set_bar(&k); close(); } }, Icon { name: "keys" } "its key into the bar" }
+            }
+            button { role: "menuitem", onclick: move |_| { set_pref(ui, |p| p.space.show_details = true); close(); }, Icon { name: "view" } "the details window" kbd { "{ui.key_of(Action::Details)}" } }
+            button { role: "menuitem", onclick: { let n = node.clone(); move |_| { on_send.call(json!({ "cmd": "removenode", "node": n })); close(); } },
+                Icon { name: "close" } if ev.free { "take it out of the room" } else { "take this placement out of the room" } kbd { "{ui.key_of(Action::DeleteText)}" } }
+            if !ev.free {
+                button {
+                    role: "menuitem",
+                    class: if armed() { "armed" } else { "" },
+                    title: "deletes the entry from the save: every placement of it goes; Ctrl+Z brings it back",
+                    onclick: { let api = api.clone(); let h = hit.clone(); move |_| {
+                        if !armed() { armed.set(true); return; }
+                        let api = api.clone(); let h = h.clone();
+                        dioxus::dioxus_core::spawn_forever(async move {
+                            match api.forget(&h.key).await {
+                                Ok(text) => {
+                                    ui.did(Did::Forgot { key: h.key.clone(), text: text.clone() });
+                                    ui.say(format!("forgot the entry “{text}” ({}) · Ctrl+Z takes it back", h.key));
+                                    ui.touched();
+                                }
+                                Err(e) => ui.fail(e),
+                            }
+                        });
+                        close();
+                    } },
+                    Icon { name: "delete" }
+                    if armed() { "forget the entry? click again" } else if copies > 1 { "forget the entry ({copies} placements)…" } else { "forget the entry…" }
+                }
+            }
+        }
+    }
+}
+
+/// the saved scenes (maps): open, rename, delete (two clicks, with an undo), and the room
+/// saved under a name
+#[component]
+fn Scenes(rev: Signal<u64>, on_open: EventHandler<String>, on_save: EventHandler<String>) -> Element {
+    let ui = ui();
+    let api = api();
+    let mut local = use_signal(|| 0u64);
+    let mut renaming: Signal<Option<String>> = use_signal(|| None);
+    let mut armed: Signal<Option<String>> = use_signal(|| None);
+    let mut gone: Signal<Option<(String, Value)>> = use_signal(|| None);
+    // the scene being combined into another, and which
+    let mut combining: Signal<Option<String>> = use_signal(|| None);
+    let mut into = use_signal(String::new);
+    let mut name = use_signal(|| default_map_name(ui));
+    let api_r = api.clone();
+    let all = use_resource(move || {
+        let api = api_r.clone();
+        let _ = (rev(), local());
+        async move { maps(&api).await }
+    });
+    let all: BTreeMap<String, Value> = all.read().clone().unwrap_or_default();
+    let here = ui.prefs.read().space.address.clone();
+    // one `scenes.*` call, then the list read again; `then` sees its answer
+    let store = {
+        let api = api.clone();
+        move |op: &'static str, args: Value, said: String, then: Option<Callback<Value>>| {
+            let api = api.clone();
+            dioxus::dioxus_core::spawn_forever(async move {
+                match api.call(op, args).await {
+                    Ok(v) => {
+                        if let Some(f) = then {
+                            f.call(v);
+                        }
+                        ui.say(said);
+                        local += 1;
+                    }
+                    Err(e) => ui.fail(e),
+                }
+            });
+        }
+    };
+    let ok_name =
+        |n: &str| (1..=96).contains(&n.len()) && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    rsx! {
+        Win {
+            id: "scenes",
+            at: (8.0, 120.0),
+            on_close: move |_| set_pref(ui, |p| p.space.show_scenes = false),
+            title: rsx! { span { class: "win-title", Icon { name: "folder" } "scenes" span { class: "dim small", style: "font-weight: 400;", "{all.len()} saved" } } },
+            div { class: "scenes",
+                if all.is_empty() {
+                    p { class: "dim small", "No scenes yet: save the room as one below (or Save name in the bar)." }
+                }
+                for (n , rows) in all.clone() {
+                    div { key: "{n}", class: if n == here { "scene on" } else { "scene" },
+                        if renaming().as_deref() == Some(n.as_str()) {
+                            input {
+                                class: "scene-name",
+                                initial_value: "{n}",
+                                "aria-label": "a new name: letters, digits, _ and -",
+                                onmounted: move |e| async move { let _ = e.set_focus(true).await; },
+                                onkeydown: move |e: KeyboardEvent| {
+                                    if e.key() == Key::Escape { renaming.set(None); }
+                                },
+                                onchange: {
+                                    let n = n.clone();
+                                    let all = all.clone();
+                                    let store = store.clone();
+                                    move |e: FormEvent| {
+                                        let to = e.value().trim().to_string();
+                                        renaming.set(None);
+                                        if to == n { return; }
+                                        if !ok_name(&to) { ui.fail("a scene's name: 1 to 96 of letters, digits, _ and -"); return; }
+                                        if all.contains_key(&to) { ui.fail(format!("there's a scene {to} already")); return; }
+                                        if ui.prefs.peek().space.address == n { let t = to.clone(); set_pref(ui, move |p| p.space.address = t); }
+                                        store("scenes.rename", json!({ "from": n, "to": to }), format!("renamed {n} to {to}"), None);
+                                    }
+                                },
+                            }
+                        } else {
+                            button { class: "plain scene-open", title: "open it (#{n})", onclick: { let n = n.clone(); move |_| on_open.call(n.clone()) },
+                                b { "{n}" } span { class: "dim small", " {rows.as_array().map(|a| a.len()).unwrap_or(0)} texts" } }
+                        }
+                        button { class: "plain ibtn", "data-tip": "rename it", "aria-label": "rename", onclick: { let n = n.clone(); move |_| renaming.set(Some(n.clone())) }, Icon { name: "rename" } }
+                        if all.len() > 1 {
+                            button { class: "plain ibtn", "data-tip": "combine it into another scene (overlaps settle)", "aria-label": "combine",
+                                onclick: { let n = n.clone(); let first = all.keys().find(|k| **k != n).cloned().unwrap_or_default(); move |_| {
+                                    if combining().as_deref() == Some(n.as_str()) { combining.set(None); } else { combining.set(Some(n.clone())); into.set(first.clone()); }
+                                } },
+                                Icon { name: "merge" } }
+                        }
+                        button {
+                            class: if armed().as_deref() == Some(n.as_str()) { "armed" } else { "plain ibtn" },
+                            "data-tip": "delete it (click twice; it can be undone)",
+                            "aria-label": "delete",
+                            onclick: {
+                                let n = n.clone();
+                                let store = store.clone();
+                                move |_| {
+                                    if armed().as_deref() != Some(n.as_str()) { armed.set(Some(n.clone())); return; }
+                                    armed.set(None);
+                                    let keep = Callback::new(move |v: Value| gone.set(Some((v["name"].as_str().unwrap_or("").to_string(), v["rows"].clone()))));
+                                    store("scenes.delete", json!({ "name": n }), format!("deleted the scene {n}"), Some(keep));
+                                }
+                            },
+                            Icon { name: "delete" }
+                            if armed().as_deref() == Some(n.as_str()) { "delete?" }
+                        }
+                    }
+                }
+                if let Some(from) = combining() {
+                    div { class: "row scene-combine",
+                        span { class: "dim small", "combine {from} into" }
+                        select { "aria-label": "the scene to combine it into", value: "{into}", onchange: move |e| into.set(e.value()),
+                            for k in all.keys().filter(|k| **k != from) {
+                                option { key: "{k}", value: "{k}", selected: *k == into(), "{k}" }
+                            }
+                        }
+                        button { class: "btn small",
+                            onclick: { let store = store.clone(); let from = from.clone(); move |_| {
+                                let to = into();
+                                let open = Callback::new({ let to = to.clone(); move |_: Value| on_open.call(to.clone()) });
+                                store("scenes.combine", json!({ "from": from, "into": to }), format!("combined {from} into {to}: what overlapped was moved out of the way"), Some(open));
+                                combining.set(None);
+                            } },
+                            "combine" }
+                        span { class: "dim small", "(it stays as it is; its copies settle out of what's there)" }
+                    }
+                }
+                if let Some((n, v)) = gone() {
+                    div { class: "scene dim small",
+                        "deleted {n} "
+                        button { class: "plain", onclick: {
+                                let store = store.clone();
+                                move |_| {
+                                    gone.set(None);
+                                    store("scenes.save", json!({ "name": n, "rows": v }), format!("{n} is back"), None);
+                                }
+                            },
+                            Icon { name: "undo" } "undo" }
+                    }
+                }
+                div { class: "row scene-save",
+                    input { "aria-label": "the scene's name", initial_value: "{name}", oninput: move |e| name.set(e.value()) }
+                    button { class: "btn small", title: "keeps every text in the room where it is", onclick: move |_| {
+                            let n = name().trim().to_string();
+                            if !ok_name(&n) { ui.fail("a scene's name: 1 to 96 of letters, digits, _ and -"); return; }
+                            on_save.call(n);
+                        }, Icon { name: "save" } "save the room" }
+                }
+            }
+        }
+    }
+}
+
+/// the position card: its own component, so its many updates (every 120 ms while the
+/// spread moves) re-render only it, not the whole room and its windows
+#[component]
+fn PosCard(pos: Signal<String>) -> Element {
+    rsx! { div { class: "poscard", "{pos}" } }
+}
+
+/// a window over the room that moves by its title bar and remembers where it was left;
+/// its close button shows when the pointer is over it
+#[component]
+fn Win(id: String, title: Element, at: (f64, f64), on_close: EventHandler<()>, children: Element) -> Element {
+    let ui = ui();
+    let saved = ui.prefs.read().space.wins.get(&id).copied();
+    let mut place = use_signal(move || saved.unwrap_or(at));
+    let mut grab: Signal<Option<(f64, f64)>> = use_signal(|| None);
+    let (x, y) = place();
+    let id2 = id.clone();
+    rsx! {
+        // kept inside the room however the window is resized: the place is clamped by the
+        // layout itself, so a window left far right comes back when the room narrows
+        div {
+            class: "win",
+            // never past the bottom: its height is what's left below where it starts (it
+            // scrolls inside); a tall one moves up when there isn't room for 320 px
+            style: "left: clamp(0px, {x:.0}px, max(0px, calc(100% - var(--win-w)))); top: clamp(0px, min({y:.0}px, calc(100% - var(--over-bottom, 40px) - 320px)), max(0px, calc(100% - var(--over-bottom, 40px) - 44px))); max-height: calc(100% - var(--over-bottom, 40px) - 8px - clamp(0px, min({y:.0}px, calc(100% - var(--over-bottom, 40px) - 320px)), max(0px, calc(100% - var(--over-bottom, 40px) - 44px))));",
+            role: "dialog",
+            div {
+                class: "win-head",
+                title: "drag to move it",
+                onpointerdown: move |e| {
+                    // from where it shows (clamped), not where it was left; no text selection
+                    e.prevent_default();
+                    let c = e.client_coordinates();
+                    let o = e.element_coordinates();
+                    place.set((c.x - o.x, c.y - o.y));
+                    grab.set(Some((o.x, o.y)));
+                },
+                {title}
+                button {
+                    class: "plain ibtn close",
+                    "aria-label": "close",
+                    onclick: move |_| on_close.call(()),
+                    onpointerdown: move |e| e.stop_propagation(),
+                    Icon { name: "close" }
+                }
+            }
+            div { class: "win-body", {children} }
+        }
+        if grab().is_some() {
+            // while dragging, a sheet over everything follows the pointer
+            div {
+                class: "win-drag",
+                onpointermove: move |e| {
+                    if let Some((ox, oy)) = grab() {
+                        let c = e.client_coordinates();
+                        place.set(((c.x - ox).max(0.0), (c.y - oy).max(0.0)));
+                    }
+                },
+                onpointerup: move |_| {
+                    grab.set(None);
+                    let id = id2.clone();
+                    spawn(async move {
+                        // kept clamped to the window as it is now
+                        let mut ev = document::eval("dioxus.send([innerWidth, innerHeight]);");
+                        let (w, h) = ev.recv::<(f64, f64)>().await.unwrap_or((1e6, 1e6));
+                        let (x, y) = place();
+                        let at = (x.clamp(0.0, (w - 120.0).max(0.0)), y.clamp(0.0, (h - 80.0).max(0.0)));
+                        place.set(at);
+                        set_pref(ui, move |p| {
+                            p.space.wins.insert(id, at);
+                        });
+                    });
+                },
+            }
+        }
+    }
+}
+
+/// the numbers of a hovered or clicked text (the Bevy app's metrics card), each gsearching
+/// itself; its key, bucket and whether it's pinned
+#[component]
+fn Details(ev: SpaceEvent, on_gsearch: EventHandler<(u64, Mode)>, on_send: EventHandler<Value>) -> Element {
+    let ui = ui();
+    let m = anend_core::spread::metrics(&ev.text);
+    let rev = ui.prefs.read().space_reversed;
+    let mode = if rev { Mode::Reversed } else { Mode::Ordinal };
+    let n = move |v: i64, md: Option<Mode>| {
+        let md = md.unwrap_or(mode);
+        rsx! {
+            span {
+                class: "num",
+                title: "gsearch {v} ({md.name()})",
+                onclick: move |_| {
+                    if v >= 0 {
+                        on_gsearch.call((v as u64, md))
+                    }
+                },
+                "{v}"
+            }
+        }
+    };
+    let rows: [[(&str, Element); 2]; 7] = [
+        [("s", n(m.s, Some(Mode::Ordinal))), ("r", n(m.r, Some(Mode::Reversed)))],
+        [("s+r", n(m.sr, None)), ("s·r", n(m.product, None))],
+        [("√(s·r)", rsx! { "{m.root:.3}" }), ("⌊√(s·r)⌋", n(m.jump, None))],
+        [("s−r", rsx! { "{m.diff}" }), ("s+r+|s−r|", n(m.wide, None))],
+        [("s+r+(s−r)", n(m.lean, None)), ("|s−r|−(s−r)", n(m.gap, None))],
+        [("v", n(m.v, None)), ("c", n(m.c, None))],
+        [("w", rsx! { "{m.w}" }), ("letters", rsx! { "{m.letters}" })],
+    ];
+    let w = window_width();
+    let key = ev.key.clone();
+    let q = ev.q as u64;
+    rsx! {
+        Win {
+            id: "details",
+            at: ((w - 330.0).max(8.0), 52.0),
+            on_close: move |_| set_pref(ui, |p| p.space.show_details = false),
+            title: rsx! { span { class: "win-title", "{ev.text}" } },
+            table { class: "metrics-table",
+                for (i , row) in rows.into_iter().enumerate() {
+                    tr { key: "{i}",
+                        for (label , cell) in row {
+                            th { key: "{label}", "{label}" }
+                            td { {cell} }
+                        }
+                    }
+                }
+            }
+            Triangle { s: m.s.max(0) as u64, r: m.r.max(0) as u64, height: 40.0 }
+            div { class: "gsum", {gem::gsum_line(&ev.text)} }
+            if !ev.free {
+                div { class: "dim small row",
+                    "key "
+                    span { class: "num", title: "into the bar", onclick: move |_| ui.set_bar(&key), "{ev.key}" }
+                    " · bucket "
+                    span { class: "swatch", style: "display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: hsl({ev.hue} 70% 45%);" }
+                    span {
+                        class: "num",
+                        title: "gsearch it",
+                        onclick: move |_| on_gsearch.call((q, if rev { Mode::Ordinal } else { Mode::Reversed })),
+                        " {q}"
+                    }
+                    if ev.pinned { " · pinned" }
+                    if ev.copies > 1 { {format!(" · {} of {} placements", if ev.primary { "the first" } else { "a copy" }, ev.copies)} }
+                }
+                div { class: "dim small", "{ev.relation()}" }
+                SizeRow { ev: ev.clone(), on_send: move |v: Value| on_send.call(v) }
+            } else {
+                div { class: "dim small",
+                    "a free text: double click or Enter edits it"
+                    if ev.pinned { " · pinned" }
+                }
+            }
+            if m.s > 1 {
+                crate::views::memory::PfLine { n: m.s as u64 }
+            }
+        }
+    }
+}
+
+/// the window's width, for placing a window at the right the first time
+fn window_width() -> f64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::window()
+            .and_then(|w| w.inner_width().ok())
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1200.0)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        1200.0
+    }
+}
+
+/// the physics panel: every slider (double click its name: back to its default), what the
+/// depth follows, reset all, settle, pause
+#[component]
+fn PhysicsPanel(paused: bool, on_settle: EventHandler<()>, on_pause: EventHandler<bool>) -> Element {
+    let ui = ui();
+    let p = ui.prefs.read().space.clone();
+    let mut groups: Vec<(&str, Vec<&Slider>)> = Vec::new();
+    for s in &SLIDERS {
+        match groups.iter_mut().find(|(g, _)| *g == s.group) {
+            Some((_, v)) => v.push(s),
+            None => groups.push((s.group, vec![s])),
+        }
+    }
+    rsx! {
+        Win {
+            id: "physics",
+            at: (8.0, 80.0),
+            on_close: move |_| set_pref(ui, |p| p.space.show_physics = false),
+            title: rsx! {
+                span { class: "win-title", Icon { name: "sliders" } " physics" }
+            },
+            div { class: "physics",
+                for (g , sliders) in groups {
+                    div { key: "{g}", class: "pgroup",
+                        h4 { "{g}" }
+                        for s in sliders {
+                            PSlider { key: "{s.key}", which: s.key, value: p.physics.get(s.key).copied().unwrap_or(s.def) }
+                        }
+                        if g == "depth" {
+                            label { class: "pslider",
+                                span { class: "pname", "depth follows" }
+                                select {
+                                    value: "{p.depth_by}",
+                                    onchange: move |e| set_pref(ui, |p| p.space.depth_by = e.value()),
+                                    for d in DEPTH_BY {
+                                        option { key: "{d}", value: "{d}", selected: p.depth_by == d, "{d}" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                div { class: "row",
+                    button {
+                        onclick: move |_| set_pref(ui, |p| {
+                            p.space.physics.clear();
+                            p.space.depth_by = "none".into();
+                        }),
+                        Icon { name: "undo" }
+                        "reset all"
+                    }
+                    button { "data-tip": "settle now · {ui.key_of(Action::Settle)}", onclick: move |_| on_settle.call(()),
+                        Icon { name: "check" }
+                        "settle"
+                    }
+                    button {
+                        class: if paused { "on" } else { "" },
+                        "data-tip": "pause the physics · {ui.key_of(Action::Pause)}",
+                        onclick: move |_| on_pause.call(!paused),
+                        Icon { name: if paused { "play" } else { "pause" } }
+                        if paused { "run" } else { "pause" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn PSlider(which: &'static str, value: f64) -> Element {
+    let ui = ui();
+    let Some(s) = SLIDERS.iter().find(|s| s.key == which) else {
+        return rsx! {};
+    };
+    let def = s.def;
+    let decimals = (-s.step.log10()).ceil().max(0.0) as usize;
+    rsx! {
+        label { class: "pslider",
+            span {
+                class: "pname",
+                title: "double click: back to {def}",
+                ondoubleclick: move |_| set_pref(ui, move |p| {
+                    p.space.physics.remove(which);
+                }),
+                "{s.label}"
+            }
+            input {
+                r#type: "range",
+                min: "{s.min}",
+                max: "{s.max}",
+                step: "{s.step}",
+                value: "{value}",
+                oninput: move |e| {
+                    if let Ok(x) = e.value().parse::<f64>() {
+                        set_pref(ui, move |p| {
+                            if (x - def).abs() < 1e-9 {
+                                p.space.physics.remove(which);
+                            } else {
+                                p.space.physics.insert(which.to_string(), x);
+                            }
+                        });
+                    }
+                },
+            }
+            span { class: "pval", {format!("{value:.decimals$}")} }
+        }
+    }
+}
+
+/// the keys as they're bound, and what the mouse does
+#[component]
+fn Help() -> Element {
+    let ui = ui();
+    let k = |a: Action| ui.key_of(a);
+    let sections: Vec<(&str, Vec<(String, &str)>)> = vec![
+        (
+            "flying",
+            vec![
+                ("Right mouse".into(), "hold to look"),
+                (
+                    format!(
+                        "{} {} {} {}",
+                        k(Action::FlyForward),
+                        k(Action::FlyLeft),
+                        k(Action::FlyBack),
+                        k(Action::FlyRight)
+                    ),
+                    "move",
+                ),
+                (format!("{} / {}", k(Action::FlyUp), k(Action::FlyDown)), "up / down"),
+                (format!("{} / {}", k(Action::RollLeft), k(Action::RollRight)), "roll"),
+                ("Shift".into(), "fast"),
+                (
+                    format!("{} {} or the wheel", k(Action::Slower), k(Action::Faster)),
+                    "flight speed",
+                ),
+                (k(Action::Level), "level the horizon"),
+                (k(Action::BackToStart), "back to start"),
+                ("arrows".into(), "hop to the nearest text that way"),
+            ],
+        ),
+        (
+            "walking, the grapple, superflight",
+            vec![
+                (k(Action::Walk), "walk / fly: gravity, blocks to stand on and bump into"),
+                (
+                    format!(
+                        "{} {} {} {}, Shift, {}",
+                        k(Action::FlyForward),
+                        k(Action::FlyLeft),
+                        k(Action::FlyBack),
+                        k(Action::FlyRight),
+                        k(Action::Sneak)
+                    ),
+                    "walk, run, sneak",
+                ),
+                (
+                    format!("{} / {}", k(Action::FlyUp), k(Action::FlyDown)),
+                    "jump (at a ledge: climb onto it) / crouch",
+                ),
+                (format!("{} / {}", k(Action::RollLeft), k(Action::RollRight)), "lean"),
+                (
+                    k(Action::Grapple),
+                    "hook the block or text ahead / let go; the wheel reels in and out",
+                ),
+                (
+                    k(Action::SuperFlight),
+                    "superflight / fly: Shift boosts; texts flown through are collected",
+                ),
+                ("Esc".into(), "let the pointer go (right-drag still looks)"),
+            ],
+        ),
+        (
+            "texts",
+            vec![
+                ("drag a text".into(), "move it; it stays pinned"),
+                ("wheel on a text".into(), "push away / pull near"),
+                ("click".into(), "its text into the bar, its numbers in the details"),
+                ("double click".into(), "its key into the bar (a free text: edit it)"),
+                (
+                    format!("double click the room, {}", k(Action::NewText)),
+                    "a new free text",
+                ),
+                (k(Action::EditText), "edit the selected text"),
+                (k(Action::DeleteText), "remove it from the room"),
+                (k(Action::CopyText), "copy it"),
+                (k(Action::Pin), "pin / unpin it"),
+                (k(Action::Undo), "undo (a move, a pin, a removal; else the last action)"),
+                (
+                    format!("{} / {}", k(Action::Export), k(Action::SaveMap)),
+                    "export the texts / save the map",
+                ),
+            ],
+        ),
+        (
+            "blocks",
+            vec![
+                (
+                    "the cube chip".into(),
+                    "the blocks window: a block of the selected text, a picture or a colour",
+                ),
+                ("click a block".into(), "select it; drag it across the view"),
+                ("drag an arrow".into(), "move it along that axis"),
+                (
+                    "drag a face's knob".into(),
+                    "resize it: the texture tiles, the far face stays",
+                ),
+                ("Shift while dragging".into(), "snap to quarter units"),
+                (k(Action::DeleteText), "delete the selected block"),
+                (k(Action::Undo), "undo a move, a resize, an add or a delete"),
+            ],
+        ),
+        (
+            "the bar",
+            vec![
+                ("Enter".into(), "a number: its bucket; a text: its sum (or its words)"),
+                ("Ctrl+Enter".into(), "remember the text, gsearch its sum"),
+                ("Shift+Enter".into(), "bring back a key, like 0,12"),
+                ("Delete".into(), "forget the key typed"),
+                ("↑ ↓".into(), "history"),
+                ("#123  #r123  #name".into(), "a bucket, a reversed one, a saved map"),
+                (
+                    "words".into(),
+                    "Enlist List Delist Unlist Count Backup Clear ClearAll Settle Maps Save name",
+                ),
+                ("Ctrl+click / Shift+click".into(), "the list's candidate / the list"),
+                ("Ctrl+right click".into(), "gsearch ⌊√(s·r)⌋"),
+                (
+                    format!("{} {}", k(Action::SideSum), k(Action::SideReversedSum)),
+                    "gsearch the bar's sums",
+                ),
+            ],
+        ),
+        (
+            "panels",
+            vec![
+                (k(Action::Physics), "the physics"),
+                (
+                    format!("{} / {}", k(Action::Pause), k(Action::Settle)),
+                    "pause / settle now",
+                ),
+                (k(Action::Details), "the details window"),
+                (k(Action::Hud), "the position card"),
+                (k(Action::Reversed), "reversed sums"),
+                (k(Action::Help), "this help"),
+            ],
+        ),
+    ];
+    rsx! {
+        div { class: "space-help",
+            button {
+                class: "plain ibtn close",
+                "aria-label": "close",
+                onclick: move |_| set_pref(ui, |p| p.space.show_help = false),
+                Icon { name: "close" }
+            }
+            div { class: "help-cols",
+                for (title , rows) in sections {
+                    div { key: "{title}",
+                        h4 { "{title}" }
+                        table {
+                            for (key , what) in rows {
+                                tr { key: "{key}",
+                                    td { kbd { "{key}" } }
+                                    td { "{what}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// what the space adds to the command bar: the bar's sums, the list state, the chips
+#[component]
+pub fn SpaceStrip() -> Element {
+    let ui = ui();
+    let p = ui.prefs.read().clone();
+    let measure = (ui.measure)();
+    let picks = (ui.picks)();
+    let list = match (&picks.list, &picks.candidate) {
+        (Some(l), Some(c)) => format!("list {} · candidate {}", l.text, c.text),
+        (Some(l), None) => format!("list {}", l.text),
+        (None, Some(c)) => format!("candidate {}", c.text),
+        _ => String::new(),
+    };
+    rsx! {
+        if let Some(me) = measure {
+            span { class: "sidecar", "aria-label": "the bar's sums",
+                "("
+                span {
+                    class: if !p.space_reversed { "num on" } else { "num" },
+                    title: "ordinal · {ui.key_of(Action::SideSum)} gsearches it",
+                    onclick: move |_| set_pref(ui, |p| p.space_reversed = false),
+                    "{me.ordinal}"
+                }
+                ", "
+                span {
+                    class: if p.space_reversed { "num on" } else { "num" },
+                    title: "reversed · {ui.key_of(Action::SideReversedSum)} gsearches it",
+                    onclick: move |_| set_pref(ui, |p| p.space_reversed = true),
+                    "{me.reversed}"
+                }
+                ")"
+            }
+        }
+        if !list.is_empty() {
+            span { class: "sidenote", "{list}" }
+        }
+        select {
+            class: "search-mode",
+            "aria-label": "how Enter searches",
+            title: "how Enter searches: normal (sums and words), by the colouring classifier (a class's name), or random (texts sharing a word, in no order; * takes any)",
+            value: "{p.space_search}",
+            onchange: move |e| { let v = e.value(); set_pref(ui, move |p| p.space_search = v) },
+            option { value: "normal", selected: p.space_search == "normal", "normal" }
+            option { value: "classifier", selected: p.space_search == "classifier", "classifier" }
+            option { value: "random", selected: p.space_search == "random", "random" }
+        }
+        span { class: "toggles",
+            TChip {
+                label: "gsearch: a text by its sum, not its words",
+                icon: "search",
+                on: p.gsearch_text,
+                onclick: move |_| set_pref(ui, |p| p.gsearch_text = !p.gsearch_text),
+            }
+            TChip {
+                label: format!("reversed: bucket by the reversed sum · {}", ui.key_of(Action::Reversed)),
+                letter: "R",
+                on: p.space_reversed,
+                onclick: move |_| set_pref(ui, |p| p.space_reversed = !p.space_reversed),
+            }
+            TChip {
+                label: "saturate: remember what's searched",
+                icon: "bolt",
+                on: p.saturate,
+                onclick: move |_| set_pref(ui, |p| p.saturate = !p.saturate),
+            }
+            TChip {
+                label: "keep: add new results to the spread",
+                icon: "pin",
+                on: p.space_keep,
+                onclick: move |_| set_pref(ui, |p| p.space_keep = !p.space_keep),
+            }
+        }
+        span { class: "toggles",
+            TChip {
+                label: format!("the physics · {}", ui.key_of(Action::Physics)),
+                icon: "sliders",
+                on: p.space.show_physics,
+                onclick: move |_| set_pref(ui, |p| p.space.show_physics = !p.space.show_physics),
+            }
+            TChip {
+                label: format!("the details window · {}", ui.key_of(Action::Details)),
+                icon: "view",
+                on: p.space.show_details,
+                onclick: move |_| set_pref(ui, |p| p.space.show_details = !p.space.show_details),
+            }
+            TChip {
+                label: "scenes: the saved rooms, to open, combine, rename and delete",
+                icon: "folder",
+                on: p.space.show_scenes,
+                onclick: move |_| set_pref(ui, |p| p.space.show_scenes = !p.space.show_scenes),
+            }
+            TChip {
+                label: "blocks: spatial saves, boxes showing texts and pictures",
+                icon: "cube",
+                on: p.space.show_blocks,
+                onclick: move |_| set_pref(ui, |p| p.space.show_blocks = !p.space.show_blocks),
+            }
+            TChip {
+                label: "animations: keyframes for blocks, eased along timing curves",
+                icon: "play",
+                on: p.space.show_anims,
+                onclick: move |_| set_pref(ui, |p| p.space.show_anims = !p.space.show_anims),
+            }
+            TChip {
+                label: "prefabs: blocks grouped into subassemblies, placed as copies",
+                icon: "prefab",
+                on: p.space.show_prefabs,
+                onclick: move |_| set_pref(ui, |p| p.space.show_prefabs = !p.space.show_prefabs),
+            }
+            TChip {
+                label: "sounds: the save's sounds, and blocks that play them",
+                icon: "sound",
+                on: p.space.show_sounds,
+                onclick: move |_| set_pref(ui, |p| p.space.show_sounds = !p.space.show_sounds),
+            }
+            TChip {
+                label: "wiring: blocks that cast rays and run programs",
+                icon: "bolt",
+                on: p.space.show_wiring,
+                onclick: move |_| set_pref(ui, |p| p.space.show_wiring = !p.space.show_wiring),
+            }
+            TChip {
+                label: "lights: ambient, sun, point and cone lights, baked onto the blocks",
+                icon: "sun",
+                on: p.space.show_lights,
+                onclick: move |_| set_pref(ui, |p| p.space.show_lights = !p.space.show_lights),
+            }
+            TChip {
+                label: "textures: recipes from pictures, texts and colours, for blocks, faces and the sky",
+                icon: "image",
+                on: p.space.show_textures,
+                onclick: move |_| set_pref(ui, |p| p.space.show_textures = !p.space.show_textures),
+            }
+            TChip {
+                label: format!("help · {}", ui.key_of(Action::Help)),
+                icon: "help",
+                on: p.space.show_help,
+                onclick: move |_| set_pref(ui, |p| p.space.show_help = !p.space.show_help),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sliders_match_the_engine() {
+        // every slider is one of space.js's PHYSICS keys, with the same default
+        for s in &SLIDERS {
+            let pat = format!("{}: {}", s.key, s.def);
+            let alt = format!("{}: {}", s.key, s.def as i64);
+            assert!(
+                ENGINE.contains(&pat) || ENGINE.contains(&alt),
+                "{} = {} isn't space.js's",
+                s.key,
+                s.def
+            );
+            assert!(s.min <= s.def && s.def <= s.max, "{}", s.key);
+        }
+        // a free spread: no spiral and no anchors left in the engine
+        assert!(!ENGINE.contains("spiral(") && !ENGINE.contains("p.anchor"));
+        assert_eq!(letter_counts("Ab b")[1], 2);
+    }
+}

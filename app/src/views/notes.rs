@@ -1,0 +1,1416 @@
+//! Notes: chronological (newest first) at the left, each with its date; long titles show
+//! in full on hover. The editor at the right holds `# title` and markdown, its tags in a
+//! box; Ctrl+S (or the save button) keeps it. The layout is a grid, so the editor takes
+//! whatever room the window gives it. The bar narrows the list by words.
+
+use dioxus::prelude::*;
+
+use crate::backend::{Note, NoteQuery, NoteSummary};
+use crate::keys::Action;
+use crate::shell::set_pref;
+use crate::ui::*;
+use crate::views::use_keys;
+
+fn when(iso: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(iso)
+        .map(|t| t.with_timezone(&chrono::Local).format("%d %b %Y, %H:%M").to_string())
+        .unwrap_or_default()
+}
+
+/// keeps the highlighting layer scrolled with the pad (once per page)
+const PAD_JS: &str = r#"
+// the colour layer's segments, kept by Rust (`highlight::Layer`): set them all, or
+// replace a run of them; a last span keeps an empty last line's height
+window.__anendHl = window.__anendHl || {
+  mk(html) { const s = document.createElement('span'); s.innerHTML = html; return s; },
+  tail(h, end) {
+    let t = h.lastElementChild;
+    if (!t || !t.classList.contains('hl-end')) { t = document.createElement('span'); t.className = 'hl-end'; h.append(t); }
+    t.textContent = end ? ' ' : '';
+  },
+  set(htmls, end) {
+    const h = document.getElementById('note-hl');
+    if (!h) return;
+    h.replaceChildren(...htmls.map((x) => this.mk(x)));
+    this.tail(h, end);
+  },
+  patch(from, count, htmls, end) {
+    const h = document.getElementById('note-hl');
+    if (!h) return;
+    const kids = h.children;
+    const before = kids[from + count] || null;
+    for (let i = 0; i < count && kids[from]; i++) kids[from].remove();
+    for (const x of htmls) h.insertBefore(this.mk(x), before && before.isConnected ? before : h.lastElementChild);
+    this.tail(h, end);
+  },
+};
+if (!window.__anendPad) {
+  window.__anendPad = true;
+  document.addEventListener('scroll', (e) => {
+    const t = e.target;
+    if (t && t.id === 'note-pad') {
+      const h = document.getElementById('note-hl');
+      if (h) { h.scrollTop = t.scrollTop; h.scrollLeft = t.scrollLeft; }
+    }
+  }, true);
+  // the pad's own undo: the desktop's web view has none for a text box, and a
+  // replacement put in by a click must come back out with Ctrl+Z too. A pause in typing
+  // ends a step; Ctrl+Z undoes, Ctrl+Shift+Z or Ctrl+Y redoes.
+  const stacks = new WeakMap();
+  const st = (p) => { let s = stacks.get(p); if (!s) { s = { undo: [], redo: [], last: 0 }; stacks.set(p, s); } return s; };
+  window.__anendPadSnap = (p, force) => {
+    const s = st(p);
+    const now = Date.now();
+    if (force || now - s.last > 800 || !s.undo.length) s.undo.push({ v: p.value, a: p.selectionStart, b: p.selectionEnd });
+    if (s.undo.length > 500) s.undo.shift();
+    s.last = force ? 0 : now;
+    s.redo = [];
+  };
+  document.addEventListener('beforeinput', (e) => {
+    const p = e.target;
+    if (p && p.id === 'note-pad' && !window.__anendPadReplaying) window.__anendPadSnap(p, false);
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    const p = e.target;
+    if (!p || p.id !== 'note-pad' || !(e.ctrlKey || e.metaKey) || e.altKey) return;
+    const k = e.key.toLowerCase();
+    const undo = k === 'z' && !e.shiftKey, redo = (k === 'z' && e.shiftKey) || k === 'y';
+    if (!undo && !redo) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const s = st(p);
+    const snap = (undo ? s.undo : s.redo).pop();
+    if (!snap) return;
+    (undo ? s.redo : s.undo).push({ v: p.value, a: p.selectionStart, b: p.selectionEnd });
+    p.value = snap.v;
+    p.setSelectionRange(snap.a, snap.b);
+    s.last = 0;
+    window.__anendPadReplaying = true;
+    p.dispatchEvent(new Event('input', { bubbles: true }));
+    window.__anendPadReplaying = false;
+  }, true);
+}
+"#;
+
+/// typing in segments (the user's approach for long texts, docs/format.md "Long texts"):
+/// each change to the pad goes to Rust as the range it replaced and what went in
+/// (UTF-16 units), so a key sends a few characters rather than the whole text. A pad
+/// whose last value isn't known (just opened) sends its whole text once.
+const PAD_SYNC_JS: &str = r#"
+window.__anendPadSend = (m) => dioxus.send(m);
+if (!window.__anendPadSync) {
+  window.__anendPadSync = true;
+  document.addEventListener('input', (e) => {
+    const p = e.target;
+    if (!p || p.id !== 'note-pad' || !window.__anendPadSend) return;
+    const v = p.value, prev = p.__prev;
+    p.__prev = v;
+    if (typeof prev !== 'string') { window.__anendPadSend({ full: v, caret: p.selectionStart }); return; }
+    const n = Math.min(prev.length, v.length);
+    let a = 0;
+    while (a < n && prev.charCodeAt(a) === v.charCodeAt(a)) a++;
+    let b = 0;
+    while (b < n - a && prev.charCodeAt(prev.length - 1 - b) === v.charCodeAt(v.length - 1 - b)) b++;
+    window.__anendPadSend({ at: a, del: prev.length - a - b, ins: v.slice(a, v.length - b), len: v.length, caret: p.selectionStart });
+  }, true);
+  // s code: Ctrl+click goes to a word's definition; Tab takes the first completion
+  document.addEventListener('click', (e) => {
+    const p = e.target;
+    if (p && p.id === 'note-pad' && (e.ctrlKey || e.metaKey) && window.__anendPadSend) window.__anendPadSend({ goto: p.selectionStart });
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    const p = e.target;
+    const c = window.__anendCompl;
+    if (!p || p.id !== 'note-pad' || e.key !== 'Tab' || e.shiftKey || !c) return;
+    e.preventDefault();
+    const a = p.selectionStart;
+    p.setRangeText(c, a, a, 'end');
+    window.__anendCompl = null;
+    p.dispatchEvent(new Event('input', { bubbles: true }));
+  }, true);
+}
+await new Promise(() => {});
+"#;
+
+/// selects a span of the pad and scrolls it into view (go to definition, the outline)
+fn pad_show(a: usize, b: usize) {
+    // the pad counts UTF-16 units; Rust's offsets are bytes
+    document::eval(&format!(
+        "const p = document.getElementById('note-pad'); if (p) {{ const enc = new TextEncoder(); const v = p.value; let a = 0, b = 0, n = 0; for (let i = 0; i < v.length; i++) {{ if (n === {a}) a = i; if (n === {b}) {{ b = i; break; }} n += enc.encode(v[i]).length; b = i + 1; }} p.focus(); p.setSelectionRange(a, b); const lh = parseFloat(getComputedStyle(p).lineHeight) || 20; const line = v.slice(0, a).split('\\n').length - 1; p.scrollTop = Math.max(0, line * lh - p.clientHeight / 3); }}"
+    ));
+}
+
+/// the output a run wrote, as one line beside the code that wrote it (`> a b` writes
+/// "\n a b"): its lines joined, at most 80 characters
+fn inline_result(out: &str) -> String {
+    let s: Vec<&str> = out
+        .split('\n')
+        .map(|l| l.strip_prefix(' ').unwrap_or(l))
+        .filter(|l| !l.is_empty())
+        .collect();
+    let s = s.join(" · ");
+    if s.chars().count() > 80 {
+        format!("{}…", s.chars().take(79).collect::<String>())
+    } else {
+        s
+    }
+}
+
+/// a change sent by `PAD_SYNC_JS`, applied to the text; false when it doesn't fit (the
+/// pad's whole text is asked for then)
+fn apply_delta(t: &mut String, m: &serde_json::Value) -> Delta {
+    if let Some(full) = m["full"].as_str() {
+        *t = full.to_string();
+        return Delta::Whole;
+    }
+    match splice(t, m) {
+        Some(e) => Delta::Edit(e),
+        None => Delta::Lost,
+    }
+}
+
+/// the notes view's colour layer: its segments, and whether it shows spelling flags
+#[derive(Default)]
+struct PadLayer {
+    layer: crate::highlight::Layer,
+    flagged: bool,
+}
+
+/// what a pad change did to the text
+enum Delta {
+    /// the whole text came
+    Whole,
+    /// bytes `a..b` were replaced by `ins`
+    Edit((usize, usize, String)),
+    /// it didn't fit: the pad's whole text is asked for
+    Lost,
+}
+
+fn splice(t: &mut String, m: &serde_json::Value) -> Option<(usize, usize, String)> {
+    let (Some(at), Some(del), Some(ins), Some(len)) = (
+        m["at"].as_u64(),
+        m["del"].as_u64(),
+        m["ins"].as_str(),
+        m["len"].as_u64(),
+    ) else {
+        return None;
+    };
+    // UTF-16 offsets to byte offsets
+    let byte_of = |t: &str, u: usize| -> Option<usize> {
+        let mut units = 0;
+        for (i, c) in t.char_indices() {
+            if units == u {
+                return Some(i);
+            }
+            units += c.len_utf16();
+            if units > u {
+                return None;
+            }
+        }
+        (units == u).then_some(t.len())
+    };
+    let a = byte_of(t, at as usize)?;
+    let b = byte_of(&t[a..], del as usize).map(|x| a + x)?;
+    t.replace_range(a..b, ins);
+    // the length check: a pad changed without an input event would drift
+    (t.encode_utf16().count() == len as usize).then(|| (a, b, ins.to_string()))
+}
+
+/// puts a replacement in the pad as one undo step of its own (Ctrl+Z takes it back);
+/// `from`..`to` in UTF-16 units
+fn replace_in_pad(from: usize, to: usize, with: &str) {
+    let js = format!(
+        r#"(() => {{
+  const p = document.getElementById('note-pad');
+  if (!p) return;
+  p.focus();
+  if (window.__anendPadSnap) window.__anendPadSnap(p, true);
+  p.setRangeText({with}, {from}, {to}, 'end');
+  window.__anendPadReplaying = true;
+  p.dispatchEvent(new Event('input', {{ bubbles: true }}));
+  window.__anendPadReplaying = false;
+}})();"#,
+        with = serde_json::to_string(with).unwrap_or_default()
+    );
+    document::eval(&js);
+}
+
+/// a flagged word the pointer clicked, and where
+#[derive(Clone, PartialEq)]
+struct Pick {
+    flag: serde_json::Value,
+    x: f64,
+    y: f64,
+}
+
+/// a note longer than this (bytes) is typed without the spelling check (which reads the
+/// whole text), unless the save's `limits.grammar_check_bytes` says otherwise; the
+/// colours stay on at any length, as the layer is coloured in segments
+const BIG: usize = 200_000;
+
+fn split_tags(t: &str) -> Vec<String> {
+    t.split(',')
+        .map(|x| x.trim().to_string())
+        .filter(|x| !x.is_empty())
+        .collect()
+}
+
+#[component]
+pub fn Notes() -> Element {
+    let ui = ui();
+    let api = api();
+    let mut q = use_signal(String::new);
+    let mut open: Signal<Option<Note>> = use_signal(|| None);
+    let mut text = use_signal(String::new);
+    let mut tags: Signal<Vec<String>> = use_signal(Vec::new);
+    let mut dirty = use_signal(|| false);
+    let mut armed = use_signal(|| false);
+    let mut seq = use_signal(|| 0u64);
+    let mut reading = use_signal(|| false);
+    let mut judging = use_signal(|| false);
+    // an s program's last run: its output and error
+    let mut ran: Signal<Option<serde_json::Value>> = use_signal(|| None);
+    // the code editor (`views::scode`): the save's s programs (title, key), the words that
+    // complete what's being typed, a go-to asked for (a place in the text), the outline
+    // shown, and a stepped run (how many steps in, its seed) with what it shows
+    let mut progs: Signal<Vec<(String, String)>> = use_signal(Vec::new);
+    let mut compl: Signal<(String, Vec<String>)> = use_signal(|| (String::new(), vec![]));
+    let mut goto_req: Signal<Option<usize>> = use_signal(|| None);
+    let mut outline_open = use_signal(|| false);
+    let mut dbg: Signal<Option<(u64, u64)>> = use_signal(|| None);
+    let mut snap: Signal<Option<serde_json::Value>> = use_signal(|| None);
+    let mut tag_gen = use_signal(|| 0u64);
+    let mut tag_draft = use_signal(String::new);
+    // the spelling check: the flags for the text they were made for
+    let mut flags: Signal<(String, Vec<serde_json::Value>)> = use_signal(|| (String::new(), vec![]));
+    let mut check_gen = use_signal(|| 0u64);
+    let mut report: Signal<Option<serde_json::Value>> = use_signal(|| None);
+    let mut pick: Signal<Option<Pick>> = use_signal(|| None);
+    // how long a note the spelling check reads (the save's limit)
+    let mut big_at = use_signal(|| BIG);
+    {
+        let api = api.clone();
+        use_hook(move || {
+            spawn(async move {
+                if let Ok(v) = api.call("limits.list", serde_json::json!({})).await {
+                    let n = v
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .find(|l| l["name"] == "limits.grammar_check_bytes")
+                        .and_then(|l| l["value"].as_u64());
+                    if let Some(n) = n {
+                        big_at.set(n as usize);
+                    }
+                }
+            });
+        });
+    }
+    // the colour layer, kept in typing segments (`highlight::Layer`); `layer_gen` asks for
+    // it whole (a note opened, a text put in, the colours or the flags changed)
+    let layer: std::rc::Rc<std::cell::RefCell<PadLayer>> = use_hook(Default::default);
+    let mut layer_gen = use_signal(|| 0u64);
+    use_hook(|| {
+        document::eval(PAD_JS);
+    });
+    // the pad's changes, as deltas (`PAD_SYNC_JS`)
+    let layer_d = layer.clone();
+    use_hook(move || {
+        let layer = layer_d.clone();
+        spawn(async move {
+            let mut ev = document::eval(PAD_SYNC_JS);
+            while let Ok(m) = ev.recv::<serde_json::Value>().await {
+                // s code: a Ctrl+click asks for the word's definition
+                if let Some(at) = m["goto"].as_u64() {
+                    goto_req.set(Some(at as usize));
+                    continue;
+                }
+                let d = text.with_mut(|t| apply_delta(t, &m));
+                match d {
+                    Delta::Lost => {
+                        // out of step: the whole text once, then deltas again
+                        document::eval(
+                            "const p = document.getElementById('note-pad'); if (p) { p.__prev = undefined; p.dispatchEvent(new Event('input', { bubbles: true })); }",
+                        );
+                        continue;
+                    }
+                    Delta::Whole => layer_gen += 1,
+                    Delta::Edit((a, b, ins)) => {
+                        // only the segments around the edit are coloured again; a layer
+                        // showing spelling flags (now stale) is made again whole
+                        let colour = ui.prefs.peek().highlight;
+                        let patched = {
+                            let mut l = layer.borrow_mut();
+                            if l.flagged {
+                                None
+                            } else {
+                                l.layer.edit(a, b, &ins, colour)
+                            }
+                        };
+                        match patched {
+                            Some((from, went, html)) => {
+                                let end = text.peek().ends_with('\n') || text.peek().is_empty();
+                                document::eval(&format!(
+                                    "window.__anendHl && window.__anendHl.patch({from}, {went}, {}, {end});",
+                                    serde_json::to_string(&html).unwrap_or_default()
+                                ));
+                            }
+                            None => layer_gen += 1,
+                        }
+                    }
+                }
+                dirty.set(true);
+                pick.set(None);
+                // s code: the words that complete what's typed before the caret
+                if tags.peek().iter().any(|t| t == anend_core::ops::script::TAG)
+                    && let Some(caret) = m["caret"].as_u64()
+                {
+                    let t = text.peek();
+                    let prefix = crate::views::scode::prefix_at(&t, caret as usize).to_string();
+                    let titles: Vec<String> = progs.peek().iter().map(|p| p.0.clone()).collect();
+                    let mut words: Vec<String> =
+                        anend_core::s::machine::COMMANDS.iter().map(|w| w.to_string()).collect();
+                    words.extend(
+                        anend_core::s::lib::words()
+                            .into_iter()
+                            .flat_map(|(_, w)| w)
+                            .map(|w| w.to_string()),
+                    );
+                    words.extend(titles.iter().cloned());
+                    let body_at = crate::views::scode::body_offset(&t);
+                    words.extend(
+                        crate::views::scode::outline(&t[body_at..], &titles)
+                            .into_iter()
+                            .map(|i| i.name),
+                    );
+                    let c = crate::views::scode::complete(&prefix, &words, 8);
+                    let rest = c.first().map(|w| w[prefix.len()..].to_string());
+                    document::eval(&format!(
+                        "window.__anendCompl = {};",
+                        serde_json::to_string(&rest).unwrap_or("null".into())
+                    ));
+                    compl.set((prefix, c));
+                } else if !compl.peek().1.is_empty() {
+                    compl.set((String::new(), vec![]));
+                    document::eval("window.__anendCompl = null;");
+                }
+            }
+        });
+    });
+    let api_r = api.clone();
+    let list = use_resource(move || {
+        let api = api_r.clone();
+        let _ = (ui.changed)();
+        let query = NoteQuery {
+            q: q(),
+            ..Default::default()
+        };
+        async move { api.notes(&query).await }
+    });
+    let save = {
+        let api = api.clone();
+        move || {
+            let api = api.clone();
+            let mut note = open.peek().clone().unwrap_or_default();
+            note.tags = tags.peek().clone();
+            let t = text.peek().clone();
+            if anend_core::note::split(&t).0.trim().is_empty() {
+                ui.fail("a note needs a '# title' line before it can be saved");
+                return;
+            }
+            dioxus::dioxus_core::spawn_forever(async move {
+                match api.save_note(&note, &t).await {
+                    Ok(n) => {
+                        open.set(Some(n));
+                        dirty.set(false);
+                        ui.say("saved");
+                        ui.touched();
+                    }
+                    Err(e) => ui.fail(e),
+                }
+            });
+        }
+    };
+    let mut new_note = move || {
+        open.set(Some(Note::default()));
+        text.set("# \n\n".into());
+        seq += 1;
+        tags.set(Vec::new());
+        dirty.set(false);
+        reading.set(false);
+        document::eval(
+            "setTimeout(() => { const p = document.getElementById('note-pad'); if (p) { p.focus(); p.setSelectionRange(2, 2); } }, 30);",
+        );
+    };
+    let save_k = save.clone();
+    use_keys(View::Notes, move |k: KeyPress| {
+        if k.bar && k.key == "Enter" {
+            let t = k.text.trim().to_string();
+            // Enter again on the same words opens the first note found
+            if t == *q.peek()
+                && let Some(first) = list
+                    .peek()
+                    .as_ref()
+                    .and_then(|r| r.as_ref().ok())
+                    .and_then(|v| v.first().cloned())
+            {
+                let mut o = ui.open_note;
+                o.set(Some(first.key));
+                document::eval("document.activeElement && document.activeElement.blur()");
+                return true;
+            }
+            q.set(t);
+            return true;
+        }
+        match k.action {
+            Some(Action::Save) => save_k(),
+            Some(Action::NewNote) => new_note(),
+            Some(Action::ToggleRead) => {
+                reading.set(!reading());
+                seq += 1;
+            }
+            Some(Action::ToggleList) => set_pref(ui, |p| p.hide_list = !p.hide_list),
+            Some(Action::NoteClassifiers) => judging.set(!judging()),
+            _ => return false,
+        }
+        true
+    });
+    // leaving the view keeps a titled note's changes, as the Bevy app did
+    {
+        let save = save.clone();
+        use_effect(move || {
+            let v = (ui.view)();
+            if v != View::Notes
+                && *dirty.peek()
+                && open.peek().is_some()
+                && !anend_core::note::split(&text.peek()).0.trim().is_empty()
+            {
+                save();
+            }
+        });
+    }
+    // closing the window keeps a titled note's changes too (desktop)
+    {
+        let api = api.clone();
+        use_effect(move || {
+            if (ui.closing)() != 1 {
+                return;
+            }
+            let t = text.peek().clone();
+            if !*dirty.peek() || open.peek().is_none() || anend_core::note::split(&t).0.trim().is_empty() {
+                return;
+            }
+            let mut c = ui.closing;
+            c.set(2);
+            let mut note = open.peek().clone().unwrap_or_default();
+            note.tags = tags.peek().clone();
+            let api = api.clone();
+            dioxus::dioxus_core::spawn_forever(async move {
+                let _ = api.save_note(&note, &t).await;
+                #[cfg(not(target_arch = "wasm32"))]
+                std::process::exit(0);
+            });
+        });
+    }
+    // a note another view asked to open (the reader's edit)
+    {
+        let api = api.clone();
+        use_effect(move || {
+            let Some(key) = (ui.open_note)() else { return };
+            let mut asked = ui.open_note;
+            asked.set(None);
+            let api = api.clone();
+            spawn(async move {
+                match api.note(&key).await {
+                    Ok(note) => {
+                        text.set(
+                            note.source
+                                .clone()
+                                .unwrap_or_else(|| anend_core::note::compose(&note.title, &note.markdown)),
+                        );
+                        tags.set(note.tags.clone());
+                        open.set(Some(note));
+                        reading.set(false);
+                        seq += 1;
+                        dirty.set(false);
+                    }
+                    Err(e) => ui.fail(e),
+                }
+            });
+        });
+    }
+    // the bar's right end: how many notes there are, or match
+    use_effect(move || {
+        let n = list
+            .read()
+            .as_ref()
+            .and_then(|r| r.as_ref().ok())
+            .map(|v| v.len())
+            .unwrap_or(0);
+        let words = q();
+        ui.side_note(
+            View::Notes,
+            if words.is_empty() {
+                format!("{n} note{}", if n == 1 { "" } else { "s" })
+            } else {
+                format!("{n} with “{words}” · Enter again to narrow")
+            },
+        );
+    });
+    // checked a beat after typing stops
+    {
+        let api = api.clone();
+        use_effect(move || {
+            let on = ui.prefs.read().check_spelling;
+            if !on || text.read().len() > big_at() {
+                return;
+            }
+            let t = text();
+            if t.trim().is_empty() {
+                return;
+            }
+            let g = *check_gen.peek() + 1;
+            check_gen.set(g);
+            let key = open.peek().as_ref().map(|n| n.key.clone()).unwrap_or_default();
+            let api = api.clone();
+            spawn(async move {
+                crate::ui::sleep_ms(700).await;
+                if *check_gen.peek() != g {
+                    return;
+                }
+                match api
+                    .call("grammar.check", serde_json::json!({ "text": t, "exclude": key }))
+                    .await
+                {
+                    Ok(r) => {
+                        if *check_gen.peek() == g {
+                            let fl = r["flags"].as_array().cloned().unwrap_or_default();
+                            flags.set((t, fl));
+                            report.set(Some(r["report"].clone()));
+                        }
+                    }
+                    // a hub from before the check: say nothing, show nothing
+                    Err(_) => flags.set((String::new(), vec![])),
+                }
+            });
+        });
+    }
+    let notes: Vec<NoteSummary> = match &*list.read() {
+        Some(Ok(v)) => v.clone(),
+        _ => vec![],
+    };
+    let cur_key = open().map(|n| n.key).unwrap_or_default();
+    // read mode shows the note as saved (its replacements and views put in) until it's
+    // edited
+    let read_text = match open() {
+        Some(n) if !dirty() && !n.key.is_empty() => {
+            anend_core::note::compose(&n.title, n.rendered.as_deref().unwrap_or(&n.markdown))
+        }
+        // only read mode shows it: no copy of a long text on every key
+        _ if reading() => text(),
+        _ => String::new(),
+    };
+    let shown_title = anend_core::note::split(&text.read()).0;
+    let (hide_list, list_right, colour) = {
+        let p = ui.prefs.read();
+        (p.hide_list, p.list_right, p.highlight)
+    };
+    // with no note open the list is all there is: it shows whatever was chosen (the choice
+    // to slide it away holds while a note is open)
+    let hide_list = hide_list && open().is_some();
+    // a note tagged `s` is s code (docs/s.md): right-aligned, coloured by s's word
+    // classes, run with ▶; the spelling check leaves it alone
+    let code = tags.read().iter().any(|t| t == anend_core::ops::script::TAG);
+    // the code editor: the programs (for go to definition and completion), when it's code
+    {
+        let api = api.clone();
+        use_effect(use_reactive!(|code| {
+            if !code {
+                return;
+            }
+            let api = api.clone();
+            spawn(async move {
+                if let Ok(v) = api.call("s.programs", serde_json::json!({})).await {
+                    progs.set(
+                        v.as_array()
+                            .into_iter()
+                            .flatten()
+                            .map(|p| {
+                                (
+                                    p["title"].as_str().unwrap_or("").to_string(),
+                                    p["key"].as_str().unwrap_or("").to_string(),
+                                )
+                            })
+                            .collect(),
+                    );
+                }
+            });
+        }));
+    }
+    // the stepped run: run again to the step asked for; the token it stops before is
+    // marked in the pad when it's the program's own
+    {
+        let api = api.clone();
+        let layer = layer.clone();
+        use_effect(move || {
+            let state = dbg();
+            let layer = layer.clone();
+            let Some((n, seed)) = state else {
+                snap.set(None);
+                let had = layer.borrow().layer.at.is_some();
+                if had {
+                    layer.borrow_mut().layer.at = None;
+                    layer_gen += 1;
+                }
+                return;
+            };
+            let whole = text.peek().clone();
+            let body_at = crate::views::scode::body_offset(&whole);
+            let body = whole[body_at..].to_string();
+            let api = api.clone();
+            spawn(async move {
+                match api
+                    .call("s.debug", serde_json::json!({ "code": body, "steps": n, "seed": seed }))
+                    .await
+                {
+                    Ok(r) => {
+                        let at = (r["main"] == true)
+                            .then(|| {
+                                Some(
+                                    body_at + r["at"]["start"].as_u64()? as usize
+                                        ..body_at + r["at"]["end"].as_u64()? as usize,
+                                )
+                            })
+                            .flatten();
+                        if *text.peek() == whole {
+                            layer.borrow_mut().layer.at = at;
+                            layer_gen += 1;
+                        }
+                        snap.set(Some(r));
+                    }
+                    Err(e) => ui.fail(e),
+                }
+            });
+        });
+    }
+    // a Ctrl+click: the word's definition here, else the program it names
+    {
+        let api = api.clone();
+        use_effect(move || {
+            let Some(at) = goto_req() else { return };
+            goto_req.set(None);
+            let t = text.peek().clone();
+            let Some((_, _, w)) = crate::views::scode::word_at(&t, at) else {
+                return;
+            };
+            let name = crate::views::scode::stem(w).to_string();
+            let titles: Vec<String> = progs.peek().iter().map(|p| p.0.clone()).collect();
+            let body_at = crate::views::scode::body_offset(&t);
+            let here = crate::views::scode::outline(&t[body_at..], &titles)
+                .into_iter()
+                .find(|i| i.name == name && i.kind != "call");
+            if let Some(i) = here {
+                pad_show(body_at + i.at, body_at + i.at + i.name.len());
+                return;
+            }
+            let Some((_, key)) = progs
+                .peek()
+                .iter()
+                .find(|p| p.0 == name || format!("{}.s", p.0) == name)
+                .cloned()
+            else {
+                ui.say(format!(
+                    "“{name}” isn't defined in this program, nor a program of the save"
+                ));
+                return;
+            };
+            let api = api.clone();
+            spawn(async move {
+                match api.note(&key).await {
+                    Ok(note) => {
+                        text.set(
+                            note.source
+                                .clone()
+                                .unwrap_or_else(|| anend_core::note::compose(&note.title, &note.markdown)),
+                        );
+                        tags.set(note.tags.clone());
+                        open.set(Some(note));
+                        seq += 1;
+                        dirty.set(false);
+                        armed.set(false);
+                    }
+                    Err(e) => ui.fail(e),
+                }
+            });
+        });
+    }
+    let check = ui.prefs.read().check_spelling && !code;
+    let shown_flags: Vec<crate::highlight::Flag> = {
+        let (t, fl) = &*flags.read();
+        if check && *t == *text.read() {
+            fl.iter()
+                .map(|f| {
+                    let sug: Vec<String> = f["suggestions"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(|s| match s["text"].as_str().unwrap_or("") {
+                            "" => "take it out".to_string(),
+                            x => x.to_string(),
+                        })
+                        .collect();
+                    crate::highlight::Flag {
+                        start: f["start"].as_u64().unwrap_or(0) as usize,
+                        end: f["end"].as_u64().unwrap_or(0) as usize,
+                        kind: if f["kind"] == "spelling" { "spell" } else { "grammar" },
+                        title: format!("{} · click: {}", f["kind"].as_str().unwrap_or(""), sug.join(", ")),
+                    }
+                })
+                .collect()
+        } else {
+            vec![]
+        }
+    };
+    // the colour layer, kept in typing segments by `layer` (made whole here when asked;
+    // each typed change patches only its segments, in the pad's delta loop). The spelling
+    // check still pauses on long notes.
+    let big = text.read().len() > big_at();
+    // s code always has its layer (inline results and the stepped token live in it)
+    let layered = colour || !shown_flags.is_empty() || code;
+    {
+        let layer = layer.clone();
+        let flags_now = shown_flags.clone();
+        use_effect(use_reactive!(|layered, colour, flags_now, code| {
+            let _ = layer_gen();
+            let mut l = layer.borrow_mut();
+            l.layer.s = code;
+            if !layered {
+                l.layer = Default::default();
+                l.flagged = false;
+                document::eval("window.__anendHl && window.__anendHl.set([], false);");
+                return;
+            }
+            let t = text.peek();
+            let html = l.layer.full(&t, colour, &flags_now);
+            l.flagged = !flags_now.is_empty();
+            let end = t.ends_with('\n') || t.is_empty();
+            document::eval(&format!(
+                "window.__anendHl && window.__anendHl.set({}, {end});",
+                serde_json::to_string(&html).unwrap_or_default()
+            ));
+        }));
+    }
+    let api_d = api.clone();
+    let mut class = String::from("notes");
+    if hide_list {
+        class.push_str(" no-list");
+    }
+    if list_right {
+        class.push_str(" list-right");
+    }
+    let unsaved = dirty();
+    rsx! {
+        div { class: "{class}",
+            // slid away, the list waits off the edge and slides in while the pointer is
+            // near that edge (or on the list), as the Bevy app's `hide_list`
+            if hide_list {
+                div { class: "list-edge", "aria-hidden": "true" }
+            }
+            div { class: "card notelist",
+                button { class: "primary", "data-tip": "start a new note · {ui.key_of(Action::NewNote)}", onclick: move |_| new_note(),
+                    Icon { name: "new" } "a new note" }
+                ul { role: "listbox", "aria-label": "notes, newest first",
+                    if open().is_some_and(|n| n.key.is_empty()) {
+                        li { class: "on", role: "option", {if shown_title.trim().is_empty() { "untitled".to_string() } else { shown_title.clone() }} if unsaved { " •" } span { class: "when", "not saved yet" } }
+                    }
+                    if notes.is_empty() {
+                        li { class: "dim", "no notes" if !q().is_empty() { " with “{q}”" } }
+                    }
+                    for n in notes {
+                        li {
+                            key: "{n.key}",
+                            class: if n.key == cur_key { "on" } else { "" },
+                            title: "{n.title}",
+                            role: "option",
+                            tabindex: "0",
+                            onclick: {
+                                let api = api.clone();
+                                let key = n.key.clone();
+                                move |_| {
+                                    let api = api.clone();
+                                    let key = key.clone();
+                                    dioxus::dioxus_core::spawn_forever(async move {
+                                        match api.note(&key).await {
+                                            Ok(note) => {
+                                                // with replacements, the note as written
+                                                text.set(note.source.clone().unwrap_or_else(|| anend_core::note::compose(&note.title, &note.markdown)));
+                                                tags.set(note.tags.clone());
+                                                open.set(Some(note));
+                                                seq += 1;
+                                                dirty.set(false);
+                                                armed.set(false);
+                                            }
+                                            Err(e) => ui.fail(e),
+                                        }
+                                    });
+                                }
+                            },
+                            if n.key == cur_key { "{shown_title}" if unsaved { " •" } } else { "{n.title}" }
+                            span { class: "when", "{when(&n.created)}" if !n.tags.is_empty() { {format!(" · {}", n.tags.join(", "))} } }
+                        }
+                    }
+                }
+            }
+            div { class: "card editor",
+                if let Some(note) = open() {
+                    div { class: "head",
+                        button { class: "plain", "data-tip": "slide the note list away / back · {ui.key_of(Action::ToggleList)}", "aria-label": "the note list",
+                            onclick: move |_| set_pref(ui, |p| p.hide_list = !p.hide_list), Icon { name: "sidebar" } }
+                        span { class: "title", title: "{shown_title}", "{shown_title}" if unsaved { span { class: "dim", " •" } } }
+                        div { class: "tagchips",
+                            for t in tags() {
+                                button { key: "{t}", class: "chip", "data-tip": "take the tag off",
+                                    onclick: { let t = t.clone(); move |_| { tags.write().retain(|x| *x != t); dirty.set(true); } },
+                                    "#{t}" span { class: "x", "×" } }
+                            }
+                            for g in [tag_gen()] {
+                                input { key: "{g}", class: "taginput", r#type: "text", placeholder: "a tag", "aria-label": "add a tag (Enter or a comma)",
+                                    oninput: move |e| {
+                                        let v = e.value();
+                                        if v.contains(',') {
+                                            for t in split_tags(&v) { if !tags.peek().contains(&t) { tags.write().push(t); } }
+                                            dirty.set(true);
+                                            tag_draft.set(String::new());
+                                            tag_gen += 1;
+                                        } else {
+                                            tag_draft.set(v);
+                                        }
+                                    },
+                                    onkeydown: move |e: KeyboardEvent| {
+                                        if e.key() == Key::Enter {
+                                            e.prevent_default();
+                                            for t in split_tags(&tag_draft.peek()) { if !tags.peek().contains(&t) { tags.write().push(t); dirty.set(true); } }
+                                            tag_draft.set(String::new());
+                                            tag_gen += 1;
+                                            document::eval("setTimeout(() => { const i = document.querySelector('.taginput'); if (i) i.focus(); }, 20);");
+                                        }
+                                    },
+                                }
+                            }
+                        }
+                        button {
+                            class: if code { "plain on" } else { "plain" },
+                            "data-tip": if code { "s code: right-aligned, the acting words in a column; click to make it a plain note" } else { "make it s code (the tag s): right-aligned, coloured by s's words, run with ▶" },
+                            "aria-label": "s code",
+                            "aria-pressed": "{code}",
+                            onclick: move |_| {
+                                let on = tags.peek().iter().any(|t| t == "s");
+                                if on { tags.write().retain(|t| t != "s"); } else { tags.write().push("s".to_string()); }
+                                dirty.set(true);
+                                layer_gen += 1;
+                            },
+                            "s"
+                        }
+                        if code {
+                            button {
+                                class: "plain",
+                                "data-tip": "run it (its files are the save's s programs, by title)",
+                                "aria-label": "run the program",
+                                onclick: { let api = api.clone(); let layer = layer.clone(); move |_| {
+                                    let api = api.clone();
+                                    let layer = layer.clone();
+                                    let whole = text.peek().clone();
+                                    let body_at = crate::views::scode::body_offset(&whole);
+                                    let body = whole[body_at..].to_string();
+                                    spawn(async move {
+                                        match api.call("s.run", serde_json::json!({ "code": body, "trace": true })).await {
+                                            Ok(r) => {
+                                                // each line's output beside it, while the text stays as it ran
+                                                let mut notes: std::collections::BTreeMap<usize, String> = Default::default();
+                                                for w in r["writes"].as_array().into_iter().flatten() {
+                                                    let at = body_at + w["from"].as_u64().unwrap_or(0) as usize;
+                                                    let line = crate::views::scode::line_of(&whole, at);
+                                                    let shown = inline_result(w["out"].as_str().unwrap_or(""));
+                                                    let n = notes.entry(line).or_default();
+                                                    if !n.is_empty() { n.push_str(" · "); }
+                                                    n.push_str(&shown);
+                                                }
+                                                if *text.peek() == whole {
+                                                    layer.borrow_mut().layer.notes = notes;
+                                                    layer_gen += 1;
+                                                }
+                                                ran.set(Some(r));
+                                            }
+                                            Err(e) => ran.set(Some(serde_json::json!({ "out": "", "err": e }))),
+                                        }
+                                    });
+                                } },
+                                Icon { name: "play" }
+                            }
+                            button {
+                                class: if dbg().is_some() { "plain on" } else { "plain" },
+                                "data-tip": "step through it: the stack, the values and the token it stops before",
+                                "aria-label": "step through the program",
+                                onclick: move |_| {
+                                    if dbg.peek().is_some() { dbg.set(None); } else {
+                                        // one seed for the whole session, so each step runs the same run again
+                                        let seed = text.peek().bytes().fold(0x5eed_u64, |h, b| h.rotate_left(5) ^ b as u64).wrapping_add(seq() * 7919);
+                                        dbg.set(Some((0, seed)));
+                                    }
+                                },
+                                Icon { name: "chevron-right" }
+                            }
+                            button {
+                                class: if outline_open() { "plain on" } else { "plain" },
+                                "data-tip": "the outline: what it defines and the programs it calls (Ctrl+click a word: its definition)",
+                                "aria-label": "the program's outline",
+                                onclick: move |_| outline_open.set(!outline_open()),
+                                Icon { name: "list" }
+                            }
+                        }
+                        button {
+                            class: if check { "plain on" } else { "plain" },
+                            "data-tip": if check { "the spelling check is on: click an underlined word for what it may be" } else { "check spelling and word choice" },
+                            "aria-label": "check spelling",
+                            "aria-pressed": "{check}",
+                            onclick: move |_| set_pref(ui, |p| p.check_spelling = !p.check_spelling),
+                            Icon { name: "check" }
+                        }
+                        button {
+                            class: if judging() { "plain on" } else { "plain" },
+                            "data-tip": "the classifiers this note is measured on · {ui.key_of(Action::NoteClassifiers)}",
+                            "aria-label": "the note's classifiers",
+                            onclick: move |_| judging.set(!judging()),
+                            Icon { name: "classifier" }
+                        }
+                        button {
+                            class: "plain",
+                            "data-tip": if reading() { format!("edit it · {}", ui.key_of(Action::ToggleRead)) } else { format!("read it · {}", ui.key_of(Action::ToggleRead)) },
+                            "aria-label": if reading() { "edit" } else { "read" },
+                            onclick: move |_| { reading.set(!reading()); seq += 1; },
+                            Icon { name: if reading() { "edit" } else { "view" } }
+                        }
+                        button { class: if dirty() { "primary" } else { "" }, "data-tip": "save · {ui.key_of(Action::Save)}", "aria-label": "save",
+                            onclick: { let s = save.clone(); move |_| s() }, Icon { name: "save" } }
+                        if !note.key.is_empty() {
+                            button {
+                                class: if armed() { "armed" } else { "plain" },
+                                "data-tip": "delete (click twice)",
+                                "aria-label": "delete",
+                                onclick: move |_| {
+                                    if !armed() { armed.set(true); return; }
+                                    let api = api_d.clone();
+                                    let key = note.key.clone();
+                                    dioxus::dioxus_core::spawn_forever(async move {
+                                        match api.delete_note(&key).await {
+                                            Ok(()) => { open.set(None); ui.say("deleted"); ui.touched(); }
+                                            Err(e) => ui.fail(e),
+                                        }
+                                    });
+                                },
+                                Icon { name: "delete" }
+                                if armed() { "delete?" }
+                            }
+                        }
+                    }
+                    if !note.created.is_empty() {
+                        span { class: "dim small", "written {when(&note.created)}" if !note.edits.is_empty() { " · {note.edits.len()} edits" } }
+                    }
+                    if judging() {
+                        if cur_key.is_empty() {
+                            div { class: "judge dim small", "save the note first: then pick classifiers to measure it on" }
+                        } else {
+                            crate::views::judge::Judge { entry: cur_key.clone() }
+                        }
+                    }
+                    if reading() {
+                        div { class: "md rendered", dangerous_inner_html: crate::md::to_html(&read_text) }
+                    }
+                    if !reading() {
+                        Replace { text, dirty, seq }
+                    }
+                    for pad in [format!("{}-{}", cur_key, seq())].into_iter().filter(|_| !reading()) {
+                        div { key: "{pad}", class: format!("pad{}{}", if layered { " hl-on" } else { "" }, if code { " code" } else { "" }),
+                            // the colours, painted under the textarea's transparent glyphs
+                            // its segments are put in by `layer` (not by the render)
+                            pre { id: "note-hl", class: "hl", "aria-hidden": "true",
+                                onmounted: move |_| layer_gen += 1,
+                            }
+                            // not bound to the signal while typing (a round trip per key would
+                            // drop letters typed fast); its text is put in when a note opens
+                            textarea {
+                                id: "note-pad",
+                                "aria-label": "the note: # title, then markdown",
+                                spellcheck: "false",
+                                onmounted: move |_| {
+                                    let js = format!(
+                                        "const p = document.getElementById('note-pad'); if (p) {{ p.value = {}; p.__prev = p.value; }}",
+                                        serde_json::to_string(&*text.peek()).unwrap_or_default()
+                                    );
+                                    document::eval(&js);
+                                },
+                                onclick: move |e: MouseEvent| {
+                                    if !ui.prefs.peek().check_spelling || flags.peek().1.is_empty() {
+                                        return;
+                                    }
+                                    let c = e.client_coordinates();
+                                    spawn(async move {
+                                        let mut ev = document::eval("const p = document.getElementById('note-pad'); dioxus.send(p ? p.selectionStart : -1);");
+                                        let Ok(at) = ev.recv::<i64>().await else { return };
+                                        let (t, fl) = flags.peek().clone();
+                                        if t != *text.peek() || at < 0 {
+                                            return;
+                                        }
+                                        let at = at as u64;
+                                        let hit = fl.into_iter().find(|f| {
+                                            f["from"].as_u64().unwrap_or(0) <= at && at <= f["to"].as_u64().unwrap_or(0)
+                                        });
+                                        pick.set(hit.map(|flag| Pick { flag, x: c.x, y: c.y }));
+                                    });
+                                },
+                            }
+                        }
+                        if code && let Some(r) = ran() {
+                            div { class: "s-run",
+                                div { class: "row",
+                                    span { class: "dim small", {format!("ran in {} steps{}", r["steps"].as_u64().unwrap_or(0), match r["code"].as_i64() { Some(c) if c != 0 => format!(" · exit {c}"), _ => String::new() })} }
+                                    span { class: "grow" }
+                                    button { class: "plain small", onclick: move |_| ran.set(None), Icon { name: "close" } }
+                                }
+                                pre { class: "s-out", {r["out"].as_str().unwrap_or("").trim_start_matches('\n').to_string()} }
+                                if let Some(e) = r["err"].as_str() {
+                                    pre { class: "s-err", role: "alert", "s: {e}" }
+                                }
+                            }
+                        }
+                        if code && !compl().1.is_empty() {
+                            div { class: "s-compl row wrap",
+                                span { class: "dim small", "Tab:" }
+                                for (i, w) in compl().1.into_iter().enumerate() {
+                                    {
+                                        let rest = w[compl().0.len().min(w.len())..].to_string();
+                                        rsx! {
+                                            button { key: "{w}", class: if i == 0 { "chip small on" } else { "chip small" },
+                                                onclick: move |_| {
+                                                    document::eval(&format!(
+                                                        "const p = document.getElementById('note-pad'); if (p) {{ const a = p.selectionStart; p.setRangeText({}, a, a, 'end'); p.focus(); window.__anendCompl = null; p.dispatchEvent(new Event('input', {{ bubbles: true }})); }}",
+                                                        serde_json::to_string(&rest).unwrap_or_default()
+                                                    ));
+                                                },
+                                                "{w}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if code && outline_open() {
+                            {
+                                let t = text.read().clone();
+                                let body_at = crate::views::scode::body_offset(&t);
+                                let titles: Vec<String> = progs.read().iter().map(|p| p.0.clone()).collect();
+                                let items = crate::views::scode::outline(&t[body_at..], &titles);
+                                rsx! {
+                                    div { class: "s-outline",
+                                        div { class: "row",
+                                            span { class: "dim small", if items.is_empty() { "it defines nothing and calls no other program" } else { "the outline · Ctrl+click a word in the code: its definition" } }
+                                            span { class: "grow" }
+                                            button { class: "plain small", "aria-label": "close the outline", onclick: move |_| outline_open.set(false), Icon { name: "close" } }
+                                        }
+                                        for (i, it) in items.into_iter().enumerate() {
+                                            {
+                                                let (a, b) = (body_at + it.at, body_at + it.at + it.name.len());
+                                                let line = crate::views::scode::line_of(&t, a) + 1;
+                                                let what = match it.kind { "script" => "script", "word" => "word", _ => "calls" };
+                                                rsx! {
+                                                    button { key: "{i}", class: "plain s-item", onclick: move |_| pad_show(a, b),
+                                                        span { class: "chip small", "{what}" }
+                                                        b { " {it.name}" }
+                                                        span { class: "dim small", " line {line}" }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if code && let (Some((n, seed)), Some(s)) = (dbg(), snap()) {
+                            div { class: "s-run s-dbg",
+                                div { class: "row wrap",
+                                    span { class: "dim small", {format!("step {}{}", s["steps"].as_u64().unwrap_or(n), if s["done"] == true { " · it ended" } else { "" })} }
+                                    span { class: "grow" }
+                                    button { class: "btn small", title: "back to the start", onclick: move |_| dbg.set(Some((0, seed))), "⏮" }
+                                    button { class: "btn small primary", disabled: s["done"] == true, title: "one step", onclick: move |_| dbg.set(Some((n + 1, seed))), "step" }
+                                    button { class: "btn small", disabled: s["done"] == true, onclick: move |_| dbg.set(Some((n + 10, seed))), "+10" }
+                                    button { class: "btn small", disabled: s["done"] == true, onclick: move |_| dbg.set(Some((n + 100, seed))), "+100" }
+                                    button { class: "btn small", disabled: s["done"] == true, title: "run to the end", onclick: move |_| dbg.set(Some((n + 1_000_000, seed))), "⏭" }
+                                    button { class: "plain small", "aria-label": "stop stepping", onclick: move |_| dbg.set(None), Icon { name: "close" } }
+                                }
+                                if s["done"] != true && s["main"] != true {
+                                    div { class: "small", "in a call, depth {s[\"depth\"]}: " code { class: "s-unit", {s["unit"].as_str().unwrap_or("").chars().take(80).collect::<String>()} } }
+                                }
+                                div { class: "row wrap s-stack",
+                                    span { class: "dim small", if s["ow"] == true { "stack (ow on)" } else { "stack" } }
+                                    for (i, v) in s["stack"].as_array().cloned().unwrap_or_default().into_iter().enumerate() {
+                                        span { key: "{i}", class: "chip small", {v.as_str().unwrap_or("").to_string()} }
+                                    }
+                                }
+                                {
+                                    let mut rows: Vec<(String, String)> = Vec::new();
+                                    for k in ["locals", "mem", "numbers"] {
+                                        for (name, v) in s[k].as_object().into_iter().flatten() {
+                                            if k != "numbers" || !s["mem"].as_object().is_some_and(|m| m.contains_key(name)) {
+                                                rows.push((name.clone(), v.as_str().unwrap_or("").to_string()));
+                                            }
+                                        }
+                                    }
+                                    for (name, v) in s["lists"].as_object().into_iter().flatten() {
+                                        let items: Vec<String> = v.as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_string)).collect();
+                                        rows.push((format!("{name} []"), items.join(" · ")));
+                                    }
+                                    rsx! {
+                                        if !rows.is_empty() {
+                                            div { class: "s-vals",
+                                                for (i, (k, v)) in rows.into_iter().enumerate() {
+                                                    div { key: "{i}", class: "small", b { "{k}" } " {v}" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                if !s["out"].as_str().unwrap_or("").is_empty() {
+                                    pre { class: "s-out", {s["out"].as_str().unwrap_or("").trim_start_matches('\n').to_string()} }
+                                }
+                                if let Some(e) = s["err"].as_str() {
+                                    pre { class: "s-err", role: "alert", "s: {e}" }
+                                }
+                            }
+                        }
+                        if let Some(pk) = pick() {
+                            SpellPick {
+                                pick: pk,
+                                on_close: move |_| pick.set(None),
+                            }
+                        }
+                        if big {
+                            div { class: "spell-note dim small", {format!("a long note ({} KB): the spelling check pauses above {} KB, so typing stays quick", text.read().len() / 1000, big_at() / 1000)} }
+                        }
+                        if check && !big {
+                            if let Some(r) = report() {
+                                div { class: "spell-note dim small",
+                                    title: "measured on a fifth of its corpus held out, with errors put in the same way it was trained: real typing errors are harder",
+                                    {format!(
+                                        "spelling check: finds {:.0}% of the errors put into held-out text, {:.0}% of what it flags is one, the first suggestion is right {:.0}% of the time; {:.1} false alarms per 1000 clean words",
+                                        r["recall"].as_f64().unwrap_or(0.0) * 100.0,
+                                        r["precision"].as_f64().unwrap_or(0.0) * 100.0,
+                                        r["top1"].as_f64().unwrap_or(0.0) * 100.0,
+                                        r["false_alarms_per_1000"].as_f64().unwrap_or(0.0),
+                                    )}
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    div { class: "empty",
+                        p { "Pick a note in the list, or make a new one ({ui.key_of(Action::NewNote)}). A note is a text whose first line is its # title." }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// what a flagged word may be: each suggestion (a click puts it in; Ctrl+Z takes it back)
+#[component]
+fn SpellPick(pick: Pick, on_close: EventHandler<()>) -> Element {
+    let f = pick.flag.clone();
+    let from = f["from"].as_u64().unwrap_or(0) as usize;
+    let to = f["to"].as_u64().unwrap_or(0) as usize;
+    let kind = f["kind"].as_str().unwrap_or("").to_string();
+    let p = f["p"].as_f64().unwrap_or(0.0) * 100.0;
+    let sugs: Vec<(String, f64)> = f["suggestions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|s| {
+            (
+                s["text"].as_str().unwrap_or("").to_string(),
+                s["p"].as_f64().unwrap_or(0.0),
+            )
+        })
+        .collect();
+    let what = match kind.as_str() {
+        "repeated" => "a word twice",
+        "confused" => "another word may fit",
+        _ => "not a word it knows",
+    };
+    rsx! {
+        div { class: "spell-pick", style: "left: {pick.x:.0}px; top: {pick.y + 14.0:.0}px;", role: "menu",
+            div { class: "dim small", "{what} · {p:.0}% sure" }
+            if sugs.is_empty() {
+                div { class: "dim small", "no suggestion" }
+            }
+            for (s , sp) in sugs {
+                button {
+                    key: "{s}",
+                    class: "plain",
+                    role: "menuitem",
+                    onclick: {
+                        let s = s.clone();
+                        move |_| {
+                            replace_in_pad(from, to, &s);
+                            on_close.call(());
+                        }
+                    },
+                    if s.is_empty() { i { "take it out" } } else { b { "{s}" } }
+                    span { class: "dim small", " {sp * 100.0:.0}%" }
+                }
+            }
+            button { class: "plain dim small", onclick: move |_| on_close.call(()), "leave it" }
+        }
+    }
+}
+
+/// the text before the selection, the word, the text after, and the word's alternatives
+type Around = (String, String, String, Vec<serde_json::Value>);
+
+/// the editor's replacements: `{{key}}` puts an entry's text in (live: it shows that
+/// entry as it is now), `{{filter:name}}` a saved filter's results; a word's synonyms and
+/// registers come from the lists it is in, those keeping the text's sum first
+#[component]
+fn Replace(text: Signal<String>, dirty: Signal<bool>, seq: Signal<u64>) -> Element {
+    let ui = ui();
+    let api = api();
+    // (the text before the selection, the word, the text after) and its alternatives
+    let mut alts: Signal<Option<Around>> = use_signal(|| None);
+    let mut find = use_signal(String::new);
+    let mut find_gen = use_signal(|| 0u64);
+    // puts a new text into the pad and the signal
+    let mut put = move |t: String| {
+        text.set(t.clone());
+        dirty.set(true);
+        let js = format!(
+            "const p = document.getElementById('note-pad'); if (p) {{ p.value = {}; p.__prev = undefined; p.dispatchEvent(new Event('input', {{ bubbles: true }})); p.focus(); }}",
+            serde_json::to_string(&t).unwrap_or_default()
+        );
+        document::eval(&js);
+    };
+    // the pad's text around its selection (the word under the caret when nothing is selected)
+    const AROUND: &str = r#"
+        const p = document.getElementById('note-pad');
+        if (!p) { dioxus.send(null); } else {
+          let a = p.selectionStart, b = p.selectionEnd, v = p.value;
+          if (a === b && WORD) {
+            while (a > 0 && /[\p{L}\p{N}'-]/u.test(v[a - 1])) a--;
+            while (b < v.length && /[\p{L}\p{N}'-]/u.test(v[b])) b++;
+          }
+          dioxus.send([v.slice(0, a), v.slice(a, b), v.slice(b)]);
+        }"#;
+    let api_a = api.clone();
+    let synonyms = move |_| {
+        let api = api_a.clone();
+        spawn(async move {
+            let mut ev = document::eval(&AROUND.replace("WORD", "true"));
+            let Ok(Some((before, word, after))) = ev.recv::<Option<(String, String, String)>>().await else {
+                return;
+            };
+            if word.trim().is_empty() {
+                ui.say("select a word (or put the caret in one) first");
+                return;
+            }
+            match api.alternatives(word.trim()).await {
+                Ok(v) => {
+                    let list: Vec<serde_json::Value> = v["alternatives"].as_array().cloned().unwrap_or_default();
+                    if list.is_empty() {
+                        ui.say(format!(
+                            "“{}” is in no list: make one of words that may stand for each other",
+                            word.trim()
+                        ));
+                        alts.set(None);
+                    } else {
+                        alts.set(Some((before, word, after, list)));
+                    }
+                }
+                Err(e) => ui.fail(e),
+            }
+        });
+    };
+    let api_f = api.clone();
+    let insert = move || {
+        let api = api_f.clone();
+        let want = find.peek().trim().to_string();
+        if want.is_empty() {
+            return;
+        }
+        spawn(async move {
+            // a key as it is, a filter by its name, else the first text with those words
+            let piece = if want.starts_with("filter:") || anend_core::graph::record::parse_label(&want).is_some() {
+                format!("{{{{{want}}}}}")
+            } else {
+                match api.search(&want, false).await {
+                    Ok(hits) if !hits.is_empty() => format!("{{{{{}}}}}", hits[0].key.trim_start_matches("note:")),
+                    Ok(_) => {
+                        ui.fail(format!("no text with “{want}”"));
+                        return;
+                    }
+                    Err(e) => {
+                        ui.fail(e);
+                        return;
+                    }
+                }
+            };
+            let mut ev = document::eval(&AROUND.replace("WORD", "false"));
+            let Ok(Some((before, sel, after))) = ev.recv::<Option<(String, String, String)>>().await else {
+                return;
+            };
+            let _ = sel;
+            put(format!("{before}{piece}{after}"));
+            find.set(String::new());
+            find_gen += 1;
+            ui.say(format!(
+                "{piece} goes in where the caret was: it shows that entry's text when read"
+            ));
+        });
+    };
+    let insert2 = insert.clone();
+    let _ = seq;
+    rsx! {
+        div { class: "replace row",
+            button { class: "plain", "data-tip": "a word's synonyms and registers: the other words of the lists it is in", onclick: synonyms,
+                Icon { name: "swap" } "alternatives" }
+            if let Some((before, word, after, list)) = alts() {
+                select {
+                    "aria-label": "replace “{word}” with",
+                    onchange: move |e| {
+                        let v = e.value();
+                        if !v.is_empty() {
+                            put(format!("{before}{v}{after}"));
+                            ui.say(format!("“{}” → “{v}”", word.trim()));
+                        }
+                        alts.set(None);
+                    },
+                    option { value: "", {format!("“{}” (o {} r {}) →", word.trim(), crate::gem::sums(word.trim()).0, crate::gem::sums(word.trim()).1)} }
+                    for a in list.iter() {
+                        option { key: "{a[\"key\"]}", value: "{a[\"text\"].as_str().unwrap_or(\"\")}",
+                            {format!("{}{} · {} · o {} r {}",
+                                if a["same_ordinal"].as_bool() == Some(true) { "= " } else { "" },
+                                a["text"].as_str().unwrap_or(""),
+                                a["list"].as_str().unwrap_or(""),
+                                a["ordinal"], a["reversed"])}
+                        }
+                    }
+                }
+            }
+            span { class: "grow" }
+            for g in [find_gen()] {
+                input { key: "{g}", r#type: "text", placeholder: "put in {{{{key}}}}: a key, words, or filter:name",
+                    "aria-label": "an entry to put in where the caret is",
+                    oninput: move |e| find.set(e.value()),
+                    onkeydown: { let insert = insert.clone(); move |e: KeyboardEvent| if e.key() == Key::Enter { insert() } },
+                }
+            }
+            button { onclick: move |_| insert2(), "put in" }
+        }
+    }
+}

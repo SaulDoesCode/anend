@@ -1,47 +1,5 @@
-[package]
-name = "anend"
-version = "0.1.0"
-edition = "2024"
-description = "anend notes: a desktop markdown note app, grown out of the anend blog server"
-license-file = "LICENSE"
-publish = false
-
+# anend: the core (the entry graph, models), the hub (the server: the sharing site and the
+# web app's API) and the app (Dioxus: the desktop app, and the web app from the same code)
 [workspace]
-members = ["core", "hub"]
-
-[dependencies]
-anend-core = { path = "core" }
-bevy = { version = "0.20", default-features = false, features = [
-    "std",
-    "multi_threaded",
-    "default_app",
-    "ui_api",
-    "ui_bevy_render",
-    "scene",
-    "picking",
-    "bevy_ui_widgets",
-    "bevy_feathers",
-    "bevy_winit",
-    "bevy_clipboard",
-    "default_font",
-    "custom_cursor",
-    "x11",
-    "wayland",
-    "system_font_discovery",
-    "bevy_pbr",
-    "bevy_light",
-] }
-bevy_slugtext = { git = "https://github.com/SaulDoesCode/bevy_slugtext", rev = "1cfb7d5" }
-ttf-parser = "0.25"
-fontique = "0.11"
-chrono = "0.4"
-redb = "4.3"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-# the window icon; the same winit bevy_winit uses
-winit = { version = "0.30", default-features = false }
-pulldown-cmark = { version = "0.13", default-features = false }
-
-ureq = { version = "3", default-features = false, features = ["rustls"] }
-
-
+members = ["core", "hub", "app"]
+resolver = "3"

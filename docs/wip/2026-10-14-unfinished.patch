@@ -1,0 +1,2063 @@
+diff --git a/core/src/lib.rs b/core/src/lib.rs
+index a909f54..f1aaf80 100644
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -13,6 +13,7 @@ pub mod markdown;
+ pub mod memo;
+ pub mod memory;
+ pub mod note;
++pub mod places;
+ pub mod simd;
+ pub mod spread;
+ pub mod store;
+diff --git a/core/src/memory.rs b/core/src/memory.rs
+index cd3436f..67665ed 100644
+--- a/core/src/memory.rs
++++ b/core/src/memory.rs
+@@ -8,6 +8,7 @@
+ //! | `memg`, `memg reversed`, `memg atbash` | gematria sum -> refs |
+ //! | `memg frequency` | letter frequency key -> refs |
+ //! | `lists` | list ref -> member refs |
++//! | `memory places`, `place map entries`, `place maps` | where entries stand in the space (places.rs) |
+ //! | `state`, `reusables` | the key allocator |
+ //!
+ //! A ref is either a memory key (1 to 4 bytes) or `note:` followed by a note's key, so the
+@@ -413,6 +414,7 @@ impl Store {
+                 lists.remove(k.as_slice(), v.as_slice()).map_err(err)?;
+             }
+         }
++        crate::places::drop_entry(&txn, &r)?;
+         txn.commit().map_err(err)?;
+         Ok(text)
+     }
+diff --git a/core/src/places.rs b/core/src/places.rs
+new file mode 100644
+index 0000000..11d5140
+--- /dev/null
++++ b/core/src/places.rs
+@@ -0,0 +1,1074 @@
++//! Places: where entries stand in the space. A placed text is a normal memory (or note)
++//! entry; its transforms are kept here, each one bit packed into a small fixed value under
++//! the entry's ref, so the same entry can stand in several places (and several maps) while
++//! identical placements collapse into one.
++//!
++//! | table | maps |
++//! |---|---|
++//! | `memory places` | ref -> packed placements (multimap: a set per entry) |
++//! | `place map entries` | map id -> refs placed in it (multimap, the reverse index) |
++//! | `place maps` | map id (u16) -> `{"name": ...}` JSON |
++//!
++//! A ref is `Ref::bytes`: a memory key or `note:<key>`, as in the lists.
++//!
++//! **The packed value** (`PACKED` = 36 bytes, little endian, version 1):
++//!
++//! | bytes | field |
++//! |---|---|
++//! | 0 | version, 1 (an unknown version doesn't unpack, and is left alone) |
++//! | 1 | kind: 0 text, 1 cube, 2 long block, 3 brick, 4 model (glTF; reserved) |
++//! | 2–3 | map id, u16 (0 is never a map) |
++//! | 4 | flags: 1 pinned, 2 hidden, 4 spread (a spread text: laid out by its sums when not pinned); the rest reserved, kept as they are |
++//! | 5 | reserved, 0 |
++//! | 6–17 | position, 3 × f32 |
++//! | 18–21 | rotation, smallest three: bits 30–31 the index of the largest component of the unit quaternion (x y z w), made positive and left out; the other three in order, 10 bits each (bits 20–29, 10–19, 0–9), each `round(v·√2·511) + 511` |
++//! | 22–27 | scale, 3 × f16 (a text uses x as its em size) |
++//! | 28–31 | colour, RGBA8 |
++//! | 32–35 | asset id, u32: 0 none; for a model, the asset in the (reserved) assets table |
++//!
++//! Packing is canonical, so the same placement always gives the same bytes: −0 is +0, a
++//! NaN is 0 (a NaN scale is 1), positions beyond f32 stay ±f32::MAX, scales are clamped to
++//! ±65504 (f16's largest) and rounded to nearest even, a rotation is normalised first (a
++//! zero or broken one is the identity), and `pack(unpack(b)) == b` for what `pack` made.
++//! Rotation is good to about 0.1°, positions are exact, scales have 11 significant bits.
++//!
++//! Moving a placement is removing the old value and inserting the new in one transaction.
++//! The reverse index holds a ref under a map while the ref has any placement in it, so
++//! "what's in map X" is a range read plus one lookup per entry, not a scan; a map id key
++//! prefix on the places table instead would have made "where is this entry" the scan, and
++//! that's what the space asks most (and what forgetting needs).
++//!
++//! **Assets (reserved, not built):** a model placement (kind 4) names its glTF asset by the
++//! asset id; the entry it's placed under is the model's memory entry (its name, so it can
++//! be searched, listed and summed like any text). A later `place assets` table would map
++//! asset id (u32) -> `{name, mime, size, hash}` JSON and a `place asset bytes` table the
++//! id -> the .glb bytes (or a path for big ones), deduplicated by content hash; bundles
++//! would carry them base64 with a size limit on the hub. Blocks (kinds 1–3) need no asset:
++//! the kind, scale and colour are the whole of them.
++//!
++//! **Migration:** maps the space kept before places, JSON rows `[text, x, y, z, {size,
++//! color, key}]` under `map:<name>` settings, become place maps by
++//! `Store::migrate_legacy_maps`: free texts are saturated (or found) and placed, memory
++//! texts placed as pinned spread texts. The old settings are left as they were; the names
++//! done are listed in the `place maps migrated` setting so it happens once.
++
++use redb::{
++    MultimapTableDefinition, ReadableDatabase, ReadableMultimapTable, ReadableTable, TableDefinition, WriteTransaction,
++};
++use serde::{Deserialize, Serialize};
++
++use crate::memory::{MEMORIES, Ref};
++use crate::store::{NOTES, Store, StoreResult};
++
++pub const PLACES: MultimapTableDefinition<&[u8], &[u8]> = MultimapTableDefinition::new("memory places");
++pub const PLACED: MultimapTableDefinition<u16, &[u8]> = MultimapTableDefinition::new("place map entries");
++pub const PLACE_MAPS: TableDefinition<u16, &[u8]> = TableDefinition::new("place maps");
++
++pub const VERSION: u8 = 1;
++pub const PACKED: usize = 36;
++
++pub const PINNED: u8 = 1;
++pub const HIDDEN: u8 = 2;
++pub const SPREAD: u8 = 4;
++
++/// the setting listing the legacy maps already made place maps
++pub const MIGRATED: &str = "place maps migrated";
++/// where the space kept its maps before
++pub const LEGACY_PREFIX: &str = "map:";
++
++fn err(e: impl std::fmt::Display) -> String {
++    e.to_string()
++}
++
++pub fn create_tables(txn: &WriteTransaction) -> StoreResult<()> {
++    txn.open_multimap_table(PLACES).map_err(err)?;
++    txn.open_multimap_table(PLACED).map_err(err)?;
++    txn.open_table(PLACE_MAPS).map_err(err)?;
++    Ok(())
++}
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
++#[repr(u8)]
++pub enum Kind {
++    #[default]
++    Text = 0,
++    Cube = 1,
++    LongBlock = 2,
++    Brick = 3,
++    /// a glTF model (reserved: nothing places these yet)
++    Model = 4,
++}
++
++impl Kind {
++    pub fn from_u8(b: u8) -> Option<Kind> {
++        Some(match b {
++            0 => Kind::Text,
++            1 => Kind::Cube,
++            2 => Kind::LongBlock,
++            3 => Kind::Brick,
++            4 => Kind::Model,
++            _ => return None,
++        })
++    }
++}
++
++/// one placement of an entry
++#[derive(Clone, Copy, Debug, PartialEq)]
++pub struct Place {
++    pub kind: Kind,
++    pub map: u16,
++    pub flags: u8,
++    pub pos: [f32; 3],
++    /// a quaternion, x y z w
++    pub rot: [f32; 4],
++    pub scale: [f32; 3],
++    pub color: [u8; 4],
++    pub asset: u32,
++}
++
++pub const IDENTITY: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
++
++impl Place {
++    /// a text of em size `size`, facing the camera (no rotation of its own)
++    pub fn text(map: u16, pos: [f32; 3], size: f32, color: [u8; 4], flags: u8) -> Place {
++        Place {
++            kind: Kind::Text,
++            map,
++            flags,
++            pos,
++            rot: IDENTITY,
++            scale: [size, size, size],
++            color,
++            asset: 0,
++        }
++    }
++
++    pub fn pinned(&self) -> bool {
++        self.flags & PINNED != 0
++    }
++
++    pub fn hidden(&self) -> bool {
++        self.flags & HIDDEN != 0
++    }
++
++    pub fn spread(&self) -> bool {
++        self.flags & SPREAD != 0
++    }
++
++    pub fn pack(&self) -> [u8; PACKED] {
++        let mut b = [0u8; PACKED];
++        b[0] = VERSION;
++        b[1] = self.kind as u8;
++        b[2..4].copy_from_slice(&self.map.to_le_bytes());
++        b[4] = self.flags;
++        for (i, v) in self.pos.iter().enumerate() {
++            b[6 + i * 4..10 + i * 4].copy_from_slice(&canon_f32(*v).to_le_bytes());
++        }
++        b[18..22].copy_from_slice(&pack_rotation(self.rot).to_le_bytes());
++        for (i, v) in self.scale.iter().enumerate() {
++            b[22 + i * 2..24 + i * 2].copy_from_slice(&f32_to_f16(canon_scale(*v)).to_le_bytes());
++        }
++        b[28..32].copy_from_slice(&self.color);
++        b[32..36].copy_from_slice(&self.asset.to_le_bytes());
++        b
++    }
++
++    /// `None` for a value of another size, version or kind
++    pub fn unpack(b: &[u8]) -> Option<Place> {
++        if b.len() != PACKED || b[0] != VERSION {
++            return None;
++        }
++        let f32_at = |i: usize| f32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]);
++        let f16_at = |i: usize| f16_to_f32(u16::from_le_bytes([b[i], b[i + 1]]));
++        Some(Place {
++            kind: Kind::from_u8(b[1])?,
++            map: u16::from_le_bytes([b[2], b[3]]),
++            flags: b[4],
++            pos: [f32_at(6), f32_at(10), f32_at(14)],
++            rot: unpack_rotation(u32::from_le_bytes([b[18], b[19], b[20], b[21]])),
++            scale: [f16_at(22), f16_at(24), f16_at(26)],
++            color: [b[28], b[29], b[30], b[31]],
++            asset: u32::from_le_bytes([b[32], b[33], b[34], b[35]]),
++        })
++    }
++}
++
++/// the map id of a packed value
++pub fn map_of(b: &[u8]) -> Option<u16> {
++    (b.len() == PACKED).then(|| u16::from_le_bytes([b[2], b[3]]))
++}
++
++/// a packed value with another map id
++pub fn with_map(b: &[u8], map: u16) -> Vec<u8> {
++    let mut out = b.to_vec();
++    if out.len() == PACKED {
++        out[2..4].copy_from_slice(&map.to_le_bytes());
++    }
++    out
++}
++
++fn canon_f32(v: f32) -> f32 {
++    if v.is_nan() || v == 0.0 {
++        0.0
++    } else {
++        v.clamp(f32::MIN, f32::MAX)
++    }
++}
++
++fn canon_scale(v: f32) -> f32 {
++    if v.is_nan() {
++        1.0
++    } else if v == 0.0 {
++        0.0
++    } else {
++        v.clamp(-65504.0, 65504.0)
++    }
++}
++
++// ---------------------------------------------------------------- f16
++
++/// IEEE half precision, rounded to nearest even
++pub fn f32_to_f16(v: f32) -> u16 {
++    let x = v.to_bits();
++    let sign = ((x >> 16) & 0x8000) as u16;
++    let exp = ((x >> 23) & 0xff) as i32;
++    let man = x & 0x7f_ffff;
++    if exp == 0xff {
++        return sign | 0x7c00 | if man != 0 { 0x200 } else { 0 };
++    }
++    let e = exp - 127 + 15;
++    if e >= 0x1f {
++        return sign | 0x7c00;
++    }
++    if e <= 0 {
++        let shift = (14 - e) as u32;
++        if shift > 24 {
++            return sign;
++        }
++        let full = man | 0x80_0000;
++        let half = 1u32 << (shift - 1);
++        let rest = full & ((1u32 << shift) - 1);
++        let mut m = full >> shift;
++        if rest > half || (rest == half && m & 1 == 1) {
++            m += 1;
++        }
++        return sign | m as u16;
++    }
++    let mut h = ((e as u32) << 10) | (man >> 13);
++    let rest = man & 0x1fff;
++    if rest > 0x1000 || (rest == 0x1000 && h & 1 == 1) {
++        h += 1;
++    }
++    sign | h as u16
++}
++
++pub fn f16_to_f32(h: u16) -> f32 {
++    let sign = ((h & 0x8000) as u32) << 16;
++    let e = ((h >> 10) & 0x1f) as u32;
++    let m = (h & 0x3ff) as u32;
++    let bits = match (e, m) {
++        (0, 0) => sign,
++        (0, m) => {
++            let v = m as f32 * (1.0 / 16_777_216.0);
++            return if sign != 0 { -v } else { v };
++        }
++        (0x1f, 0) => sign | 0x7f80_0000,
++        (0x1f, m) => sign | 0x7fc0_0000 | (m << 13),
++        (e, m) => sign | ((e + 112) << 23) | (m << 13),
++    };
++    f32::from_bits(bits)
++}
++
++// ---------------------------------------------------------------- rotation
++
++const STEPS: f32 = 511.0;
++
++/// a unit quaternion (x y z w) in 32 bits: the smallest three
++pub fn pack_rotation(q: [f32; 4]) -> u32 {
++    let len = q.iter().map(|v| v * v).sum::<f32>().sqrt();
++    let q = if len.is_finite() && len > 1e-6 {
++        q.map(|v| v / len)
++    } else {
++        IDENTITY
++    };
++    let mut big = 0;
++    for i in 1..4 {
++        if q[i].abs() > q[big].abs() {
++            big = i;
++        }
++    }
++    let q = if q[big] < 0.0 { q.map(|v| -v) } else { q };
++    let mut out = (big as u32) << 30;
++    let mut shift = 20;
++    for (i, v) in q.iter().enumerate() {
++        if i == big {
++            continue;
++        }
++        let s = (v * std::f32::consts::SQRT_2 * STEPS).round().clamp(-STEPS, STEPS) as i32 + 511;
++        out |= (s as u32) << shift;
++        shift -= 10;
++    }
++    out
++}
++
++pub fn unpack_rotation(r: u32) -> [f32; 4] {
++    let big = (r >> 30) as usize;
++    let mut q = [0f32; 4];
++    let mut shift = 20;
++    let mut sum = 0.0;
++    for (i, slot) in q.iter_mut().enumerate() {
++        if i == big {
++            continue;
++        }
++        let s = ((r >> shift) & 0x3ff).min(1022) as i32 - 511;
++        *slot = s as f32 / STEPS * std::f32::consts::FRAC_1_SQRT_2;
++        sum += *slot * *slot;
++        shift -= 10;
++    }
++    q[big] = (1.0 - sum).max(0.0).sqrt();
++    q
++}
++
++// ---------------------------------------------------------------- colours
++
++/// `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`
++pub fn parse_hex_color(s: &str) -> Option<[u8; 4]> {
++    let h = s.trim().trim_start_matches('#');
++    let nib = |c: u8| (c as char).to_digit(16).map(|d| d as u8);
++    let b = h.as_bytes();
++    if !h.is_ascii() {
++        return None;
++    }
++    match b.len() {
++        3 | 4 => {
++            let mut out = [255u8; 4];
++            for (i, c) in b.iter().enumerate() {
++                out[i] = nib(*c)? * 17;
++            }
++            Some(out)
++        }
++        6 | 8 => {
++            let mut out = [255u8; 4];
++            for i in 0..b.len() / 2 {
++                out[i] = nib(b[i * 2])? * 16 + nib(b[i * 2 + 1])?;
++            }
++            Some(out)
++        }
++        _ => None,
++    }
++}
++
++/// `#rrggbb`, with `aa` when it isn't opaque
++pub fn hex_color(c: [u8; 4]) -> String {
++    if c[3] == 255 {
++        format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])
++    } else {
++        format!("#{:02x}{:02x}{:02x}{:02x}", c[0], c[1], c[2], c[3])
++    }
++}
++
++// ---------------------------------------------------------------- the store
++
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct PlaceMap {
++    pub id: u16,
++    pub name: String,
++}
++
++#[derive(Serialize, Deserialize, Default)]
++struct Meta {
++    name: String,
++}
++
++fn check_name(name: &str) -> StoreResult<String> {
++    let n = name.trim();
++    if n.is_empty() || n.chars().count() > 200 {
++        return Err("a map's name is 1 to 200 characters".into());
++    }
++    Ok(n.to_string())
++}
++
++fn exists(txn: &WriteTransaction, r: &Ref) -> StoreResult<bool> {
++    Ok(match r {
++        Ref::Memory(k) => txn.open_table(MEMORIES).map_err(err)?.get(k.as_slice()).map_err(err)?.is_some(),
++        Ref::Note(k) => txn.open_table(NOTES).map_err(err)?.get(k.as_str()).map_err(err)?.is_some(),
++    })
++}
++
++fn map_exists(txn: &WriteTransaction, map: u16) -> StoreResult<bool> {
++    Ok(txn.open_table(PLACE_MAPS).map_err(err)?.get(map).map_err(err)?.is_some())
++}
++
++/// adds one packed placement and its reverse index entry; true if it wasn't there
++fn insert(txn: &WriteTransaction, rb: &[u8], packed: &[u8]) -> StoreResult<bool> {
++    let map = map_of(packed).ok_or("that isn't a packed placement")?;
++    let new = !txn
++        .open_multimap_table(PLACES)
++        .map_err(err)?
++        .insert(rb, packed)
++        .map_err(err)?;
++    txn.open_multimap_table(PLACED).map_err(err)?.insert(map, rb).map_err(err)?;
++    Ok(new)
++}
++
++/// removes one packed placement, and the ref from its map's index when it was its last
++/// placement there; true if it was there
++fn remove(txn: &WriteTransaction, rb: &[u8], packed: &[u8]) -> StoreResult<bool> {
++    let Some(map) = map_of(packed) else { return Ok(false) };
++    let mut places = txn.open_multimap_table(PLACES).map_err(err)?;
++    if !places.remove(rb, packed).map_err(err)? {
++        return Ok(false);
++    }
++    let mut still = false;
++    for v in places.get(rb).map_err(err)? {
++        if map_of(v.map_err(err)?.value()) == Some(map) {
++            still = true;
++            break;
++        }
++    }
++    if !still {
++        txn.open_multimap_table(PLACED).map_err(err)?.remove(map, rb).map_err(err)?;
++    }
++    Ok(true)
++}
++
++/// drops every placement of an entry (it was forgotten or deleted)
++pub fn drop_entry(txn: &WriteTransaction, r: &Ref) -> StoreResult<usize> {
++    let rb = r.bytes();
++    let removed: Vec<Vec<u8>> = {
++        let mut places = txn.open_multimap_table(PLACES).map_err(err)?;
++        let mut out = Vec::new();
++        for v in places.remove_all(rb.as_slice()).map_err(err)? {
++            out.push(v.map_err(err)?.value().to_vec());
++        }
++        out
++    };
++    let mut placed = txn.open_multimap_table(PLACED).map_err(err)?;
++    for p in &removed {
++        if let Some(m) = map_of(p) {
++            placed.remove(m, rb.as_slice()).map_err(err)?;
++        }
++    }
++    Ok(removed.len())
++}
++
++fn clear_map(txn: &WriteTransaction, map: u16) -> StoreResult<usize> {
++    let refs: Vec<Vec<u8>> = {
++        let mut placed = txn.open_multimap_table(PLACED).map_err(err)?;
++        let mut out = Vec::new();
++        for v in placed.remove_all(map).map_err(err)? {
++            out.push(v.map_err(err)?.value().to_vec());
++        }
++        out
++    };
++    let mut places = txn.open_multimap_table(PLACES).map_err(err)?;
++    let mut n = 0;
++    for rb in refs {
++        let mut doomed = Vec::new();
++        for v in places.get(rb.as_slice()).map_err(err)? {
++            let v = v.map_err(err)?.value().to_vec();
++            if map_of(&v) == Some(map) {
++                doomed.push(v);
++            }
++        }
++        for v in doomed {
++            places.remove(rb.as_slice(), v.as_slice()).map_err(err)?;
++            n += 1;
++        }
++    }
++    Ok(n)
++}
++
++fn new_map(txn: &WriteTransaction, name: &str, id: Option<u16>) -> StoreResult<u16> {
++    let mut t = txn.open_table(PLACE_MAPS).map_err(err)?;
++    let id = match id {
++        Some(id) => id,
++        None => {
++            let last = t.last().map_err(err)?.map(|(k, _)| k.value()).unwrap_or(0);
++            last.checked_add(1).ok_or("there's no room for another map")?
++        }
++    };
++    if id == 0 {
++        return Err("0 isn't a map".into());
++    }
++    let meta = serde_json::to_vec(&Meta { name: name.to_string() }).map_err(err)?;
++    t.insert(id, meta.as_slice()).map_err(err)?;
++    Ok(id)
++}
++
++fn read_maps(txn: &redb::ReadTransaction) -> StoreResult<Vec<PlaceMap>> {
++    let t = txn.open_table(PLACE_MAPS).map_err(err)?;
++    let mut out = Vec::new();
++    for item in t.iter().map_err(err)? {
++        let (k, v) = item.map_err(err)?;
++        let name = serde_json::from_slice::<Meta>(v.value()).map(|m| m.name).unwrap_or_default();
++        out.push(PlaceMap { id: k.value(), name });
++    }
++    Ok(out)
++}
++
++impl Store {
++    /// places an entry; false when that very placement was there already
++    pub fn place(&self, r: &Ref, p: &Place) -> StoreResult<bool> {
++        let txn = self.db.begin_write().map_err(err)?;
++        if !exists(&txn, r)? {
++            return Err(format!("there's nothing under {}", r.label()));
++        }
++        if !map_exists(&txn, p.map)? {
++            return Err(format!("there's no map {}", p.map));
++        }
++        let new = insert(&txn, &r.bytes(), &p.pack())?;
++        txn.commit().map_err(err)?;
++        Ok(new)
++    }
++
++    /// moves a placement: the old one out and the new one in, at once
++    pub fn move_place(&self, r: &Ref, from: &Place, to: &Place) -> StoreResult<()> {
++        let txn = self.db.begin_write().map_err(err)?;
++        let rb = r.bytes();
++        if !remove(&txn, &rb, &from.pack())? {
++            return Err(format!("{} isn't placed there", r.label()));
++        }
++        if !map_exists(&txn, to.map)? {
++            return Err(format!("there's no map {}", to.map));
++        }
++        insert(&txn, &rb, &to.pack())?;
++        txn.commit().map_err(err)
++    }
++
++    /// takes a placement away; false when it wasn't there
++    pub fn unplace(&self, r: &Ref, p: &Place) -> StoreResult<bool> {
++        let txn = self.db.begin_write().map_err(err)?;
++        let gone = remove(&txn, &r.bytes(), &p.pack())?;
++        txn.commit().map_err(err)?;
++        Ok(gone)
++    }
++
++    /// every placement of an entry, in every map
++    pub fn places_of(&self, r: &Ref) -> StoreResult<Vec<Place>> {
++        let txn = self.db.begin_read().map_err(err)?;
++        let t = txn.open_multimap_table(PLACES).map_err(err)?;
++        let mut out = Vec::new();
++        for v in t.get(r.bytes().as_slice()).map_err(err)? {
++            if let Some(p) = Place::unpack(v.map_err(err)?.value()) {
++                out.push(p);
++            }
++        }
++        Ok(out)
++    }
++
++    /// what's placed in a map, entry by entry
++    pub fn places_in(&self, map: u16) -> StoreResult<Vec<(Ref, Place)>> {
++        let txn = self.db.begin_read().map_err(err)?;
++        let placed = txn.open_multimap_table(PLACED).map_err(err)?;
++        let places = txn.open_multimap_table(PLACES).map_err(err)?;
++        let mut out = Vec::new();
++        for rb in placed.get(map).map_err(err)? {
++            let rb = rb.map_err(err)?.value().to_vec();
++            let r = Ref::from_bytes(&rb);
++            for v in places.get(rb.as_slice()).map_err(err)? {
++                if let Some(p) = Place::unpack(v.map_err(err)?.value()).filter(|p| p.map == map) {
++                    out.push((r.clone(), p));
++                }
++            }
++        }
++        Ok(out)
++    }
++
++    /// every placement as stored: ref and packed value (unknown versions too)
++    pub fn all_places(&self) -> StoreResult<Vec<(Ref, Vec<u8>)>> {
++        let txn = self.db.begin_read().map_err(err)?;
++        let t = txn.open_multimap_table(PLACES).map_err(err)?;
++        let mut out = Vec::new();
++        for item in t.iter().map_err(err)? {
++            let (k, vs) = item.map_err(err)?;
++            let r = Ref::from_bytes(k.value());
++            for v in vs {
++                out.push((r.clone(), v.map_err(err)?.value().to_vec()));
++            }
++        }
++        Ok(out)
++    }
++
++    /// puts packed placements in as they are (a bundle's); ones of entries or maps that
++    /// aren't there are skipped. Returns how many were new.
++    pub fn import_places(&self, items: &[(Ref, Vec<u8>)]) -> StoreResult<usize> {
++        let txn = self.db.begin_write().map_err(err)?;
++        let mut n = 0;
++        for (r, v) in items {
++            let Some(map) = map_of(v) else { continue };
++            if exists(&txn, r)? && map_exists(&txn, map)? && insert(&txn, &r.bytes(), v)? {
++                n += 1;
++            }
++        }
++        txn.commit().map_err(err)?;
++        Ok(n)
++    }
++
++    pub fn place_maps(&self) -> StoreResult<Vec<PlaceMap>> {
++        let txn = self.db.begin_read().map_err(err)?;
++        read_maps(&txn)
++    }
++
++    pub fn place_map(&self, name: &str) -> StoreResult<Option<u16>> {
++        let name = name.trim();
++        Ok(self.place_maps()?.into_iter().find(|m| m.name == name).map(|m| m.id))
++    }
++
++    /// a new, empty map
++    pub fn create_place_map(&self, name: &str) -> StoreResult<u16> {
++        let name = check_name(name)?;
++        if self.place_map(&name)?.is_some() {
++            return Err(format!("there's a map named {name} already"));
++        }
++        let txn = self.db.begin_write().map_err(err)?;
++        let id = new_map(&txn, &name, None)?;
++        txn.commit().map_err(err)?;
++        Ok(id)
++    }
++
++    /// the map with this name, made if there isn't one
++    pub fn ensure_place_map(&self, name: &str) -> StoreResult<u16> {
++        match self.place_map(name)? {
++            Some(id) => Ok(id),
++            None => self.create_place_map(name),
++        }
++    }
++
++    /// a map under the id and name a bundle gave it (replacing what had that id)
++    pub fn import_place_map(&self, id: u16, name: &str) -> StoreResult<()> {
++        let txn = self.db.begin_write().map_err(err)?;
++        new_map(&txn, name, Some(id))?;
++        txn.commit().map_err(err)
++    }
++
++    pub fn rename_place_map(&self, id: u16, name: &str) -> StoreResult<()> {
++        let name = check_name(name)?;
++        if self.place_map(&name)?.is_some_and(|other| other != id) {
++            return Err(format!("there's a map named {name} already"));
++        }
++        let txn = self.db.begin_write().map_err(err)?;
++        if !map_exists(&txn, id)? {
++            return Err(format!("there's no map {id}"));
++        }
++        new_map(&txn, &name, Some(id))?;
++        txn.commit().map_err(err)
++    }
++
++    /// deletes a map and every placement in it; returns how many there were
++    pub fn delete_place_map(&self, id: u16) -> StoreResult<usize> {
++        let txn = self.db.begin_write().map_err(err)?;
++        if txn.open_table(PLACE_MAPS).map_err(err)?.remove(id).map_err(err)?.is_none() {
++            return Err(format!("there's no map {id}"));
++        }
++        let n = clear_map(&txn, id)?;
++        txn.commit().map_err(err)?;
++        Ok(n)
++    }
++
++    /// replaces everything in a map with these placements (their map ids are set to it),
++    /// in one transaction; returns how many distinct placements it holds now
++    pub fn set_map_places(&self, map: u16, items: &[(Ref, Place)]) -> StoreResult<usize> {
++        let txn = self.db.begin_write().map_err(err)?;
++        if !map_exists(&txn, map)? {
++            return Err(format!("there's no map {map}"));
++        }
++        clear_map(&txn, map)?;
++        let mut n = 0;
++        for (r, p) in items {
++            if !exists(&txn, r)? {
++                return Err(format!("there's nothing under {}", r.label()));
++            }
++            let p = Place { map, ..*p };
++            if insert(&txn, &r.bytes(), &p.pack())? {
++                n += 1;
++            }
++        }
++        txn.commit().map_err(err)?;
++        Ok(n)
++    }
++
++    /// turns the space's old JSON maps (`map:<name>` settings) into place maps, once
++    /// each: free texts are saturated (or found), memory texts placed as pinned spread
++    /// texts; sizes left out are `free_size` for free texts and `mem_size` for memory
++    /// ones. The old settings stay. Returns the names migrated and their placements.
++    pub fn migrate_legacy_maps(&self, free_size: f32, mem_size: f32) -> StoreResult<Vec<(String, usize)>> {
++        let names = self.setting_names(LEGACY_PREFIX)?;
++        let mut done: Vec<String> = self
++            .setting(MIGRATED)?
++            .and_then(|b| serde_json::from_slice(&b).ok())
++            .unwrap_or_default();
++        let todo: Vec<String> = names.into_iter().filter(|n| !done.contains(n)).collect();
++        if todo.is_empty() {
++            return Ok(Vec::new());
++        }
++        let mut out = Vec::new();
++        for name in todo {
++            done.push(name.clone());
++            let Some(rows) = self
++                .setting(&format!("{LEGACY_PREFIX}{name}"))?
++                .and_then(|b| serde_json::from_slice::<Vec<serde_json::Value>>(&b).ok())
++            else {
++                continue;
++            };
++            if check_name(&name).is_err() || self.place_map(&name)?.is_some() {
++                continue;
++            }
++            let mut items = Vec::new();
++            for row in rows.iter().filter_map(LegacyRow::read) {
++                let known = match row.key.as_deref().and_then(Ref::parse) {
++                    Some(r) if self.remember(&r).is_ok() => Some(r),
++                    _ => None,
++                };
++                let keyed = row.key.is_some();
++                let r = match known {
++                    Some(r) => r,
++                    None if row.text.trim().is_empty() => continue,
++                    None => Ref::Memory(self.saturate(&row.text)?.0),
++                };
++                let size = row.size.unwrap_or(if keyed { mem_size } else { free_size });
++                let color = row.color.as_deref().and_then(parse_hex_color).unwrap_or(INK);
++                let flags = if keyed { SPREAD | PINNED } else { PINNED };
++                items.push((r, Place::text(0, row.pos, size, color, flags)));
++            }
++            let id = self.create_place_map(&name)?;
++            let n = self.set_map_places(id, &items)?;
++            out.push((name, n));
++        }
++        self.set_setting(MIGRATED, &serde_json::to_vec(&done).map_err(err)?)?;
++        Ok(out)
++    }
++}
++
++/// the space's ink, the colour a text has when it says none
++pub const INK: [u8; 4] = [0x3b, 0x2a, 0x1c, 255];
++
++/// a row of an old map: `[text, x, y, z, {size, color, key}]`
++#[derive(Debug, Clone, PartialEq)]
++pub struct LegacyRow {
++    pub text: String,
++    pub pos: [f32; 3],
++    pub size: Option<f32>,
++    pub color: Option<String>,
++    /// "3,14" or "note:…"; old maps may hold a number
++    pub key: Option<String>,
++}
++
++impl LegacyRow {
++    pub fn read(v: &serde_json::Value) -> Option<LegacyRow> {
++        let a = v.as_array()?;
++        let num = |i: usize| a.get(i).and_then(|x| x.as_f64()).map(|x| x as f32);
++        let o = a.get(4);
++        let field = |k: &str| o.and_then(|o| o.get(k)).filter(|x| !x.is_null());
++        Some(LegacyRow {
++            text: a.first()?.as_str()?.to_string(),
++            pos: [num(1)?, num(2)?, num(3)?],
++            size: field("size").and_then(|x| x.as_f64()).map(|x| x as f32),
++            color: field("color").and_then(|x| x.as_str()).map(String::from),
++            key: field("key").map(|x| match x {
++                serde_json::Value::String(s) => s.clone(),
++                other => other.to_string(),
++            }),
++        })
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn store(name: &str) -> (Store, std::path::PathBuf) {
++        let path = std::env::temp_dir().join(format!("anend-places-{}-{}.redb", std::process::id(), name));
++        let _ = std::fs::remove_file(&path);
++        (Store::open(&path).unwrap(), path)
++    }
++
++    /// a small deterministic generator
++    struct Lcg(u64);
++    impl Lcg {
++        fn next(&mut self) -> u32 {
++            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
++            (self.0 >> 32) as u32
++        }
++        fn unit(&mut self) -> f32 {
++            self.next() as f32 / u32::MAX as f32 * 2.0 - 1.0
++        }
++    }
++
++    fn sample() -> Place {
++        Place {
++            kind: Kind::Brick,
++            map: 513,
++            flags: PINNED | SPREAD | 0x80,
++            pos: [1.25, -3.5e7, 0.1],
++            rot: [0.1, -0.7, 0.2, 0.68],
++            scale: [0.5, 2.0, -1.5],
++            color: [1, 2, 3, 4],
++            asset: 0xdead_beef,
++        }
++    }
++
++    #[test]
++    fn layout_is_fixed() {
++        let b = sample().pack();
++        assert_eq!(b.len(), PACKED);
++        assert_eq!(b[0], 1);
++        assert_eq!(b[1], 3);
++        assert_eq!(&b[2..4], &[1, 2]); // 513 little endian
++        assert_eq!(b[4], 0x85);
++        assert_eq!(b[5], 0);
++        assert_eq!(&b[6..10], &1.25f32.to_le_bytes());
++        assert_eq!(&b[22..24], &0x3800u16.to_le_bytes()); // 0.5 in f16
++        assert_eq!(&b[26..28], &0xbe00u16.to_le_bytes()); // -1.5
++        assert_eq!(&b[28..32], &[1, 2, 3, 4]);
++        assert_eq!(&b[32..36], &0xdead_beefu32.to_le_bytes());
++        // identity: w is the big one (index 3), the others at the middle step
++        let id = pack_rotation(IDENTITY);
++        assert_eq!(id, (3 << 30) | (511 << 20) | (511 << 10) | 511);
++        assert_eq!(unpack_rotation(id), IDENTITY);
++        assert_eq!(map_of(&b), Some(513));
++        assert_eq!(map_of(&with_map(&b, 7)), Some(7));
++    }
++
++    #[test]
++    fn round_trip_and_idempotence() {
++        let p = sample();
++        let q = Place::unpack(&p.pack()).unwrap();
++        assert_eq!((q.kind, q.map, q.flags, q.pos, q.color, q.asset), (p.kind, p.map, p.flags, p.pos, p.color, p.asset));
++        assert_eq!(q.scale, [0.5, 2.0, -1.5]);
++        assert_eq!(q.pack(), p.pack());
++        // other sizes, versions and kinds don't unpack
++        let mut b = p.pack();
++        assert!(Place::unpack(&b[..35]).is_none());
++        b[0] = 2;
++        assert!(Place::unpack(&b).is_none());
++        let mut b = p.pack();
++        b[1] = 9;
++        assert!(Place::unpack(&b).is_none());
++
++        let mut g = Lcg(7);
++        for _ in 0..20_000 {
++            let p = Place {
++                kind: Kind::from_u8((g.next() % 5) as u8).unwrap(),
++                map: g.next() as u16,
++                flags: g.next() as u8,
++                pos: [g.unit() * 1e4, g.unit(), g.unit() * 1e-3],
++                rot: [g.unit(), g.unit(), g.unit(), g.unit()],
++                scale: [g.unit() * 100.0, g.unit(), g.unit() * 1e-3],
++                color: g.next().to_le_bytes(),
++                asset: g.next(),
++            };
++            let b = p.pack();
++            let q = Place::unpack(&b).unwrap();
++            assert_eq!(q.pack(), b, "{p:?}");
++            assert_eq!(q.pos, p.pos);
++            for i in 0..3 {
++                // f16: half an ulp of 11 significant bits, or the subnormal step
++                let tol = (p.scale[i].abs() * (1.0 / 2048.0)).max(1.0 / 33_554_432.0);
++                assert!((q.scale[i] - p.scale[i]).abs() <= tol, "{} vs {}", q.scale[i], p.scale[i]);
++            }
++            // the same rotation (q or -q), within the quantisation
++            let len = p.rot.iter().map(|v| v * v).sum::<f32>().sqrt();
++            if len > 1e-6 {
++                let dot: f32 = p.rot.iter().zip(q.rot).map(|(a, b)| a / len * b).sum();
++                let angle = 2.0 * dot.abs().min(1.0).acos();
++                assert!(angle.to_degrees() < 0.25, "{angle} for {:?}", p.rot);
++            }
++            let ql: f32 = q.rot.iter().map(|v| v * v).sum();
++            assert!((ql - 1.0).abs() < 2e-3);
++        }
++    }
++
++    #[test]
++    fn canonical_values() {
++        let base = Place::text(1, [0.0; 3], 0.5, INK, 0);
++        let with = |f: &dyn Fn(&mut Place)| {
++            let mut p = base;
++            f(&mut p);
++            p.pack()
++        };
++        // -0 is 0, NaN is 0 (scale 1), infinities clamp
++        assert_eq!(with(&|p| p.pos = [-0.0, -0.0, -0.0]), base.pack());
++        assert_eq!(with(&|p| p.pos[0] = f32::NAN), base.pack());
++        let inf = Place::unpack(&with(&|p| p.pos = [f32::INFINITY, f32::NEG_INFINITY, 1.0])).unwrap();
++        assert_eq!(inf.pos, [f32::MAX, f32::MIN, 1.0]);
++        assert_eq!(with(&|p| p.scale[0] = -0.0), with(&|p| p.scale[0] = 0.0));
++        assert_eq!(Place::unpack(&with(&|p| p.scale = [f32::NAN; 3])).unwrap().scale, [1.0; 3]);
++        assert_eq!(Place::unpack(&with(&|p| p.scale = [1e9, -1e9, 70000.0])).unwrap().scale, [65504.0, -65504.0, 65504.0]);
++        // rotations: q and -q, scaled or not, are the same bytes; zero and NaN are the identity
++        let r = [0.3, -0.5, 0.1, -0.8];
++        let neg = r.map(|v: f32| -v);
++        let big = r.map(|v: f32| v * 9.0);
++        assert_eq!(pack_rotation(r), pack_rotation(neg));
++        assert_eq!(pack_rotation(r), pack_rotation(big));
++        assert_eq!(pack_rotation([0.0; 4]), pack_rotation(IDENTITY));
++        assert_eq!(pack_rotation([f32::NAN, 0.0, 0.0, 1.0]), pack_rotation(IDENTITY));
++        // the largest component comes back positive
++        let u = unpack_rotation(pack_rotation(r));
++        assert!(u[3] > 0.0 && u[0] < 0.0 && u[1] > 0.0);
++        // a quarter turn about z: x y both zero, a tie between z and w picks z
++        let h = std::f32::consts::FRAC_1_SQRT_2;
++        let qt = unpack_rotation(pack_rotation([0.0, 0.0, h, h]));
++        assert!((qt[2] - h).abs() < 1e-3 && (qt[3] - h).abs() < 2e-3);
++        assert_eq!(pack_rotation(qt), pack_rotation([0.0, 0.0, h, h]));
++        // every axis as the largest
++        for big in 0..4 {
++            let mut q = [0.1f32, -0.2, 0.15, 0.05];
++            q[big] = -0.9;
++            let b = pack_rotation(q);
++            assert_eq!((b >> 30) as usize, big);
++            assert!(unpack_rotation(b)[big] > 0.0);
++        }
++    }
++
++    #[test]
++    fn f16_every_value() {
++        for h in 0..=u16::MAX {
++            let v = f16_to_f32(h);
++            if v.is_nan() {
++                assert!(f32_to_f16(v) & 0x7c00 == 0x7c00 && f32_to_f16(v) & 0x3ff != 0);
++                continue;
++            }
++            assert_eq!(f32_to_f16(v), h, "{h:#06x} {v}");
++        }
++        assert_eq!(f32_to_f16(1.0), 0x3c00);
++        assert_eq!(f32_to_f16(65504.0), 0x7bff);
++        assert_eq!(f32_to_f16(65520.0), 0x7c00); // rounds to infinity (place() clamps first)
++        assert_eq!(f16_to_f32(0x0001), 5.960_464_5e-8);
++        // ties go to even: 1 + 2^-11 is between 1 and 1 + 2^-10
++        assert_eq!(f32_to_f16(1.0 + 1.0 / 2048.0), 0x3c00);
++        assert_eq!(f32_to_f16(1.0 + 3.0 / 2048.0), 0x3c02);
++        assert_eq!(f32_to_f16(1e-9), 0);
++        assert_eq!(f32_to_f16(-1e-9), 0x8000);
++    }
++
++    #[test]
++    fn colours() {
++        assert_eq!(parse_hex_color("#3b2a1c"), Some(INK));
++        assert_eq!(parse_hex_color("fff"), Some([255; 4]));
++        assert_eq!(parse_hex_color("#10203040"), Some([0x10, 0x20, 0x30, 0x40]));
++        assert_eq!(parse_hex_color("#12"), None);
++        assert_eq!(parse_hex_color("#zzzzzz"), None);
++        assert_eq!(hex_color(INK), "#3b2a1c");
++        assert_eq!(hex_color([1, 2, 3, 4]), "#01020304");
++    }
++
++    #[test]
++    fn table_ops() {
++        let (s, path) = store("ops");
++        let a = Ref::Memory(s.saturate_new("alpha").unwrap());
++        let b = Ref::Memory(s.saturate_new("beta").unwrap());
++        let note = s.save(&crate::note::Note { title: "n".into(), ..Default::default() }).unwrap();
++        let n = Ref::Note(note.key.clone());
++        let home = s.create_place_map("home").unwrap();
++        let work = s.create_place_map("work").unwrap();
++        assert_eq!((home, work), (1, 2));
++        assert!(s.create_place_map(" home ").is_err());
++        assert!(s.create_place_map("  ").is_err());
++
++        let p1 = Place::text(home, [1.0, 2.0, 3.0], 0.5, INK, PINNED);
++        let p2 = Place::text(home, [4.0, 5.0, 6.0], 0.5, INK, PINNED);
++        assert!(s.place(&a, &p1).unwrap());
++        assert!(!s.place(&a, &p1).unwrap(), "the same placement collapses");
++        assert!(s.place(&a, &p2).unwrap());
++        assert!(s.place(&a, &Place { map: work, ..p1 }).unwrap());
++        assert!(s.place(&n, &p1).unwrap());
++        assert!(s.place(&Ref::Memory(vec![99]), &p1).is_err());
++        assert!(s.place(&b, &Place { map: 77, ..p1 }).is_err());
++
++        assert_eq!(s.places_of(&a).unwrap().len(), 3);
++        assert_eq!(s.places_in(home).unwrap().len(), 3);
++        assert_eq!(s.places_in(work).unwrap(), vec![(a.clone(), Place::unpack(&Place { map: work, ..p1 }.pack()).unwrap())]);
++
++        // moving: the old one out, the new one in
++        let p3 = Place::text(home, [7.0, 8.0, 9.0], 1.0, [255, 0, 0, 255], 0);
++        s.move_place(&a, &p2, &p3).unwrap();
++        assert!(s.move_place(&a, &p2, &p3).is_err());
++        let mut in_home: Vec<[f32; 3]> = s.places_in(home).unwrap().iter().map(|(_, p)| p.pos).collect();
++        in_home.sort_by(|x, y| x.partial_cmp(y).unwrap());
++        assert_eq!(in_home, [[1.0, 2.0, 3.0], [1.0, 2.0, 3.0], [7.0, 8.0, 9.0]]);
++
++        // the reverse index keeps a ref while it has a placement in the map
++        assert!(s.unplace(&a, &p1).unwrap());
++        assert!(!s.unplace(&a, &p1).unwrap());
++        assert_eq!(s.places_in(home).unwrap().len(), 2);
++        assert!(s.unplace(&a, &p3).unwrap());
++        assert_eq!(s.places_in(home).unwrap(), vec![(n.clone(), Place::unpack(&p1.pack()).unwrap())]);
++
++        // maps: rename, list, delete takes its placements
++        s.rename_place_map(work, "office").unwrap();
++        assert!(s.rename_place_map(work, "home").is_err());
++        assert_eq!(s.place_map("office").unwrap(), Some(work));
++        assert_eq!(
++            s.place_maps().unwrap().iter().map(|m| m.name.as_str()).collect::<Vec<_>>(),
++            ["home", "office"]
++        );
++        assert_eq!(s.delete_place_map(work).unwrap(), 1);
++        assert!(s.delete_place_map(work).is_err());
++        assert!(s.places_of(&a).unwrap().is_empty());
++        assert_eq!(s.create_place_map("again").unwrap(), 2);
++
++        // set_map_places replaces a map's contents
++        let items = vec![(a.clone(), p1), (b.clone(), p2), (b.clone(), p2)];
++        assert_eq!(s.set_map_places(home, &items).unwrap(), 2);
++        assert_eq!(s.places_in(home).unwrap().len(), 2);
++        assert!(s.places_of(&n).unwrap().is_empty());
++
++        // forgetting a memory or deleting a note drops its placements
++        s.place(&n, &p3).unwrap();
++        s.forget(match &b {
++            Ref::Memory(k) => k,
++            _ => unreachable!(),
++        })
++        .unwrap();
++        assert!(s.places_of(&b).unwrap().is_empty());
++        s.delete(&note.key).unwrap();
++        assert!(s.places_of(&n).unwrap().is_empty());
++        assert_eq!(s.places_in(home).unwrap().len(), 1);
++        assert_eq!(s.all_places().unwrap().len(), 1);
++        drop(s);
++        let _ = std::fs::remove_file(path);
++    }
++
++    #[test]
++    fn legacy_maps_migrate_once() {
++        let (s, path) = store("legacy");
++        let k = s.saturate_new("listen").unwrap();
++        let rows = serde_json::json!([
++            ["a free text", 1.5, 2.25, -3.0, {}],
++            ["a big one", 0.0, 0.0, 0.0, {"size": 1.0, "color": "#ff0000"}],
++            ["listen", 4.0, 5.0, 6.0, {"key": "0"}],
++            ["gone", 7.0, 8.0, 9.0, {"key": "9,9"}],
++            ["old number key", 1.0, 1.0, 1.0, {"key": 0}],
++            "not a row"
++        ]);
++        s.set_setting("map:home", &serde_json::to_vec(&rows).unwrap()).unwrap();
++        s.set_setting("map:empty", b"[]").unwrap();
++        let done = s.migrate_legacy_maps(0.5, 0.35).unwrap();
++        assert_eq!(done, vec![("empty".to_string(), 0), ("home".to_string(), 5)]);
++        assert!(s.migrate_legacy_maps(0.5, 0.35).unwrap().is_empty(), "once");
++        // the old settings are still there
++        assert!(s.setting("map:home").unwrap().is_some());
++
++        let home = s.place_map("home").unwrap().unwrap();
++        let places = s.places_in(home).unwrap();
++        let find = |t: &str| {
++            let r = Ref::Memory(s.find_exact(t).unwrap().unwrap());
++            places.iter().filter(|(x, _)| *x == r).map(|(_, p)| *p).collect::<Vec<_>>()
++        };
++        let free = find("a free text");
++        assert_eq!(free.len(), 1);
++        assert_eq!((free[0].pos, free[0].scale[0], free[0].color, free[0].flags), ([1.5, 2.25, -3.0], 0.5, INK, PINNED));
++        let big = find("a big one");
++        assert_eq!((big[0].scale[0], big[0].color), (1.0, [255, 0, 0, 255]));
++        // a memory text keeps its key; both rows of key 0 are placements of it
++        let listen = find("listen");
++        assert_eq!(listen.len(), 2);
++        assert!(listen.iter().all(|p| p.flags == SPREAD | PINNED && p.scale[0] == f16_to_f32(f32_to_f16(0.35))));
++        assert_eq!(Ref::Memory(k), Ref::Memory(s.find_exact("listen").unwrap().unwrap()));
++        // a key that's gone: its text is saturated in its place
++        assert_eq!(find("gone").len(), 1);
++        drop(s);
++        let _ = std::fs::remove_file(path);
++    }
++}
+diff --git a/core/src/store.rs b/core/src/store.rs
+index 362d622..4f19730 100644
+--- a/core/src/store.rs
++++ b/core/src/store.rs
+@@ -38,6 +38,7 @@ impl Store {
+         crate::classifiers::create_tables(&txn)?;
+         crate::memo::create_tables(&txn)?;
+         crate::filters::create_tables(&txn)?;
++        crate::places::create_tables(&txn)?;
+         txn.commit().map_err(err)?;
+         let store = Store {
+             db,
+@@ -178,6 +179,7 @@ impl Store {
+         if let Ok(note) = serde_json::from_slice::<Note>(&removed) {
+             crate::memory::index_note(&txn, &note, false)?;
+         }
++        crate::places::drop_entry(&txn, &crate::memory::Ref::Note(key.to_string()))?;
+         txn.commit().map_err(err)?;
+         Ok(())
+     }
+diff --git a/hub/web/style.css b/hub/web/style.css
+index b8f27cc..8fffb07 100644
+--- a/hub/web/style.css
++++ b/hub/web/style.css
+@@ -61,6 +61,9 @@ button, .btn {
+ }
+ button:hover, .btn:hover { filter: brightness(1.06); text-decoration: none; }
+ button:focus-visible, .btn:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
++a:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
++/* a place the focus is put back to after a redraw: no ring, Tab goes on from there */
++[tabindex="-1"]:focus { outline: none; }
+ button.on, button.primary, .btn.primary { background: var(--accent); }
+ button.armed { background: var(--bad); color: #fff; }
+ button.bad { background: color-mix(in srgb, var(--bad) 75%, var(--buttons)); color: #fff; }
+@@ -197,12 +200,18 @@ button.chip, .chip {
+ .notelist { display: flex; flex-direction: column; gap: 6px; padding: 6px; overflow: hidden; min-height: 0; transition: transform .2s, opacity .2s; }
+ .notelist button.new { width: 100%; height: 24px; flex: none; }
+ ul.notes { list-style: none; margin: 0; padding: 0; overflow: auto; min-height: 0; }
+-ul.notes li { padding: 3px 8px; border-radius: var(--radius); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
++ul.notes li { border-radius: var(--radius); }
++ul.notes li.empty { padding: 3px 8px; }
++ul.notes .note-link {
++  display: block; width: 100%; height: auto; padding: 3px 8px; border-radius: var(--radius); background: none; color: inherit;
++  font: inherit; text-align: left; text-decoration: none; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
++}
++ul.notes .note-link:focus-visible { outline-offset: -2px; }
+ ul.notes li:hover { background: color-mix(in srgb, var(--buttons) 35%, transparent); }
+ ul.notes li.on { background: var(--accent); color: var(--on-button); }
+-ul.notes li.empty { cursor: default; }
+ .editor-wrap.collapsed { grid-template-columns: 0 minmax(0, 1fr); gap: 0; }
+-.editor-wrap.collapsed .notelist { transform: translateX(-110%); opacity: 0; }
++.editor-wrap.collapsed .notelist { transform: translateX(-110%); opacity: 0; visibility: hidden; transition-property: transform, opacity, visibility; }
++.editor-wrap.collapsed.peek .notelist { visibility: visible; }
+ .editor-wrap.collapsed .edge { display: block; }
+ .editor-wrap.collapsed.peek .notelist { position: absolute; z-index: 4; top: 0; bottom: 0; left: 0; width: 240px; transform: none; opacity: 1; box-shadow: 4px 0 18px rgb(0 0 0 / .25); }
+ .editor-wrap.collapsed .slide { transform: scaleX(-1); }
+@@ -484,7 +493,10 @@ kbd { font: 12px var(--mono); background: var(--pad); border-radius: 3px; paddin
+ .clf-side, .clf-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+ .clf-offline { max-width: 560px; }
+ ul.clf-names { list-style: none; margin: 0; padding: 0; }
+-ul.clf-names li { display: flex; justify-content: space-between; gap: 6px; padding: 3px 8px; border-radius: var(--radius); cursor: pointer; }
++ul.clf-names li { border-radius: var(--radius); }
++ul.clf-names .clf-pick { display: flex; justify-content: space-between; gap: 6px; width: 100%; height: auto; padding: 3px 8px; background: none; color: inherit; font-size: inherit; text-align: left; }
++ul.clf-names .clf-pick:focus-visible { outline-offset: -2px; }
++.clf-panel { display: contents; }
+ ul.clf-names li:hover { background: color-mix(in srgb, var(--buttons) 35%, transparent); }
+ ul.clf-names li.on { background: var(--accent); color: var(--on-button); }
+ ul.clf-names li.on .dim { color: inherit; }
+@@ -544,11 +556,11 @@ button.no { background: color-mix(in srgb, var(--bad) 45%, var(--buttons)); }
+ .clf-none { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 34px 20px; gap: 2px; }
+ .clf-none .big svg.icon { width: 40px; height: 40px; color: var(--accent); stroke-width: 1.5; }
+ .clf-none p { margin: 2px 0; max-width: 420px; }
+-nav.clf-tabs { display: flex; gap: 2px; background: var(--cards); border-radius: var(--radius); padding: 4px; overflow-x: auto; scrollbar-width: none; }
+-nav.clf-tabs::-webkit-scrollbar { display: none; }
+-nav.clf-tabs button { background: none; color: var(--dim); height: 28px; padding: 0 12px 0 10px; gap: 6px; flex: none; }
+-nav.clf-tabs button:hover { background: color-mix(in srgb, var(--buttons) 35%, transparent); color: var(--text); filter: none; }
+-nav.clf-tabs button.on { background: var(--accent); color: var(--on-button); }
++.clf-tabs { display: flex; gap: 2px; background: var(--cards); border-radius: var(--radius); padding: 4px; overflow-x: auto; scrollbar-width: none; }
++.clf-tabs::-webkit-scrollbar { display: none; }
++.clf-tabs button { background: none; color: var(--dim); height: 28px; padding: 0 12px 0 10px; gap: 6px; flex: none; }
++.clf-tabs button:hover { background: color-mix(in srgb, var(--buttons) 35%, transparent); color: var(--text); filter: none; }
++.clf-tabs button.on { background: var(--accent); color: var(--on-button); }
+ .clf-index, .clf-bucket-hits, .clf-near, .clf-validators, .clf-disagree, .clf-export, .clf-import { display: flex; flex-direction: column; gap: 6px; }
+ .clf-index h3, .clf-bucket-hits h3, .clf-near h3, .clf-validators h3, .clf-disagree h3, .clf-export h3, .clf-import h3 { margin: 0; }
+ .clf-index p, .clf-near p, .clf-validators p, .clf-export p, .clf-import p { margin: 0; }
+@@ -566,9 +578,10 @@ button.bk-name:hover { background: color-mix(in srgb, var(--c) 18%, transparent)
+ button.bk-band { height: 100%; padding: 0; border-radius: 3px; background: color-mix(in srgb, var(--pad) 55%, transparent); display: flex; align-items: flex-end; overflow: hidden; }
+ button.bk-band .bar { display: block; width: 100%; height: max(3px, calc(var(--h) * 100%)); background: var(--c); opacity: var(--a); border-radius: 2px 2px 0 0; }
+ button.bk-band.empty .bar { display: none; }
+-button.bk-band:disabled { opacity: 1; cursor: default; }
+-button.bk-band:not(:disabled):hover { filter: none; outline: 2px solid color-mix(in srgb, var(--c) 70%, transparent); outline-offset: -2px; }
++button.bk-band[aria-disabled=true] { cursor: default; filter: none; }
++button.bk-band:not([aria-disabled=true]):hover { filter: none; outline: 2px solid color-mix(in srgb, var(--c) 70%, transparent); outline-offset: -2px; }
+ button.bk-band.on { outline: 2px solid var(--c); outline-offset: -2px; }
++button.bk-band:focus-visible, button.bk-band.on:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+ button.linkish { background: none; color: var(--text); height: auto; padding: 0; font-size: inherit; justify-content: flex-start; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; text-align: left; }
+ button.linkish:hover { color: var(--link); filter: none; text-decoration: underline; }
+ .clf-bucket-hits .clf-results .prob { background: linear-gradient(90deg, color-mix(in srgb, var(--c) 55%, transparent) calc(var(--p) * 100%), var(--pad) 0); }
+@@ -795,8 +808,8 @@ body.login #dock, body.login #tabs, body.login #settings-button { visibility: hi
+   .bk-row { grid-template-columns: minmax(84px, 110px) minmax(0, 1fr); gap: 6px; }
+   .bk-axis { grid-template-columns: minmax(84px, 110px) auto 1fr auto; gap: 6px; }
+   /* all five parts fit across a phone, rather than the last hiding past the edge */
+-  nav.clf-tabs button { flex: 1 1 auto; justify-content: center; padding: 0 5px; gap: 4px; }
+-  nav.clf-tabs button .lab { font-size: 12.5px; }
++  .clf-tabs button { flex: 1 1 auto; justify-content: center; padding: 0 5px; gap: 4px; }
++  .clf-tabs button .lab { font-size: 12.5px; }
+   .checks { margin-left: 0; }
+   .space-tint { top: 32px; right: 4px; max-width: calc(100% - 8px); }
+   .poscard { max-width: calc(100% - 44px); overflow: hidden; text-overflow: ellipsis; }
+diff --git a/hub/web/util.js b/hub/web/util.js
+index c3be3e4..bac048a 100644
+--- a/hub/web/util.js
++++ b/hub/web/util.js
+@@ -91,6 +91,45 @@ export function typing(e) {
+   return t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+ }
+ 
++// whether a key event comes from a control that has keys of its own (a button, a link, a
++// box): a view's single-key shortcuts leave those alone, so Enter and Space still press it
++export function onControl(e) {
++  const t = e.target;
++  return !!(t && t.closest && t.closest('button, a[href], input, select, textarea, summary, [contenteditable], [tabindex]:not([tabindex="-1"])'));
++}
++
++// redraw `root` without losing the keyboard's place: the focused control is found again
++// after `draw` by its name (data-fk, aria-label, or its text) and how many before it share
++// that name; gone, the focus goes to `fallback` (or the root) so Tab carries on from there
++// rather than from the top of the page
++function focusName(e) {
++  return e.dataset.fk || e.getAttribute('aria-label') || e.id || `${e.tagName}:${(e.textContent || '').trim().slice(0, 40)}`;
++}
++const FOCUSABLE = 'button, a[href], input, select, textarea, summary, [tabindex]';
++export function keepFocus(root, draw, fallback) {
++  const a = document.activeElement;
++  let want = null;
++  if (a && a !== document.body && root.contains(a)) {
++    const name = focusName(a);
++    const same = [...root.querySelectorAll(FOCUSABLE)].filter((e) => focusName(e) === name);
++    want = { name, nth: Math.max(0, same.indexOf(a)) };
++  }
++  const out = draw();
++  const back = () => {
++    if (!want || (document.activeElement && document.activeElement !== document.body && root.contains(document.activeElement))) return;
++    const same = [...root.querySelectorAll(FOCUSABLE)].filter((e) => focusName(e) === want.name && !e.disabled && e.offsetParent !== null);
++    const t = same[Math.min(want.nth, same.length - 1)] || (typeof fallback === 'function' ? fallback() : fallback);
++    if (t) t.focus({ preventScroll: true });
++    else {
++      if (!root.hasAttribute('tabindex')) root.setAttribute('tabindex', '-1');
++      root.focus({ preventScroll: true });
++    }
++  };
++  if (out && typeof out.then === 'function') return out.then((v) => (back(), v));
++  back();
++  return out;
++}
++
+ // a key the way the dispatcher writes them: 0,12 or note:1000001
+ export const KEY = /^(note:\d+|\d{1,3}(,\d{1,3}){0,3})$/;
+ 
+diff --git a/hub/web/views/classify.js b/hub/web/views/classify.js
+index a76e774..132a847 100644
+--- a/hub/web/views/classify.js
++++ b/hub/web/views/classify.js
+@@ -3,7 +3,7 @@
+ // class's probability with a yes or no for each classifier that had a part in a result,
+ // their outputs written back as lists, and texts near each other by what they represent
+ 
+-import { el, clear, confirmClick, debounce } from '../util.js';
++import { el, clear, confirmClick, debounce, keepFocus } from '../util.js';
+ import { iconButton, icon, tip } from '../icons.js';
+ import * as more from './clsmore.js';
+ 
+@@ -122,7 +122,7 @@ async function open(name, keep = false) {
+ 
+ function draw() {
+   const y = body.parentElement?.scrollTop;
+-  clear(
++  keepFocus(body, () => clear(
+     body,
+     el('div.clf-side', listCard(), newCard(), more.importCard(), more.hubCard()),
+     el(
+@@ -132,20 +132,38 @@ function draw() {
+         : more.hubOpen()
+         ? more.hubPanel()
+         : detail
+-        ? [headCard(), tabBar(), ...[].concat(tabCards())]
++        ? [headCard(), tabBar(), el('div.clf-panel', { role: 'tabpanel', id: 'clf-panel', 'aria-labelledby': `clf-tab-${tab}` }, tabCards())]
+         : el('div.card.clf-none', el('span.big', icon('classifier')), el('p', all.length ? 'pick a classifier' : 'no classifiers yet'), el('p.dim.small', 'make one from two or more lists (each list a class), or bring one in from a .anendcls file')),
+     ),
+-  );
++  ));
+   if (y && body.parentElement) body.parentElement.scrollTop = y;
+ }
+ 
++// the tabs: one Tab stop, the arrow keys (and Home, End) move between them and open each
+ function tabBar() {
++  const keys = (e) => {
++    const i = TABS.findIndex((x) => x[0] === tab);
++    const n = TABS.length;
++    const to = { ArrowRight: i + 1, ArrowLeft: i - 1 + n, Home: 0, End: n - 1 }[e.key];
++    if (to == null) return;
++    e.preventDefault();
++    setTab(TABS[to % n][0]);
++    body.querySelector(`#clf-tab-${tab}`)?.focus();
++  };
+   return el(
+-    'nav.clf-tabs',
+-    { role: 'tablist', 'aria-label': 'the classifier’s parts' },
++    'div.clf-tabs',
++    { role: 'tablist', 'aria-label': 'the classifier’s parts', onkeydown: keys },
+     TABS.map(([t, ic, label, about]) =>
+       tip(
+-        el('button', { type: 'button', role: 'tab', className: tab === t ? 'on' : '', 'aria-selected': String(tab === t), onclick: () => setTab(t) }, icon(ic), el('span.lab', label)),
++        el(
++          'button',
++          {
++            type: 'button', role: 'tab', id: `clf-tab-${t}`, className: tab === t ? 'on' : '', 'aria-selected': String(tab === t),
++            'aria-controls': 'clf-panel', tabindex: tab === t ? '0' : '-1', dataset: { fk: `tab-${t}` }, onclick: () => setTab(t),
++          },
++          icon(ic),
++          el('span.lab', label),
++        ),
+         about,
+       ),
+     ),
+@@ -170,9 +188,13 @@ function listCard() {
+           all.map((c) =>
+             el(
+               'li',
+-              { className: c.name === selected ? 'on' : '', onclick: () => open(c.name) },
+-              el('span.name', c.name),
+-              el('span.dim.small', c.training ? 'training…' : c.trained ? pct(c.accuracy) : 'untrained'),
++              { className: c.name === selected ? 'on' : '' },
++              el(
++                'button.clf-pick',
++                { type: 'button', 'aria-current': c.name === selected ? 'true' : null, onclick: () => open(c.name) },
++                el('span.name', c.name),
++                el('span.dim.small', c.training ? 'training…' : c.trained ? pct(c.accuracy) : 'untrained'),
++              ),
+             ),
+           ),
+         )
+diff --git a/hub/web/views/clsmore.js b/hub/web/views/clsmore.js
+index cc8b106..85eb59a 100644
+--- a/hub/web/views/clsmore.js
++++ b/hub/web/views/clsmore.js
+@@ -197,7 +197,7 @@ function indexCard() {
+       { className: `bk-row${on ? ' on' : ''}`, style: { '--c': colourOf(x.index) } },
+       el(
+         'button.bk-name',
+-        { type: 'button', onclick: () => openBucket(x.index ?? 'uncertain', null), 'aria-label': `the texts in ${x.class}` },
++        { type: 'button', onclick: () => openBucket(x.index ?? 'uncertain', null), 'aria-label': `the texts in ${x.class}: ${x.count}`, dataset: { fk: `bk-${x.class}` } },
+         el('span.sw'),
+         el('span.nm', x.class),
+         el('span.n', x.count),
+@@ -212,9 +212,11 @@ function indexCard() {
+               {
+                 type: 'button',
+                 className: `bk-band${n ? '' : ' empty'}${on && st.pick.band === band ? ' on' : ''}`,
+-                disabled: !n,
++                // empty cells stay in the grid's arrow-key walk, so they aren't disabled
++                'aria-disabled': n ? null : 'true',
++                dataset: { fk: `bk-${x.class}-${band}` },
+                 style: { '--h': n / max, '--a': 0.25 + band * 0.075 },
+-                onclick: () => openBucket(x.index ?? 'uncertain', band),
++                onclick: () => n && openBucket(x.index ?? 'uncertain', band),
+               },
+               el('span.bar'),
+             ),
+@@ -236,11 +238,44 @@ function indexCard() {
+         : iconButton('bolt', 'index the save: read every memory and note once, so buckets, near texts and filters answer at once', { text: b.indexed ? 'index again' : 'index the save', cls: b.indexed >= total ? '' : 'primary', onclick: index }),
+     ),
+     st.job ? indexProgress(st.job) : null,
+-    el('div.bk-grid', el('div.bk-axis.small.dim', el('span', 'class'), el('span', '0%'), el('span', 'sureness →'), el('span', '100%')), rows),
+-    el('p.dim.small', 'each class’s texts by how sure it is, in tenths; “uncertain” holds the texts it puts in no class. Click a class or a column for its texts. What’s filed is kept until training, feedback or steering changes it.'),
++    gridKeys(el('div.bk-grid', { role: 'group', 'aria-label': 'buckets: the arrow keys move, Enter opens', 'aria-describedby': 'bk-about' }, el('div.bk-axis.small.dim', { 'aria-hidden': 'true' }, el('span', 'class'), el('span', '0%'), el('span', 'sureness →'), el('span', '100%')), rows)),
++    el('p.dim.small#bk-about', 'each class’s texts by how sure it is, in tenths; “uncertain” holds the texts it puts in no class. Click a class or a column for its texts (or move with the arrow keys and press Enter). What’s filed is kept until training, feedback or steering changes it.'),
+   );
+ }
+ 
++// the buckets grid takes one Tab stop; the arrow keys walk its cells (a row's name, then
++// its ten columns), Home and End go to a row's ends, Enter or Space opens one
++function gridKeys(grid) {
++  const rows = () => [...grid.querySelectorAll('.bk-row')].map((r) => [...r.querySelectorAll('button')]);
++  const all = () => rows().flat();
++  const pick = (t) => {
++    for (const b of all()) b.tabIndex = b === t ? 0 : -1;
++  };
++  // the stop: the open bucket's cell, else the first row's name
++  pick(grid.querySelector('.bk-row.on .bk-band.on') || grid.querySelector('.bk-row.on .bk-name') || grid.querySelector('.bk-name'));
++  grid.addEventListener('focusin', (e) => e.target.matches('button') && pick(e.target));
++  grid.addEventListener('keydown', (e) => {
++    const rs = rows();
++    const r = rs.findIndex((row) => row.includes(e.target));
++    if (r < 0) return;
++    const c = rs[r].indexOf(e.target);
++    const to = {
++      ArrowRight: [r, c + 1],
++      ArrowLeft: [r, c - 1],
++      ArrowDown: [r + 1, c],
++      ArrowUp: [r - 1, c],
++      Home: [e.ctrlKey ? 0 : r, 0],
++      End: [e.ctrlKey ? rs.length - 1 : r, rs[r].length - 1],
++    }[e.key];
++    if (!to) return;
++    e.preventDefault();
++    const row = rs[Math.max(0, Math.min(rs.length - 1, to[0]))];
++    const t = row[Math.max(0, Math.min(row.length - 1, to[1]))];
++    t?.focus();
++  });
++  return grid;
++}
++
+ function bucketHitsCard() {
+   const d = ctx.detail();
+   const bk = st.bucket;
+@@ -457,8 +492,8 @@ function validatorsCard(d) {
+     const mode = el(
+       'div.seg',
+       { role: 'group', 'aria-label': 'how it checks' },
+-      tip(el('button', { type: 'button', className: v.mode !== 'weigh' ? 'on' : '', onclick: () => ((v.mode = 'gate'), draw()) }, 'gate'), 'gate: a text it doesn’t pass is in none of the classes'),
+-      tip(el('button', { type: 'button', className: v.mode === 'weigh' ? 'on' : '', onclick: () => ((v.mode = 'weigh'), draw()) }, 'scale'), 'scale: the probabilities are multiplied by the validator’s'),
++      tip(el('button', { type: 'button', className: v.mode !== 'weigh' ? 'on' : '', 'aria-pressed': String(v.mode !== 'weigh'), dataset: { fk: `gate-${i}` }, onclick: () => ((v.mode = 'gate'), draw()) }, 'gate'), 'gate: a text it doesn’t pass is in none of the classes'),
++      tip(el('button', { type: 'button', className: v.mode === 'weigh' ? 'on' : '', 'aria-pressed': String(v.mode === 'weigh'), dataset: { fk: `scale-${i}` }, onclick: () => ((v.mode = 'weigh'), draw()) }, 'scale'), 'scale: the probabilities are multiplied by the validator’s'),
+     );
+     return el(
+       'div.vrow',
+diff --git a/hub/web/views/editor.js b/hub/web/views/editor.js
+index 920a26c..755b7df 100644
+--- a/hub/web/views/editor.js
++++ b/hub/web/views/editor.js
+@@ -1,15 +1,16 @@
+ // the editor: the note list next to the editor card. The first `# line` is the note's
+ // title, the rest markdown; unsaved notes are marked • and saved when you switch away.
+ 
+-import { el, clear, debounce, confirmClick } from '../util.js';
++import { el, clear, debounce, confirmClick, keepFocus } from '../util.js';
+ import { render } from '../markdown.js';
+ import { lines as hlLines } from '../highlight.js';
+ import { icon, iconButton, tip } from '../icons.js';
+ import { drawer } from './notecls.js';
+ 
+ let app;
+-let nd, drawerBtn, wrap, listEl, chips, tagInput, pad, padWrap, mirror, rendered, toggleBtn, saveBtn, deleteBtn, count, hint;
++let nd, drawerBtn, listBtn, wrap, listEl, chips, tagInput, pad, padWrap, mirror, rendered, toggleBtn, saveBtn, deleteBtn, count, hint;
+ let notes = [];
++let padLeaves = false; // Escape was pressed in the pad: the next Tab leaves it
+ let q = '';
+ let mode = 'edit';
+ // the note being edited: what's stored, and what's in the editor
+@@ -45,7 +46,7 @@ function drawList() {
+   const items = [];
+   // the new note, while it's unsaved
+   if (cur && !cur.note._key) {
+-    items.push(el('li.on', { title: 'not saved yet' }, `${titleOf(cur.text) || 'untitled'} •`));
++    items.push(el('li.on', el('button.note-link', { type: 'button', title: 'not saved yet', 'aria-current': 'true', onclick: () => pad.focus() }, `${titleOf(cur.text) || 'untitled'} •`)));
+   }
+   for (const n of notes) {
+     const on = cur && cur.note._key === n.key;
+@@ -53,23 +54,27 @@ function drawList() {
+     items.push(
+       el(
+         'li',
+-        { className: on ? 'on' : '', title: `${n.words} words · ${n.tags.map((t) => '#' + t).join(' ')}`, onclick: () => app.go(`editor/${encodeURIComponent(n.key)}`) },
+-        `${(on ? titleOf(cur.text) : '') || n.title}${dirty ? ' •' : ''}`,
++        { className: on ? 'on' : '' },
++        el(
++          'a.note-link',
++          { href: `#/editor/${encodeURIComponent(n.key)}`, title: `${n.words} words · ${n.tags.map((t) => '#' + t).join(' ')}`, 'aria-current': on ? 'true' : null },
++          `${(on ? titleOf(cur.text) : '') || n.title}${dirty ? ' •' : ''}`,
++        ),
+       ),
+     );
+   }
+   if (!items.length) items.push(el('li.dim.empty', q ? 'no notes match' : 'no notes yet'));
+-  clear(listEl, items);
++  keepFocus(listEl, () => clear(listEl, items));
+   count.textContent = `${notes.length} note${notes.length === 1 ? '' : 's'}`;
+ }
+ 
+ function drawTags() {
+-  clear(
++  keepFocus(chips, () => clear(
+     chips,
+     (cur?.tags || []).map((t) =>
+       el('button.chip', { type: 'button', title: `remove #${t}`, 'aria-label': `remove the tag ${t}`, onclick: () => removeTag(t) }, `#${t}`, el('span.x', '×')),
+     ),
+-  );
++  ), () => chips.querySelector('button') || tagInput);
+ }
+ 
+ function removeTag(t) {
+@@ -269,6 +274,7 @@ async function remove() {
+ function toggleList() {
+   wrap.classList.toggle('collapsed');
+   wrap.classList.remove('peek');
++  listBtn.setAttribute('aria-expanded', String(!wrap.classList.contains('collapsed')));
+   try {
+     localStorage.setItem('anend.list', wrap.classList.contains('collapsed') ? 'away' : '');
+   } catch {
+@@ -292,7 +298,7 @@ export default {
+     this.barRight = count;
+     listEl = el('ul.notes');
+     const side = el(
+-      'aside.card.notelist',
++      'aside.card.notelist#note-list',
+       iconButton('new', 'new note', { key: 'Ctrl+N', text: 'new note', cls: 'primary.new', onclick: () => newNote() }),
+       listEl,
+     );
+@@ -320,16 +326,19 @@ export default {
+     deleteBtn = confirmClick(iconButton('delete', 'delete this note (click twice)'), 'delete?', remove);
+     hint = el('span.hint');
+     nd = drawer(app);
+-    drawerBtn = iconButton('classifier', 'classifiers on this note', { key: 'Ctrl+I', onclick: () => nd.toggle() });
++    drawerBtn = iconButton('classifier', 'classifiers on this note', { key: 'Ctrl+I', onclick: () => nd.toggle(), 'aria-controls': 'note-drawer' });
+     drawerBtn.classList.toggle('on', nd.open);
+-    drawerBtn.setAttribute('aria-pressed', String(nd.open));
+-    nd.onToggle = (on) => {
++    drawerBtn.setAttribute('aria-expanded', String(nd.open));
++    nd.onToggle = (on, hadFocus) => {
+       drawerBtn.classList.toggle('on', on);
+-      drawerBtn.setAttribute('aria-pressed', String(on));
++      drawerBtn.setAttribute('aria-expanded', String(on));
++      // closed from inside (its close button, Ctrl+I): the focus goes back to its button
++      if (!on && hadFocus) drawerBtn.focus({ preventScroll: true });
+     };
+     pad = el('textarea.pad', {
+       spellcheck: true,
+       'aria-label': 'the note',
++      'aria-description': 'Tab indents; Escape then Tab moves on',
+       oninput: () => {
+         cur.text = pad.value;
+         touch();
+@@ -340,8 +349,15 @@ export default {
+         mirror.scrollLeft = pad.scrollLeft;
+       },
+       onkeydown: (e) => {
++        // Escape, then Tab, leaves the pad (Shift+Tab always does)
++        if (e.key === 'Escape') {
++          padLeaves = true;
++          return;
++        }
++        const leave = padLeaves;
++        padLeaves = false;
+         // tab indents instead of leaving (as an edit the browser can undo)
+-        if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
++        if (e.key === 'Tab' && !leave && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+           e.preventDefault();
+           if (!document.execCommand('insertText', false, '  ')) {
+             pad.setRangeText('  ', pad.selectionStart, pad.selectionEnd, 'end');
+@@ -355,11 +371,12 @@ export default {
+     padWrap = el('div.pad-wrap', mirror, pad);
+     new ResizeObserver(() => fitMirror()).observe(pad);
+     rendered = el('article.rendered.md', { hidden: true });
++    listBtn = iconButton('sidebar', 'the note list', { key: 'Ctrl+B', cls: 'plain.slide', onclick: toggleList, 'aria-controls': 'note-list' });
+     const card = el(
+       'div.card.editor-card',
+       el(
+         'div.editor-head',
+-        iconButton('sidebar', 'the note list', { key: 'Ctrl+B', cls: 'plain.slide', onclick: toggleList }),
++        listBtn,
+         chips,
+         el('span.grow'),
+         hint,
+@@ -379,6 +396,7 @@ export default {
+     } catch {
+       /* private window */
+     }
++    listBtn.setAttribute('aria-expanded', String(!wrap.classList.contains('collapsed')));
+     section.append(wrap);
+     app.on('save', () => {
+       cur = null;
+diff --git a/hub/web/views/filters.js b/hub/web/views/filters.js
+index edcd8d5..6714c76 100644
+--- a/hub/web/views/filters.js
++++ b/hub/web/views/filters.js
+@@ -2,7 +2,7 @@
+ // classifier's class at a sureness, words, sums, a list, tags, memories or notes, another
+ // saved filter), run live over the save, kept as presets, and written to a list
+ 
+-import { el, clear, confirmClick, debounce, openHit } from '../util.js';
++import { el, clear, confirmClick, debounce, openHit, keepFocus } from '../util.js';
+ import { icon, iconButton, tip } from '../icons.js';
+ 
+ let app, side, main, count;
+@@ -311,13 +311,21 @@ function drawState() {
+   clear(stateEl, el('span.flt-reads', describe(clean(root))), dirty && (name || root.of.length) ? el('span.hint', name ? 'unsaved changes' : 'not kept yet') : null);
+ }
+ 
+-function drawTree() {
+-  clear(treeEl, groupEl(root, null, -1, 0));
++// the tree drawn again; the focus stays on its control, or goes to `focus` (a node: its
++// first field) when a node was just added, or to the group's "add" when one went away
++let focusNode = null;
++function drawTree(fallback) {
++  keepFocus(treeEl, () => clear(treeEl, groupEl(root, null, -1, 0)), fallback);
++  if (focusNode) {
++    const n = treeEl.querySelector('[data-new]');
++    focusNode = null;
++    n?.querySelector('input, select, button:not(.flt-not)')?.focus();
++  }
+ }
+ 
+ // a change to the tree's shape: draw it again and run
+-function reshape() {
+-  drawTree();
++function reshape(fallback) {
++  drawTree(fallback);
+   changed();
+ }
+ 
+@@ -331,6 +339,7 @@ function notBtn(node, parent, i) {
+   return tip(
+     el('button.flt-not', {
+       type: 'button',
++      dataset: { fk: `not-${indexOf(parent)}-${i}` },
+       className: `flt-not${negated ? ' on' : ''}`,
+       'aria-pressed': String(negated),
+       onclick: () => replace(parent, i, negated ? node.of : { op: 'not', of: node }),
+@@ -339,25 +348,107 @@ function notBtn(node, parent, i) {
+   );
+ }
+ 
+-function removeBtn(parent, i) {
+-  return iconButton('close', 'remove this', { small: true, cls: 'plain', onclick: () => (parent.of.splice(i, 1), reshape()) });
++function removeBtn(parent, i, depth) {
++  const what = depth > 1 ? 'this from its group' : 'this condition';
++  return iconButton('close', `remove ${what}`, {
++    small: true,
++    cls: 'plain',
++    dataset: { fk: `remove-${depth}-${i}` },
++    // the focus goes to the next one's remove, else the group's "add"
++    onclick: () => {
++      const g = groups.get(parent);
++      parent.of.splice(i, 1);
++      reshape(() => treeEl.querySelector(`[data-fk="remove-${depth}-${Math.min(i, parent.of.length - 1)}"]`) || g?.querySelector('.flt-add'));
++    },
++  });
+ }
+ 
++// "add a condition": a button that opens the kinds as a menu (a select would add one at
++// every arrow key on some systems); the arrow keys move in it, Escape closes it
++let menuOpen = null; // the group whose menu is open
++const groups = new WeakMap(); // a group's node -> its element (to put the focus back)
+ function addMenu(group) {
+-  const s = el(
+-    'select.flt-add',
++  const open = menuOpen === group;
++  const btn = el(
++    'button.flt-add',
++    {
++      type: 'button',
++      'aria-haspopup': 'menu',
++      'aria-expanded': String(open),
++      dataset: { fk: `add-${depthOf(group)}-${indexOf(group)}` },
++      onclick: () => {
++        menuOpen = open ? null : group;
++        drawTree();
++        if (menuOpen) treeEl.querySelector('.flt-menu [role=menuitem]')?.focus();
++      },
++    },
++    icon('new'),
++    ' add',
++  );
++  tip(btn, 'add a condition');
++  if (!open) return btn;
++  const close = (refocus) => {
++    menuOpen = null;
++    drawTree();
++    if (refocus) treeEl.querySelector(`[data-fk="${btn.dataset.fk}"]`)?.focus();
++  };
++  const menu = el(
++    'div.flt-menu',
+     {
++      role: 'menu',
+       'aria-label': 'add a condition',
+-      onchange: () => {
+-        if (!s.value) return;
+-        group.of.push(make(s.value));
+-        reshape();
++      onkeydown: (e) => {
++        const items = [...menu.querySelectorAll('[role=menuitem]')];
++        const i = items.indexOf(document.activeElement);
++        const to = { ArrowDown: i + 1, ArrowUp: i - 1 + items.length, Home: 0, End: items.length - 1 }[e.key];
++        if (to != null) {
++          e.preventDefault();
++          items[to % items.length].focus();
++        } else if (e.key === 'Escape') {
++          e.preventDefault();
++          e.stopPropagation();
++          close(true);
++        } else if (e.key === 'Tab') close(false);
+       },
+     },
+-    el('option', { value: '' }, '+ add a condition…'),
+-    KINDS.map(([k, , about]) => el('option', { value: k }, about)),
++    KINDS.map(([k, ic, about]) =>
++      el(
++        'button',
++        {
++          type: 'button',
++          role: 'menuitem',
++          tabindex: '-1',
++          onclick: () => {
++            const node = make(k);
++            group.of.push(node);
++            menuOpen = null;
++            focusNode = node;
++            newNode = node;
++            reshape();
++          },
++        },
++        icon(ic),
++        el('span', about),
++      ),
++    ),
+   );
+-  return s;
++  return el('span.flt-addwrap', btn, menu);
++}
++let newNode = null; // the node just added, marked so its first field takes the focus
++const depthOf = (g) => {
++  const walk = (n, d) => (n === g ? d : (n.of && (Array.isArray(n.of) ? n.of : [n.of]).reduce((a, k) => (a >= 0 ? a : walk(k, d + 1)), -1)) ?? -1);
++  return walk(root, 0);
++};
++const indexOf = (g) => {
++  let at = -1;
++  let n = 0;
++  const walk = (x) => {
++    if (x === g) at = n;
++    n++;
++    if (x.of) (Array.isArray(x.of) ? x.of : [x.of]).forEach(walk);
++  };
++  walk(root);
++  return at;
+ }
+ 
+ // a node, which may be a "not" around something
+@@ -373,12 +464,18 @@ function groupEl(g, parent, i, depth, holder = null) {
+   const seg = el(
+     'div.seg',
+     { role: 'group', 'aria-label': 'how they combine' },
+-    tip(el('button', { type: 'button', className: g.op === 'and' ? 'on' : '', onclick: () => ((g.op = 'and'), reshape()) }, icon('and'), ' all of'), 'every condition must hold'),
+-    tip(el('button', { type: 'button', className: g.op === 'or' ? 'on' : '', onclick: () => ((g.op = 'or'), reshape()) }, icon('or'), ' any of'), 'any one condition is enough'),
++    tip(el('button', { type: 'button', className: g.op === 'and' ? 'on' : '', 'aria-pressed': String(g.op === 'and'), dataset: { fk: `and-${indexOf(g)}` }, onclick: () => ((g.op = 'and'), reshape()) }, icon('and'), ' all of'), 'every condition must hold'),
++    tip(el('button', { type: 'button', className: g.op === 'or' ? 'on' : '', 'aria-pressed': String(g.op === 'or'), dataset: { fk: `or-${indexOf(g)}` }, onclick: () => ((g.op = 'or'), reshape()) }, icon('or'), ' any of'), 'any one condition is enough'),
+   );
+-  return el(
++  const box = el(
+     'div.flt-group',
+-    { className: `flt-group ${g.op}${holder ? ' negated' : ''}${depth ? '' : ' root'}`, style: { '--depth': depth } },
++    {
++      className: `flt-group ${g.op}${holder ? ' negated' : ''}${depth ? '' : ' root'}`,
++      style: { '--depth': depth },
++      role: 'group',
++      'aria-label': depth ? `${holder ? 'not ' : ''}${g.op === 'and' ? 'all of' : 'any of'} (a group)` : 'the conditions',
++      dataset: newNode === outer ? { new: '1' } : null,
++    },
+     el(
+       'div.flt-ghead',
+       depth ? notBtn(outer, parent, i) : null,
+@@ -386,12 +483,14 @@ function groupEl(g, parent, i, depth, holder = null) {
+       el('span.dim.small', depth ? '' : 'texts matching'),
+       el('span.grow'),
+       addMenu(g),
+-      depth ? removeBtn(parent, i) : null,
++      depth ? removeBtn(parent, i, depth) : null,
+     ),
+     g.of.length
+       ? el('div.flt-kids', g.of.map((k, j) => nodeEl(k, g, j, depth + 1)))
+       : el('p.dim.small.flt-empty', depth ? 'empty: add a condition' : 'no conditions yet: every memory and note matches. Add a condition to narrow it down.'),
+   );
++  groups.set(g, box);
++  return box;
+ }
+ 
+ function condEl(c, parent, i, holder) {
+@@ -399,11 +498,11 @@ function condEl(c, parent, i, holder) {
+   const [, ic, about] = KINDS.find((k) => k[0] === c.op) || [null, 'help', c.op];
+   return el(
+     'div.flt-cond',
+-    { className: `flt-cond${holder ? ' negated' : ''}` },
+-    tip(el('span.flt-kind', icon(ic)), about),
++    { className: `flt-cond${holder ? ' negated' : ''}`, role: 'group', 'aria-label': `${holder ? 'not: ' : ''}${about}`, dataset: newNode === outer ? { new: '1' } : null },
++    tip(el('span.flt-kind', { role: 'img' }, icon(ic)), about),
+     notBtn(outer, parent, i),
+     el('div.flt-fields', fields(c)),
+-    removeBtn(parent, i),
++    removeBtn(parent, i, depth(parent) + 1),
+   );
+ }
+ 
+@@ -465,7 +564,7 @@ function fields(c) {
+         el(
+           'div.seg',
+           { role: 'group', 'aria-label': 'which texts' },
+-          ['memories', 'notes'].map((k) => el('button', { type: 'button', className: c.kind === k ? 'on' : '', onclick: () => ((c.kind = k), reshape()) }, k)),
++          ['memories', 'notes'].map((k) => el('button', { type: 'button', className: c.kind === k ? 'on' : '', 'aria-pressed': String(c.kind === k), onclick: () => ((c.kind = k), reshape()) }, k)),
+         ),
+       ];
+     case 'preset':
+diff --git a/hub/web/views/notecls.js b/hub/web/views/notecls.js
+index 223791e..9b789f3 100644
+--- a/hub/web/views/notecls.js
++++ b/hub/web/views/notecls.js
+@@ -2,7 +2,7 @@
+ // kept per note), what each says of it (every class with its probability, the classes it
+ // counts it in, what its validators say), and a yes or no for each
+ 
+-import { el, clear } from '../util.js';
++import { el, clear, keepFocus } from '../util.js';
+ import { icon, iconButton, tip } from '../icons.js';
+ 
+ const pct = (x) => (x == null ? '–' : `${Math.round(x * 100)}%`);
+@@ -22,13 +22,14 @@ export function drawer(app) {
+ 
+   const body = el('div.nd-body');
+   const root = el(
+-    'aside.note-drawer',
++    'aside.note-drawer#note-drawer',
+     { hidden: !open, 'aria-label': 'classifiers on this note' },
+     el('div.nd-head', icon('classifier'), el('h3', 'classifiers'), el('span.grow'), iconButton('refresh', 'read the note again', { small: true, cls: 'plain', onclick: () => load() }), iconButton('close', 'close the drawer', { small: true, cls: 'plain', key: 'Ctrl+I', onclick: () => toggle(false) })),
+     body,
+   );
+ 
+   function toggle(on = !open) {
++    const hadFocus = root.contains(document.activeElement);
+     open = on;
+     root.hidden = !open;
+     try {
+@@ -36,7 +37,7 @@ export function drawer(app) {
+     } catch {
+       /* private window */
+     }
+-    api.onToggle?.(open);
++    api.onToggle?.(open, hadFocus);
+     if (open) load();
+   }
+ 
+@@ -130,7 +131,7 @@ export function drawer(app) {
+       return;
+     }
+     const byName = new Map(d.verdicts.map((v) => [v.name, v]));
+-    clear(
++    keepFocus(body, () => clear(
+       body,
+       el('p.dim.small.nd-about', 'Tick the classifiers to file this note under: they read it now and whenever it changes.'),
+       el(
+@@ -146,7 +147,7 @@ export function drawer(app) {
+           );
+         }),
+       ),
+-    );
++    ));
+   }
+ 
+   const api = {
+diff --git a/src/classify_ui.rs b/src/classify_ui.rs
+index a5375d5..48bb388 100644
+--- a/src/classify_ui.rs
++++ b/src/classify_ui.rs
+@@ -151,6 +151,8 @@ pub struct ClsState {
+     pub importing: bool,
+     pub imports: Vec<PathBuf>,
+     pub confirm_delete: bool,
++    /// "share it?" shown: the next click shares
++    pub confirm_share: bool,
+     // training
+     pub epochs: f32,
+     pub rounds: f32,
+@@ -216,6 +218,7 @@ impl Default for ClsState {
+             importing: false,
+             imports: vec![],
+             confirm_delete: false,
++            confirm_share: false,
+             epochs: 14.0,
+             rounds: 1.0,
+             fresh: false,
+@@ -295,6 +298,7 @@ impl ClsState {
+         self.creating = false;
+         self.importing = false;
+         self.confirm_delete = false;
++        self.confirm_share = false;
+         self.redraw = true;
+         self.buckets_reload = true;
+     }
+@@ -1389,14 +1393,24 @@ fn draw_head(
+             },
+         );
+         let name = d.name.clone();
+-        icon_button(
+-            c,
+-            top,
+-            Icon::Upload,
+-            "share it on the hub (with the app token from the settings' hub section)",
+-            ButtonVariant::Normal,
+-        )
+-        .observe(
++        let mut share = if st.confirm_share {
++            button(
++                c,
++                top,
++                "share it?".into(),
++                ButtonVariant::Primary,
++                "click again to share it on the hub: anyone there can take it in",
++            )
++        } else {
++            icon_button(
++                c,
++                top,
++                Icon::Upload,
++                "share it on the hub (asks first; uses the app token from the settings' hub section)",
++                ButtonVariant::Normal,
++            )
++        };
++        share.observe(
+             move |_a: On<Activate>,
+                   mut st: ResMut<ClsState>,
+                   work: Res<Work>,
+@@ -1404,6 +1418,14 @@ fn draw_head(
+                   config: Res<crate::config::Config>,
+                   mut status: ResMut<Status>,
+                   time: Res<Time>| {
++                if !st.confirm_share {
++                    st.confirm_share = true;
++                    st.confirm_delete = false;
++                    st.redraw = true;
++                    return;
++                }
++                st.confirm_share = false;
++                st.redraw = true;
+                 let msg = match crate::cls_more::start_share(&mut st, &work, db.0.clone(), &config, name.clone()) {
+                     Ok(()) => format!("sharing “{}” on the hub…", name),
+                     Err(e) => e,
+@@ -1440,6 +1462,7 @@ fn draw_head(
+               mut config: ResMut<crate::config::Config>| {
+             if !st.confirm_delete {
+                 st.confirm_delete = true;
++                st.confirm_share = false;
+                 st.redraw = true;
+                 return;
+             }
+@@ -2592,11 +2615,13 @@ fn draw_form(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts) {
+     dim(c, r, "name", f);
+     c.spawn_scene(bsn! {
+         @FeathersTextInputContainer
+-        Node { flex_grow: 0.0, min_width: px(260) }
++        // a fixed width the input fills, its text from the left edge: the container
++        // centers its children, so an input narrower than it (`visible_width`) sat
++        // indented, by however much the measured width fell short
++        Node { flex_grow: 0.0, width: px(260), justify_content: JustifyContent::FlexStart }
+         Children [
+-            @FeathersTextInput {
+-                @visible_width: 24f32,
+-            }
++            @FeathersTextInput
++            Node { flex_grow: 1.0, min_width: px(0) }
+             ClsNameInput
+         ]
+     })
+diff --git a/src/cls_more.rs b/src/cls_more.rs
+index 272926a..aa723cd 100644
+--- a/src/cls_more.rs
++++ b/src/cls_more.rs
+@@ -518,19 +518,8 @@ pub fn draw_hub(st: &mut ClsState, c: &mut Commands, main: Entity, f: &Fonts, co
+         dim(c, k, "none shared there yet (or none match)", f);
+     }
+     for h in st.hub.found.clone() {
+-        let item = col(c, main, 4.0);
+-        c.entity(item).insert((
+-            Node {
+-                width: percent(100),
+-                max_width: px(900),
+-                flex_direction: FlexDirection::Column,
+-                row_gap: px(4),
+-                padding: UiRect::all(px(12)),
+-                border_radius: BorderRadius::all(px(6)),
+-                ..default()
+-            },
+-            BackgroundColor(colors::CARD),
+-        ));
++        // a card like the header's, so they line up
++        let item = card(c, main);
+         let r = row(c, item, 8.0);
+         crate::icons::spawn_icon(c, r, Icon::Classifier, 18.0, colors::TEXT);
+         bold(c, r, &h.name, f, 16.0, colors::TEXT);
+diff --git a/src/filters_ui.rs b/src/filters_ui.rs
+index 29490d9..66d1579 100644
+--- a/src/filters_ui.rs
++++ b/src/filters_ui.rs
+@@ -46,6 +46,8 @@ pub struct FiltersState {
+     pub query: String,
+     pub results: Option<Results>,
+     pub running: bool,
++    /// the filter the results are for: once results show, a changed filter runs again
++    ran: Option<Expr>,
+     side: String,
+ }
+ 
+@@ -64,6 +66,7 @@ impl Default for FiltersState {
+             query: String::new(),
+             results: None,
+             running: false,
++            ran: None,
+             side: String::new(),
+         }
+     }
+@@ -233,6 +236,7 @@ pub fn view() -> impl Scene {
+ 
+ fn run(st: &mut FiltersState, work: &Work, db: &Db) {
+     let e = st.expr.clone();
++    st.ran = Some(e.clone());
+     st.running = true;
+     st.redraw = true;
+     let store = db.0.clone();
+@@ -277,12 +281,17 @@ pub fn rebuild_filters(
+     main: Single<Entity, With<FltMain>>,
+     bar_side: Single<Entity, With<crate::bar::BarSide>>,
+     fonts: Res<Fonts>,
++    work: Res<Work>,
+     mut commands: Commands,
+ ) {
+     if session.route != Route::Filters {
+         st.side.clear();
+         return;
+     }
++    // results on show stay in step with the filter (one run at a time)
++    if st.results.is_some() && !st.running && st.ran.as_ref() != Some(&st.expr) {
++        run(&mut st, &work, &db);
++    }
+     if std::mem::take(&mut st.reload) {
+         st.presets = db.0.filter_presets().unwrap_or_default();
+         st.classifiers =
+@@ -668,11 +677,13 @@ pub fn rebuild_filters(
+     dim(c, r, "keep as", f);
+     c.spawn_scene(bsn! {
+         @FeathersTextInputContainer
+-        Node { flex_grow: 0.0, min_width: px(200) }
++        // a fixed width the input fills, its text from the left edge: the container
++        // centers its children, so an input narrower than it (`visible_width`) sat
++        // indented, by however much the measured width fell short
++        Node { flex_grow: 0.0, width: px(200), justify_content: JustifyContent::FlexStart }
+         Children [
+-            @FeathersTextInput {
+-                @visible_width: 18f32,
+-            }
++            @FeathersTextInput
++            Node { flex_grow: 1.0, min_width: px(0) }
+             FltNameInput
+         ]
+     })
