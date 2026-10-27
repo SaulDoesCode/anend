@@ -24,6 +24,20 @@ pub enum Stop {
     Err(String),
     /// `<--`: the exit code
     Exit(i32),
+    /// the step a debugger asked to stop at (`Rt::pause_at`)
+    Pause,
+}
+
+/// what the code editor learns from a run: which of the program's own tokens was running
+/// when output was written (its inline results)
+#[derive(Default)]
+pub struct Trace {
+    /// the program's unit
+    main: Option<*const Vec<Tok>>,
+    /// the program's token running now (or the last one, while a call it made runs)
+    at: usize,
+    /// (the program's token, the output written meanwhile)
+    pub writes: Vec<(usize, String)>,
 }
 
 pub type Res = Result<(), Stop>;
@@ -177,6 +191,12 @@ pub struct Rt {
     pub loaded: HashSet<String>,
     /// the most activations held at once (tail calls keep it flat)
     pub max_depth: usize,
+    /// set, the run records which of the program's tokens wrote what
+    pub trace: Option<Trace>,
+    /// set, the run stops (Stop::Pause) before the step past this many
+    pub pause_at: Option<u64>,
+    /// each unit's source, by the unit (for a paused run's position)
+    unit_src: HashMap<*const Vec<Tok>, Rc<str>>,
 }
 
 fn whole(v: f64) -> Option<u64> {
@@ -205,6 +225,9 @@ impl Rt {
             max_out: 16 << 20,
             loaded: HashSet::new(),
             max_depth: 0,
+            trace: None,
+            pause_at: None,
+            unit_src: HashMap::new(),
         }
     }
 
@@ -214,6 +237,9 @@ impl Rt {
         self.global.numbers.insert("argc".into(), args.len() as f64);
         self.global.lists.insert("args".into(), list);
         let r = self.unit(src).and_then(|u| {
+            if let Some(t) = self.trace.as_mut() {
+                t.main = Some(Rc::as_ptr(&u));
+            }
             self.push_act(u, None, Kind::Plain);
             self.drive(0)
         });
@@ -221,6 +247,7 @@ impl Rt {
             Ok(()) => (None, 0),
             Err(Stop::Exit(c)) => (None, c),
             Err(Stop::Err(m)) => (Some(m), 1),
+            Err(Stop::Pause) => (None, -1),
         };
         Outcome {
             out: self.out.clone(),
@@ -239,7 +266,9 @@ impl Rt {
         let toks = lex(src).map_err(|e| Stop::Err(format!("{e} in a unit")))?;
         let u = Rc::new(toks);
         if self.units.len() < 10_000 {
-            self.units.insert(src.into(), u.clone());
+            let s: Rc<str> = src.into();
+            self.unit_src.insert(Rc::as_ptr(&u), s.clone());
+            self.units.insert(s, u.clone());
         }
         Ok(u)
     }
@@ -252,6 +281,20 @@ impl Rt {
             locals: Scope::default(),
             kind,
         });
+    }
+
+    /// where a paused run is: the running unit's source, whether it's the program's own,
+    /// and the token it stops before (its index), with how deep the calls go
+    pub fn position(&self) -> Option<(Rc<str>, bool, usize, usize)> {
+        let a = self.acts.last()?;
+        let src = self.unit_src.get(&Rc::as_ptr(&a.unit))?.clone();
+        let main = self.trace.as_ref().and_then(|t| t.main) == Some(Rc::as_ptr(&a.unit));
+        Some((src, main, a.pc, self.acts.len()))
+    }
+
+    /// the running activation's locals (a paused run's)
+    pub fn locals(&self) -> Option<&Scope> {
+        self.acts.last().map(|a| &a.locals)
     }
 
     /// runs `src` as a unit on the line, to its end (for natives applying a quotation)
@@ -283,11 +326,20 @@ impl Rt {
                 self.finish(top)?;
                 continue;
             }
+            if self.pause_at.is_some_and(|p| self.steps >= p) {
+                return Err(Stop::Pause);
+            }
             let unit = a.unit.clone();
             let pc = a.pc;
             a.pc += 1;
             let last = pc + 1 == unit.len();
             self.steps += 1;
+            let before = self.out.len();
+            if let Some(t) = self.trace.as_mut()
+                && t.main == Some(Rc::as_ptr(&unit))
+            {
+                t.at = pc;
+            }
             if self.steps > self.max_steps {
                 return err(format!("the run took more than {} steps", self.max_steps));
             }
@@ -304,6 +356,15 @@ impl Rt {
                     self.stack.push(s.into());
                 }
                 Tok::Word(w) => self.word(w, last)?,
+            }
+            if let Some(t) = self.trace.as_mut()
+                && self.out.len() > before
+            {
+                let wrote = self.out[before..].to_string();
+                match t.writes.last_mut() {
+                    Some(l) if l.0 == t.at => l.1.push_str(&wrote),
+                    _ => t.writes.push((t.at, wrote)),
+                }
             }
             if self.out.len() > self.max_out {
                 return err("the output grew past its limit");

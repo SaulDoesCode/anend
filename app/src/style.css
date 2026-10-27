@@ -934,3 +934,13 @@ a.btn { text-decoration: none; }
 /* the sounds window */
 .snd-row { gap: 6px; align-items: center; }
 .snd-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
+
+/* s code: inline results, the stepped token, completion, the outline, the debugger */
+.pad pre.hl .s-note { position: absolute; left: 10px; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); font-style: italic; font-size: .88em; text-align: left; pointer-events: none; }
+.pad pre.hl mark.s-at { background: color-mix(in srgb, var(--accent) 45%, transparent); color: inherit; border-radius: 2px; }
+.s-compl { gap: 4px; padding: 4px 2px 0; }
+.s-outline { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: 5px; background: var(--card); max-height: 220px; overflow: auto; }
+.s-outline .s-item { justify-content: flex-start; gap: 4px; height: auto; padding: 2px 4px; }
+.s-dbg .s-stack { gap: 4px; padding: 4px 0; }
+.s-dbg .s-vals { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 2px 10px; padding: 4px 0; }
+.s-dbg .s-unit { font-size: .9em; }

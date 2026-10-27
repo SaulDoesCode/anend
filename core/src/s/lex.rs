@@ -73,7 +73,21 @@ fn brace_parts(prefix: &str, inner: &[char]) -> Vec<Part> {
 
 /// a unit's tokens, or why it doesn't parse
 pub fn lex(src: &str) -> Result<Vec<Tok>, String> {
+    Ok(lex_spans(src)?.into_iter().map(|(t, _)| t).collect())
+}
+
+/// a unit's tokens with where each is in `src` (byte offsets, a literal's prefix included):
+/// for the code editor's outline, inline results and stepping
+pub fn lex_spans(src: &str) -> Result<Vec<(Tok, std::ops::Range<usize>)>, String> {
     let cs: Vec<char> = src.chars().collect();
+    // a char's index → its byte offset (and the end)
+    let mut byte = Vec::with_capacity(cs.len() + 1);
+    let mut b = 0;
+    for c in &cs {
+        byte.push(b);
+        b += c.len_utf8();
+    }
+    byte.push(b);
     let mut out = Vec::new();
     let mut i = 0;
     while i < cs.len() {
@@ -92,7 +106,7 @@ pub fn lex(src: &str) -> Result<Vec<Tok>, String> {
             if cs[i] == '\'' {
                 let close = cs[i + 1..].iter().position(|&c| c == '\'').ok_or("an unclosed quote")?;
                 let body: String = cs[i + 1..i + 1 + close].iter().collect();
-                out.push(Tok::Quote(format!("{word}{body}")));
+                out.push((Tok::Quote(format!("{word}{body}")), byte[start]..byte[i + close + 2]));
                 i += close + 2;
             } else {
                 let mut depth = 0usize;
@@ -113,12 +127,12 @@ pub fn lex(src: &str) -> Result<Vec<Tok>, String> {
                     }
                     j += 1;
                 }
-                out.push(Tok::Brace(brace_parts(&word, &cs[i + 1..j])));
+                out.push((Tok::Brace(brace_parts(&word, &cs[i + 1..j])), byte[start]..byte[j + 1]));
                 i = j + 1;
             }
             continue;
         }
-        out.push(Tok::Word(word));
+        out.push((Tok::Word(word), byte[start]..byte[i]));
     }
     Ok(out)
 }
@@ -163,5 +177,7 @@ mod tests {
         assert!(lex("{a").is_err());
         assert!(lex("'a").is_err());
         assert_eq!(lex("x'y'z").unwrap(), vec![Tok::Quote("xy".into()), w("z")]);
+        let sp: Vec<_> = lex_spans("é {a b} c'd'").unwrap().into_iter().map(|t| t.1).collect();
+        assert_eq!(sp, [0..2, 3..8, 9..13]);
     }
 }

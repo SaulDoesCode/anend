@@ -270,8 +270,11 @@ Lists are how you tell anend what goes together, and what models learn from.
 - **s programs:** the **s** button in a note's toolbar tags it `s`, which makes it a
   program in s (docs/s.md). Its text then stands right-aligned, so each line's acting word
   is at the right, and is coloured by s's kinds of word. **▶** runs it and shows what it
-  printed, or its error, under the pad. A program can run another by its title
-  (`greet.`), since its files are the save's s programs.
+  printed, or its error, under the pad, and each line's output beside it. A program can
+  run another by its title (`greet.`), since its files are the save's s programs. The step
+  button runs it one step at a time (or 10, 100, to the end), with the stack and the values
+  shown and the next token marked; the outline lists what it defines; Ctrl+click a word
+  goes to its definition; typing offers completions (Tab takes the first).
 - **The reader** (**Ctrl+4**): notes and texts as cards, a page at a time. Click one (or
   Enter on it) to read it big; **← →** step through, **Esc** goes back.
 - **Tags** (**Ctrl+6**): every tag with its count. Click picks one, Ctrl or Shift+click

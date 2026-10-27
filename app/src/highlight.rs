@@ -481,6 +481,10 @@ pub struct Layer {
     pub segs: Vec<String>,
     /// the text is s code (a note tagged `s`): coloured by s's word classes, whole
     pub s: bool,
+    /// s code's inline results, by line (dropped when the text changes)
+    pub notes: std::collections::BTreeMap<usize, String>,
+    /// the token a stepped run stopped before (dropped when the text changes)
+    pub at: Option<std::ops::Range<usize>>,
 }
 
 impl Layer {
@@ -488,7 +492,7 @@ impl Layer {
     pub fn full(&mut self, text: &str, colour: bool, flags: &[Flag]) -> Vec<String> {
         if self.s {
             self.segs = vec![text.to_string()];
-            return vec![s_html(text, colour)];
+            return vec![s_html_with(text, colour, &self.notes, self.at.clone())];
         }
         self.segs = segments(text).into_iter().map(str::to_string).collect();
         let mut at = 0;
@@ -525,6 +529,9 @@ impl Layer {
             }
             t.replace_range(a..b, ins);
             let went = self.segs.len();
+            // what ran belonged to the text as it was
+            self.notes.clear();
+            self.at = None;
             let html = s_html(&t, colour);
             self.segs = vec![t];
             return Some((0, went, vec![html]));
@@ -650,16 +657,51 @@ pub fn s_classes(text: &str) -> Vec<Class> {
 
 /// s code as the colour layer's html
 pub fn s_html(text: &str, colour: bool) -> String {
+    s_html_with(text, colour, &std::collections::BTreeMap::new(), None)
+}
+
+/// s code as the colour layer's html, with what the code editor adds: inline results at
+/// the start of their lines (`notes`, by line; drawn at the pad's left edge without
+/// moving the text) and the token a stepped run stopped before (`at`, marked)
+pub fn s_html_with(
+    text: &str,
+    colour: bool,
+    notes: &std::collections::BTreeMap<usize, String>,
+    at: Option<std::ops::Range<usize>>,
+) -> String {
     let classes = if colour {
         s_classes(text)
     } else {
         vec![Class::Plain; text.len()]
     };
+    let at = at.filter(|r| {
+        r.start < r.end && r.end <= text.len() && text.is_char_boundary(r.start) && text.is_char_boundary(r.end)
+    });
+    let cut = |i: usize| {
+        at.as_ref().is_some_and(|r| r.start == i || r.end == i) || (i > 0 && text.as_bytes()[i - 1] == b'\n')
+    };
     let mut out = String::with_capacity(text.len() * 2);
+    let mut line = 0;
     let mut a = 0;
+    if text.is_empty()
+        && let Some(n) = notes.get(&0)
+    {
+        note_html(n, &mut out);
+    }
     while a < text.len() {
+        if a == 0 || text.as_bytes()[a - 1] == b'\n' {
+            if a > 0 {
+                line += 1;
+            }
+            if let Some(n) = notes.get(&line) {
+                note_html(n, &mut out);
+            }
+        }
+        if at.as_ref().is_some_and(|r| r.start == a) {
+            out.push_str("<mark class=\"s-at\">");
+        }
         let mut b = a + 1;
-        while b < text.len() && (classes[b] == classes[a] || !text.is_char_boundary(b)) {
+        while b < text.len() && !cut(b) && (classes[b] == classes[a] || !text.is_char_boundary(b)) {
             b += 1;
         }
         let css = classes[a].css();
@@ -672,9 +714,19 @@ pub fn s_html(text: &str, colour: bool) -> String {
             escape(&text[a..b], &mut out);
             out.push_str("</span>");
         }
+        if at.as_ref().is_some_and(|r| r.end == b) {
+            out.push_str("</mark>");
+        }
         a = b;
     }
     out
+}
+
+/// an inline result: drawn at the line's start, at the pad's left edge, taking no room
+fn note_html(n: &str, out: &mut String) {
+    out.push_str("<span class=\"s-note\" aria-hidden=\"true\">");
+    escape(n, out);
+    out.push_str("</span>");
 }
 
 #[cfg(test)]
@@ -953,5 +1005,14 @@ mod timing {
             .collect();
         assert_eq!(c, "{{{{.9..$.vv.C");
         assert!(s_html("{a} <", true).contains("h-sl"));
+        let mut notes = std::collections::BTreeMap::new();
+        notes.insert(1, "out".to_string());
+        let h = super::s_html_with("a >\nb >", true, &notes, Some(2..3));
+        assert!(h.contains("<mark class=\"s-at\">"), "{h}");
+        let i = h.find("s-note").unwrap();
+        assert!(
+            h[..i].contains('\n') && !h[..i].contains("b"),
+            "the note starts line 2: {h}"
+        );
     }
 }

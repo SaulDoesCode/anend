@@ -89,6 +89,9 @@ departure says why in its commit).
 - Done (27 Oct): placing prefabs by hand (#19): the ghost, snapping, turning, red overlaps.
 - Done (27 Oct): the ▶ usable point for walking through what has been built (README,
   guide, offered on PR #8).
+- Done (27 Oct): the rest of s's code editor: outline, go to definition, inline results,
+  the step debugger, completion.
+- Next: a headless standard library over every app op, and `anend run` (#11).
   Open further up: the language lines (s, the standard library), taxonomies and pipes,
   the wgpu renderer and culling.
 

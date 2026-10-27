@@ -296,3 +296,15 @@ The answers left these open. Each is written into the design as its default.
     ghost against the face it points at; with nothing under the view it hangs 12 units
     ahead, since blocks float in the room anyway. A click where it would overlap a block
     is refused rather than settled.
+
+## The code editor (27 Oct)
+
+76. **Inline results go at the left of the line whose token wrote them** (in the
+    right-aligned code, that space is free); output written inside a call is put beside
+    the program's line that made the call. They stay until the text changes.
+77. **Stepping runs the program again from the start to the step asked for,** with one
+    seed for the whole session, rather than holding a paused run: every step is the same
+    run, at the cost of time on long programs (one run's steps at most).
+78. **Go to definition is Ctrl+click** (a word's script or `><` definition in this program,
+    else the program it names); completion offers at most eight words, shortest first, and
+    Tab takes the first (Tab moves on as usual when there's none).

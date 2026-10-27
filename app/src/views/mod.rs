@@ -13,6 +13,7 @@ pub mod models;
 pub mod notes;
 pub mod pictures;
 pub mod reader;
+pub mod scode;
 pub mod settings;
 pub mod space;
 pub mod specs;

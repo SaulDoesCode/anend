@@ -235,10 +235,21 @@ mod tests {
             assert!(hl.contains(needle), "highlight.rs lost {needle}");
         }
         let rs = include_str!("views/notes.rs");
-        for needle in ["\"run the program\"", "\"s.run\"", "s-run", "ops::script::TAG"] {
+        for needle in [
+            "\"run the program\"",
+            "\"s.run\"",
+            "s-run",
+            "ops::script::TAG",
+            "\"s.debug\"",
+            "\"step through the program\"",
+            "\"the program's outline\"",
+            "goto_req",
+            "__anendCompl",
+        ] {
             assert!(rs.contains(needle), "notes.rs lost {needle}");
         }
         assert!(include_str!("style.css").contains(".pad.code textarea"));
+        assert!(hl.contains("pub fn s_html_with(") && include_str!("views/scode.rs").contains("pub fn outline("));
     }
 
     /// wiring: blocks that cast rays and run programs, the window, playing in the room

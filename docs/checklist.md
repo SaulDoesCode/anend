@@ -133,11 +133,11 @@ docs/architecture.md (the whole).
       constant space, as s §6 requires (#11).
       (26 Oct: `anend_core::s`, its own activation stack, a tail call replaces its frame;
       the codec's s mode; programs are notes tagged `s`, run with `s.run`.)
-- [ ] The notes view as s's code editor: a right-aligned mode (the acting word stands at the
+- [x] The notes view as s's code editor: a right-aligned mode (the acting word stands at the
       right), highlighting by s's word classes (commands, suffix forms, literals, locals),
       outline, go to definition, inline results, step debugging, completion (#11, #12).
-      (26 Oct: the right-aligned mode, the word-class colours and ▶ running are in; outline,
-      go to definition, inline results, step debugging and completion remain.)
+      (27 Oct: outline, Ctrl+click to a definition, inline results, the step debugger and
+      completion; `s.run` with `trace`, `s.debug`.)
 - [ ] A headless standard library over every app op, and `anend run` (#11).
 - [ ] Classifiers and models as language primitives (#18).
 - [ ] ▶ **usable:** scripting the project from the notes view and the command line.

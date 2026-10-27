@@ -55,7 +55,7 @@ pub fn call(g: &Graph, op: &str, args: &Value, shared: bool) -> Res {
                     .collect::<Vec<_>>()
             ))
         }
-        "s.run" => {
+        "s.run" | "s.debug" => {
             let progs = programs(g)?;
             let code = match args.get("code").and_then(Value::as_str) {
                 Some(c) => c.to_string(),
@@ -82,7 +82,23 @@ pub fn call(g: &Graph, op: &str, args: &Value, shared: bool) -> Res {
                 })
                 .unwrap_or_default();
             let max = if shared { 2_000_000 } else { 50_000_000 };
-            let o = crate::s::run(&code, s(args, "stdin"), files, &argv, max, g.now());
+            let seed = args.get("seed").and_then(Value::as_u64).unwrap_or_else(|| g.now());
+            // the debugger: the run stopped before a step (`steps`), the same seed each time
+            if op == "s.debug" {
+                let steps = args.get("steps").and_then(Value::as_u64).unwrap_or(0).min(max);
+                let snap = crate::s::debug(&code, s(args, "stdin"), files, &argv, steps, seed);
+                return Ok(json!(snap));
+            }
+            // with `trace`, the output each of the program's tokens wrote (its inline results)
+            if args.get("trace").and_then(Value::as_bool) == Some(true) {
+                let (o, writes) = crate::s::run_traced(&code, s(args, "stdin"), files, &argv, max, seed);
+                let lines: Vec<Value> = writes
+                    .into_iter()
+                    .map(|(r, out)| json!({ "from": r.start, "to": r.end, "out": out }))
+                    .collect();
+                return Ok(json!({ "out": o.out, "err": o.err, "code": o.code, "steps": o.steps, "writes": lines }));
+            }
+            let o = crate::s::run(&code, s(args, "stdin"), files, &argv, max, seed);
             Ok(json!({ "out": o.out, "err": o.err, "code": o.code, "steps": o.steps }))
         }
         "s.words" => {
@@ -134,6 +150,11 @@ mod tests {
         assert_eq!(r["out"], "\n in\n x");
         let r = call(&g, "s.run", &json!({ "code": "{l.} l$ l.." }), true).unwrap();
         assert!(r["err"].as_str().unwrap().contains("2000000 steps"));
+        let r = call(&g, "s.run", &json!({ "code": "{hi} >", "trace": true }), l).unwrap();
+        assert_eq!(r["writes"], json!([{ "from": 5, "to": 6, "out": "\n hi" }]));
+        let d = call(&g, "s.debug", &json!({ "code": "1 2", "steps": 1, "seed": 3 }), l).unwrap();
+        assert_eq!(d["stack"], json!(["1"]));
+        assert_eq!(d["at"], json!({ "start": 2, "end": 3 }));
         assert!(
             call(&g, "s.words", &json!({}), l).unwrap()["commands"]
                 .as_array()

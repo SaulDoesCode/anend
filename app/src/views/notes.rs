@@ -105,17 +105,56 @@ if (!window.__anendPadSync) {
     if (!p || p.id !== 'note-pad' || !window.__anendPadSend) return;
     const v = p.value, prev = p.__prev;
     p.__prev = v;
-    if (typeof prev !== 'string') { window.__anendPadSend({ full: v }); return; }
+    if (typeof prev !== 'string') { window.__anendPadSend({ full: v, caret: p.selectionStart }); return; }
     const n = Math.min(prev.length, v.length);
     let a = 0;
     while (a < n && prev.charCodeAt(a) === v.charCodeAt(a)) a++;
     let b = 0;
     while (b < n - a && prev.charCodeAt(prev.length - 1 - b) === v.charCodeAt(v.length - 1 - b)) b++;
-    window.__anendPadSend({ at: a, del: prev.length - a - b, ins: v.slice(a, v.length - b), len: v.length });
+    window.__anendPadSend({ at: a, del: prev.length - a - b, ins: v.slice(a, v.length - b), len: v.length, caret: p.selectionStart });
+  }, true);
+  // s code: Ctrl+click goes to a word's definition; Tab takes the first completion
+  document.addEventListener('click', (e) => {
+    const p = e.target;
+    if (p && p.id === 'note-pad' && (e.ctrlKey || e.metaKey) && window.__anendPadSend) window.__anendPadSend({ goto: p.selectionStart });
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    const p = e.target;
+    const c = window.__anendCompl;
+    if (!p || p.id !== 'note-pad' || e.key !== 'Tab' || e.shiftKey || !c) return;
+    e.preventDefault();
+    const a = p.selectionStart;
+    p.setRangeText(c, a, a, 'end');
+    window.__anendCompl = null;
+    p.dispatchEvent(new Event('input', { bubbles: true }));
   }, true);
 }
 await new Promise(() => {});
 "#;
+
+/// selects a span of the pad and scrolls it into view (go to definition, the outline)
+fn pad_show(a: usize, b: usize) {
+    // the pad counts UTF-16 units; Rust's offsets are bytes
+    document::eval(&format!(
+        "const p = document.getElementById('note-pad'); if (p) {{ const enc = new TextEncoder(); const v = p.value; let a = 0, b = 0, n = 0; for (let i = 0; i < v.length; i++) {{ if (n === {a}) a = i; if (n === {b}) {{ b = i; break; }} n += enc.encode(v[i]).length; b = i + 1; }} p.focus(); p.setSelectionRange(a, b); const lh = parseFloat(getComputedStyle(p).lineHeight) || 20; const line = v.slice(0, a).split('\\n').length - 1; p.scrollTop = Math.max(0, line * lh - p.clientHeight / 3); }}"
+    ));
+}
+
+/// the output a run wrote, as one line beside the code that wrote it (`> a b` writes
+/// "\n a b"): its lines joined, at most 80 characters
+fn inline_result(out: &str) -> String {
+    let s: Vec<&str> = out
+        .split('\n')
+        .map(|l| l.strip_prefix(' ').unwrap_or(l))
+        .filter(|l| !l.is_empty())
+        .collect();
+    let s = s.join(" · ");
+    if s.chars().count() > 80 {
+        format!("{}…", s.chars().take(79).collect::<String>())
+    } else {
+        s
+    }
+}
 
 /// a change sent by `PAD_SYNC_JS`, applied to the text; false when it doesn't fit (the
 /// pad's whole text is asked for then)
@@ -231,6 +270,15 @@ pub fn Notes() -> Element {
     let mut judging = use_signal(|| false);
     // an s program's last run: its output and error
     let mut ran: Signal<Option<serde_json::Value>> = use_signal(|| None);
+    // the code editor (`views::scode`): the save's s programs (title, key), the words that
+    // complete what's being typed, a go-to asked for (a place in the text), the outline
+    // shown, and a stepped run (how many steps in, its seed) with what it shows
+    let mut progs: Signal<Vec<(String, String)>> = use_signal(Vec::new);
+    let mut compl: Signal<(String, Vec<String>)> = use_signal(|| (String::new(), vec![]));
+    let mut goto_req: Signal<Option<usize>> = use_signal(|| None);
+    let mut outline_open = use_signal(|| false);
+    let mut dbg: Signal<Option<(u64, u64)>> = use_signal(|| None);
+    let mut snap: Signal<Option<serde_json::Value>> = use_signal(|| None);
     let mut tag_gen = use_signal(|| 0u64);
     let mut tag_draft = use_signal(String::new);
     // the spelling check: the flags for the text they were made for
@@ -272,6 +320,11 @@ pub fn Notes() -> Element {
         spawn(async move {
             let mut ev = document::eval(PAD_SYNC_JS);
             while let Ok(m) = ev.recv::<serde_json::Value>().await {
+                // s code: a Ctrl+click asks for the word's definition
+                if let Some(at) = m["goto"].as_u64() {
+                    goto_req.set(Some(at as usize));
+                    continue;
+                }
                 let d = text.with_mut(|t| apply_delta(t, &m));
                 match d {
                     Delta::Lost => {
@@ -308,6 +361,39 @@ pub fn Notes() -> Element {
                 }
                 dirty.set(true);
                 pick.set(None);
+                // s code: the words that complete what's typed before the caret
+                if tags.peek().iter().any(|t| t == anend_core::ops::script::TAG)
+                    && let Some(caret) = m["caret"].as_u64()
+                {
+                    let t = text.peek();
+                    let prefix = crate::views::scode::prefix_at(&t, caret as usize).to_string();
+                    let titles: Vec<String> = progs.peek().iter().map(|p| p.0.clone()).collect();
+                    let mut words: Vec<String> =
+                        anend_core::s::machine::COMMANDS.iter().map(|w| w.to_string()).collect();
+                    words.extend(
+                        anend_core::s::lib::words()
+                            .into_iter()
+                            .flat_map(|(_, w)| w)
+                            .map(|w| w.to_string()),
+                    );
+                    words.extend(titles.iter().cloned());
+                    let body_at = crate::views::scode::body_offset(&t);
+                    words.extend(
+                        crate::views::scode::outline(&t[body_at..], &titles)
+                            .into_iter()
+                            .map(|i| i.name),
+                    );
+                    let c = crate::views::scode::complete(&prefix, &words, 8);
+                    let rest = c.first().map(|w| w[prefix.len()..].to_string());
+                    document::eval(&format!(
+                        "window.__anendCompl = {};",
+                        serde_json::to_string(&rest).unwrap_or("null".into())
+                    ));
+                    compl.set((prefix, c));
+                } else if !compl.peek().1.is_empty() {
+                    compl.set((String::new(), vec![]));
+                    document::eval("window.__anendCompl = null;");
+                }
             }
         });
     });
@@ -535,6 +621,129 @@ pub fn Notes() -> Element {
     // a note tagged `s` is s code (docs/s.md): right-aligned, coloured by s's word
     // classes, run with ▶; the spelling check leaves it alone
     let code = tags.read().iter().any(|t| t == anend_core::ops::script::TAG);
+    // the code editor: the programs (for go to definition and completion), when it's code
+    {
+        let api = api.clone();
+        use_effect(use_reactive!(|code| {
+            if !code {
+                return;
+            }
+            let api = api.clone();
+            spawn(async move {
+                if let Ok(v) = api.call("s.programs", serde_json::json!({})).await {
+                    progs.set(
+                        v.as_array()
+                            .into_iter()
+                            .flatten()
+                            .map(|p| {
+                                (
+                                    p["title"].as_str().unwrap_or("").to_string(),
+                                    p["key"].as_str().unwrap_or("").to_string(),
+                                )
+                            })
+                            .collect(),
+                    );
+                }
+            });
+        }));
+    }
+    // the stepped run: run again to the step asked for; the token it stops before is
+    // marked in the pad when it's the program's own
+    {
+        let api = api.clone();
+        let layer = layer.clone();
+        use_effect(move || {
+            let state = dbg();
+            let layer = layer.clone();
+            let Some((n, seed)) = state else {
+                snap.set(None);
+                let had = layer.borrow().layer.at.is_some();
+                if had {
+                    layer.borrow_mut().layer.at = None;
+                    layer_gen += 1;
+                }
+                return;
+            };
+            let whole = text.peek().clone();
+            let body_at = crate::views::scode::body_offset(&whole);
+            let body = whole[body_at..].to_string();
+            let api = api.clone();
+            spawn(async move {
+                match api
+                    .call("s.debug", serde_json::json!({ "code": body, "steps": n, "seed": seed }))
+                    .await
+                {
+                    Ok(r) => {
+                        let at = (r["main"] == true)
+                            .then(|| {
+                                Some(
+                                    body_at + r["at"]["start"].as_u64()? as usize
+                                        ..body_at + r["at"]["end"].as_u64()? as usize,
+                                )
+                            })
+                            .flatten();
+                        if *text.peek() == whole {
+                            layer.borrow_mut().layer.at = at;
+                            layer_gen += 1;
+                        }
+                        snap.set(Some(r));
+                    }
+                    Err(e) => ui.fail(e),
+                }
+            });
+        });
+    }
+    // a Ctrl+click: the word's definition here, else the program it names
+    {
+        let api = api.clone();
+        use_effect(move || {
+            let Some(at) = goto_req() else { return };
+            goto_req.set(None);
+            let t = text.peek().clone();
+            let Some((_, _, w)) = crate::views::scode::word_at(&t, at) else {
+                return;
+            };
+            let name = crate::views::scode::stem(w).to_string();
+            let titles: Vec<String> = progs.peek().iter().map(|p| p.0.clone()).collect();
+            let body_at = crate::views::scode::body_offset(&t);
+            let here = crate::views::scode::outline(&t[body_at..], &titles)
+                .into_iter()
+                .find(|i| i.name == name && i.kind != "call");
+            if let Some(i) = here {
+                pad_show(body_at + i.at, body_at + i.at + i.name.len());
+                return;
+            }
+            let Some((_, key)) = progs
+                .peek()
+                .iter()
+                .find(|p| p.0 == name || format!("{}.s", p.0) == name)
+                .cloned()
+            else {
+                ui.say(format!(
+                    "“{name}” isn't defined in this program, nor a program of the save"
+                ));
+                return;
+            };
+            let api = api.clone();
+            spawn(async move {
+                match api.note(&key).await {
+                    Ok(note) => {
+                        text.set(
+                            note.source
+                                .clone()
+                                .unwrap_or_else(|| anend_core::note::compose(&note.title, &note.markdown)),
+                        );
+                        tags.set(note.tags.clone());
+                        open.set(Some(note));
+                        seq += 1;
+                        dirty.set(false);
+                        armed.set(false);
+                    }
+                    Err(e) => ui.fail(e),
+                }
+            });
+        });
+    }
     let check = ui.prefs.read().check_spelling && !code;
     let shown_flags: Vec<crate::highlight::Flag> = {
         let (t, fl) = &*flags.read();
@@ -566,7 +775,8 @@ pub fn Notes() -> Element {
     // each typed change patches only its segments, in the pad's delta loop). The spelling
     // check still pauses on long notes.
     let big = text.read().len() > big_at();
-    let layered = colour || !shown_flags.is_empty();
+    // s code always has its layer (inline results and the stepped token live in it)
+    let layered = colour || !shown_flags.is_empty() || code;
     {
         let layer = layer.clone();
         let flags_now = shown_flags.clone();
@@ -706,17 +916,56 @@ pub fn Notes() -> Element {
                                 class: "plain",
                                 "data-tip": "run it (its files are the save's s programs, by title)",
                                 "aria-label": "run the program",
-                                onclick: { let api = api.clone(); move |_| {
+                                onclick: { let api = api.clone(); let layer = layer.clone(); move |_| {
                                     let api = api.clone();
-                                    let body = anend_core::note::split(&text.peek()).1.to_string();
+                                    let layer = layer.clone();
+                                    let whole = text.peek().clone();
+                                    let body_at = crate::views::scode::body_offset(&whole);
+                                    let body = whole[body_at..].to_string();
                                     spawn(async move {
-                                        match api.call("s.run", serde_json::json!({ "code": body })).await {
-                                            Ok(r) => ran.set(Some(r)),
+                                        match api.call("s.run", serde_json::json!({ "code": body, "trace": true })).await {
+                                            Ok(r) => {
+                                                // each line's output beside it, while the text stays as it ran
+                                                let mut notes: std::collections::BTreeMap<usize, String> = Default::default();
+                                                for w in r["writes"].as_array().into_iter().flatten() {
+                                                    let at = body_at + w["from"].as_u64().unwrap_or(0) as usize;
+                                                    let line = crate::views::scode::line_of(&whole, at);
+                                                    let shown = inline_result(w["out"].as_str().unwrap_or(""));
+                                                    let n = notes.entry(line).or_default();
+                                                    if !n.is_empty() { n.push_str(" · "); }
+                                                    n.push_str(&shown);
+                                                }
+                                                if *text.peek() == whole {
+                                                    layer.borrow_mut().layer.notes = notes;
+                                                    layer_gen += 1;
+                                                }
+                                                ran.set(Some(r));
+                                            }
                                             Err(e) => ran.set(Some(serde_json::json!({ "out": "", "err": e }))),
                                         }
                                     });
                                 } },
                                 Icon { name: "play" }
+                            }
+                            button {
+                                class: if dbg().is_some() { "plain on" } else { "plain" },
+                                "data-tip": "step through it: the stack, the values and the token it stops before",
+                                "aria-label": "step through the program",
+                                onclick: move |_| {
+                                    if dbg.peek().is_some() { dbg.set(None); } else {
+                                        // one seed for the whole session, so each step runs the same run again
+                                        let seed = text.peek().bytes().fold(0x5eed_u64, |h, b| h.rotate_left(5) ^ b as u64).wrapping_add(seq() * 7919);
+                                        dbg.set(Some((0, seed)));
+                                    }
+                                },
+                                Icon { name: "chevron-right" }
+                            }
+                            button {
+                                class: if outline_open() { "plain on" } else { "plain" },
+                                "data-tip": "the outline: what it defines and the programs it calls (Ctrl+click a word: its definition)",
+                                "aria-label": "the program's outline",
+                                onclick: move |_| outline_open.set(!outline_open()),
+                                Icon { name: "list" }
                             }
                         }
                         button {
@@ -830,6 +1079,110 @@ pub fn Notes() -> Element {
                                 }
                                 pre { class: "s-out", {r["out"].as_str().unwrap_or("").trim_start_matches('\n').to_string()} }
                                 if let Some(e) = r["err"].as_str() {
+                                    pre { class: "s-err", role: "alert", "s: {e}" }
+                                }
+                            }
+                        }
+                        if code && !compl().1.is_empty() {
+                            div { class: "s-compl row wrap",
+                                span { class: "dim small", "Tab:" }
+                                for (i, w) in compl().1.into_iter().enumerate() {
+                                    {
+                                        let rest = w[compl().0.len().min(w.len())..].to_string();
+                                        rsx! {
+                                            button { key: "{w}", class: if i == 0 { "chip small on" } else { "chip small" },
+                                                onclick: move |_| {
+                                                    document::eval(&format!(
+                                                        "const p = document.getElementById('note-pad'); if (p) {{ const a = p.selectionStart; p.setRangeText({}, a, a, 'end'); p.focus(); window.__anendCompl = null; p.dispatchEvent(new Event('input', {{ bubbles: true }})); }}",
+                                                        serde_json::to_string(&rest).unwrap_or_default()
+                                                    ));
+                                                },
+                                                "{w}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if code && outline_open() {
+                            {
+                                let t = text.read().clone();
+                                let body_at = crate::views::scode::body_offset(&t);
+                                let titles: Vec<String> = progs.read().iter().map(|p| p.0.clone()).collect();
+                                let items = crate::views::scode::outline(&t[body_at..], &titles);
+                                rsx! {
+                                    div { class: "s-outline",
+                                        div { class: "row",
+                                            span { class: "dim small", if items.is_empty() { "it defines nothing and calls no other program" } else { "the outline · Ctrl+click a word in the code: its definition" } }
+                                            span { class: "grow" }
+                                            button { class: "plain small", "aria-label": "close the outline", onclick: move |_| outline_open.set(false), Icon { name: "close" } }
+                                        }
+                                        for (i, it) in items.into_iter().enumerate() {
+                                            {
+                                                let (a, b) = (body_at + it.at, body_at + it.at + it.name.len());
+                                                let line = crate::views::scode::line_of(&t, a) + 1;
+                                                let what = match it.kind { "script" => "script", "word" => "word", _ => "calls" };
+                                                rsx! {
+                                                    button { key: "{i}", class: "plain s-item", onclick: move |_| pad_show(a, b),
+                                                        span { class: "chip small", "{what}" }
+                                                        b { " {it.name}" }
+                                                        span { class: "dim small", " line {line}" }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if code && let (Some((n, seed)), Some(s)) = (dbg(), snap()) {
+                            div { class: "s-run s-dbg",
+                                div { class: "row wrap",
+                                    span { class: "dim small", {format!("step {}{}", s["steps"].as_u64().unwrap_or(n), if s["done"] == true { " · it ended" } else { "" })} }
+                                    span { class: "grow" }
+                                    button { class: "btn small", title: "back to the start", onclick: move |_| dbg.set(Some((0, seed))), "⏮" }
+                                    button { class: "btn small primary", disabled: s["done"] == true, title: "one step", onclick: move |_| dbg.set(Some((n + 1, seed))), "step" }
+                                    button { class: "btn small", disabled: s["done"] == true, onclick: move |_| dbg.set(Some((n + 10, seed))), "+10" }
+                                    button { class: "btn small", disabled: s["done"] == true, onclick: move |_| dbg.set(Some((n + 100, seed))), "+100" }
+                                    button { class: "btn small", disabled: s["done"] == true, title: "run to the end", onclick: move |_| dbg.set(Some((n + 1_000_000, seed))), "⏭" }
+                                    button { class: "plain small", "aria-label": "stop stepping", onclick: move |_| dbg.set(None), Icon { name: "close" } }
+                                }
+                                if s["done"] != true && s["main"] != true {
+                                    div { class: "small", "in a call, depth {s[\"depth\"]}: " code { class: "s-unit", {s["unit"].as_str().unwrap_or("").chars().take(80).collect::<String>()} } }
+                                }
+                                div { class: "row wrap s-stack",
+                                    span { class: "dim small", if s["ow"] == true { "stack (ow on)" } else { "stack" } }
+                                    for (i, v) in s["stack"].as_array().cloned().unwrap_or_default().into_iter().enumerate() {
+                                        span { key: "{i}", class: "chip small", {v.as_str().unwrap_or("").to_string()} }
+                                    }
+                                }
+                                {
+                                    let mut rows: Vec<(String, String)> = Vec::new();
+                                    for k in ["locals", "mem", "numbers"] {
+                                        for (name, v) in s[k].as_object().into_iter().flatten() {
+                                            if k != "numbers" || !s["mem"].as_object().is_some_and(|m| m.contains_key(name)) {
+                                                rows.push((name.clone(), v.as_str().unwrap_or("").to_string()));
+                                            }
+                                        }
+                                    }
+                                    for (name, v) in s["lists"].as_object().into_iter().flatten() {
+                                        let items: Vec<String> = v.as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_string)).collect();
+                                        rows.push((format!("{name} []"), items.join(" · ")));
+                                    }
+                                    rsx! {
+                                        if !rows.is_empty() {
+                                            div { class: "s-vals",
+                                                for (i, (k, v)) in rows.into_iter().enumerate() {
+                                                    div { key: "{i}", class: "small", b { "{k}" } " {v}" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                if !s["out"].as_str().unwrap_or("").is_empty() {
+                                    pre { class: "s-out", {s["out"].as_str().unwrap_or("").trim_start_matches('\n').to_string()} }
+                                }
+                                if let Some(e) = s["err"].as_str() {
                                     pre { class: "s-err", role: "alert", "s: {e}" }
                                 }
                             }
