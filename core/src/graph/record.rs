@@ -33,13 +33,15 @@ pub mod mime {
     pub const TAXONOMY: u16 = 11;
     /// a pipe: its text the pipe's JSON, a filter and its effects (`ops::pipes`)
     pub const PIPE: u16 = 12;
+    /// a tag set: its text the set's JSON, word types of one's own (`ops::tagsets`)
+    pub const TAGSET: u16 = 13;
 
     /// entries that are a block's data rather than texts: left out of search and counts
     pub fn hidden(m: u16) -> bool {
-        m == ANIMATION || m == WIRING || m == TAXONOMY || m == PIPE
+        m == ANIMATION || m == WIRING || m == TAXONOMY || m == PIPE || m == TAGSET
     }
 
-    pub const NAMES: [&str; 13] = [
+    pub const NAMES: [&str; 14] = [
         "text/plain",
         "text/markdown",
         "application/x-anend-fn",
@@ -53,6 +55,7 @@ pub mod mime {
         "application/x-anend-wiring",
         "application/x-anend-taxonomy",
         "application/x-anend-pipe",
+        "application/x-anend-tagset",
     ];
 
     pub fn builtin(name: &str) -> Option<u16> {

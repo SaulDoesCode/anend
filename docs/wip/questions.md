@@ -389,3 +389,20 @@ The answers left these open. Each is written into the design as its default.
     first argument, and the bar's words narrow whatever it says.
 97. **Layouts are cards, a tight grid, a list, and auto** (the reader's old choice between
     cards and the grid); headings group by kind, a sum, length, or a classifier's classes.
+
+## Tag sets (27 Oct)
+
+98. **A tag set learns from words alone** (its classifier reads each word on its own, not
+    its neighbours): marked words are few, and a word's own letters carry most of what a
+    small set can learn. Context-aware tagging can come with a spec model later.
+99. **A set's marked words are lists** (`<set>: <type>`), so they show, merge and back up
+    like any list, and the set's classifier (`tags: <set>`) is an ordinary classifier.
+100. **Training a set starts from scratch, quick and brisk** (200 epochs at 0.01), with
+    nothing held out under forty marked words (holding three words out stopped it at once);
+    from forty, a fifth are held out and its precision and recall are on those.
+101. **English types only on English:** a text gets the built-in types when 60 % of its
+    words are English ones and, from four words, it has one of English's commonest words.
+    In the browser build, without the bundled lexicon, the word lists the rules use stand
+    in for it (it errs towards English).
+102. **A checker's suggestions are the nearest words marked right** (edit distance ≤ 3, the
+    three nearest), not a trained corrector; #10's corruption-trained corrector waits.

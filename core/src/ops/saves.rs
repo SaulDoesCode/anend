@@ -523,6 +523,13 @@ impl Saves {
             let (_, g) = self.current()?;
             return super::pipes::call(self, &g, op, args);
         }
+        if super::tagsets::routed(op) {
+            if self.models.is_none() {
+                return Err("these saves keep no models".into());
+            }
+            let (_, g) = self.current()?;
+            return super::tagsets::call(self, &g, op, args);
+        }
         if super::taxonomy::routed(op) {
             if self.models.is_none() {
                 return Err("these saves keep no models".into());

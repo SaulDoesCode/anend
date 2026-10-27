@@ -28,6 +28,8 @@ pub mod script;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod sounds;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod tagsets;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod taxonomy;
 pub mod templates;
 pub mod texts;
@@ -206,7 +208,7 @@ pub fn counts(v: &View) -> Result<(u64, u64), String> {
     };
     let notes = of(mime::MARKDOWN)?;
     let tags = of(mime::TAG)?;
-    let anims = of(mime::ANIMATION)? + of(mime::WIRING)? + of(mime::TAXONOMY)? + of(mime::PIPE)?;
+    let anims = of(mime::ANIMATION)? + of(mime::WIRING)? + of(mime::TAXONOMY)? + of(mime::PIPE)? + of(mime::TAGSET)?;
     Ok((notes, all.saturating_sub(notes + tags + anims)))
 }
 

@@ -281,6 +281,27 @@ words as its first argument.
 | `views.list` | | `[{name, builtin, about?, key?}]`: the presets, then the save's view programs |
 | `views.run` | `{name, words?, tag?}` | `{name, title, layout, total, hits: [hit + fx?], groups: [{name, from, count}], described}`: at most 20,000 texts (5,000 from a pipe); not from inside an s run |
 
+### Tag sets
+
+Word types of one's own (`core/src/ops/tagsets.rs`, queued requests #13 and #10): a set
+names its types (`{name, colour, about?}`); each type keeps its marked words as a list
+`<set>: <type>`, and the set's classifier `tags: <set>` learns from those lists. A set may
+say which texts it's for (`for_texts: {classifier or taxonomy, class}`): a text goes to the
+first such set that takes it, else to the built-in `english` set (`kinds::tag`, by rule)
+when it reads as English (`kinds::looks_english`), else to none. A checker (`check: true`)
+has the types right and wrong, and gives each wrong word the nearest words marked right.
+
+| op | args | data |
+|---|---|---|
+| `tagsets.list` | | `[{name: "english", builtin, types}, {key, builtin: false, set}…]` |
+| `tagsets.save` | `{set, was?, new?}` | `{key, set}`: two types or more, `#rrggbb` colours, no colons in names; a set keeps its name |
+| `tagsets.delete` | `{name}` | `{removed}`; its classifier goes too, its lists stay |
+| `tagsets.mark` | `{name, word, type}` | `{word, type, taught, score}`: into that type's list (out of the others'); when the set is trained, its classifier's feedback too (`taught`) |
+| `tagsets.train` | `{name, epochs?: 200, lr?: 0.01, wait?}` | the training job: from scratch on the marked words (two or more of each type), all of them under forty, else a fifth held out |
+| `tagsets.tag` | `{text, name?}` | `{set, words: [{word, start, end, type, prob, colour?, suggest?}], trained?, english?, check?}`: below the set's threshold a word gets no type; untrained, the words come without types to be marked |
+| `tagsets.score` | `{name}` | `{marked: [{type, words, some}], trained, training, accuracy, measured_on, types: [{type, precision, recall, support}]}` |
+| `classify.set_train` | `{name, val_fraction?: 0–0.5, patience?}` | details: how a classifier trains from now on |
+
 ### Classifier buckets, filters and modules
 
 Outputs are memoized per classifier and memory/note (`core/src/memo.rs`), under a stamp

@@ -790,6 +790,24 @@ pub fn call(store: Arc<Store>, op: &str, args: &Value, limits: &Limits) -> Res {
             details(st, &def)
         }
         "classify.get" => details(st, &st.classifier(name_arg(args)?)?),
+        // how it trains from now on: the share of examples held out to stop early by
+        // (0 to 0.5), and how many evaluations without a better one it waits
+        "classify.set_train" => {
+            let name = name_arg(args)?;
+            not_training(st, &[name.to_string()])?;
+            let mut def = st.classifier(name)?;
+            if let Some(v) = args.get("val_fraction").and_then(Value::as_f64) {
+                if !(0.0..=0.5).contains(&v) {
+                    return Err("the share held out goes from 0 to 0.5".into());
+                }
+                def.train.val_fraction = v as f32;
+            }
+            if let Some(p) = args.get("patience").and_then(Value::as_u64) {
+                def.train.patience = (p as usize).clamp(1, 10_000);
+            }
+            st.put_classifier(&mut def, None)?;
+            details(st, &def)
+        }
         "classify.delete" => {
             let name = name_arg(args)?;
             not_training(st, &[name.to_string()])?;

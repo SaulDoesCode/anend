@@ -421,6 +421,20 @@ it learns from in this save, and for a writer, which other models judge what it 
 A spec can start from a pretrained open model (the builder's *starts from*); see
 [models](../docs/models.md). On a shared hub only the folders the hub offers can be named.
 
+### Tag sets
+
+![an Afrikaans tag set, its words labelled](guide/tagsets.png)
+
+The **tag sets** tab holds word types of your own. **new** names the set and its types
+(each with a colour), or makes a **checker** (right and wrong, for a language of your own);
+**for texts** can name a classifier's class (the language starter's "not English", say), so
+the set reads those texts by itself. In **try a text**, type a text and **tag it**: click a
+word to say which type it is. Two or more words of each type, then **train it**; after
+that, every word you correct teaches it straight away. **how it reads** shows each type's
+precision and recall. A checker underlines wrong words and offers the nearest right ones.
+The built-in **english** set types English texts only, so other languages aren't labelled
+as though they were English.
+
 ### Taxonomies
 
 ![a taxonomy: English or not, then which kind of thing](guide/taxonomy.png)

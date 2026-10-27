@@ -969,3 +969,135 @@ fn views_are_presets_and_programs() {
     drop(ws);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// tag sets: word types of one's own, learned from marked words; a checker; English only on English
+#[test]
+fn tag_sets_learn_marked_words() {
+    let dir = temp("tagsets");
+    let ws = Saves::new(&dir, "notes").with_models(Limits::NONE);
+    save(&ws);
+    let c = |op: &str, a: Value| ws.call(op, &a);
+    let lists = c("lists.stats", json!({})).unwrap()["lists"].clone();
+    let keys: Vec<Value> = lists.as_array().unwrap().iter().map(|l| l["list"].clone()).collect();
+    c(
+        "classify.create",
+        json!({ "name": "sorter", "classes": keys, "preset": "tiny" }),
+    )
+    .unwrap();
+    c(
+        "classify.train",
+        json!({ "name": "sorter", "epochs": 30, "wait": true }),
+    )
+    .unwrap();
+
+    // checked
+    let one = json!({ "name": "x", "types": [{ "name": "a", "colour": "#112233" }] });
+    assert!(
+        c("tagsets.save", json!({ "set": one }))
+            .unwrap_err()
+            .contains("two types")
+    );
+    let bad = json!({ "name": "english", "types": [{ "name": "a", "colour": "#112233" }, { "name": "b", "colour": "#112233" }] });
+    assert!(c("tagsets.save", json!({ "set": bad })).is_err());
+    let set = json!({
+        "name": "taste",
+        "types": [{ "name": "sweet", "colour": "#e0a03f" }, { "name": "tart", "colour": "#3fa0e0" }],
+        "for_texts": { "classifier": "sorter", "class": "fruit" },
+        "threshold": 0.0
+    });
+    let mut wrong_class = set.clone();
+    wrong_class["for_texts"]["class"] = json!("pebbles");
+    assert!(
+        c("tagsets.save", json!({ "set": wrong_class }))
+            .unwrap_err()
+            .contains("no class")
+    );
+    c("tagsets.save", json!({ "set": set, "new": true })).unwrap();
+    assert_eq!(c("tagsets.list", json!({})).unwrap().as_array().unwrap().len(), 2);
+
+    // training waits for words of each type
+    for w in ["banana", "mango", "peach", "melon"] {
+        c("tagsets.mark", json!({ "name": "taste", "word": w, "type": "sweet" })).unwrap();
+    }
+    assert!(
+        c("tagsets.train", json!({ "name": "taste" }))
+            .unwrap_err()
+            .contains("as tart")
+    );
+    for w in ["cherry", "plum", "grape", "apple"] {
+        c("tagsets.mark", json!({ "name": "taste", "word": w, "type": "tart" })).unwrap();
+    }
+    // a word moves between types
+    c(
+        "tagsets.mark",
+        json!({ "name": "taste", "word": "apple", "type": "sweet" }),
+    )
+    .unwrap();
+    let sc = c("tagsets.score", json!({ "name": "taste" })).unwrap();
+    assert_eq!(sc["marked"][0]["words"], 5, "{sc}");
+    assert_eq!(sc["marked"][1]["words"], 3);
+    let j = c("tagsets.train", json!({ "name": "taste", "wait": true })).unwrap();
+    assert_eq!(j["state"], "done", "{j}");
+    let sc = c("tagsets.score", json!({ "name": "taste" })).unwrap();
+    assert_eq!(sc["trained"], true);
+    assert_eq!(sc["types"].as_array().unwrap().len(), 2, "{sc}");
+    // a mark on a trained set teaches it at once
+    let m = c(
+        "tagsets.mark",
+        json!({ "name": "taste", "word": "plum", "type": "tart" }),
+    )
+    .unwrap();
+    assert_eq!(m["taught"], true);
+
+    // the set reads the texts it's for; English rules read English; other languages get none
+    let t = c("tagsets.tag", json!({ "text": "banana plum cherry" })).unwrap();
+    assert_eq!(t["set"], "taste", "{t}");
+    let ws3 = t["words"].as_array().unwrap();
+    assert_eq!(ws3.len(), 3);
+    assert!(ws3.iter().all(|w| w["type"] == "sweet" || w["type"] == "tart"), "{t}");
+    assert!(ws3[0]["colour"].as_str().unwrap().starts_with('#'));
+    let e = c("tagsets.tag", json!({ "text": "the granite stands tall" })).unwrap();
+    assert_eq!(e["set"], "english");
+    assert!(
+        e["words"].as_array().unwrap().iter().any(|w| w["type"] == "noun"),
+        "{e}"
+    );
+    let af = c("tagsets.tag", json!({ "text": "die hond loop vinnig na die huis toe" })).unwrap();
+    assert_eq!(af["english"], false);
+    assert_eq!(af["words"], json!([]));
+
+    // a checker: right and wrong, with the nearest right words for a wrong one
+    c(
+        "tagsets.save",
+        json!({ "set": { "name": "elvish", "check": true, "types": [], "threshold": 0.0 }, "new": true }),
+    )
+    .unwrap();
+    for w in ["mellon", "galadh", "lasse", "aear", "elen"] {
+        c("tagsets.mark", json!({ "name": "elvish", "word": w, "type": "right" })).unwrap();
+    }
+    for w in ["melon", "galad", "lass", "ear", "eln"] {
+        c("tagsets.mark", json!({ "name": "elvish", "word": w, "type": "wrong" })).unwrap();
+    }
+    c("tagsets.train", json!({ "name": "elvish", "wait": true })).unwrap();
+    let k = c("tagsets.tag", json!({ "name": "elvish", "text": "mellon melon" })).unwrap();
+    assert_eq!(k["check"], true);
+    for w in k["words"].as_array().unwrap() {
+        if w["type"] == "wrong" {
+            assert!(w["suggest"].as_array().is_some(), "{k}");
+        }
+    }
+    assert!(
+        k["words"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["type"] == "wrong" && w["suggest"][0] == "mellon")
+            || k["words"][1]["type"] == "right",
+        "{k}"
+    );
+
+    c("tagsets.delete", json!({ "name": "taste" })).unwrap();
+    assert!(c("classify.get", json!({ "name": "tags: taste" })).is_err());
+    drop(ws);
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -48,11 +48,13 @@ pub fn Models() -> Element {
     let mut chosen: Signal<Option<String>> = use_signal(|| None);
     let mut side = use_signal(|| Side::None);
     let mut rev = use_signal(|| 0u64);
-    // the classifiers (0), the spec models (1) or the taxonomies (2)
+    // the classifiers (0), the spec models (1), the taxonomies (2) or the tag sets (3)
     let mut tab = use_signal(|| {
         let p = ui.prefs.peek();
-        if p.folded("models: taxonomies") {
-            2u8
+        if p.folded("models: tagsets") {
+            3u8
+        } else if p.folded("models: taxonomies") {
+            2
         } else if p.folded("models: specs") {
             1
         } else {
@@ -70,6 +72,9 @@ pub fn Models() -> Element {
         async move { api.models().await }
     });
     use_keys(View::Models, move |k: KeyPress| {
+        if *tab.peek() == 3 {
+            return false;
+        }
         if *tab.peek() == 2 {
             if k.bar && k.key == "Enter" {
                 let n = tax_bar.peek().0 + 1;
@@ -133,7 +138,7 @@ pub fn Models() -> Element {
         div { class: "page wide",
             div { class: "row",
                 div { class: "mtabs", role: "tablist", "aria-label": "kinds of model",
-                    for (on , label) in [(0u8, "classifiers"), (1, "spec models"), (2, "taxonomies")] {
+                    for (on , label) in [(0u8, "classifiers"), (1, "spec models"), (2, "taxonomies"), (3, "tag sets")] {
                         button { key: "{label}", role: "tab", "aria-selected": "{tab() == on}",
                             class: if tab() == on { "mtab on" } else { "mtab" },
                             onclick: move |_| {
@@ -141,9 +146,11 @@ pub fn Models() -> Element {
                                 crate::shell::set_pref(ui, |p| {
                                     p.collapsed.remove("models: specs");
                                     p.collapsed.remove("models: taxonomies");
+                                    p.collapsed.remove("models: tagsets");
                                     match on {
                                         1 => { p.collapsed.insert("models: specs".into()); }
                                         2 => { p.collapsed.insert("models: taxonomies".into()); }
+                                        3 => { p.collapsed.insert("models: tagsets".into()); }
                                         _ => {}
                                     }
                                 });
@@ -151,7 +158,9 @@ pub fn Models() -> Element {
                             "{label}" }
                     }
                 }
-                if tab() == 2 {
+                if tab() == 3 {
+                    span { class: "dim small", "word types of your own, learned from words you mark" }
+                } else if tab() == 2 {
                     span { class: "dim small", "classifiers in a tree: each answer picks the next classifier" }
                 } else if specs_tab() {
                     span { class: "dim small", "described as data: what they read, their heads, what they learn from" }
@@ -170,7 +179,9 @@ pub fn Models() -> Element {
                     Icon { name: "upload" } "import" }
                 }
             }
-            if tab() == 2 {
+            if tab() == 3 {
+                crate::views::tagsets::TagSets {}
+            } else if tab() == 2 {
                 crate::views::taxonomy::Taxonomies { bar: tax_bar }
             } else if specs_tab() {
                 crate::views::specs::SpecModels { state: specs }

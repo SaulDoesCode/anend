@@ -154,8 +154,9 @@ docs/architecture.md (the whole).
       (docs/architecture.md 4). (27 Oct: `views.*` and `std:view`; the reader's three views
       are presets and it shows any view program. The memory view, lists and the space stay
       their own code, questions.md 95.)
-- [ ] Tag sets of the user's own; word types for other languages through a language
-      taxonomy; conlang checking trained by hand (#13, #10).
+- [x] Tag sets of the user's own; word types for other languages through a language
+      taxonomy; conlang checking trained by hand (#13, #10). (27 Oct: `tagsets.*`, the
+      models view's tag sets tab, English types only on English, checkers with suggestions.)
 - [ ] ▶ **usable:** the taxonomy engine, with effects stacked onto views.
 
 The user, 27 Oct: "Prefabs must be grouped and not loose pieces. Items must be multi

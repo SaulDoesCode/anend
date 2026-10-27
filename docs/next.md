@@ -99,7 +99,8 @@ departure says why in its commit).
 - Done (27 Oct): pipes (`pipes.*`, the filters view as the pipe editor, effects in the
   memory view and the space).
 - Done (27 Oct): views as programs (`views.*`, `std:view`, the reader as their host).
-- Next: tag sets, the taxonomy engine's ▶ point; then the user's 27 Oct
+- Done (27 Oct): tag sets (`tagsets.*`, the tag sets tab, checkers, English only on English).
+- Next: the taxonomy engine's ▶ point; then the user's 27 Oct
   lines (grouped prefabs, shift and box selection, Ctrl+G groups, drawn wires, wgpu with no
   JavaScript on the desktop, culling, polish, ▶).
   Open further up: the language lines (s, the standard library), taxonomies and pipes,

@@ -1034,6 +1034,63 @@ pub fn tag(text: &str) -> Vec<Tagged> {
     out
 }
 
+/// whether a word is English: the bundled lexicon's (`grammar`), or in the browser, where
+/// the lexicon isn't built in, the word lists the types are told by
+#[cfg(not(target_arch = "wasm32"))]
+fn in_lexicon(w: &str) -> bool {
+    crate::grammar::is_word(w)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn in_lexicon(w: &str) -> bool {
+    [
+        PREPOSITIONS,
+        CONJUNCTIONS,
+        AUXILIARIES,
+        VERBS,
+        ADJECTIVES,
+        ADVERBS,
+        NUMBER_WORDS,
+        INTERJECTIONS,
+    ]
+    .iter()
+    .any(|l| l.contains(&w))
+        || by_form(w).is_some()
+}
+
+/// whether a text reads as English: most of its words (60 %) are in the bundled English
+/// lexicon (or are capitalised, as names are), and a text of four words or more has one of
+/// English's commonest words. Word types by English rules are only given
+/// to texts that do, so other languages aren't labelled as though they were English.
+pub fn looks_english(text: &str) -> bool {
+    let words: Vec<&str> = text
+        .split(|c: char| !c.is_alphabetic() && c != '\'')
+        .map(|w| w.trim_matches('\''))
+        .filter(|w| !w.is_empty())
+        .take(200)
+        .collect();
+    if words.is_empty() {
+        return true;
+    }
+    let known = words
+        .iter()
+        .filter(|w| {
+            let l = w.to_lowercase();
+            in_lexicon(&l)
+                || PRONOUNS.contains(&l.as_str())
+                || DETERMINERS.contains(&l.as_str())
+                || w.chars().next().is_some_and(char::is_uppercase)
+        })
+        .count();
+    // a sentence of English (four words or more) has some of its commonest words
+    const COMMON: [&str; 32] = [
+        "the", "a", "an", "of", "to", "in", "is", "are", "was", "were", "and", "or", "it", "that", "for", "on", "with",
+        "as", "at", "by", "i", "you", "he", "she", "we", "they", "this", "be", "have", "not", "my", "his",
+    ];
+    let common = words.len() < 4 || words.iter().any(|w| COMMON.contains(&w.to_lowercase().as_str()));
+    common && known * 10 >= words.len() * 6
+}
+
 /// each word of a text and its type ([`tag`])
 pub fn word_types(text: &str) -> Vec<(String, &'static str)> {
     tag(text).into_iter().map(|t| (t.word, t.ty)).collect()

@@ -615,7 +615,12 @@ pub(crate) fn TaggedText(
     #[props(default)]
     ruby: bool,
 ) -> Element {
-    let tags = anend_core::kinds::tag(&text);
+    // English types only on English (other languages get their own tag sets)
+    let tags = if anend_core::kinds::looks_english(&text) {
+        anend_core::kinds::tag(&text)
+    } else {
+        vec![]
+    };
     let mut parts: Vec<(String, Option<&'static str>)> = Vec::new();
     let mut at = 0;
     for t in &tags {
@@ -655,7 +660,7 @@ pub(crate) fn TaggedText(
 #[component]
 fn TypesLegend(texts: Vec<String>) -> Element {
     let mut counts: std::collections::BTreeMap<usize, (&'static str, usize)> = Default::default();
-    for t in &texts {
+    for t in texts.iter().filter(|t| anend_core::kinds::looks_english(t)) {
         for w in anend_core::kinds::tag(t) {
             let i = anend_core::kinds::WORD_TYPES
                 .iter()

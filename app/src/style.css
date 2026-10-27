@@ -972,3 +972,15 @@ input.tax-about { width: 100%; }
 .rrow h3 { margin: 0; font-size: 1em; }
 .rrow .body { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .view-title { font-style: italic; }
+
+/* ---------------------------------------------------------------- tag sets */
+.chip.ts-type { background: color-mix(in srgb, var(--c) 30%, var(--cards)); box-shadow: inset 3px 0 0 var(--c); }
+.swatch-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+.ts-words { display: flex; flex-wrap: wrap; gap: 6px 4px; padding: 8px 0; align-items: flex-start; }
+.ts-word { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; }
+.ts-word > button.plain { display: inline-flex; flex-direction: column; align-items: center; height: auto; padding: 2px 6px; border-radius: var(--radius); border-bottom: 3px solid var(--c); }
+.ts-word .w { font-size: 1.15em; }
+.ts-word .l { font-size: 11px; color: var(--dim); }
+.ts-word.flagged .w { text-decoration: underline wavy #d6453d; }
+.ts-pick, .ts-suggest { display: flex; gap: 3px; flex-wrap: wrap; justify-content: center; }
+.row.wrap { flex-wrap: wrap; }

@@ -228,6 +228,35 @@ mod tests {
         }
     }
 
+    /// tag sets: the models view's fourth tab; English types only on English
+    #[test]
+    fn tag_sets_stay() {
+        let cls = include_str!("views/classifiers.rs");
+        assert!(
+            cls.contains("(3, \"tag sets\")")
+                && cls.contains("models: tagsets")
+                && cls.contains("crate::views::tagsets::TagSets {}")
+        );
+        let t = include_str!("views/tagsets.rs");
+        for needle in [
+            "\"tagsets.mark\"",
+            "\"tagsets.train\"",
+            "\"tagsets.tag\"",
+            "\"tagsets.score\"",
+            "\"tagsets.save\"",
+            "\"tagsets.delete\"",
+            "\"a checker\"",
+            "ts-suggest",
+        ] {
+            assert!(t.contains(needle), "tagsets.rs lost {needle}");
+        }
+        let m = include_str!("views/memory.rs");
+        assert!(
+            m.matches("looks_english").count() >= 2,
+            "the memory view's word types only on English"
+        );
+    }
+
     /// views as programs: the reader's presets and view programs
     #[test]
     fn views_as_programs_stay() {
