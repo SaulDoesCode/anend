@@ -1916,6 +1916,7 @@ fn ensure_tables(txn: &WriteTransaction) -> GResult<()> {
     txn.open_table(SETTINGS).map_err(err)?;
     txn.open_table(MIMES).map_err(err)?;
     super::assets::ensure_tables(txn)?;
+    super::sounds::ensure_tables(txn)?;
     super::textures::ensure_tables(txn)?;
     super::lights::ensure_tables(txn)?;
     super::scenes::ensure_tables(txn)?;
@@ -2241,6 +2242,8 @@ impl Graph {
         plain!(super::assets::PICTURES, "pictures");
         plain!(super::assets::PICTURE_BYTES, "picture bytes");
         multi!(super::assets::PICTURE_LISTS, "picture lists");
+        plain!(super::sounds::SOUNDS, "sounds");
+        plain!(super::sounds::SOUND_BYTES, "sound bytes");
         plain!(super::textures::TEXTURES, "textures");
         plain!(super::lights::LIGHTS, "lights");
         plain!(super::scenes::SCENES, "scenes");

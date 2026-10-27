@@ -64,6 +64,9 @@ pub(super) fn fire(ui: Ui, api: Api, sp: Sp, id: String, event: &'static str, fr
                     sp.send(json!({ "cmd": "blocks", "blocks": r["blocks"], "textures": textures }));
                 }
                 sp.send(json!({ "cmd": "rays", "rays": r["rays"] }));
+                if r["sounds"].as_array().is_some_and(|a| !a.is_empty()) {
+                    sp.send(json!({ "cmd": "sounds", "sounds": r["sounds"] }));
+                }
                 for s in r["says"].as_array().into_iter().flatten() {
                     ui.say(s.as_str().unwrap_or("").to_string());
                 }

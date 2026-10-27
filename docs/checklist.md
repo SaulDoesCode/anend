@@ -180,7 +180,9 @@ docs/architecture.md (the whole).
 - [x] Switch and logic-gate prefabs (#27).
       (27 Oct: `prefabs.starters`: a switch, AND, OR, XOR, NOT, a latch, a lamp and a
       door, run by composed s programs; a hit carries the sender's value.)
-- [ ] Audio emitters and the sounds table (#17).
+- [x] Audio emitters and the sounds table (#17).
+      (27 Oct: `graph::sounds`, `ops::sounds`, the sounds window, emitters played by the
+      room while it plays, `sound` and `hush` from programs.)
 - [ ] ▶ **usable:** logic-world scenes, with blocks acting on each other.
 - [ ] First-person mode with Thief-like movement, the grapple, and superflight that collects
       texts (#9).

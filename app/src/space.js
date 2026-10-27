@@ -1304,6 +1304,161 @@ export class Space {
     const old = (was && this.live && this.wireT) || new Map();
     this.wireT = new Map([...old].filter(([k]) => this.wires.has(k)));
     this.dirty = true;
+    // the looping sound emitters play while the room plays
+    if (this.live && !was) this.startLoops();
+    if (!this.live && was) this.hushAll();
+  }
+
+  // ------------------------------------------------------------------ sounds
+  //
+  // Blocks can be sound emitters (core's graph::sounds): a sound of the save, a volume,
+  // how far it carries (it fades to nothing there) and whether it loops. While the room
+  // plays, looping emitters sound from the start and the others when a program prints
+  // `sound`; each is placed where its block is and heard from the camera (Web Audio).
+  // The room asks Rust for a sound's bytes the first time it needs them (`soundwant`).
+  audio() {
+    if (!this.ac) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      this.ac = new AC();
+      this.buffers = new Map(); // sound id → AudioBuffer, or a Promise while decoding
+      this.voices = new Map(); // block id → { src, gain, pan }
+      this.waiting = new Map(); // sound id → block ids to start when it arrives
+    }
+    if (this.ac.state === 'suspended') this.ac.resume().catch(() => {});
+    return this.ac;
+  }
+
+  // a sound's bytes from Rust: decoded, then the blocks waiting on it start
+  soundData(id, data) {
+    const ac = this.audio();
+    if (!ac) return;
+    const bin = atob(data);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const p = ac.decodeAudioData(bytes.buffer).then((buf) => {
+      this.buffers.set(id, buf);
+      const want = this.waiting.get(id) || [];
+      this.waiting.delete(id);
+      for (const w of want) w();
+    }).catch((e) => {
+      this.buffers.delete(id);
+      this.send({ ...this.ev('toast', null), text: `that sound doesn't play here: ${e && e.message || e}` });
+    });
+    this.buffers.set(id, p);
+  }
+
+  // runs `then` with the sound's buffer, once it's here
+  withSound(id, then) {
+    const b = this.buffers.get(id);
+    if (b instanceof AudioBuffer) return then(b);
+    const q = this.waiting.get(id) || [];
+    q.push(() => then(this.buffers.get(id)));
+    this.waiting.set(id, q);
+    if (!b) {
+      this.buffers.set(id, 'asked');
+      this.send({ ...this.ev('soundwant', null), data: id });
+    }
+  }
+
+  // a block's sound starts (again, from the beginning)
+  playSound(blockId) {
+    const o = this.blocks.get(blockId);
+    const s = o && o.b.sound;
+    if (!s || !this.audio()) return;
+    this.stopSound(blockId);
+    this.withSound(s.id, (buf) => {
+      if (!(buf instanceof AudioBuffer) || !this.blocks.has(blockId)) return;
+      const ac = this.ac;
+      const src = ac.createBufferSource();
+      src.buffer = buf;
+      src.loop = !!s.loop;
+      const gain = ac.createGain();
+      gain.gain.value = s.volume == null ? 1 : s.volume;
+      const pan = ac.createPanner();
+      pan.panningModel = 'equalpower';
+      pan.distanceModel = 'linear';
+      pan.refDistance = 1;
+      pan.maxDistance = Math.max(1.01, s.range || 20);
+      pan.rolloffFactor = 1;
+      src.connect(gain).connect(pan).connect(ac.destination);
+      const v = { src, gain, pan };
+      this.voices.set(blockId, v);
+      this.placeVoice(blockId, v);
+      src.onended = () => { if (this.voices.get(blockId) === v) this.voices.delete(blockId); };
+      src.start();
+      this.listen();
+    });
+  }
+
+  stopSound(blockId) {
+    const v = this.voices && this.voices.get(blockId);
+    if (!v) return;
+    this.voices.delete(blockId);
+    try { v.src.stop(); } catch { /* ended already */ }
+  }
+
+  startLoops() {
+    for (const [id, o] of this.blocks) if (o.b.sound && o.b.sound.loop) this.playSound(id);
+  }
+
+  hushAll() {
+    if (!this.voices) return;
+    for (const id of [...this.voices.keys()]) this.stopSound(id);
+  }
+
+  // what programs asked for: `[{block, play}]`
+  sounds(list) {
+    for (const s of list || []) (s.play ? this.playSound(s.block) : this.stopSound(s.block));
+  }
+
+  // a sound heard as it is, not placed (the sounds window's ▶)
+  previewSound(id) {
+    if (!this.audio()) return;
+    if (this.preview && this.preview.stop) { try { this.preview.stop(); } catch { /* done */ } }
+    this.withSound(id, (buf) => {
+      if (!(buf instanceof AudioBuffer)) return;
+      const src = this.ac.createBufferSource();
+      src.buffer = buf;
+      src.connect(this.ac.destination);
+      src.start();
+      this.preview = src;
+    });
+  }
+
+  placeVoice(id, v) {
+    const o = this.blocks.get(id);
+    if (!o) return;
+    const p = o.mesh.position;
+    const t = this.ac.currentTime;
+    if (v.pan.positionX) {
+      v.pan.positionX.setValueAtTime(p.x, t);
+      v.pan.positionY.setValueAtTime(p.y, t);
+      v.pan.positionZ.setValueAtTime(p.z, t);
+    } else v.pan.setPosition(p.x, p.y, p.z);
+  }
+
+  // the listener is the camera; voices follow their blocks (an animation moves them)
+  listen() {
+    if (!this.ac || !this.voices || !this.voices.size) return;
+    const l = this.ac.listener, c = this.camera, t = this.ac.currentTime;
+    const f = new THREE.Vector3(0, 0, -1).applyQuaternion(c.quaternion);
+    const u = new THREE.Vector3(0, 1, 0).applyQuaternion(c.quaternion);
+    if (l.positionX) {
+      l.positionX.setValueAtTime(c.position.x, t);
+      l.positionY.setValueAtTime(c.position.y, t);
+      l.positionZ.setValueAtTime(c.position.z, t);
+      l.forwardX.setValueAtTime(f.x, t);
+      l.forwardY.setValueAtTime(f.y, t);
+      l.forwardZ.setValueAtTime(f.z, t);
+      l.upX.setValueAtTime(u.x, t);
+      l.upY.setValueAtTime(u.y, t);
+      l.upZ.setValueAtTime(u.z, t);
+    } else {
+      l.setPosition(c.position.x, c.position.y, c.position.z);
+      l.setOrientation(f.x, f.y, f.z, u.x, u.y, u.z);
+    }
+    for (const [id, v] of this.voices) this.placeVoice(id, v);
   }
 
   wireFire(id, event, from) {
@@ -1660,6 +1815,7 @@ export class Space {
   dropBlock(id) {
     const o = this.blocks.get(id);
     if (!o) return;
+    this.stopSound(id);
     if (o.b.zone) {
       this.zoneBlocks = null;
       this.zonesDirty = true;
@@ -1672,8 +1828,8 @@ export class Space {
   }
 
   blockOut(o) {
-    const { id, kind, texture, x, y, z, w, h, d, rot, bend, faces, variant, shape, zone, anim, part_of } = o.b;
-    return { id, kind, texture, x, y, z, w, h, d, rot: rot || [0, 0, 0, 1], bend: bend || null, faces: faces || null, shape: shape || 'box', zone: zone || null, anim: anim || null, ...(variant != null ? { variant } : {}), ...(part_of ? { part_of } : {}) };
+    const { id, kind, texture, x, y, z, w, h, d, rot, bend, faces, variant, shape, zone, anim, part_of, sound } = o.b;
+    return { id, kind, texture, x, y, z, w, h, d, rot: rot || [0, 0, 0, 1], bend: bend || null, faces: faces || null, shape: shape || 'box', zone: zone || null, anim: anim || null, ...(variant != null ? { variant } : {}), ...(part_of ? { part_of } : {}), ...(sound ? { sound } : {}) };
   }
 
   pickBlock(id) {
@@ -2222,6 +2378,7 @@ export class Space {
     const animated = this.blocks.size && this.animating();
     if (animated) this.applyAnims(now);
     this.wireTimers(now);
+    this.listen();
     const rays = this.fadeRays(now);
     if (moving || turning || this.keys.size || this.ease || this.looking || this.drag || this.bdrag || this.dirty || animated || rays) {
       this.dirty = false;

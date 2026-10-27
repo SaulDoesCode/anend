@@ -315,6 +315,8 @@ pub struct AssetsWritten {
     /// prefabs brought in (`<name> 2` when the target has one so named), and their copies
     pub prefabs: usize,
     pub copies: usize,
+    /// sounds the target didn't have
+    pub sounds: usize,
 }
 
 /// a save's spec models, pictures and blocks into another (a merge's second half; the entries
@@ -342,6 +344,13 @@ pub fn assets(target: &crate::graph::Graph, src: &crate::graph::Graph) -> GResul
         };
         target.put_spec_record(None, &r.name, &r.to_json()?)?;
         w.models += 1;
+    }
+    for s in src.sounds()? {
+        if let Some(b) = src.sound_bytes(&s.id)?
+            && target.put_sound(&s, &b)?
+        {
+            w.sounds += 1;
+        }
     }
     for p in src.pictures()? {
         if let Some(b) = src.picture_bytes(&p.id)?

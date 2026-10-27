@@ -128,6 +128,8 @@ pub struct SpaceUi {
     pub show_wiring: bool,
     /// the prefabs window (subassemblies and their menu)
     pub show_prefabs: bool,
+    /// the sounds window (the save's sounds and the selected block's emitter)
+    pub show_sounds: bool,
     /// where each movable window was left (`details`, `physics`): its left and top
     pub wins: BTreeMap<String, (f64, f64)>,
 }
@@ -150,6 +152,7 @@ impl Default for SpaceUi {
             show_anims: false,
             show_wiring: false,
             show_prefabs: false,
+            show_sounds: false,
             wins: BTreeMap::new(),
         }
     }

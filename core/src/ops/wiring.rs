@@ -17,7 +17,8 @@
 //! - `signal <name>`: every block listening for that signal gets it;
 //! - `cast`: it casts its ray now;
 //! - `keep <text>`: the state its next run reads;
-//! - `say <text>`: a line shown in the room.
+//! - `say <text>`: a line shown in the room;
+//! - `sound`, `hush`: its sound (a sound emitter's) starts or stops, while the room plays.
 //!
 //! A block without a program casts its ray whenever an event it listens for reaches it.
 //! Each block a ray registers gets a `hit` from the caster. One cause sets off at most
@@ -143,6 +144,8 @@ struct Report {
     events: Vec<Value>,
     rays: Vec<Value>,
     says: Vec<String>,
+    /// emitters to start (`true`) or stop: `{block, play}`
+    sounds: Vec<Value>,
     /// blocks changed, by their address now
     changed: Vec<String>,
     /// addresses that went (a block retextured comes back under a new one)
@@ -270,6 +273,13 @@ fn act(
         }
         "say" => {
             r.says.push(rest.to_string());
+            return Ok(true);
+        }
+        "sound" | "hush" if words.len() == 1 => {
+            if b.t.sound.is_none() {
+                return Err("it has no sound (the sounds window gives it one)".into());
+            }
+            r.sounds.push(json!({ "block": id.clone(), "play": first == "sound" }));
             return Ok(true);
         }
         _ => return Ok(false),
@@ -440,6 +450,7 @@ pub fn call(g: &Graph, op: &str, args: &Value, shared: bool) -> Res {
             out["events"] = json!(r.events);
             out["rays"] = json!(r.rays);
             out["says"] = json!(r.says);
+            out["sounds"] = json!(r.sounds);
             out["removed"] = json!(r.removed);
             out["cut"] = json!(r.cut);
             Ok(out)

@@ -107,6 +107,9 @@ pub struct Transform {
     /// what it does when something happens to it (`graph::wiring`)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wire: Option<super::wiring::WireRef>,
+    /// a sound it plays (`graph::sounds`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sound: Option<super::sounds::Emitter>,
 }
 
 /// a block's shape, kept in its placement's flags (bits 3–6, `place::Kind`)
@@ -232,6 +235,9 @@ fn extra_bytes(t: &Transform) -> Option<Vec<u8>> {
     if let Some(w) = t.wire {
         w.write(&mut out);
     }
+    if let Some(s) = t.sound {
+        s.write(&mut out);
+    }
     (!out.is_empty()).then_some(out)
 }
 
@@ -266,6 +272,13 @@ fn read_extra(b: &[u8]) -> Extra {
                 }
                 None => break,
             },
+            b'S' => match super::sounds::Emitter::read(&b[at..]) {
+                Some((s, n)) => {
+                    x.sound = Some(s);
+                    at += n;
+                }
+                None => break,
+            },
             b'W' => match super::wiring::WireRef::read(&b[at..]) {
                 Some((w, n)) => {
                     x.wire = Some(w);
@@ -287,6 +300,7 @@ struct Extra {
     zone: Option<Zone>,
     anim: Option<super::anims::AnimRef>,
     wire: Option<super::wiring::WireRef>,
+    sound: Option<super::sounds::Emitter>,
 }
 
 /// a staging zone: a block whose texts spread among themselves inside it, under physics
@@ -384,6 +398,7 @@ impl Default for Transform {
             zone: None,
             anim: None,
             wire: None,
+            sound: None,
         }
     }
 }
@@ -631,6 +646,7 @@ impl Transform {
             zone: self.zone.map(Zone::checked),
             anim: self.anim.map(super::anims::AnimRef::checked),
             wire: self.wire,
+            sound: self.sound.map(super::sounds::Emitter::checked),
             ..self
         })
     }
@@ -772,6 +788,7 @@ fn transform(p: &Placement) -> Transform {
         zone,
         anim,
         wire,
+        sound,
     } = p.extra.as_deref().map(read_extra).unwrap_or_default();
     let [w, h, d] = match p.scale {
         Scale::One => [1.0; 3],
@@ -795,6 +812,7 @@ fn transform(p: &Placement) -> Transform {
         zone,
         anim,
         wire,
+        sound,
     }
 }
 

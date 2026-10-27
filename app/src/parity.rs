@@ -287,6 +287,33 @@ mod tests {
         assert!(sp.contains("show_prefabs") && sp.contains("\"prefabspot\"") && sp.contains("\"thumbs\""));
     }
 
+    /// sounds: the window, emitters played by the room
+    #[test]
+    fn sounds_stay() {
+        let js = include_str!("space.js");
+        for needle in [
+            "playSound(blockId)",
+            "startLoops()",
+            "hushAll()",
+            "soundData(id, data)",
+            "listen()",
+        ] {
+            assert!(js.contains(needle), "space.js lost {needle}");
+        }
+        let rs = include_str!("views/space/soundwin.rs");
+        for needle in [
+            "fn Sounds(",
+            "\"sounds.add\"",
+            "\"blocks.set\"",
+            "sounds to add",
+            "the sound it plays",
+        ] {
+            assert!(rs.contains(needle), "soundwin.rs lost {needle}");
+        }
+        let sp = include_str!("views/space.rs");
+        assert!(sp.contains("show_sounds") && sp.contains("\"soundwant\""));
+    }
+
     /// keyframe animations: the window, the room posing blocks
     #[test]
     fn animations_stay() {

@@ -469,6 +469,11 @@ impl Saves {
             let limits = self.models.unwrap_or(super::classify::Limits::NONE);
             return super::blocks::call(&g, op, args, &limits);
         }
+        if super::sounds::routed(op) {
+            let (_, g) = self.current()?;
+            let limits = self.models.unwrap_or(super::classify::Limits::NONE);
+            return super::sounds::call(&g, op, args, &limits);
+        }
         if super::prefabs::routed(op) {
             let (_, g) = self.current()?;
             return super::prefabs::call(&g, op, args);

@@ -170,6 +170,11 @@ text for its menu.
   tagged `s`, yours to read and change). Place copies in a row at one height, switches on
   the left: each one's ray goes out of its right side into the next. Then *▶ play* in
   the wiring window and click the switches.
+- **Sounds.** The sounds window (the speaker chip) adds sound files to the save and gives
+  the selected block one to play: how loud, how far it carries, and whether it loops.
+  While the room plays, looping sounds play from the start and the others when a program
+  prints `sound` (a click, a hit, a timer or a text entering a zone can run it); you hear
+  each from where it is.
 - **Wiring.** The wiring window (the bolt chip) makes a block act: pick what it listens
   for (a click, another block's ray, a text coming into or leaving its zone, a timer, a
   signal), the s program it runs (a note tagged `s`) and its ray: *fixed* out of one of

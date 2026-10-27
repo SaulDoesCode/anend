@@ -83,6 +83,12 @@ fn transform(v: &Value, base: Transform) -> Transform {
         },
         // the wiring is set with `wiring.set`
         wire: base.wire,
+        // `sound: {id, volume?, range?, loop?}` makes it a sound emitter, `sound: null` not
+        sound: match v.get("sound") {
+            None => base.sound,
+            Some(Value::Null) => None,
+            Some(s) => serde_json::from_value(s.clone()).ok().or(base.sound),
+        },
     }
 }
 

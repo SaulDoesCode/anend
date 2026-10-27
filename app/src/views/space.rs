@@ -29,6 +29,7 @@ use crate::views::{TChip, use_keys};
 mod animwin;
 mod lightwin;
 mod prefabwin;
+mod soundwin;
 mod texwin;
 mod wirewin;
 
@@ -531,6 +532,9 @@ try {{
     else if (c.cmd === 'thumbs') dioxus.send({{ kind: 'thumbs', data: sp.thumbs(c.prefabs || [], c.textures || {{}}) }});
     else if (c.cmd === 'prefabspot') dioxus.send({{ kind: 'prefabspot', data: {{ ...sp.blockSpot(), want: c.want }} }});
     else if (c.cmd === 'rays') sp.showRays(c.rays || []);
+    else if (c.cmd === 'sounddata') sp.soundData(c.id, c.data || '');
+    else if (c.cmd === 'sounds') sp.sounds(c.sounds || []);
+    else if (c.cmd === 'soundpreview') sp.previewSound(c.id);
     else if (c.cmd === 'animpreview') sp.previewAnim(c.id, c.anim || null, c.p);
     else if (c.cmd === 'lights') sp.setLights(c.lights || [], c.changed || null);
     else if (c.cmd === 'showlights') sp.showLights(!!c.on, c.picked);
@@ -1572,6 +1576,9 @@ pub fn Space() -> Element {
             if p.space.show_anims {
                 animwin::Anims { sp, block: (sp.block)(), on_changed: { let api = api_b.clone(); move |_| { let api = api.clone(); dioxus::dioxus_core::spawn_forever(count_blocks(api, sp)); } } }
             }
+            if p.space.show_sounds {
+                soundwin::Sounds { sp }
+            }
             if p.space.show_prefabs {
                 prefabwin::Prefabs { sp }
             }
@@ -1693,6 +1700,16 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
         // an undo took back blocks just added, or put back blocks just deleted
         "lightspot" => lightwin::light_spot(ui, api, sp, e.data.clone()),
         "prefabspot" => prefabwin::place_at(ui, api, sp, e.data.clone()),
+        // the room needs a sound's bytes to play it
+        "soundwant" => {
+            let id = e.data.as_str().unwrap_or("").to_string();
+            dioxus::dioxus_core::spawn_forever(async move {
+                match api.call("sounds.get", json!({ "id": id })).await {
+                    Ok(r) => sp.send(json!({ "cmd": "sounddata", "id": id, "data": r["data"] })),
+                    Err(e) => ui.fail(e),
+                }
+            });
+        }
         "thumbs" => {
             let mut t = sp.thumbs;
             let mut m = t.peek().clone();
@@ -3311,6 +3328,12 @@ pub fn SpaceStrip() -> Element {
                 icon: "prefab",
                 on: p.space.show_prefabs,
                 onclick: move |_| set_pref(ui, |p| p.space.show_prefabs = !p.space.show_prefabs),
+            }
+            TChip {
+                label: "sounds: the save's sounds, and blocks that play them",
+                icon: "sound",
+                on: p.space.show_sounds,
+                onclick: move |_| set_pref(ui, |p| p.space.show_sounds = !p.space.show_sounds),
             }
             TChip {
                 label: "wiring: blocks that cast rays and run programs",

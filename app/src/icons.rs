@@ -54,6 +54,7 @@ pub fn svg(name: &str) -> &'static str {
         "shield" => include_str!("../../assets/icons/shield.svg"),
         "sidebar" => include_str!("../../assets/icons/sidebar.svg"),
         "sliders" => include_str!("../../assets/icons/sliders.svg"),
+        "sound" => include_str!("../../assets/icons/sound.svg"),
         "sort" => include_str!("../../assets/icons/sort.svg"),
         "space" => include_str!("../../assets/icons/space.svg"),
         "star" => include_str!("../../assets/icons/star.svg"),

@@ -17,6 +17,7 @@ pub mod query;
 pub mod record;
 pub mod scenes;
 pub mod settle;
+pub mod sounds;
 pub mod store;
 pub mod textures;
 pub mod wiring;

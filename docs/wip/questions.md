@@ -261,3 +261,15 @@ The answers left these open. Each is written into the design as its default.
     reaches it to close it.
 66. **The gate labels are texts of the save** (AND, OR, XOR, NOT, LATCH), shown on a
     plate above each gate, so they appear among the save's texts.
+
+## Sounds (27 Oct)
+
+67. **Sounds play only while the room plays** (the wiring window's ▶ play), so building is
+    quiet: looping emitters start with it, the others when a program prints `sound`, and
+    stopping play silences everything. Zone enter and leave reach a sound through a
+    program (`{sound} >`), not as a separate setting on the emitter.
+68. **A sound fades linearly to nothing at its reach** (Web Audio's linear distance model,
+    full volume within 1 unit), panned by where it is from the camera; no echo or
+    occlusion.
+69. **The save keeps sound files as they were added;** the page decodes them, so a format
+    the browser or the desktop's web view can't play is reported when it's first played.

@@ -255,6 +255,12 @@ impl Graph {
                 v
             }).collect::<Vec<_>>(),
             "picture_lists": self.picture_list_rows()?,
+            "sounds": self.sounds()?.into_iter().map(|s| {
+                let data = self.sound_bytes(&s.id).ok().flatten().unwrap_or_default();
+                let mut v = json!(s);
+                v["data"] = json!(crate::classifiers::base64(&data));
+                v
+            }).collect::<Vec<_>>(),
             "textures": self.textures()?,
             "lights": self.lights()?,
             "scenes": self.scenes()?,
@@ -388,6 +394,21 @@ impl Graph {
             pic.id = super::assets::picture_id(&data);
             pic.size = data.len() as u64;
             self.put_picture(&pic, &data)?;
+        }
+        for s in o.get("sounds").and_then(Value::as_array).into_iter().flatten() {
+            let Some(data) = s
+                .get("data")
+                .and_then(Value::as_str)
+                .and_then(crate::classifiers::unbase64)
+            else {
+                continue;
+            };
+            let Ok(mut snd) = serde_json::from_value::<super::sounds::Sound>(s.clone()) else {
+                continue;
+            };
+            snd.id = super::assets::picture_id(&data);
+            snd.size = data.len() as u64;
+            self.put_sound(&snd, &data)?;
         }
         for row in o.get("picture_lists").and_then(Value::as_array).into_iter().flatten() {
             if let (Some(l), Some(id)) = (row.get(0).and_then(Value::as_str), row.get(1).and_then(Value::as_str))

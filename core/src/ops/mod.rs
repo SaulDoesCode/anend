@@ -23,6 +23,8 @@ pub mod prefabs;
 mod saves;
 pub mod scenes;
 pub mod script;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod sounds;
 pub mod templates;
 pub mod texts;
 #[cfg(not(target_arch = "wasm32"))]

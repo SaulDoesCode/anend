@@ -470,10 +470,15 @@ texture key from that moment on, eased between keys along CSS cubic-bezier timin
 | `prefabs.detach` | `{id}` | the copy as ordinary blocks: `{ids, blocks, textures, removed}` |
 | `prefabs.rename` | `{prefab, name}` | `{renamed}` |
 | `prefabs.delete` | `{prefab}` | `{copies, removed}`: the prefab and its copies gone |
+| `sounds.list` | | `[{id, mime, name, added, size, seconds?}]`: the save's sounds (`graph::sounds`) |
+| `sounds.add` | `{data, name}` (base64), or `{path}` on one's own machine | `{sound, new}`; at most 8 MB a sound and 500 a save on a shared hub (256 MB on one's own machine) |
+| `sounds.get` | `{id}` | `{sound, data}` (base64), for the room to play |
+| `sounds.name` | `{id, name}` | the sound, renamed |
+| `sounds.delete` | `{id}` | `{removed}`; blocks naming it play nothing |
 | `wiring.list` | | `[{id, key, wiring}]`: the wired blocks (`graph::wiring`; a wiring is an entry of mime `application/x-anend-wiring`) |
 | `wiring.get` | `{id}` | the block's wiring `{on, every?, signal?, program?, ray?: {dir, targets?, stick?, mode, n, range, sees?}, state?}`, or null |
 | `wiring.set` | `{id, wiring}` | the block (as `blocks.list` has it) and its `wiring`; `wiring: null` unwires it. An entry another block shares isn't changed: the block gets its own |
-| `wiring.fire` | `{id, event, from?, value?}` | what one cause set off (`ops::wiring`): `{events: [{block, event, from, out?, err?, steps?}], rays: [{from, to, hits}], says, blocks, textures, removed, cut}` (`blocks` the blocks it changed, `removed` addresses that went; `cut` when it stopped at 200 events or the steps' budget) |
+| `wiring.fire` | `{id, event, from?, value?}` | what one cause set off (`ops::wiring`): `{events: [{block, event, from, out?, err?, steps?}], rays: [{from, to, hits}], says, sounds: [{block, play}], blocks, textures, removed, cut}` (`blocks` the blocks it changed, `removed` addresses that went; `cut` when it stopped at 200 events or the steps' budget) |
 | `lights.list` | | the room's lights: `[{id, kind, colour, intensity, x, y, z, dir, range, angle, softness}]` (`kind` ambient, directional, point or spot) |
 | `lights.add` | a light, or `{light}` | the light, with its id (at most 64 a save) |
 | `lights.set` | `{id, ...fields}` | the light, the fields given replaced |

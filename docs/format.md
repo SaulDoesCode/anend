@@ -169,7 +169,10 @@ f32s. An animation it plays is `A` 1, the animation entry's id (u64), then its d
 speed (f32s). Animations are entries of mime 9 (`application/x-anend-animation`), their
 text the animation's JSON (`core/src/graph/anims.rs`). A block's wiring is `W` 1 and the
 wiring entry's id (u64); wirings are entries of mime 10 (`application/x-anend-wiring`),
-their text the wiring's JSON (`core/src/graph/wiring.rs`). `graph lights` (`core/src/graph/lights.rs`): the
+their text the wiring's JSON (`core/src/graph/wiring.rs`). A sound emitter is `S` 1, the
+sound's 16-byte id, its volume and reach (f32s) and a byte of flags (1: loops); sounds
+are kept in `graph sounds` (sound id, 32 hex digits → `{id, mime, name, added, size,
+seconds?}` JSON) and `graph sound bytes` (`core/src/graph/sounds.rs`). `graph lights` (`core/src/graph/lights.rs`): the
 room's lights, light id (u64) → `{kind, colour, intensity, x, y, z, dir, range, angle,
 softness}` JSON.
 
