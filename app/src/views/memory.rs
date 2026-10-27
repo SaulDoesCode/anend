@@ -237,6 +237,10 @@ async fn enter(mut ui: Ui, api: Api, m: Mem, raw: String, ctrl: bool, shift: boo
     if list_command(ui, api.clone(), m, &t).await {
         return;
     }
+    // `Run <program> [arguments]`: an s program of the save
+    if crate::views::scode::run_from_bar(ui, &api, &t).await {
+        return;
+    }
     let (tint, cls_search) = {
         let p = ui.prefs.peek();
         (p.tint.clone(), p.cls_search)

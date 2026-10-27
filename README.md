@@ -96,6 +96,10 @@ app/web/build.sh            # writes app/web/dist
 
 # a hub on your own machine: no logins, the app at http://127.0.0.1:8080/app/
 cargo run --release -p anend-hub -- --local
+
+# an s program on a save, headless: a file, or the save's program (a note tagged s) by
+# title; piped stdin is its stdin, its output comes out (std:anend reaches every op)
+cargo run --release -p anend-app -- run tally --save ~/.local/share/anend/saves/main.redb
 ```
 
 On Linux the app turns off WebKitGTK's DMA-BUF renderer, which leaves a white window

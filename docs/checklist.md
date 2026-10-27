@@ -138,7 +138,8 @@ docs/architecture.md (the whole).
       outline, go to definition, inline results, step debugging, completion (#11, #12).
       (27 Oct: outline, Ctrl+click to a definition, inline results, the step debugger and
       completion; `s.run` with `trace`, `s.debug`.)
-- [ ] A headless standard library over every app op, and `anend run` (#11).
+- [x] A headless standard library over every app op, and `anend run` (#11). (27 Oct:
+      `std:anend`'s `op` and its JSON words; `Run` in the bar; `anend-app run`.)
 - [ ] Classifiers and models as language primitives (#18).
 - [ ] ▶ **usable:** scripting the project from the notes view and the command line.
 - [ ] Taxonomies: classifiers in hierarchies that route a text to further classifiers,

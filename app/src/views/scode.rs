@@ -133,6 +133,45 @@ pub fn body_offset(text: &str) -> usize {
     text.len() - text.trim_start().len()
 }
 
+/// the bar's `Run <program> [arguments]`: the save's s program of that title, run; what it
+/// wrote shown, or its error. True when the bar's text was a `Run`
+pub async fn run_from_bar(ui: crate::ui::Ui, api: &crate::ui::Api, text: &str) -> bool {
+    let Some(rest) = text.trim().strip_prefix("Run ") else {
+        return false;
+    };
+    let mut words = rest.split_whitespace();
+    let Some(title) = words.next().map(|t| t.strip_suffix(".s").unwrap_or(t).to_string()) else {
+        return false;
+    };
+    let args: Vec<String> = words.map(str::to_string).collect();
+    let progs = api.call("s.programs", serde_json::json!({})).await.unwrap_or_default();
+    let Some(key) = progs
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|p| p["title"] == title.as_str())
+        .and_then(|p| p["key"].as_str().map(str::to_string))
+    else {
+        ui.fail(format!("the save has no s program titled “{title}” (a note tagged s)"));
+        return true;
+    };
+    match api.call("s.run", serde_json::json!({ "key": key, "args": args })).await {
+        Ok(r) => {
+            let out = r["out"].as_str().unwrap_or("").trim_start_matches('\n').to_string();
+            match r["err"].as_str() {
+                Some(e) => ui.fail(format!("{title}: {e}")),
+                None => ui.toast(if out.trim().is_empty() {
+                    format!("{title} ran ({} steps)", r["steps"])
+                } else {
+                    out
+                }),
+            }
+        }
+        Err(e) => ui.fail(e),
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

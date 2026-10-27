@@ -46,6 +46,11 @@ pub fn programs(g: &Graph) -> Result<BTreeMap<String, (String, String)>, String>
 
 /// `shared`: on a shared hub (fewer steps a run)
 pub fn call(g: &Graph, op: &str, args: &Value, shared: bool) -> Res {
+    call_hosted(g, op, args, shared, None)
+}
+
+/// `call`, with a host whose ops a program reaches through `std:anend`'s `op`
+pub fn call_hosted(g: &Graph, op: &str, args: &Value, shared: bool, host: Option<crate::s::machine::Host<'_>>) -> Res {
     match op {
         "s.programs" => {
             let p = programs(g)?;
@@ -86,19 +91,19 @@ pub fn call(g: &Graph, op: &str, args: &Value, shared: bool) -> Res {
             // the debugger: the run stopped before a step (`steps`), the same seed each time
             if op == "s.debug" {
                 let steps = args.get("steps").and_then(Value::as_u64).unwrap_or(0).min(max);
-                let snap = crate::s::debug(&code, s(args, "stdin"), files, &argv, steps, seed);
+                let snap = crate::s::debug(&code, s(args, "stdin"), files, &argv, steps, seed, host);
                 return Ok(json!(snap));
             }
             // with `trace`, the output each of the program's tokens wrote (its inline results)
             if args.get("trace").and_then(Value::as_bool) == Some(true) {
-                let (o, writes) = crate::s::run_traced(&code, s(args, "stdin"), files, &argv, max, seed);
+                let (o, writes) = crate::s::run_traced(&code, s(args, "stdin"), files, &argv, max, seed, host);
                 let lines: Vec<Value> = writes
                     .into_iter()
                     .map(|(r, out)| json!({ "from": r.start, "to": r.end, "out": out }))
                     .collect();
                 return Ok(json!({ "out": o.out, "err": o.err, "code": o.code, "steps": o.steps, "writes": lines }));
             }
-            let o = crate::s::run(&code, s(args, "stdin"), files, &argv, max, seed);
+            let o = crate::s::run(&code, s(args, "stdin"), files, &argv, max, seed, host);
             Ok(json!({ "out": o.out, "err": o.err, "code": o.code, "steps": o.steps }))
         }
         "s.words" => {
@@ -162,5 +167,21 @@ mod tests {
                 .len()
                 > 50
         );
+    }
+
+    #[test]
+    fn programs_call_the_projects_ops() {
+        let g = Graph::in_memory().unwrap();
+        let rm = Default::default();
+        let host = |op: &str, a: &Value| super::super::call(&g, &rm, op, a);
+        let code = "std/anend.s.\n{mem.saturate} {{\"text\": \"apple pie\"}} op\n{~r~} {key} json\n{made ~j~} >\nq {apple pie} obj {mem.search} {~o~} op\n{~r~} #json {found ~=~} >\n{no.such.op} op {failed} >! {~err~} >";
+        let r = call_hosted(&g, "s.run", &json!({ "code": code }), false, Some(&host)).unwrap();
+        assert_eq!(r["err"], Value::Null, "{r}");
+        let out = r["out"].as_str().unwrap();
+        assert!(out.contains("found 1"), "{out}");
+        assert!(out.contains("no.such.op"), "{r}");
+        // without a host, op fails
+        let r = call(&g, "s.run", &json!({ "code": "std/anend.s. {notes.list} op" }), false).unwrap();
+        assert!(r["err"].as_str().unwrap().contains("no anend"));
     }
 }

@@ -463,6 +463,15 @@ impl Saves {
 
     /// one op of the app API: the saves' own here, the models' in `super::classify`,
     /// the rest on the open save
+    /// an op asked for by an s program (`std:anend`'s `op`): any op but a run of its own
+    /// (a program calls another with `name.`), with the same limits as the app's
+    fn hosted(&self, op: &str, args: &Value) -> Res {
+        if op.starts_with("s.") || (op == "wiring.fire") {
+            return Err(format!("a program can't start {op} itself (call a program with name.)"));
+        }
+        self.call(op, args)
+    }
+
     pub fn call(&self, op: &str, args: &Value) -> Res {
         if super::blocks::routed(op) {
             let (_, g) = self.current()?;
@@ -481,12 +490,14 @@ impl Saves {
         if super::wiring::routed(op) {
             let (_, g) = self.current()?;
             let shared = self.models.is_some_and(|l| l.shared);
-            return super::wiring::call(&g, op, args, shared);
+            let host = |op: &str, a: &Value| self.hosted(op, a);
+            return super::wiring::call_hosted(&g, op, args, shared, Some(&host));
         }
         if super::script::routed(op) {
             let (_, g) = self.current()?;
             let shared = self.models.is_some_and(|l| l.shared);
-            return super::script::call(&g, op, args, shared);
+            let host = |op: &str, a: &Value| self.hosted(op, a);
+            return super::script::call_hosted(&g, op, args, shared, Some(&host));
         }
         if super::chains::routed(op) {
             let (_, g) = self.current()?;

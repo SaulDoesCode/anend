@@ -14,8 +14,9 @@ use std::collections::BTreeMap;
 pub use machine::{Outcome, Rt};
 
 /// runs a program: its source, what stdin holds, its files, its arguments, at most how
-/// many steps it may take, and the seed of its random numbers (the caller's clock: the
-/// browser has no system time to read here)
+/// many steps it may take, the seed of its random numbers (the caller's clock: the
+/// browser has no system time to read here), and its host for `std:anend` (none: `op`
+/// fails)
 pub fn run(
     src: &str,
     stdin: &str,
@@ -23,9 +24,11 @@ pub fn run(
     args: &[String],
     max_steps: u64,
     seed: u64,
+    host: Option<machine::Host<'_>>,
 ) -> Outcome {
     let mut rt = Rt::new(stdin, files, seed);
     rt.max_steps = max_steps;
+    rt.host = host;
     rt.run_program(src, args)
 }
 
@@ -38,9 +41,11 @@ pub fn run_traced(
     args: &[String],
     max_steps: u64,
     seed: u64,
+    host: Option<machine::Host<'_>>,
 ) -> (Outcome, Vec<(std::ops::Range<usize>, String)>) {
     let mut rt = Rt::new(stdin, files, seed);
     rt.max_steps = max_steps;
+    rt.host = host;
     rt.trace = Some(machine::Trace::default());
     let o = rt.run_program(src, args);
     let spans = lex::lex_spans(src).unwrap_or_default();
@@ -87,8 +92,10 @@ pub fn debug(
     args: &[String],
     steps: u64,
     seed: u64,
+    host: Option<machine::Host<'_>>,
 ) -> Snapshot {
     let mut rt = Rt::new(stdin, files, seed);
+    rt.host = host;
     rt.trace = Some(machine::Trace::default());
     rt.pause_at = Some(steps);
     rt.max_steps = steps.saturating_add(1);

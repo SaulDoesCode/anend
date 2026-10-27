@@ -63,6 +63,18 @@ In a run the files are the save's s programs (each under its title and its title
 them, workers run in step, `tcp` fails, as in the spec's browser runtime (§10). The
 library (`std/core.s` … `std/elec.s`) is built in as natives (`s::lib`).
 
+A run in anend also has anend's own library module, `std:anend` (`std/anend.s.`; not part
+of s 1.0): `op` calls any of the app API's ops by name with JSON arguments, on the save the
+run belongs to and with the same limits as the app (`name [args] [dest = r]`: mem[dest] =
+the answer as JSON, ow = it answered, else mem[err] says why); `json` reads a value at a
+dotted path (`text path [dest = j]`, a string as itself), `#json` counts the items there
+(`text [path] [dest = =]`), `obj` builds a JSON object from key-value pairs (mem[o]; a
+value that reads as JSON goes in as it is) and `quote` makes a JSON string (mem[q]). A
+program can't start another run through `op` (`s.*`, `wiring.fire`): it calls another
+program with `name.`. Programs run from the notes view (▶), the bar (`Run <title>
+[arguments]`), blocks' wirings, and the command line (`anend-app run <file or title>
+[arguments] [--save path]`).
+
 ## Rendering and the interpreter (`interp`)
 
 Rendering a body decodes it, transcludes `REF`s and evaluates `CALL`s. A function is any

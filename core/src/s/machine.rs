@@ -15,7 +15,11 @@ use std::rc::Rc;
 use super::lex::{Part, Tok, brace_source, lex};
 use super::val::{V, num_text};
 
-pub type NativeFn = fn(&mut Rt) -> Res;
+pub type NativeFn = fn(&mut Rt<'_>) -> Res;
+
+/// what a run may ask its host for (anend's app ops, `std:anend`): an op's name and
+/// arguments, its answer
+pub type Host<'h> = &'h dyn Fn(&str, &serde_json::Value) -> Result<serde_json::Value, String>;
 
 /// why a run stopped early
 #[derive(Clone, Debug, PartialEq)]
@@ -101,8 +105,8 @@ struct Handle {
     append: bool,
 }
 
-struct Worker {
-    rt: Box<Rt>,
+struct Worker<'h> {
+    rt: Box<Rt<'h>>,
     results: VecDeque<String>,
 }
 
@@ -168,7 +172,7 @@ impl Prng {
     }
 }
 
-pub struct Rt {
+pub struct Rt<'h> {
     pub stack: Vec<V>,
     pub ow: bool,
     pub global: Scope,
@@ -181,7 +185,7 @@ pub struct Rt {
     /// the run's files: path → contents
     pub files: BTreeMap<String, String>,
     handles: HashMap<String, Handle>,
-    workers: Vec<Option<Worker>>,
+    workers: Vec<Option<Worker<'h>>>,
     pub out: String,
     stdin: VecDeque<String>,
     pub prng: Prng,
@@ -197,14 +201,16 @@ pub struct Rt {
     pub pause_at: Option<u64>,
     /// each unit's source, by the unit (for a paused run's position)
     unit_src: HashMap<*const Vec<Tok>, Rc<str>>,
+    /// the host's ops (`std:anend`), when the run has a host
+    pub host: Option<Host<'h>>,
 }
 
 fn whole(v: f64) -> Option<u64> {
     (v >= 0.0 && v.fract() == 0.0 && v < 1.8e19).then_some(v as u64)
 }
 
-impl Rt {
-    pub fn new(stdin: &str, files: BTreeMap<String, String>, seed: u64) -> Rt {
+impl<'h> Rt<'h> {
+    pub fn new(stdin: &str, files: BTreeMap<String, String>, seed: u64) -> Rt<'h> {
         Rt {
             stack: Vec::new(),
             ow: false,
@@ -228,6 +234,7 @@ impl Rt {
             trace: None,
             pause_at: None,
             unit_src: HashMap::new(),
+            host: None,
         }
     }
 
@@ -1103,6 +1110,7 @@ impl Rt {
                         .cloned()
                         .ok_or_else(|| Stop::Err(format!("t: there's no file {path}")))?;
                     let mut rt = Box::new(Rt::new("", self.files.clone(), self.prng.next_u64()));
+                    rt.host = self.host;
                     rt.max_steps = self.max_steps.saturating_sub(self.steps);
                     let o = rt.run_program(&src, &[]);
                     self.out.push_str(&o.out);
@@ -1172,6 +1180,7 @@ impl Rt {
                         .cloned()
                         .ok_or_else(|| Stop::Err(format!("***: there's no file {path}")))?;
                     let mut rt = Rt::new("", self.files.clone(), self.prng.next_u64());
+                    rt.host = self.host;
                     rt.max_steps = self.max_steps.saturating_sub(self.steps);
                     let o = rt.run_program(&src, &[]);
                     self.out.push_str(&o.out);

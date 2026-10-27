@@ -38,6 +38,12 @@ impl Local {
         self.saves.current_path().unwrap_or_default()
     }
 
+    /// an op answered here and now (the command line's `run`, which has no interface to keep
+    /// waiting)
+    pub fn call_now(&self, op: &str, args: &Value) -> Res {
+        self.dispatch(op, args)
+    }
+
     fn dispatch(&self, op: &str, args: &Value) -> Res {
         self.saves.call(op, args)
     }

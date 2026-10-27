@@ -292,7 +292,15 @@ fn act(
 }
 
 /// one cause and what it sets off
-fn fire(g: &Graph, id: &str, event: Event, from: &str, value: &str, shared: bool) -> Result<Report, String> {
+fn fire(
+    g: &Graph,
+    id: &str,
+    event: Event,
+    from: &str,
+    value: &str,
+    shared: bool,
+    host: Option<crate::s::machine::Host<'_>>,
+) -> Result<Report, String> {
     let progs = super::script::programs(g)?;
     let mut files = BTreeMap::new();
     for (title, (_, body)) in &progs {
@@ -323,7 +331,7 @@ fn fire(g: &Graph, id: &str, event: Event, from: &str, value: &str, shared: bool
                 None => log["err"] = json!(format!("no s program titled {:?}", w.program)),
                 Some((_, code)) => {
                     let args = [ev.name().to_string(), from.clone(), id.clone(), value.clone()];
-                    let o = crate::s::run(code, &w.state, files.clone(), &args, budget.max(1), g.now());
+                    let o = crate::s::run(code, &w.state, files.clone(), &args, budget.max(1), g.now(), host);
                     budget = budget.saturating_sub(o.steps);
                     let mut out = Vec::new();
                     for line in o.out.lines() {
@@ -406,6 +414,11 @@ fn fire(g: &Graph, id: &str, event: Event, from: &str, value: &str, shared: bool
 }
 
 pub fn call(g: &Graph, op: &str, args: &Value, shared: bool) -> Res {
+    call_hosted(g, op, args, shared, None)
+}
+
+/// `call`, with a host whose ops a block's program reaches through `std:anend`'s `op`
+pub fn call_hosted(g: &Graph, op: &str, args: &Value, shared: bool, host: Option<crate::s::machine::Host<'_>>) -> Res {
     let block = |args: &Value| -> Result<Block, String> {
         let id = s(args, "id");
         g.block(id)?.ok_or_else(|| format!("no block {id}"))
@@ -444,7 +457,7 @@ pub fn call(g: &Graph, op: &str, args: &Value, shared: bool) -> Res {
             let id = s(args, "id");
             let ev =
                 Event::parse(s(args, "event")).ok_or("which event? (click, hit, enter, leave, timer or signal)")?;
-            let r = fire(g, id, ev, s(args, "from"), s(args, "value"), shared)?;
+            let r = fire(g, id, ev, s(args, "from"), s(args, "value"), shared, host)?;
             let now: Vec<Block> = r.changed.iter().filter_map(|i| g.block(i).ok().flatten()).collect();
             let mut out = super::blocks::listed(g, &now)?;
             out["events"] = json!(r.events);

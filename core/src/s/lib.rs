@@ -22,6 +22,7 @@ fn module(name: &str) -> Option<(&'static [&'static str], Natives)> {
         "sh" => (&["text"], SH),
         "logic" => (&["core"], LOGIC),
         "elec" => (&["line"], ELEC),
+        "anend" => (&[], ANEND),
         _ => return None,
     })
 }
@@ -1426,9 +1427,133 @@ fn rc(rt: &mut Rt, up: bool) -> Res {
     Ok(())
 }
 
+// ------------------------------------------------------------ std/anend.s
+//
+// anend's own module (not in s 1.0): the project's functions, headless. `op` calls any
+// of the app API's ops (docs/app-api.md) by name with JSON arguments, on the save the run
+// belongs to, with the hub's limits on a shared hub; `json`, `#json` and `quote` read its
+// answers and build its arguments. A run without a host (s on its own) fails on `op`.
+
+/// a JSON value at a dotted path (`0.title`, `members.2`): the value, if it's there
+fn json_at<'v>(v: &'v serde_json::Value, path: &str) -> Option<&'v serde_json::Value> {
+    path.split('.').filter(|p| !p.is_empty()).try_fold(v, |v, p| match v {
+        serde_json::Value::Array(a) => p.parse::<usize>().ok().and_then(|i| a.get(i)),
+        serde_json::Value::Object(o) => o.get(p),
+        _ => None,
+    })
+}
+
+/// a JSON value as s text: a string as itself, anything else as its JSON
+fn json_text(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        v => v.to_string(),
+    }
+}
+
+const ANEND: Natives = &[
+    // name [args (JSON) = {}] [dest = r]: mem[dest] = the answer (JSON); ow: it answered
+    // (else mem[err] says why)
+    ("op", |rt| {
+        let vals = line(rt);
+        let Some(name) = vals.first().map(|v| v.text().to_string()) else {
+            return err("op needs an op's name");
+        };
+        let args = vals.get(1).map(|v| v.text().to_string()).unwrap_or_else(|| "{}".into());
+        let dest = vals.get(2).map(|v| v.text().to_string()).unwrap_or_else(|| "r".into());
+        let Some(host) = rt.host else {
+            return err("op: this run has no anend to ask (it runs in the notes view, the bar or `anend run`)");
+        };
+        let args: serde_json::Value = match serde_json::from_str(if args.trim().is_empty() { "{}" } else { &args }) {
+            Ok(a) => a,
+            Err(e) => return err(format!("op {name}: its arguments aren't JSON: {e}")),
+        };
+        match host(&name, &args) {
+            Ok(v) => {
+                rt.mset(&dest, V::from(v.to_string()));
+                rt.ow = true;
+            }
+            Err(e) => {
+                rt.global.mem.insert("err".into(), V::from(e));
+                rt.ow = false;
+            }
+        }
+        Ok(())
+    }),
+    // json path [dest = j]: mem[dest] = the value there (a string as itself); ow: found
+    ("json", |rt| {
+        let vals = line(rt);
+        need_vals(&vals, 2, "json")?;
+        let dest = vals.get(2).map(|v| v.text().to_string()).unwrap_or_else(|| "j".into());
+        let found = serde_json::from_str::<serde_json::Value>(&vals[0].text())
+            .ok()
+            .and_then(|v| json_at(&v, &vals[1].text()).map(json_text));
+        rt.ow = found.is_some();
+        rt.mset(&dest, V::from(found.unwrap_or_else(|| "404".into())));
+        Ok(())
+    }),
+    // json [path] [dest = =]: numbers[dest] = how many items (or keys, or characters) there
+    ("#json", |rt| {
+        let vals = line(rt);
+        need_vals(&vals, 1, "#json")?;
+        let path = vals.get(1).map(|v| v.text().to_string()).unwrap_or_default();
+        let dest = vals.get(2).map(|v| v.text().to_string()).unwrap_or_else(|| "=".into());
+        let n = serde_json::from_str::<serde_json::Value>(&vals[0].text())
+            .ok()
+            .and_then(|v| {
+                json_at(&v, &path).map(|x| match x {
+                    serde_json::Value::Array(a) => a.len(),
+                    serde_json::Value::Object(o) => o.len(),
+                    serde_json::Value::String(s) => s.chars().count(),
+                    _ => 0,
+                })
+            })
+            .unwrap_or(0);
+        rt.nset(&dest, n as f64);
+        Ok(())
+    }),
+    // key value key value ...: mem[o] = a JSON object of them (a value that reads as JSON,
+    // a number, an object, a list, true, false or null, goes in as it is; the rest as text)
+    ("obj", |rt| {
+        let vals = line(rt);
+        if !vals.len().is_multiple_of(2) {
+            return err("obj needs keys and values in pairs");
+        }
+        let mut o = serde_json::Map::new();
+        for kv in vals.chunks(2) {
+            let v = kv[1].text().to_string();
+            let j = serde_json::from_str::<serde_json::Value>(&v)
+                .ok()
+                .filter(|j| !j.is_string())
+                .unwrap_or(serde_json::Value::String(v));
+            o.insert(kv[0].text().to_string(), j);
+        }
+        rt.mset("o", V::from(serde_json::Value::Object(o).to_string()));
+        Ok(())
+    }),
+    // text [dest = q]: mem[dest] = the text as a JSON string (for building arguments)
+    ("quote", |rt| {
+        let vals = line(rt);
+        need_vals(&vals, 1, "quote")?;
+        let dest = vals.get(1).map(|v| v.text().to_string()).unwrap_or_else(|| "q".into());
+        rt.mset(
+            &dest,
+            V::from(serde_json::Value::String(vals[0].text().to_string()).to_string()),
+        );
+        Ok(())
+    }),
+];
+
+fn need_vals(vals: &[V], n: usize, who: &str) -> Res {
+    if vals.len() < n {
+        return err(format!("{who} needs {n} value{}", if n == 1 { "" } else { "s" }));
+    }
+    Ok(())
+}
+
 /// every library word, by module (for completion and highlighting)
 pub fn words() -> Vec<(&'static str, Vec<&'static str>)> {
-    ["core", "line", "text", "gem", "sh", "logic", "elec"]
+    ["core", "line", "text", "gem", "sh", "logic", "elec", "anend"]
         .iter()
         .filter_map(|m| module(m).map(|(_, w)| (*m, w.iter().map(|(n, _)| *n).collect())))
         .collect()

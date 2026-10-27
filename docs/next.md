@@ -91,7 +91,9 @@ departure says why in its commit).
   guide, offered on PR #8).
 - Done (27 Oct): the rest of s's code editor: outline, go to definition, inline results,
   the step debugger, completion.
-- Next: a headless standard library over every app op, and `anend run` (#11).
+- Done (27 Oct): `std:anend` over every app op, `Run` in the bar, `anend-app run` (#11).
+- Next: classifiers and models as language primitives (#18), then the ▶ usable point for
+  scripting.
   Open further up: the language lines (s, the standard library), taxonomies and pipes,
   the wgpu renderer and culling.
 

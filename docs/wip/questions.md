@@ -308,3 +308,17 @@ The answers left these open. Each is written into the design as its default.
 78. **Go to definition is Ctrl+click** (a word's script or `><` definition in this program,
     else the program it names); completion offers at most eight words, shortest first, and
     Tab takes the first (Tab moves on as usual when there's none).
+
+## The standard library and `anend run` (27 Oct)
+
+79. **The standard library is one module, `std:anend`, with one word per kind of thing
+    rather than a word per op:** `op` takes any op's name and JSON arguments, so every op
+    the app has (and every new one) is there at once; `json`, `#json`, `obj` and `quote`
+    read answers and build arguments. Answers stay JSON text, since s's values are text.
+80. **A program can't start a run through `op`** (`s.run`, `s.debug`, `wiring.fire`), so
+    runs don't nest without bound; programs call each other with `name.`.
+81. **The command line is `anend-app run`** (the desktop binary, which already opens saves);
+    the program is a file, else the save's program of that title; output on stdout, an
+    error on stderr, the program's exit code, and piped stdin as its stdin.
+82. **`Run <title> [arguments]` in the bar** (the memory view and the space) shows the
+    output as a toast (it can be clicked into the bar) and an error in the top bar.

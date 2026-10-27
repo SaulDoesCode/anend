@@ -38,6 +38,79 @@ pub fn make_api() -> Api {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+/// `anend-app run <program> [arguments...] [--save path.redb]`: runs an s program on the
+/// save, headless, with the app's ops a call away (`std:anend`). The program is a file, or
+/// the save's s program (a note tagged `s`) of that title. What it writes goes to stdout,
+/// an error to stderr; stdin, when piped, is its stdin. Its exit code is the program's.
+fn run_cli(args: &[String], save: Option<&std::path::Path>) -> i32 {
+    use std::io::{IsTerminal, Read};
+    let mut rest: Vec<String> = Vec::new();
+    let mut skip = false;
+    for (i, a) in args.iter().enumerate().skip(2) {
+        if skip {
+            skip = false;
+            continue;
+        }
+        if a == "--save" || a == "--db" {
+            skip = true;
+            continue;
+        }
+        let _ = i;
+        rest.push(a.clone());
+    }
+    let Some(program) = rest.first().cloned() else {
+        eprintln!("usage: anend-app run <program.s or a program's title> [its arguments...] [--save path.redb]");
+        return 2;
+    };
+    let dir = prefs::data_dir().join("saves");
+    let local = match backend::local::Local::open(&dir, save) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("anend: couldn't open the save: {e}");
+            return 1;
+        }
+    };
+    let mut stdin = String::new();
+    if !std::io::stdin().is_terminal() {
+        let _ = std::io::stdin().read_to_string(&mut stdin);
+    }
+    let mut call = serde_json::json!({ "args": rest[1..], "stdin": stdin });
+    if std::path::Path::new(&program).is_file() {
+        match std::fs::read_to_string(&program) {
+            Ok(code) => call["code"] = code.into(),
+            Err(e) => {
+                eprintln!("anend: {program}: {e}");
+                return 1;
+            }
+        }
+    } else {
+        let progs = local.call_now("s.programs", &serde_json::json!({})).unwrap_or_default();
+        let title = program.strip_suffix(".s").unwrap_or(&program);
+        match progs.as_array().into_iter().flatten().find(|p| p["title"] == title) {
+            Some(p) => call["key"] = p["key"].clone(),
+            None => {
+                eprintln!("anend: no file {program}, and the save has no s program titled {title:?}");
+                return 1;
+            }
+        }
+    }
+    match local.call_now("s.run", &call) {
+        Ok(r) => {
+            let out = r["out"].as_str().unwrap_or("");
+            println!("{}", out.strip_prefix('\n').unwrap_or(out));
+            if let Some(e) = r["err"].as_str() {
+                eprintln!("s: {e}");
+            }
+            r["code"].as_i64().unwrap_or(0) as i32
+        }
+        Err(e) => {
+            eprintln!("anend: {e}");
+            1
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
     // WebKitGTK's DMA-BUF renderer needs GBM buffers the driver may refuse ("Failed to
@@ -56,9 +129,14 @@ fn main() {
         .position(|a| a == "--save" || a == "--db")
         .and_then(|i| args.get(i + 1))
         .map(std::path::PathBuf::from);
+    let prefs = prefs::load();
+    // `anend-app run <program> [its arguments]`: an s program, headless, on the save
+    if args.get(1).map(String::as_str) == Some("run") {
+        let save = arg_save.clone().or_else(|| prefs.save.clone().map(Into::into));
+        std::process::exit(run_cli(&args, save.as_deref()));
+    }
     // the installed font families, for the settings' font fields
     fonts::scan_system();
-    let prefs = prefs::load();
     let save = arg_save.or_else(|| prefs.save.clone().map(Into::into));
     let dir = prefs::data_dir().join("saves");
     let local = match backend::local::Local::open(&dir, save.as_deref()) {

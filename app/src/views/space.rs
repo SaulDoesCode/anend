@@ -1104,6 +1104,10 @@ async fn enter(mut ui: Ui, api: Api, sp: Sp, raw: String, ctrl: bool, shift: boo
     let mut words = t.split_whitespace();
     let word = words.next().unwrap_or_default().to_string();
     let rest: Vec<&str> = words.collect();
+    // `Run <program> [arguments]`: an s program of the save
+    if word == "Run" && crate::views::scode::run_from_bar(ui, &api, &t).await {
+        return;
+    }
     if COMMANDS.contains(&word.as_str()) && (rest.is_empty() || word == "Save") {
         if matches!(word.as_str(), "Note" | "Notes") {
             ui.say("weum's notes on memories aren't part of anend; lists are");

@@ -274,7 +274,10 @@ Lists are how you tell anend what goes together, and what models learn from.
   run another by its title (`greet.`), since its files are the save's s programs. The step
   button runs it one step at a time (or 10, 100, to the end), with the stack and the values
   shown and the next token marked; the outline lists what it defines; Ctrl+click a word
-  goes to its definition; typing offers completions (Tab takes the first).
+  goes to its definition; typing offers completions (Tab takes the first). `Run <title>
+  [arguments]` in the bar runs a program from anywhere, and `anend-app run` from a shell.
+  With `std/anend.s.` a program reaches everything the app does: `{notes.list} op` puts
+  the answer in `r`, and `json`, `#json` and `obj` read and build what ops take and give.
 - **The reader** (**Ctrl+4**): notes and texts as cards, a page at a time. Click one (or
   Enter on it) to read it big; **← →** step through, **Esc** goes back.
 - **Tags** (**Ctrl+6**): every tag with its count. Click picks one, Ctrl or Shift+click

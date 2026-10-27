@@ -1,7 +1,7 @@
 use super::*;
 
 fn out(src: &str) -> String {
-    let o = run(src, "", BTreeMap::new(), &[], 5_000_000, 7);
+    let o = run(src, "", BTreeMap::new(), &[], 5_000_000, 7, None);
     assert_eq!(o.err, None, "{src}");
     o.out
 }
@@ -86,14 +86,14 @@ fn the_library() {
 
 #[test]
 fn errors_and_exits() {
-    let o = run("+", "", BTreeMap::new(), &[], 1000, 7);
+    let o = run("+", "", BTreeMap::new(), &[], 1000, 7, None);
     assert_eq!(o.err.as_deref(), Some("+ needs 2 values"));
     assert_eq!(o.code, 1);
-    let o = run("hi > 3 <-- never >", "", BTreeMap::new(), &[], 1000, 7);
+    let o = run("hi > 3 <-- never >", "", BTreeMap::new(), &[], 1000, 7, None);
     assert_eq!((o.out.as_str(), o.code, o.err), ("\n hi", 3, None));
-    let o = run("{loop.} loop$ loop..", "", BTreeMap::new(), &[], 1000, 7);
+    let o = run("{loop.} loop$ loop..", "", BTreeMap::new(), &[], 1000, 7, None);
     assert!(o.err.unwrap().contains("steps"));
-    assert!(run("{a", "", BTreeMap::new(), &[], 10, 7).err.is_some());
+    assert!(run("{a", "", BTreeMap::new(), &[], 10, 7, None).err.is_some());
 }
 
 #[test]
@@ -107,16 +107,17 @@ fn files_input_and_args() {
         &["first".into()],
         1000,
         7,
+        None,
     );
     assert_eq!(o.out, "\n from a file\n hi\n typed\n first");
-    let o = run("{echo hi} < r~ >_", "", BTreeMap::new(), &[], 100, 7);
+    let o = run("{echo hi} < r~ >_", "", BTreeMap::new(), &[], 100, 7, None);
     assert_eq!(o.out, "hi\n");
 }
 
 #[test]
 fn inline_results_and_stepping() {
     let src = "1 a#\n{one} >\n{x} sh$ sh. //\na~ 2 + =~ >";
-    let (o, w) = super::run_traced(src, "", BTreeMap::new(), &[], 1000, 7);
+    let (o, w) = super::run_traced(src, "", BTreeMap::new(), &[], 1000, 7, None);
     assert_eq!(o.out, "\n one\n 3");
     // the output by the program's token that wrote it: `>` on line 2, the call on line 3
     // wrote nothing (the script didn't print), `>` on line 4
@@ -126,17 +127,17 @@ fn inline_results_and_stepping() {
         .collect();
     assert_eq!(lines, [(1, "\n one"), (3, "\n 3")]);
     // stepping: before step 3 the program is about to run `{one}` with nothing stacked
-    let s = super::debug(src, "", BTreeMap::new(), &[], 2, 7);
+    let s = super::debug(src, "", BTreeMap::new(), &[], 2, 7, None);
     assert!(!s.done && s.main);
     assert_eq!(&src[s.at.clone().unwrap()], "{one}");
     assert_eq!(s.numbers["a"], "1");
     assert!(s.stack.is_empty());
-    let s = super::debug(src, "", BTreeMap::new(), &[], 3, 7);
+    let s = super::debug(src, "", BTreeMap::new(), &[], 3, 7, None);
     assert_eq!(s.stack, ["one"]);
     // inside the script's body: not the program's own unit
-    let s = super::debug(src, "", BTreeMap::new(), &[], 7, 7);
+    let s = super::debug(src, "", BTreeMap::new(), &[], 7, 7, None);
     assert!(!s.main && s.depth == 2, "{s:?}");
     assert_eq!(s.unit, "x");
-    let s = super::debug(src, "", BTreeMap::new(), &[], 1000, 7);
+    let s = super::debug(src, "", BTreeMap::new(), &[], 1000, 7, None);
     assert!(s.done && s.err.is_none());
 }

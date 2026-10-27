@@ -250,6 +250,12 @@ mod tests {
         }
         assert!(include_str!("style.css").contains(".pad.code textarea"));
         assert!(hl.contains("pub fn s_html_with(") && include_str!("views/scode.rs").contains("pub fn outline("));
+        // the bar's Run and the command line's run (#11)
+        assert!(include_str!("views/scode.rs").contains("pub async fn run_from_bar("));
+        assert!(include_str!("views/memory.rs").contains("run_from_bar"));
+        assert!(include_str!("views/space.rs").contains("run_from_bar"));
+        assert!(include_str!("main.rs").contains("fn run_cli("));
+        assert!(include_str!("../../core/src/s/lib.rs").contains("\"anend\" =>"));
     }
 
     /// wiring: blocks that cast rays and run programs, the window, playing in the room
