@@ -512,6 +512,13 @@ impl Saves {
             let limits = self.models.unwrap_or(super::classify::Limits::NONE);
             return super::pictures::call(&g, op, args, &limits);
         }
+        if super::taxonomy::routed(op) {
+            if self.models.is_none() {
+                return Err("these saves keep no models".into());
+            }
+            let (_, g) = self.current()?;
+            return super::taxonomy::call(self, &g, op, args);
+        }
         match &self.models {
             Some(limits) if super::models::routed(op) => super::models::saves_call(self, op, args, limits),
             Some(limits) if super::classify::routed(op) => super::classify::saves_call(self, op, args, limits),

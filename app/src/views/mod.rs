@@ -19,6 +19,7 @@ pub mod space;
 pub mod specs;
 pub mod stats;
 pub mod tags;
+pub mod taxonomy;
 
 use dioxus::prelude::*;
 

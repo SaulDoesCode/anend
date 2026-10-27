@@ -48,8 +48,20 @@ pub fn Models() -> Element {
     let mut chosen: Signal<Option<String>> = use_signal(|| None);
     let mut side = use_signal(|| Side::None);
     let mut rev = use_signal(|| 0u64);
-    // the classifiers or the spec models
-    let mut specs_tab = use_signal(|| ui.prefs.peek().folded("models: specs"));
+    // the classifiers (0), the spec models (1) or the taxonomies (2)
+    let mut tab = use_signal(|| {
+        let p = ui.prefs.peek();
+        if p.folded("models: taxonomies") {
+            2u8
+        } else if p.folded("models: specs") {
+            1
+        } else {
+            0
+        }
+    });
+    let specs_tab = use_memo(move || tab() == 1);
+    // the bar's text, sent to a taxonomy's try card by Enter
+    let mut tax_bar = use_signal(|| (0u64, String::new()));
     let specs = use_hook(crate::views::specs::SpecState::new);
     let api_r = api.clone();
     let models = use_resource(move || {
@@ -58,6 +70,14 @@ pub fn Models() -> Element {
         async move { api.models().await }
     });
     use_keys(View::Models, move |k: KeyPress| {
+        if *tab.peek() == 2 {
+            if k.bar && k.key == "Enter" {
+                let n = tax_bar.peek().0 + 1;
+                tax_bar.set((n, k.text.trim().to_string()));
+                return true;
+            }
+            return false;
+        }
         if *specs_tab.peek() {
             if k.bar && k.key == "Enter" {
                 let mut e = specs.enter;
@@ -113,25 +133,33 @@ pub fn Models() -> Element {
         div { class: "page wide",
             div { class: "row",
                 div { class: "mtabs", role: "tablist", "aria-label": "kinds of model",
-                    for (on , label) in [(false, "classifiers"), (true, "spec models")] {
-                        button { key: "{label}", role: "tab", "aria-selected": "{specs_tab() == on}",
-                            class: if specs_tab() == on { "mtab on" } else { "mtab" },
+                    for (on , label) in [(0u8, "classifiers"), (1, "spec models"), (2, "taxonomies")] {
+                        button { key: "{label}", role: "tab", "aria-selected": "{tab() == on}",
+                            class: if tab() == on { "mtab on" } else { "mtab" },
                             onclick: move |_| {
-                                specs_tab.set(on);
+                                tab.set(on);
                                 crate::shell::set_pref(ui, |p| {
-                                    if on { p.collapsed.insert("models: specs".into()); } else { p.collapsed.remove("models: specs"); }
+                                    p.collapsed.remove("models: specs");
+                                    p.collapsed.remove("models: taxonomies");
+                                    match on {
+                                        1 => { p.collapsed.insert("models: specs".into()); }
+                                        2 => { p.collapsed.insert("models: taxonomies".into()); }
+                                        _ => {}
+                                    }
                                 });
                             },
                             "{label}" }
                     }
                 }
-                if specs_tab() {
+                if tab() == 2 {
+                    span { class: "dim small", "classifiers in a tree: each answer picks the next classifier" }
+                } else if specs_tab() {
                     span { class: "dim small", "described as data: what they read, their heads, what they learn from" }
                 } else {
                     span { class: "dim small", "learn classes from example lists, then read any text" }
                 }
                 span { class: "grow" }
-                if !specs_tab() {
+                if tab() == 0 {
                 button { class: if side() == Side::New { "on" } else { "" }, onclick: move |_| side.set(if side() == Side::New { Side::None } else { Side::New }),
                     Icon { name: "new" } "new" }
                 button { class: if side() == Side::Starters { "on" } else { "" }, "data-tip": "ready-made classifiers whose answers a rule can check",
@@ -142,7 +170,9 @@ pub fn Models() -> Element {
                     Icon { name: "upload" } "import" }
                 }
             }
-            if specs_tab() {
+            if tab() == 2 {
+                crate::views::taxonomy::Taxonomies { bar: tax_bar }
+            } else if specs_tab() {
                 crate::views::specs::SpecModels { state: specs }
             } else {
             if let Some(n) = note {

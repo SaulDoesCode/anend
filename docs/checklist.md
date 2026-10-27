@@ -144,8 +144,9 @@ docs/architecture.md (the whole).
       `class`, `feedback`, `steer`, `likely`, `similar`, `search`, `model`, `generate`.)
 - [x] ▶ **usable:** scripting the project from the notes view and the command line.
       (27 Oct: README "Programs", the guide's "Programs", offered on PR #8.)
-- [ ] Taxonomies: classifiers in hierarchies that route a text to further classifiers,
+- [x] Taxonomies: classifiers in hierarchies that route a text to further classifiers,
       trained by hand in the UI, with accuracy per node (docs/architecture.md 1).
+      (27 Oct: `taxonomy.*`, the models view's taxonomies tab, `route` in `std:learn`.)
 - [ ] Pipes: sources through filters to stacked effects, computed rather than stored; the
       filters page becomes the pipe editor (docs/architecture.md 2, 3).
 - [ ] Views as programs: today's views rebuilt as presets, with parity.md's guards passing

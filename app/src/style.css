@@ -944,3 +944,15 @@ a.btn { text-decoration: none; }
 .s-dbg .s-stack { gap: 4px; padding: 4px 0; }
 .s-dbg .s-vals { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 2px 10px; padding: 4px 0; }
 .s-dbg .s-unit { font-size: .9em; }
+
+/* ---------------------------------------------------------------- taxonomies */
+.tax-node { display: flex; flex-direction: column; gap: 4px; }
+.tax-node > .row { gap: 8px; align-items: center; flex-wrap: wrap; }
+.tax-route { display: flex; flex-direction: column; gap: 4px; margin-left: 14px; }
+.tax-route > .row { gap: 8px; align-items: center; flex-wrap: wrap; }
+.tax-class { font-weight: 600; overflow-wrap: anywhere; }
+.tax-sub { margin-left: 10px; padding: 4px 0 4px 12px; border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); }
+input.tax-title { font-size: 1.2em; font-weight: 700; min-width: 0; flex: 1 1 200px; }
+.tax-step .t { white-space: normal; }
+.tax-which { flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 6px 52px; }
+input.tax-about { width: 100%; }

@@ -29,13 +29,15 @@ pub mod mime {
     pub const ANIMATION: u16 = 9;
     /// a block's wiring: its text the wiring's JSON (`graph::wiring`)
     pub const WIRING: u16 = 10;
+    /// a taxonomy: its text the taxonomy's JSON, classifiers in a tree (`ops::taxonomy`)
+    pub const TAXONOMY: u16 = 11;
 
     /// entries that are a block's data rather than texts: left out of search and counts
     pub fn hidden(m: u16) -> bool {
-        m == ANIMATION || m == WIRING
+        m == ANIMATION || m == WIRING || m == TAXONOMY
     }
 
-    pub const NAMES: [&str; 11] = [
+    pub const NAMES: [&str; 12] = [
         "text/plain",
         "text/markdown",
         "application/x-anend-fn",
@@ -47,6 +49,7 @@ pub mod mime {
         "application/x-anend-chain",
         "application/x-anend-animation",
         "application/x-anend-wiring",
+        "application/x-anend-taxonomy",
     ];
 
     pub fn builtin(name: &str) -> Option<u16> {

@@ -227,6 +227,29 @@ mod tests {
         }
     }
 
+    /// taxonomies: the models view's third tab, the tree editor, routing and marking
+    #[test]
+    fn taxonomies_stay() {
+        let cls = include_str!("views/classifiers.rs");
+        assert!(cls.contains("(2, \"taxonomies\")") && cls.contains("models: taxonomies"));
+        assert!(cls.contains("crate::views::taxonomy::Taxonomies { bar: tax_bar }"));
+        let tx = include_str!("views/taxonomy.rs");
+        for needle in [
+            "\"taxonomy.list\"",
+            "\"taxonomy.get\"",
+            "\"taxonomy.save\"",
+            "\"taxonomy.delete\"",
+            "\"taxonomy.route\"",
+            "\"taxonomy.mark\"",
+            "\"ends here\"",
+            "\"none of these\"",
+            "fn node_view(",
+        ] {
+            assert!(tx.contains(needle), "taxonomy.rs lost {needle}");
+        }
+        assert!(include_str!("../../core/src/s/lib.rs").contains("(\"route\", |rt|"));
+    }
+
     /// s programs: notes tagged s, the right-aligned code mode, word classes, running
     #[test]
     fn s_programs_stay() {

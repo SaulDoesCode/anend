@@ -590,3 +590,113 @@ fn programs_classify_and_generate() {
     drop(ws);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// taxonomies: classifiers in a tree, routing a text, marked by hand per node
+#[test]
+fn taxonomies_route_and_count_marks() {
+    let dir = temp("taxonomy");
+    let ws = Saves::new(&dir, "notes").with_models(Limits::NONE);
+    save(&ws);
+    let c = |op: &str, a: Value| ws.call(op, &a);
+    let lists = c("lists.stats", json!({})).unwrap()["lists"].clone();
+    let keys: Vec<Value> = lists.as_array().unwrap().iter().map(|l| l["list"].clone()).collect();
+    for name in ["sorter", "again"] {
+        c(
+            "classify.create",
+            json!({ "name": name, "classes": keys, "preset": "tiny" }),
+        )
+        .unwrap();
+        c("classify.train", json!({ "name": name, "epochs": 30, "wait": true })).unwrap();
+    }
+    let tree = json!({ "name": "things", "root": { "classifier": "sorter", "routes": { "fruit": { "classifier": "again" } } } });
+
+    // checked against the classifiers
+    let bad =
+        json!({ "name": "x", "root": { "classifier": "sorter", "routes": { "pebbles": { "classifier": "again" } } } });
+    let e = c("taxonomy.save", json!({ "taxonomy": bad })).unwrap_err();
+    assert!(e.contains("no class \"pebbles\""), "{e}");
+    let bad =
+        json!({ "name": "x", "root": { "classifier": "sorter", "routes": { "fruit": { "classifier": "nobody" } } } });
+    let e = c("taxonomy.save", json!({ "taxonomy": bad })).unwrap_err();
+    assert!(e.contains("after fruit") && e.contains("\"nobody\""), "{e}");
+
+    let made = c("taxonomy.save", json!({ "taxonomy": tree })).unwrap();
+    assert_eq!(made["nodes"].as_array().unwrap().len(), 2);
+    assert_eq!(made["nodes"][1]["path"], json!(["fruit"]));
+    assert!(made["nodes"][0]["held_out"].is_number(), "{made}");
+    assert_eq!(c("taxonomy.list", json!({})).unwrap()[0]["nodes"], 2);
+    // a new one can't take a name that's there
+    let e = c("taxonomy.save", json!({ "taxonomy": tree, "new": true })).unwrap_err();
+    assert!(e.contains("already"), "{e}");
+    // kept out of search and counts
+    assert_eq!(c("mem.search", json!({ "q": "sorter" })).unwrap(), json!([]));
+
+    // a fruit goes on to the second classifier; a rock stops at the first
+    let r = c(
+        "taxonomy.route",
+        json!({ "name": "things", "text": "banana plum cherry" }),
+    )
+    .unwrap();
+    assert_eq!(r["steps"].as_array().unwrap().len(), 2, "{r}");
+    assert_eq!(r["steps"][1]["classifier"], "again");
+    assert_eq!(r["class"], "fruit");
+    assert_eq!(r["reached"], true);
+    let r = c("taxonomy.route", json!({ "name": "things", "text": "granite slate" })).unwrap();
+    assert_eq!(r["steps"].as_array().unwrap().len(), 1, "{r}");
+    assert_eq!(r["class"], "rocks");
+
+    // marks count per node and are the classifier's feedback
+    let m = c(
+        "taxonomy.mark",
+        json!({ "name": "things", "text": "granite slate", "path": [], "right": true }),
+    )
+    .unwrap();
+    assert_eq!(m["nodes"][0]["right"], 1);
+    let m = c(
+        "taxonomy.mark",
+        json!({ "name": "things", "text": "banana plum", "path": ["fruit"], "right": false, "class": "rocks" }),
+    )
+    .unwrap();
+    assert_eq!(m["nodes"][1]["wrong"], 1);
+    assert_eq!(m["nodes"][1]["by_hand"], 0.0);
+    let fb = c("classify.get", json!({ "name": "again" })).unwrap();
+    assert_eq!(fb["feedback_count"], 2, "a no and a yes: {fb}");
+    assert!(
+        c(
+            "taxonomy.mark",
+            json!({ "name": "things", "text": "x", "path": ["rocks"], "right": true })
+        )
+        .is_err()
+    );
+
+    // an edit keeps the marks where the same classifier stands; a renamed one keeps them too
+    let mut t2 = tree.clone();
+    t2["name"] = json!("kinds");
+    t2["about"] = json!("fruit, then fruit again");
+    let s = c("taxonomy.save", json!({ "taxonomy": t2, "was": "things" })).unwrap();
+    assert_eq!(s["nodes"][0]["right"], 1);
+    assert_eq!(s["nodes"][1]["wrong"], 1);
+    let mut t3 = t2.clone();
+    t3["root"]["routes"]["fruit"]["classifier"] = json!("sorter");
+    let s = c("taxonomy.save", json!({ "taxonomy": t3 })).unwrap();
+    assert_eq!(s["nodes"][1]["wrong"], 0);
+    assert!(c("taxonomy.get", json!({ "name": "things" })).is_err());
+
+    // from s
+    let r = c(
+        "s.run",
+        json!({ "code": "std/learn.s.\n{kinds} {banana plum cherry} route\n{ended in ~t~} >\n{t} {all} { then } l/ {~all~} >" }),
+    )
+    .unwrap();
+    assert_eq!(r["err"], Value::Null, "{r}");
+    let out = r["out"].as_str().unwrap();
+    assert!(
+        out.contains("ended in fruit") && out.contains("fruit then fruit"),
+        "{out}"
+    );
+
+    c("taxonomy.delete", json!({ "name": "kinds" })).unwrap();
+    assert_eq!(c("taxonomy.list", json!({})).unwrap(), json!([]));
+    drop(ws);
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -224,6 +224,26 @@ feedback?}`, the weights base64 (the `ANENDCLS` file). It is left out when there
 so older bundles read as before. Merging a bundle into a save leaves its classifiers out
 (their lists get new keys there), and so does the forge.
 
+### Taxonomies
+
+A taxonomy (`core/src/ops/taxonomy.rs`, docs/architecture.md part 1) puts the save's
+classifiers in a tree: a node names a classifier, and each of its classes ends the
+routing or leads on to a further node. A node has one parent; a classifier can stand at
+several nodes. It's an entry of the save, kept out of search and counts. Each node counts
+the routings marked right and wrong there by hand; nothing about the texts is stored. A
+`taxonomy` is `{name, about?, root: node}`, a node `{classifier, routes?: {class: node},
+right, wrong}`; `path` names a node by the classes leading to it (`[]` the top). These need
+saves that keep models, like `classify.*`.
+
+| op | args | data |
+|---|---|---|
+| `taxonomy.list` | | `[{key, name, about, nodes, root, right, wrong}]` (root: its first classifier; right and wrong summed over its nodes) |
+| `taxonomy.get` | `{name}` | `{key, taxonomy, nodes: [{path, classifier, classes, trained, held_out, right, wrong, by_hand, routes, missing}]}` (`held_out`: the classifier's accuracy on texts it didn't train on; `by_hand`: right out of those marked, null before any) |
+| `taxonomy.save` | `{taxonomy, was?: its old name, new?: true}` | as `taxonomy.get`; every classifier must exist and every routed class be one of its classes; a node keeps its marks while the same classifier stands at that place; `new` refuses a name that's taken |
+| `taxonomy.delete` | `{name}` | `{removed}` (its classifiers stay) |
+| `taxonomy.route` | `{name, text or key}` | `{name, steps: [{path, classifier, class, prob, trained, right, wrong, by_hand}], class, reached}`: each node's top class, on until a class leads nowhere or a classifier isn't trained (`reached` false) |
+| `taxonomy.mark` | `{name, text or key, path, right, class?}` | as `taxonomy.get`: the node counts a right or a wrong; right tells its classifier yes for the class it gives, wrong tells it no (and yes for `class`, the right one, when given) |
+
 ### Classifier buckets, filters and modules
 
 Outputs are memoized per classifier and memory/note (`core/src/memo.rs`), under a stamp
@@ -455,7 +475,7 @@ texture key from that moment on, eased between keys along CSS cubic-bezier timin
 | `s.run` | `{code}` or `{key}` (a note), `stdin?`, `args?`, `trace?`, `seed?` | `{out, err, code, steps, writes?}` (with `trace`, `writes: [{from, to, out}]`: the output each of the program's own tokens wrote, by its place in the code): an s program's run (docs/s.md); its files are the save's s programs (notes tagged `s`) by title; at most 2 million steps on a shared hub, 50 million on one's own machine |
 | `s.debug` | as `s.run`, with `steps` and `seed` | the run stopped before its `steps`-th step: `{done, steps, out, err, main, unit, at: {start, end}, depth, stack, ow, mem, numbers, lists, locals}` (`at` the next token's place in the program when `main`, else in `unit`, the call's text); the same seed gives the same run |
 | `std:anend` | (inside a run) | `op` calls the ops here on the run's save, not `s.*` or `wiring.fire`; see docs/format.md, "s programs" |
-| `std:learn` | (inside a run) | `class`, `feedback`, `steer`, `likely`, `similar` (`classify.*`), `model`, `generate` (`models.*`) and `search` (`mem.search`), with answers as s values; see docs/format.md |
+| `std:learn` | (inside a run) | `class`, `feedback`, `steer`, `likely`, `similar` (`classify.*`), `route` (`taxonomy.route`), `model`, `generate` (`models.*`) and `search` (`mem.search`), with answers as s values; see docs/format.md |
 | `s.programs` | | `[{title, key}]`: the notes tagged `s` |
 | `s.words` | | `{commands, suffixes, library: [{module, words}]}`: what the code editor colours |
 | `anims.list` | | `[{key, anim}]`: the animations (entries of mime `application/x-anend-animation`, `graph::anims`) |

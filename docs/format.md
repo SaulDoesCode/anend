@@ -89,7 +89,9 @@ spec model: dest/<head> each head's answer (a generate head's text, a classes he
 class, a values head's values as dest/<head>/<value>), mem[dest] the first head's by name;
 ow = trained. `generate` (`model [prompt] [candidates = 8] [dest = g]`): mem[dest] the best
 candidate its critics kept (else the best), dest/score its score, list dest the kept ones;
-ow = one was kept. A class is named as the classifier names it (a starter's classes carry
+ow = one was kept. `route` (`taxonomy text [dest = t]`) sends a text down a taxonomy:
+mem[dest] the class it ends in, dest/p how sure the last classifier was, list dest the
+classes on the way; ow = it reached the end. A class is named as the classifier names it (a starter's classes carry
 the starter's name: `fruit, stones and animals: fruit`). Each word goes through the same
 ops as the app, so a shared hub's limits apply, and a failure leaves mem[err] and ow false.
 
@@ -199,7 +201,10 @@ f32s. An animation it plays is `A` 1, the animation entry's id (u64), then its d
 speed (f32s). Animations are entries of mime 9 (`application/x-anend-animation`), their
 text the animation's JSON (`core/src/graph/anims.rs`). A block's wiring is `W` 1 and the
 wiring entry's id (u64); wirings are entries of mime 10 (`application/x-anend-wiring`),
-their text the wiring's JSON (`core/src/graph/wiring.rs`). A sound emitter is `S` 1, the
+their text the wiring's JSON (`core/src/graph/wiring.rs`). Taxonomies are entries of mime 11
+(`application/x-anend-taxonomy`), their text the taxonomy's JSON (`core/src/ops/taxonomy.rs`:
+`{name, about?, root}`, a node `{classifier, routes?: {class: node}, right, wrong}`); like
+wirings they're left out of search and counts. A sound emitter is `S` 1, the
 sound's 16-byte id, its volume and reach (f32s) and a byte of flags (1: loops); sounds
 are kept in `graph sounds` (sound id, 32 hex digits → `{id, mime, name, added, size,
 seconds?}` JSON) and `graph sound bytes` (`core/src/graph/sounds.rs`). `graph lights` (`core/src/graph/lights.rs`): the

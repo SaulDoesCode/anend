@@ -95,8 +95,9 @@ departure says why in its commit).
 - Done (27 Oct): `std:learn`, classifiers and models as s words (#18).
 - Done (27 Oct): the ▶ usable point for scripting (README, guide "Programs", offered on
   PR #8).
-- Next: taxonomies (classifiers in hierarchies routing texts, trained by hand, accuracy
-  per node; docs/architecture.md 1).
+- Done (27 Oct): taxonomies (`taxonomy.*`, the models view's third tab, `route` in s).
+- Next: pipes (sources through filters to stacked effects; the filters page becomes the
+  pipe editor; docs/architecture.md 2, 3).
   Open further up: the language lines (s, the standard library), taxonomies and pipes,
   the wgpu renderer and culling.
 

@@ -77,7 +77,7 @@ impl View {
             View::Reader | View::Notes => "words to find notes by",
             View::Tags => "a tag (Enter picks the first match)",
             View::Stats => "",
-            View::Models => "a text to try the model on",
+            View::Models => "a text to try the model on (or to route, in a taxonomy)",
             View::Filters => "words, or a sum like 79 or 70-90",
         }
     }

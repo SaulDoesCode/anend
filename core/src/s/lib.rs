@@ -1733,6 +1733,36 @@ const LEARN: Natives = &[
         rt.ow = texts_into(rt, &dest, Some(&v)) > 0;
         Ok(())
     }),
+    // taxonomy text [dest = t]: routes the text down the taxonomy's classifiers; mem[dest]
+    // = the class it ends in, dest/p how sure the last classifier was, list dest the
+    // classes along the way; ow: it reached the end (every classifier on the way trained)
+    ("route", |rt| {
+        let vals = line(rt);
+        need_vals(&vals, 2, "route")?;
+        let dest = arg(&vals, 2, "t");
+        let args = serde_json::json!({ "name": vals[0].text().to_string(), "text": vals[1].text().to_string() });
+        let Some(v) = ask(rt, "route", "taxonomy.route", args)? else {
+            return Ok(());
+        };
+        fresh(rt, &dest);
+        let steps: Vec<serde_json::Value> = v.get("steps").and_then(|s| s.as_array()).cloned().unwrap_or_default();
+        for st in &steps {
+            if let Some(c) = st.get("class").and_then(|c| c.as_str()) {
+                rt.list_mut(&dest).push(V::str(c));
+            }
+        }
+        let last = steps.last();
+        let class = last
+            .and_then(|l| l.get("class"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("404")
+            .to_string();
+        rt.mset(&dest, V::from(class));
+        let p = last.and_then(|l| l.get("prob")).and_then(|p| p.as_f64()).unwrap_or(0.0);
+        rt.mset(&format!("{dest}/p"), V::N(p));
+        rt.ow = v.get("reached").and_then(|r| r.as_bool()).unwrap_or(false);
+        Ok(())
+    }),
     // model input [dest = m]: runs a spec model on the text; dest/<head> = each head's
     // answer (the text a generate head writes, a classes head's top class, a values head's
     // values as dest/<head>/<value>), mem[dest] the first head's (by name); ow: trained

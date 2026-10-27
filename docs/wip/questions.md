@@ -330,3 +330,18 @@ The answers left these open. Each is written into the design as its default.
     `steer` and `likely` unchanged.
 85. **A block generating its next texture waits:** a generate head writes text, and a
     texture is a recipe; a model that writes recipes would be its own piece of work.
+
+## Taxonomies (27 Oct)
+
+86. **A taxonomy is a tree, not a DAG** (architecture.md's open question): a node has one
+    parent, and the same classifier can stand at several nodes, which covers the shared
+    cases without a node's counts mixing texts that came by different ways.
+87. **Routing follows each node's top class.** A multi head's other classes don't branch
+    the routing; one text gives one path.
+88. **Marking is the classifier's feedback too:** right is a yes for the class given;
+    wrong is a no for it and, when the right class is picked, a yes for that one. A node
+    keeps only its counts (right, wrong), in the taxonomy's own entry; nothing about the
+    texts is stored, and routing reads them afresh each time.
+89. **A node's accuracy is shown two ways:** by hand (right out of marked, at that node)
+    and its classifier's held-out accuracy. Saving keeps a node's counts while the same
+    classifier stands at the same place.

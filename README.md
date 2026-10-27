@@ -52,7 +52,7 @@ Every view has the command bar at the bottom, and each view keeps its own text t
 | **notes** (Ctrl+5) | markdown notes, in a list by date, with tags and a read mode. A note can be attached to any entry. Typing stays quick in a note of any length. A note tagged `s` is a program in s (below), and the notes view is its code editor. |
 | **tags** (Ctrl+6) | tags on any entry: pick tags (all or any) and see the entries that have them. |
 | **stats** (Ctrl+7) | figures for the whole save |
-| **models** (Ctrl+8) | classifiers (learned from lists, trained and run here) and spec models: models described as data (what they read, their heads, what they learn from, critics for a writer), made in a builder with a control for every part or as JSON, then trained, run and, for a writer, asked to write. |
+| **models** (Ctrl+8) | classifiers (learned from lists, trained and run here) and spec models: models described as data (what they read, their heads, what they learn from, critics for a writer), made in a builder with a control for every part or as JSON, then trained, run and, for a writer, asked to write. Taxonomies put classifiers in a tree: each answer picks the next classifier, and every step can be marked right or wrong, which each node counts and its classifier learns from. |
 | **filters** (Ctrl+9) | words, a sum range, written between two dates, a tag, a kind. Each filter is kept by name in the save. |
 
 The top bar holds the view icons, the search line with its triangle, undo (**Ctrl+Z**) and

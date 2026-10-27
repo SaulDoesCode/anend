@@ -398,6 +398,23 @@ it learns from in this save, and for a writer, which other models judge what it 
 A spec can start from a pretrained open model (the builder's *starts from*); see
 [models](../docs/models.md). On a shared hub only the folders the hub offers can be named.
 
+### Taxonomies
+
+![a taxonomy: English or not, then which kind of thing](guide/taxonomy.png)
+
+The **taxonomies** tab puts classifiers in a tree. Make one with **new**: a name and the
+first classifier. Under each classifier its classes are listed, and each either **ends
+here** or sends the text on to another classifier, chosen from the menu beside it; so
+"English or not?" can hand English texts to a classifier that only knows English.
+**save** keeps the tree; **as saved** drops the changes.
+
+Type a text in **try a text** (or in the bar, then Enter) and **route it**: each step shows
+the classifier, the class it gave and how sure it was. Mark each step **✓** right or **✗**
+wrong; wrong asks which class it was. Every mark counts at that node (beside it: *by hand
+75% (3 of 4)*, next to the classifier's own held-out accuracy) and teaches its classifier,
+as a yes or no on its own page would. The taxonomy stores the counts, never anything about
+the texts. From s, `{kinds} {a text} route` routes a text (`std/learn.s.`).
+
 ## Filters
 
 ![a filter](guide/filters.png)
