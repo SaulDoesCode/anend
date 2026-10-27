@@ -3,7 +3,9 @@
 //!
 //! `wiring.fire` is one cause and everything it sets off, in order: the block that the
 //! event reaches runs its s program (when it listens for that event), with the event, who
-//! caused it and its own address as arguments and its kept state as stdin. The lines the
+//! caused it, its own address and the cause's value as arguments (a hit's or a signal's
+//! value is the first word of the sender's kept state: a switch's 1 or 0, a gate's
+//! output), and its kept state as stdin. The lines the
 //! program prints that start with one of these words act on the block; the rest are its
 //! output:
 //!
@@ -148,6 +150,12 @@ struct Report {
     cut: bool,
 }
 
+/// what a block tells the blocks it hits or signals: the first word of its kept state
+/// (a switch's 1 or 0, a gate's output)
+fn value_of(w: &Wiring) -> String {
+    w.state.split_whitespace().next().unwrap_or("").to_string()
+}
+
 /// the blocks listening for a signal by this name, in address order
 fn listeners(g: &Graph, name: &str) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
@@ -172,7 +180,7 @@ fn act(
     w: &mut Wiring,
     kept: &mut bool,
     cast: &mut bool,
-    q: &mut VecDeque<(String, Event, String)>,
+    q: &mut VecDeque<(String, Event, String, String)>,
     r: &mut Report,
 ) -> Result<bool, String> {
     let words: Vec<&str> = line.split_whitespace().collect();
@@ -247,7 +255,7 @@ fn act(
         "stop" if words.len() == 1 => t.anim = None,
         "signal" if !rest.is_empty() => {
             for to in listeners(g, rest)? {
-                q.push_back((to, Event::Signal, id.clone()));
+                q.push_back((to, Event::Signal, id.clone(), value_of(w)));
             }
             return Ok(true);
         }
@@ -274,7 +282,7 @@ fn act(
 }
 
 /// one cause and what it sets off
-fn fire(g: &Graph, id: &str, event: Event, from: &str, shared: bool) -> Result<Report, String> {
+fn fire(g: &Graph, id: &str, event: Event, from: &str, value: &str, shared: bool) -> Result<Report, String> {
     let progs = super::script::programs(g)?;
     let mut files = BTreeMap::new();
     for (title, (_, body)) in &progs {
@@ -283,10 +291,10 @@ fn fire(g: &Graph, id: &str, event: Event, from: &str, shared: bool) -> Result<R
     }
     let mut budget: u64 = if shared { 2_000_000 } else { 50_000_000 };
     let mut r = Report::default();
-    let mut q: VecDeque<(String, Event, String)> = VecDeque::new();
-    q.push_back((id.to_string(), event, from.to_string()));
+    let mut q: VecDeque<(String, Event, String, String)> = VecDeque::new();
+    q.push_back((id.to_string(), event, from.to_string(), value.to_string()));
     let mut n = 0;
-    while let Some((mut id, ev, from)) = q.pop_front() {
+    while let Some((mut id, ev, from, value)) = q.pop_front() {
         let Some(b) = g.block(&id)? else { continue };
         let Some(mut w) = wiring_of(g, &b)? else { continue };
         if !w.on.contains(&ev) {
@@ -304,7 +312,7 @@ fn fire(g: &Graph, id: &str, event: Event, from: &str, shared: bool) -> Result<R
             match progs.get(&w.program) {
                 None => log["err"] = json!(format!("no s program titled {:?}", w.program)),
                 Some((_, code)) => {
-                    let args = [ev.name().to_string(), from.clone(), id.clone()];
+                    let args = [ev.name().to_string(), from.clone(), id.clone(), value.clone()];
                     let o = crate::s::run(code, &w.state, files.clone(), &args, budget.max(1), g.now());
                     budget = budget.saturating_sub(o.steps);
                     let mut out = Vec::new();
@@ -372,7 +380,7 @@ fn fire(g: &Graph, id: &str, event: Event, from: &str, shared: bool) -> Result<R
                 ids
             };
             for h in hits {
-                q.push_back((h, Event::Hit, id.clone()));
+                q.push_back((h, Event::Hit, id.clone(), value_of(&w)));
             }
         }
         if kept {
@@ -426,7 +434,7 @@ pub fn call(g: &Graph, op: &str, args: &Value, shared: bool) -> Res {
             let id = s(args, "id");
             let ev =
                 Event::parse(s(args, "event")).ok_or("which event? (click, hit, enter, leave, timer or signal)")?;
-            let r = fire(g, id, ev, s(args, "from"), shared)?;
+            let r = fire(g, id, ev, s(args, "from"), s(args, "value"), shared)?;
             let now: Vec<Block> = r.changed.iter().filter_map(|i| g.block(i).ok().flatten()).collect();
             let mut out = super::blocks::listed(g, &now)?;
             out["events"] = json!(r.events);

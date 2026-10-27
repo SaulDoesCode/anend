@@ -459,6 +459,7 @@ texture key from that moment on, eased between keys along CSS cubic-bezier timin
 | `anims.save` | `{key?, anim}` | `{key, anim}`: a new animation, or the one at `key` changed (blocks playing it play the change) |
 | `anims.delete` | `{key}` | `{removed}`; blocks playing it stop |
 | `prefabs.list` | | `{prefabs: [{id, name, created, edited, copies, parts}], textures}`: the save's prefabs (`graph::prefabs`), each with its blocks (relative to its origin) |
+| `prefabs.starters` | | `{programs, prefabs}`: the starter s programs and prefabs (switch, AND, OR, XOR, NOT, latch, lamp, door) the save lacked, made |
 | `prefabs.copies` | | `[{id, scene, name, x, y, z, rot, scale, own}]`: the room's copies (`own`: how many parts have the copy's own values) |
 | `prefabs.make` | `{name, ids}` | the blocks grouped into a new prefab, one copy where they were: `{prefab, copy, blocks, textures, removed}` (`blocks` the copy's parts, `removed` the blocks' old addresses) |
 | `prefabs.place` | `{prefab, x, y, z, rot?, scale?}` | a new copy: `{copy, blocks, textures}` |
@@ -472,7 +473,7 @@ texture key from that moment on, eased between keys along CSS cubic-bezier timin
 | `wiring.list` | | `[{id, key, wiring}]`: the wired blocks (`graph::wiring`; a wiring is an entry of mime `application/x-anend-wiring`) |
 | `wiring.get` | `{id}` | the block's wiring `{on, every?, signal?, program?, ray?: {dir, targets?, stick?, mode, n, range, sees?}, state?}`, or null |
 | `wiring.set` | `{id, wiring}` | the block (as `blocks.list` has it) and its `wiring`; `wiring: null` unwires it. An entry another block shares isn't changed: the block gets its own |
-| `wiring.fire` | `{id, event, from?}` | what one cause set off (`ops::wiring`): `{events: [{block, event, from, out?, err?, steps?}], rays: [{from, to, hits}], says, blocks, textures, removed, cut}` (`blocks` the blocks it changed, `removed` addresses that went; `cut` when it stopped at 200 events or the steps' budget) |
+| `wiring.fire` | `{id, event, from?, value?}` | what one cause set off (`ops::wiring`): `{events: [{block, event, from, out?, err?, steps?}], rays: [{from, to, hits}], says, blocks, textures, removed, cut}` (`blocks` the blocks it changed, `removed` addresses that went; `cut` when it stopped at 200 events or the steps' budget) |
 | `lights.list` | | the room's lights: `[{id, kind, colour, intensity, x, y, z, dir, range, angle, softness}]` (`kind` ambient, directional, point or spot) |
 | `lights.add` | a light, or `{light}` | the light, with its id (at most 64 a save) |
 | `lights.set` | `{id, ...fields}` | the light, the fields given replaced |

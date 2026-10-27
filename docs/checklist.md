@@ -177,7 +177,9 @@ docs/architecture.md (the whole).
       (27 Oct: `graph::prefabs`, `ops::prefabs`, the prefabs window with pictures, copies
       with their own values. Not yet: prefabs inside prefabs, editing a prefab's set of
       parts, undo of prefab changes.)
-- [ ] Switch and logic-gate prefabs (#27).
+- [x] Switch and logic-gate prefabs (#27).
+      (27 Oct: `prefabs.starters`: a switch, AND, OR, XOR, NOT, a latch, a lamp and a
+      door, run by composed s programs; a hit carries the sender's value.)
 - [ ] Audio emitters and the sounds table (#17).
 - [ ] ▶ **usable:** logic-world scenes, with blocks acting on each other.
 - [ ] First-person mode with Thief-like movement, the grapple, and superflight that collects

@@ -279,6 +279,7 @@ mod tests {
             "\"prefabs.detach\"",
             "pick blocks in the room",
             "…but not the other copies",
+            "\"prefabs.starters\"",
         ] {
             assert!(rs.contains(needle), "prefabwin.rs lost {needle}");
         }

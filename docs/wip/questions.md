@@ -243,3 +243,21 @@ The answers left these open. Each is written into the design as its default.
 61. **Grouping takes only room blocks,** not parts of other copies (no prefab inside a
     prefab yet), and a prefab's set of parts can't be edited after it's made: change a
     copy and make its changes the prefab's, or detach, edit and group again.
+
+## Switches and gates (27 Oct)
+
+62. **A hit or a signal carries a value: the first word of the sender's kept state,**
+    given to the program as its fourth argument (a switch keeps 1 or 0, a gate its
+    output first). A click, a timer or a zone event carries none.
+63. **A gate keeps each input's last value by who sent it,** so it takes any number of
+    inputs. AND is on while two inputs are on (not "all of them", since a gate doesn't know
+    of an input until it hears from it); OR while any is; XOR while an odd number are;
+    NOT while none is.
+64. **The latch flips each time an input turns on, and holds** (a toggle), rather than
+    having separate set and reset inputs.
+65. **The starters' rays go out of their right side (+x) at the copy's height,** so a row
+    wires itself; the switch's paddle tilts about that axis, so its ray stays level. The
+    door swings a quarter turn rather than lifting, so the ray that opened it still
+    reaches it to close it.
+66. **The gate labels are texts of the save** (AND, OR, XOR, NOT, LATCH), shown on a
+    plate above each gate, so they appear among the save's texts.

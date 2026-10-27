@@ -54,8 +54,206 @@ fn copy_out(g: &Graph, id: &str) -> Res {
     Ok(out)
 }
 
+// ---------------------------------------------------------------- starters (#27)
+
+/// the s programs the starter prefabs run (notes tagged `s`), title → body. `inputs` and
+/// `gate-out` are components the gates share: a gate is `inputs.`, a rule, `gate-out.`
+pub const PROGRAMS: [(&str, &str); 10] = [
+    (
+        "switch",
+        "{A switch: each click turns it on or off, tilts its paddle and tells what's ahead} //\n\
+         _ <_ _~ s# 1 s~ - =~ s#\n\
+         {keep ~s~} >\n\
+         s~ 1 == {{turn -30 0 0} >} ~? //\n\
+         s~ 0 == {{turn 30 0 0} >} ~? //\n\
+         {cast} >",
+    ),
+    (
+        "inputs",
+        "{A gate's inputs: its state is its output, then each input's last value by who sent it, as who=value. It counts the inputs and how many are on, for the gate to decide} //\n\
+         args 0 ev [l] args 1 who [l] args 3 v [l]\n\
+         _ <_ _~ st /l\n\
+         0 ones# 0 count# 0 w0@ st 0 w0 [l] w0~ was#\n\
+         ins l-\n\
+         {{~k~=~val~} ins l count; {~val~} 1 == ones;?} keep1$\n\
+         {st n~ it [l] 0 k@ 0 val@ {~it~} kv '=' /l kv 0 k [l] kv 1 val [l] kv l- {~k~} {~who~} != keep1.?} step2$\n\
+         {n~ 0 >> step2.?} step$\n\
+         {{~who~=~v~} ins l count; {~v~} 1 == ones;?} add$\n\
+         st #l =~ step &&&\n\
+         {~ev~} hit = add.?\n\
+         {~ev~} signal = add.?",
+    ),
+    (
+        "gate-out",
+        "{A gate's output: kept first in its state, shown by its colour, told ahead by its ray} //\n\
+         ins line l/\n\
+         {keep ~o~ ~line~} >\n\
+         o~ 1 == {{colour #f5c518} >} ~? //\n\
+         o~ 0 == {{colour ~base~} >} ~? //\n\
+         {cast} >",
+    ),
+    (
+        "and",
+        "{An AND gate: on while two inputs are on} //\n\
+         {#3d6fb6} base@\n\
+         inputs.\n\
+         0 o# ones~ 2 >>= {1 o#} ~? //\n\
+         gate-out.",
+    ),
+    (
+        "or",
+        "{An OR gate: on while any input is on} //\n\
+         {#3f9b4b} base@\n\
+         inputs.\n\
+         0 o# ones~ 0 >> {1 o#} ~? //\n\
+         gate-out.",
+    ),
+    (
+        "xor",
+        "{An XOR gate: on while an odd number of inputs are on} //\n\
+         {#8e44ad} base@\n\
+         inputs.\n\
+         ones~ 2 % =~ o#\n\
+         gate-out.",
+    ),
+    (
+        "not",
+        "{A NOT gate: on while no input is on} //\n\
+         {#c0392b} base@\n\
+         inputs.\n\
+         1 o# ones~ 0 >> {0 o#} ~? //\n\
+         gate-out.",
+    ),
+    (
+        "latch",
+        "{A latch: it flips each time an input turns on, and holds} //\n\
+         {#d35400} base@\n\
+         inputs.\n\
+         was~ o#\n\
+         {~ev~} hit = {~v~} 1 & {1 was~ - =~ o#} ~? //\n\
+         gate-out.",
+    ),
+    (
+        "lamp",
+        "{A lamp: lit while what reaches it is on} //\n\
+         args 3 v [l]\n\
+         {~v~} 1 = {{colour #ffd84a} >} ~? //\n\
+         {~v~} 1 != {{colour #3a3a3a} >} ~? //\n\
+         {keep ~v~} >",
+    ),
+    (
+        "door",
+        "{A door: it swings open while what reaches it is on, and shut when it's off} //\n\
+         _ <_ _~ open# args 3 v [l]\n\
+         {~v~} 1 = open~ 0 & {{turn 0 90 0} > {keep 1} >} ~? //\n\
+         {~v~} 1 != open~ 1 & {{turn 0 -90 0} > {keep 0} >} ~? //",
+    ),
+];
+
+/// makes the starter programs and prefabs the save lacks (by title and name): a switch,
+/// AND, OR, XOR and NOT gates, a latch, a lamp and a door. Their parts sit so their
+/// signal line is the copy's height: rays go out of each one's right side (+x) at y 0, so
+/// copies placed in a row at one height wire themselves. What it made
+fn starters(g: &Graph) -> Res {
+    use crate::graph::blocks::{Kind, Shape, Transform};
+    use crate::graph::wiring::{Event, Ray, WireRef};
+    let removed = Default::default();
+    let have = super::script::programs(g)?;
+    let mut programs = Vec::new();
+    for (title, body) in PROGRAMS {
+        if !have.contains_key(title) {
+            super::call(
+                g,
+                &removed,
+                "notes.save",
+                &json!({ "note": { "tags": [super::script::TAG] }, "text": format!("# {title}\n\n{body}") }),
+            )?;
+            programs.push(title);
+        }
+    }
+    let wire = |program: &str, on: Event, ray: bool| -> Result<Option<WireRef>, String> {
+        let w = Wiring {
+            on: vec![on],
+            program: program.into(),
+            ray: ray.then(|| Ray {
+                dir: [1.0, 0.0, 0.0],
+                range: 20.0,
+                ..Ray::default()
+            }),
+            ..Wiring::default()
+        }
+        .checked()?;
+        let text = serde_json::to_string(&w).map_err(|e| e.to_string())?;
+        Ok(Some(WireRef {
+            entry: g.save_text(&text, mime::WIRING)?.0,
+        }))
+    };
+    let t = |x: f32, y: f32, z: f32, w: f32, h: f32, d: f32| Transform {
+        x,
+        y,
+        z,
+        w,
+        h,
+        d,
+        ..Transform::default()
+    };
+    let label =
+        |text: &str| -> Result<String, String> { Ok(crate::graph::record::label(g.save_text(text, mime::TEXT)?.0)) };
+    let mut made = Vec::new();
+    let names: std::collections::HashSet<String> = g.prefabs()?.into_iter().map(|p| p.name).collect();
+    let mut add = |name: &str, parts: Vec<(Kind, String, Transform)>| -> Result<(), String> {
+        if !names.contains(name) {
+            g.put_prefab(name, &parts)?;
+            made.push(name.to_string());
+        }
+        Ok(())
+    };
+    let mut paddle = t(0.0, 0.0, 0.0, 0.25, 0.4, 0.6);
+    paddle.wire = wire("switch", Event::Click, true)?;
+    add(
+        "switch",
+        vec![
+            (Kind::Plain, "#e8e8e8".into(), t(0.0, -0.35, 0.0, 1.2, 0.3, 1.2)),
+            (Kind::Plain, "#fafafa".into(), paddle),
+        ],
+    )?;
+    for (name, program, colour, text) in [
+        ("AND gate", "and", "#3d6fb6", "AND"),
+        ("OR gate", "or", "#3f9b4b", "OR"),
+        ("XOR gate", "xor", "#8e44ad", "XOR"),
+        ("NOT gate", "not", "#c0392b", "NOT"),
+        ("latch", "latch", "#d35400", "LATCH"),
+    ] {
+        let mut body = t(0.0, 0.0, 0.0, 1.0, 1.0, 2.4);
+        body.wire = wire(program, Event::Hit, true)?;
+        add(
+            name,
+            vec![
+                (Kind::Plain, colour.into(), body),
+                (Kind::Text, label(text)?, t(0.0, 0.56, 0.0, 1.0, 0.12, 2.4)),
+            ],
+        )?;
+    }
+    let mut bulb = t(0.0, 0.0, 0.0, 0.8, 0.8, 0.8);
+    bulb.shape = Shape::Sphere;
+    bulb.wire = wire("lamp", Event::Hit, false)?;
+    add(
+        "lamp",
+        vec![
+            (Kind::Plain, "#3a3a3a".into(), bulb),
+            (Kind::Plain, "#777777".into(), t(0.0, -0.6, 0.0, 0.2, 0.4, 0.2)),
+        ],
+    )?;
+    let mut panel = t(0.0, 0.5, 0.0, 0.2, 2.0, 1.6);
+    panel.wire = wire("door", Event::Hit, false)?;
+    add("door", vec![(Kind::Plain, "#8b5a2b".into(), panel)])?;
+    Ok(json!({ "programs": programs, "prefabs": made }))
+}
+
 pub fn call(g: &Graph, op: &str, args: &Value) -> Res {
     match op {
+        // the starter programs and prefabs the save lacks (#27)
+        "prefabs.starters" => starters(g),
         // the prefabs, each with its parts (for a thumbnail) and how many copies stand
         "prefabs.list" => {
             let copies = g.copies()?;
@@ -431,5 +629,92 @@ mod tests {
         .unwrap();
         assert_eq!(f["events"].as_array().unwrap().len(), 2, "{f}");
         assert_eq!(c("prefabs.delete", json!({ "prefab": scene }))["copies"], 1);
+    }
+
+    #[test]
+    fn switches_through_gates_light_a_lamp() {
+        let g = Graph::in_memory().unwrap();
+        let c = |op: &str, a: Value| -> Value {
+            if super::super::wiring::routed(op) {
+                super::super::wiring::call(&g, op, &a, false).unwrap()
+            } else {
+                call(&g, op, &a).unwrap()
+            }
+        };
+        let made = c("prefabs.starters", json!({}));
+        assert_eq!(made["prefabs"].as_array().unwrap().len(), 8, "{made}");
+        assert_eq!(made["programs"].as_array().unwrap().len(), PROGRAMS.len());
+        // a second time makes nothing
+        assert_eq!(c("prefabs.starters", json!({}))["prefabs"], json!([]));
+        let id = |name: &str| g.prefabs().unwrap().into_iter().find(|p| p.name == name).unwrap().id;
+        let place = |name: &str, x: f32, z: f32| {
+            c("prefabs.place", json!({ "prefab": id(name), "x": x, "y": 0, "z": z }))["copy"]["id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        // two switches, side by side, into an AND gate, into a lamp
+        let a = place("switch", 0.0, -0.8);
+        let b = place("switch", 0.0, 0.8);
+        let and = place("AND gate", 3.0, 0.0);
+        let lamp = place("lamp", 6.0, 0.0);
+        let paddle = |s: &str| format!("{s}/plain:#fafafa#1");
+        let bulb = format!("{lamp}/plain:#3a3a3a#1");
+        let lit = || g.part(&bulb).unwrap().unwrap().texture;
+        let click = |s: &str| {
+            let f = c("wiring.fire", json!({ "id": paddle(s), "event": "click" }));
+            for e in f["events"].as_array().unwrap() {
+                assert!(e.get("err").is_none(), "{f}");
+            }
+            f
+        };
+        let f = click(&a);
+        assert_eq!(f["events"].as_array().unwrap().len(), 3, "{f}");
+        assert_eq!(lit(), "#3a3a3a", "one switch on: the AND stays off");
+        click(&b);
+        assert_eq!(lit(), "#ffd84a", "both on: lit");
+        click(&a);
+        assert_eq!(lit(), "#3a3a3a", "one off again: dark");
+        // the gate shows its output by its colour, and keeps its inputs
+        let state = c("wiring.get", json!({ "id": format!("{and}/plain:#3d6fb6#1") }))["state"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(state.starts_with("0 "), "{state}");
+        assert_eq!(state.matches('=').count(), 2, "{state}");
+        // a NOT gate opens a door while nothing is on
+        let not = place("NOT gate", 3.0, 10.0);
+        let door = place("door", 6.0, 10.0);
+        let s = place("switch", 0.0, 10.0);
+        click(&s);
+        let panel = |s: &str| g.part(&format!("{s}/plain:#8b5a2b#1")).unwrap().unwrap().t.rot;
+        assert!(panel(&door)[3] > 0.99, "switch on: NOT off: the door stays shut");
+        click(&s);
+        assert!(panel(&door)[3] < 0.8, "switch off: NOT on: the door swings open");
+        let _ = not;
+        // OR, XOR and the latch, each between two switches and a lamp: the lamp after
+        // a on, b on, a off
+        for (k, (gate, want)) in [
+            ("OR gate", ["#ffd84a", "#ffd84a", "#ffd84a"]),
+            ("XOR gate", ["#ffd84a", "#3a3a3a", "#ffd84a"]),
+            ("latch", ["#ffd84a", "#3a3a3a", "#3a3a3a"]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let z = 20.0 + 10.0 * k as f32;
+            let a = place("switch", 0.0, z - 0.8);
+            let b = place("switch", 0.0, z + 0.8);
+            place(gate, 3.0, z);
+            let lamp = place("lamp", 6.0, z);
+            let bulb = format!("{lamp}/plain:#3a3a3a#1");
+            let lit = || g.part(&bulb).unwrap().unwrap().texture;
+            let mut got = Vec::new();
+            for s in [&a, &b, &a] {
+                click(s);
+                got.push(lit());
+            }
+            assert_eq!(got, want, "{gate}");
+        }
     }
 }

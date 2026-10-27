@@ -165,6 +165,11 @@ text for its menu.
   their own. Select a part to move, turn or size its whole copy, or to *detach* it. A part
   you change by hand changes in that copy only; *make them the prefab's* changes every
   copy, or *…but not the other copies* keeps the rest as they were.
+- **Switches and gates.** *add the starters* in the prefabs window makes a switch, AND,
+  OR, XOR and NOT gates, a latch, a lamp and a door, with the s programs they run (notes
+  tagged `s`, yours to read and change). Place copies in a row at one height, switches on
+  the left: each one's ray goes out of its right side into the next. Then *▶ play* in
+  the wiring window and click the switches.
 - **Wiring.** The wiring window (the bolt chip) makes a block act: pick what it listens
   for (a click, another block's ray, a text coming into or leaving its zone, a timer, a
   signal), the s program it runs (a note tagged `s`) and its ray: *fixed* out of one of

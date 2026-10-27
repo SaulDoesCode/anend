@@ -290,6 +290,26 @@ pub(super) fn Prefabs(sp: Sp) -> Element {
             }
             div { class: "wire-sec",
                 span { class: "small", if list.is_empty() { "no prefabs yet" } else { "the menu: place a copy ahead of you" } }
+                button { class: "btn small",
+                    title: "a switch, AND, OR, XOR and NOT gates, a latch, a lamp and a door, run by s programs (notes tagged s); placed in a row at one height, each one's ray reaches the next",
+                    onclick: {
+                        let api = api.clone();
+                        move |_| {
+                            let api = api.clone();
+                            spawn(async move {
+                                match api.call("prefabs.starters", json!({})).await {
+                                    Ok(r) => {
+                                        load_prefabs(ui, &api, sp).await;
+                                        let n = r["prefabs"].as_array().map_or(0, |a| a.len());
+                                        ui.say(if n == 0 { "the starters are here already".to_string() } else { format!("{n} starter prefabs · place them in a row at one height, then play: click a switch") });
+                                    }
+                                    Err(e) => ui.fail(e),
+                                }
+                            });
+                        }
+                    },
+                    "add the starters: switch, gates, lamp, door"
+                }
                 div { class: "pf-grid",
                     for p in list.iter() {
                         {

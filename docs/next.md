@@ -77,7 +77,10 @@ departure says why in its commit).
   cause and what it sets off in core; the wiring window, playing, timers, zone events.
 - Done (27 Oct): prefabs (#19): grouping, the menu with pictures, copies as one
   placement each with their own values, links inside a prefab working per copy, merges.
-- Next: the switch and gate prefabs (#27), then audio emitters (#17).
+- Done (27 Oct): switch and gate prefabs (#27): the starters, composed s programs, values
+  carried by hits and signals.
+- Next: audio emitters and the sounds table (#17), then the ▶ usable point for logic-world
+  scenes.
   Open further up: the language lines (s, the standard library), taxonomies and pipes,
   the wgpu renderer and culling.
 
