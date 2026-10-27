@@ -28,8 +28,11 @@ const BASE_PX = 32;
 const BLOCK_TILE = 1;
 const STEP = 1 / 60;
 // the flying keys by action, as the keymap binds them (Rust sends them: `keys`)
-const DEFAULT_KEYS = { fly_forward: 'KeyW', fly_back: 'KeyS', fly_left: 'KeyA', fly_right: 'KeyD', fly_up: 'Space', fly_down: 'KeyC', roll_left: 'KeyQ', roll_right: 'KeyE', level: 'KeyR', back_to_start: 'Home', slower: 'BracketLeft', faster: 'BracketRight' };
-const FLYING = ['fly_forward', 'fly_back', 'fly_left', 'fly_right', 'fly_up', 'fly_down', 'roll_left', 'roll_right'];
+const DEFAULT_KEYS = { fly_forward: 'KeyW', fly_back: 'KeyS', fly_left: 'KeyA', fly_right: 'KeyD', fly_up: 'Space', fly_down: 'KeyC', roll_left: 'KeyQ', roll_right: 'KeyE', level: 'KeyR', back_to_start: 'Home', slower: 'BracketLeft', faster: 'BracketRight', walk: 'KeyV', superflight: 'KeyB', grapple: 'KeyG', sneak: 'KeyZ' };
+const FLYING = ['fly_forward', 'fly_back', 'fly_left', 'fly_right', 'fly_up', 'fly_down', 'roll_left', 'roll_right', 'sneak'];
+// walking (first-person mode): the body's sizes, speeds (units a second) and the floor
+const BODY = { r: 0.3, stand: 1.7, crouch: 1.05, walk: 3.2, run: 6, sneak: 1.4, crawl: 1.6, jump: 6.2, gravity: 20, step: 0.35, mantle: 1.3, floor: -9 };
+const FP_STEP = 1 / 120;
 // the physics' settings (the panel's sliders); Rust sends changes as `physics`
 export const PHYSICS = {
   damping: 2.2, gravity: 0.06, repel: 9, link: 4, attract: 0.9, pad: 0.3, cool: 0.012, substeps: 2,
@@ -1246,6 +1249,308 @@ export class Space {
     this.dirty = true;
   }
 
+
+  // ------------------------------------------------------------------ first person
+  //
+  // Besides flying (the default), you can walk (V): gravity, blocks to stand on and bump
+  // into, run (Shift), sneak (held), crouch (C), jump (Space), lean (Q, E) and mantle (jump
+  // at a ledge within reach climbs onto it). The grapple (G) hooks the block or text you
+  // look at, to swing on, reel in and out with the wheel, and let go with G or a jump.
+  // Superflight (B) flies fast where you look (Shift boosts) and collects the texts you
+  // fly through, in order, drawn as a trail; Rust offers to make them an entry, a chain, a
+  // list or the bar's text. The body moves in fixed steps of 1/120 s, the same on the
+  // desktop and the web. Walking and superflight lock the pointer when the page allows
+  // (Esc lets it go); right-drag looks around as ever.
+  setMode(mode) {
+    const was = this.mode || 'fly';
+    if (mode === was) return;
+    this.mode = mode;
+    this.ease = null;
+    if (mode === 'fly') {
+      this.dropRope();
+      this.body = null;
+      this.flight = null;
+      if (document.pointerLockElement === this.host) document.exitPointerLock?.();
+    } else {
+      const c = this.camera.position;
+      if (mode === 'walk') {
+        this.flight = null;
+        this.body = { p: new THREE.Vector3(c.x, c.y - (BODY.stand - 0.1), c.z), v: new THREE.Vector3(), ground: false, h: BODY.stand, lean: 0, acc: 0, ledge: null };
+        this.rollA = 0;
+      } else {
+        this.dropRope();
+        this.body = null;
+        this.flight = { v: new THREE.Vector3(), acc: 0, last: c.clone() };
+        if (!this.collected) this.collected = [];
+      }
+      // the pointer locked, the mouse looks; not on the desktop, whose web view stops
+      // passing keys on while it's locked (seen under Xvfb), so right-drag looks there
+      try { if (!window.__anendNoLock) this.host.requestPointerLock?.(); } catch { /* right-drag still looks */ }
+    }
+    this.send({ ...this.ev('mode', null), data: mode });
+    this.dirty = true;
+  }
+
+  // what blocks are in the way: their boxes in the room (turned and bent), made again
+  // when blocks change
+  solids() {
+    if (!this.solidBoxes || this.solidsAt !== this.blocksRev) {
+      this.solidBoxes = [];
+      for (const o of this.blocks.values()) {
+        if (o.b.zone) continue;
+        o.mesh.updateMatrixWorld(true);
+        this.solidBoxes.push(new THREE.Box3().setFromObject(o.mesh));
+      }
+      this.solidsAt = this.blocksRev;
+    }
+    return this.solidBoxes;
+  }
+
+  // the body's box at feet `p` with height `h`
+  bodyBox(p, h, out) {
+    return (out || new THREE.Box3()).set(new THREE.Vector3(p.x - BODY.r, p.y, p.z - BODY.r), new THREE.Vector3(p.x + BODY.r, p.y + h, p.z + BODY.r));
+  }
+
+  // whether a body at feet `p`, `h` tall, would stand in a block
+  blocked(p, h) {
+    const box = this.bodyBox(p, h);
+    box.min.addScalar(0.001);
+    box.max.addScalar(-0.001);
+    return this.solids().some((s) => s.intersectsBox(box));
+  }
+
+  moveBody(dt) {
+    if (this.mode === 'super') return this.superflight(dt);
+    const b = this.body;
+    if (!b) return;
+    b.acc = Math.min(b.acc + dt, 0.25);
+    while (b.acc >= FP_STEP) {
+      this.walkStep(FP_STEP);
+      b.acc -= FP_STEP;
+    }
+    // the camera at the eyes, leaning
+    const c = this.camera;
+    const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    c.position.set(b.p.x, b.p.y + b.h - 0.1, b.p.z).addScaledVector(right, b.lean * 0.4);
+    this.rollA = -b.lean * 0.12;
+    if (this.rope) this.drawRope();
+  }
+
+  walkStep(dt) {
+    const b = this.body, k = this.held.bind(this);
+    // crouching (and staying down where there's no room to stand)
+    const want = k('fly_down') ? BODY.crouch : BODY.stand;
+    if (want > b.h && this.blocked(b.p, want)) { /* stays down */ } else b.h = want;
+    const lean = (k('roll_left') ? -1 : 0) + (k('roll_right') ? 1 : 0);
+    b.lean += (lean - b.lean) * Math.min(1, dt * 10);
+    // where the keys push, on the ground's plane
+    const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    const wish = new THREE.Vector3();
+    if (k('fly_forward')) wish.add(fwd);
+    if (k('fly_back')) wish.sub(fwd);
+    if (k('fly_left')) wish.sub(right);
+    if (k('fly_right')) wish.add(right);
+    if (wish.lengthSq() > 0) wish.normalize();
+    const shift = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+    const speed = b.h < BODY.stand ? BODY.crawl : k('sneak') ? BODY.sneak : shift ? BODY.run : BODY.walk;
+    if (this.rope) {
+      // on the rope: a little push, gravity, the rope's pull
+      b.v.addScaledVector(wish, 6 * dt);
+      b.v.y -= BODY.gravity * dt;
+    } else if (b.ground) {
+      b.v.x = wish.x * speed;
+      b.v.z = wish.z * speed;
+    } else {
+      b.v.x += (wish.x * speed - b.v.x) * Math.min(1, dt * 2);
+      b.v.z += (wish.z * speed - b.v.z) * Math.min(1, dt * 2);
+      b.v.y -= BODY.gravity * dt;
+    }
+    if (b.ground && !this.rope) b.v.y = 0;
+    // a jump; at a ledge in reach, a mantle onto it
+    if (k('fly_up') && !b.jumpHeld) {
+      if (this.rope) this.dropRope();
+      else if (b.ledge != null && b.ledge - b.p.y <= BODY.mantle && !this.blocked(new THREE.Vector3(b.p.x + fwd.x * 0.35, b.ledge + 0.01, b.p.z + fwd.z * 0.35), b.h)) {
+        b.p.set(b.p.x + fwd.x * 0.35, b.ledge + 0.01, b.p.z + fwd.z * 0.35);
+        b.v.set(0, 0, 0);
+      } else if (b.ground) b.v.y = BODY.jump;
+    }
+    b.jumpHeld = k('fly_up');
+    // move one axis at a time, out of what's in the way
+    b.ledge = null;
+    b.ground = false;
+    const box = new THREE.Box3();
+    for (const axis of ['x', 'z', 'y']) {
+      const d = b.v[axis] * dt;
+      if (!d) continue;
+      b.p[axis] += d;
+      for (const s of this.solids()) {
+        this.bodyBox(b.p, b.h, box);
+        if (!s.intersectsBox(box)) continue;
+        if (axis === 'y') {
+          if (d < 0) { b.p.y = s.max.y; b.ground = true; } else b.p.y = s.min.y - b.h;
+          b.v.y = 0;
+        } else {
+          // a low step is climbed; a higher one is a ledge to mantle
+          const rise = s.max.y - b.p.y;
+          if (rise > 0 && rise <= BODY.step && b.v.y <= 0 && !this.blocked(new THREE.Vector3(b.p.x, s.max.y + 0.001, b.p.z), b.h)) {
+            b.p.y = s.max.y + 0.001;
+            continue;
+          }
+          if (rise > 0) b.ledge = b.ledge == null ? s.max.y : Math.max(b.ledge, s.max.y);
+          b.p[axis] = d > 0 ? s.min[axis] - BODY.r - 0.0005 : s.max[axis] + BODY.r + 0.0005;
+          if (!this.rope) b.v[axis] = 0;
+        }
+      }
+    }
+    if (b.p.y <= BODY.floor) { b.p.y = BODY.floor; b.v.y = Math.max(0, b.v.y); b.ground = true; }
+    // standing on something (resting on its top)
+    if (!b.ground && b.v.y <= 0) {
+      const below = this.bodyBox(new THREE.Vector3(b.p.x, b.p.y - 0.01, b.p.z), 0.009);
+      if (this.solids().some((s) => s.intersectsBox(below))) b.ground = true;
+    }
+    // the rope keeps the hand within its length of the hook
+    const r = this.rope;
+    if (r) {
+      const hand = new THREE.Vector3(b.p.x, b.p.y + b.h - 0.3, b.p.z);
+      const d = hand.clone().sub(r.at);
+      const len = d.length();
+      if (len > r.len) {
+        d.multiplyScalar(1 / len);
+        b.p.addScaledVector(d, r.len - len);
+        const out = b.v.dot(d);
+        if (out > 0) b.v.addScaledVector(d, -out);
+        b.ground = false;
+      }
+      b.v.multiplyScalar(1 - Math.min(1, dt * 0.15));
+    }
+  }
+
+  // the grapple: hook what's ahead, or let go
+  grapple() {
+    if (this.rope) return this.dropRope();
+    if (this.mode !== 'walk') this.setMode('walk');
+    const c = this.camera;
+    // where you look now (the room may not have drawn since the last turn)
+    this.applyTurn();
+    c.updateMatrixWorld(true);
+    const ray = this.rayFrom(null);
+    let at = null;
+    const meshes = [...this.blocks.values()].map((o) => o.mesh);
+    const hit = ray.intersectObjects(meshes, false)[0];
+    if (hit && hit.distance <= 60) at = hit.point.clone();
+    // else a text near where you look
+    if (!at) {
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(c.quaternion);
+      let best = 0.05;
+      const w = new THREE.Vector3();
+      for (const n of this.order) {
+        this.world(n, w);
+        const d = w.clone().sub(c.position);
+        const dist = d.length();
+        if (dist < 1 || dist > 60) continue;
+        const off = 1 - d.normalize().dot(fwd);
+        if (off < best) { best = off; at = w.clone(); }
+      }
+    }
+    if (!at) { this.send({ ...this.ev('toast', null), text: 'nothing to hook ahead (60 units at most)' }); return; }
+    const b = this.body;
+    const hand = new THREE.Vector3(b.p.x, b.p.y + b.h - 0.3, b.p.z);
+    this.rope = { at, len: Math.max(1.2, hand.distanceTo(at)) };
+    if (!this.ropeLine) {
+      this.ropeLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0x5a4632 }));
+      this.ropeLine.frustumCulled = false;
+    }
+    this.scene.add(this.ropeLine);
+    this.drawRope();
+  }
+
+  dropRope() {
+    if (!this.rope) return;
+    this.rope = null;
+    if (this.ropeLine) this.scene.remove(this.ropeLine);
+    this.dirty = true;
+  }
+
+  drawRope() {
+    const b = this.body, r = this.rope;
+    if (!b || !r || !this.ropeLine) return;
+    const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    const hand = new THREE.Vector3(b.p.x, b.p.y + b.h - 0.35, b.p.z).addScaledVector(right, 0.25);
+    const pos = this.ropeLine.geometry.attributes.position;
+    pos.setXYZ(0, hand.x, hand.y, hand.z);
+    pos.setXYZ(1, r.at.x, r.at.y, r.at.z);
+    pos.needsUpdate = true;
+  }
+
+  // superflight: thrust where you look, Shift to boost; texts flown through are collected
+  superflight(dt) {
+    const f = this.flight;
+    if (!f) return;
+    f.acc = Math.min(f.acc + dt, 0.25);
+    const c = this.camera, k = this.held.bind(this);
+    while (f.acc >= FP_STEP) {
+      const t = FP_STEP;
+      const look = new THREE.Vector3(0, 0, -1).applyQuaternion(c.quaternion);
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(c.quaternion);
+      const boost = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') ? 3 : 1;
+      const thrust = new THREE.Vector3();
+      if (k('fly_forward')) thrust.addScaledVector(look, 40 * boost);
+      if (k('fly_back')) thrust.addScaledVector(f.v, -2);
+      if (k('fly_left')) thrust.addScaledVector(right, -20);
+      if (k('fly_right')) thrust.addScaledVector(right, 20);
+      if (k('fly_up')) thrust.y += 20;
+      if (k('fly_down')) thrust.y -= 20;
+      f.v.addScaledVector(thrust, t);
+      f.v.multiplyScalar(1 - Math.min(1, 1.2 * t));
+      const max = 30 * boost;
+      if (f.v.length() > max) f.v.setLength(max);
+      const from = c.position.clone();
+      c.position.addScaledVector(f.v, t);
+      this.collect(from, c.position);
+      f.acc -= t;
+    }
+  }
+
+  // the texts within reach of the path from `a` to `b`, in the order met, into the buffer
+  collect(a, b) {
+    const seg = b.clone().sub(a);
+    const len2 = seg.lengthSq();
+    if (len2 < 1e-9) return;
+    const w = new THREE.Vector3();
+    const met = [];
+    const have = new Set(this.collected.map((x) => x.key));
+    for (const n of this.order) {
+      if (have.has(n.key)) continue;
+      this.world(n, w);
+      const t = Math.max(0, Math.min(1, w.clone().sub(a).dot(seg) / len2));
+      const near = a.clone().addScaledVector(seg, t).distanceTo(w);
+      if (near <= 0.6 + (n.size || this.p.size)) met.push({ t, n, at: w.clone() });
+    }
+    if (!met.length) return;
+    met.sort((x, y) => x.t - y.t || (x.n.key < y.n.key ? -1 : 1));
+    for (const m of met) this.collected.push({ key: m.n.key, text: m.n.f.text, at: m.at });
+    this.drawTrail();
+    this.send({ ...this.ev('collected', null), data: this.collected.map((x) => ({ key: x.key, text: x.text })) });
+  }
+
+  // the collected texts, joined by a line in the order met
+  drawTrail() {
+    if (this.trail) { this.scene.remove(this.trail); this.trail.geometry.dispose(); this.trail = null; }
+    const pts = (this.collected || []).map((x) => x.at);
+    if (pts.length < 2) return;
+    this.trail = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xff8c1a }));
+    this.trail.frustumCulled = false;
+    this.scene.add(this.trail);
+    this.dirty = true;
+  }
+
+  clearCollected() {
+    this.collected = [];
+    this.drawTrail();
+    this.send({ ...this.ev('collected', null), data: [] });
+  }
+
   // ------------------------------------------------------------------ prefabs
   //
   // A prefab's copies are drawn as their parts, ordinary blocks whose ids name their copy
@@ -1387,7 +1692,7 @@ export class Space {
       this.placeVoice(blockId, v);
       src.onended = () => { if (this.voices.get(blockId) === v) this.voices.delete(blockId); };
       src.start();
-      this.listen();
+      this.hearFrom();
     });
   }
 
@@ -1438,8 +1743,9 @@ export class Space {
     } else v.pan.setPosition(p.x, p.y, p.z);
   }
 
-  // the listener is the camera; voices follow their blocks (an animation moves them)
-  listen() {
+  // the listener is the camera; voices follow their blocks (an animation moves them).
+  // (Not `listen`: that's the method that attaches the room's events, once.)
+  hearFrom() {
     if (!this.ac || !this.voices || !this.voices.size) return;
     const l = this.ac.listener, c = this.camera, t = this.ac.currentTime;
     const f = new THREE.Vector3(0, 0, -1).applyQuaternion(c.quaternion);
@@ -1790,6 +2096,8 @@ export class Space {
 
   shapeBlock(o) {
     const { b, mesh } = o;
+    // walking bumps into the blocks as they are now
+    this.blocksRev = (this.blocksRev || 0) + 1;
     // a zone's place or size changed: its texts are looked at again (and come along)
     if (b.zone || o.wasZone) {
       this.zoneBlocks = null;
@@ -1815,6 +2123,7 @@ export class Space {
   dropBlock(id) {
     const o = this.blocks.get(id);
     if (!o) return;
+    this.blocksRev = (this.blocksRev || 0) + 1;
     this.stopSound(id);
     if (o.b.zone) {
       this.zoneBlocks = null;
@@ -1926,7 +2235,8 @@ export class Space {
 
   rayFrom(e) {
     const r = this.host.getBoundingClientRect();
-    const ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    // with the pointer locked (walking, superflight) it's where you look
+    const ndc = document.pointerLockElement === this.host || !e ? new THREE.Vector2(0, 0) : new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     this.ray.setFromCamera(ndc, this.camera);
     return this.ray;
   }
@@ -2274,6 +2584,13 @@ export class Space {
       h.classList.add('looking');
       try { h.setPointerCapture(e.pointerId); } catch { /* fine without */ }
     });
+    // the pointer locked (walking, superflight): the mouse looks around
+    document.addEventListener('mousemove', (e) => {
+      if (document.pointerLockElement !== h) return;
+      const k = LOOK * (this.p.look || 1);
+      this.tyaw -= (e.movementX || 0) * k;
+      this.tpitch = Math.max(-1.55, Math.min(1.55, this.tpitch - (e.movementY || 0) * k));
+    });
     h.addEventListener('pointermove', (e) => {
       if (this.bdrag) { this.dragBlock(e); return; }
       if (!this.looking) return;
@@ -2303,6 +2620,8 @@ export class Space {
     h.addEventListener('wheel', (e) => {
       if (e.target.closest('.slabel')) return;
       e.preventDefault();
+      // hanging on the grapple, the wheel reels the rope in or out
+      if (this.rope) { this.rope.len = Math.max(1.2, Math.min(60, this.rope.len + (e.deltaY > 0 ? 0.8 : -0.8))); return; }
       this.speed = Math.min(200, Math.max(0.5, this.speed * (e.deltaY > 0 ? 0.9 : 1.1)));
       this.info(true);
     }, { passive: false });
@@ -2318,6 +2637,9 @@ export class Space {
         e.preventDefault();
         this.hop(k);
       } else if (k === b.level) this.level();
+      else if (k === b.walk) this.setMode(this.mode === 'walk' ? 'fly' : 'walk');
+      else if (k === b.superflight) this.setMode(this.mode === 'super' ? 'fly' : 'super');
+      else if (k === b.grapple) this.grapple();
       else if (k === b.back_to_start) this.home();
       else if (k === b.slower) this.speed = Math.max(0.5, this.speed / 1.25);
       else if (k === b.faster) this.speed = Math.min(200, this.speed * 1.25);
@@ -2328,12 +2650,27 @@ export class Space {
 
   // ------------------------------------------------------------------ the frame
 
+  // a frame, and the next one asked for whatever goes wrong in this one (a fault is
+  // reported once, not left to stop the room)
   loop(now) {
     if (!this.running) return;
+    try {
+      this.frame(now);
+    } catch (e) {
+      if (!this.faulted) {
+        this.faulted = true;
+        this.send({ ...this.ev('fault', null), text: `the room: ${e && e.message || e}` });
+      }
+    }
+    requestAnimationFrame(this.loop);
+  }
+
+  frame(now) {
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     const c = this.camera;
-    if (this.keys.size) {
+    if (this.mode && this.mode !== 'fly') this.moveBody(dt);
+    else if (this.keys.size) {
       const k = this.keys;
       const v = this.speed * (k.has('ShiftLeft') || k.has('ShiftRight') ? 4 : 1) * dt;
       if (this.held('fly_forward')) c.translateZ(-v);
@@ -2378,14 +2715,13 @@ export class Space {
     const animated = this.blocks.size && this.animating();
     if (animated) this.applyAnims(now);
     this.wireTimers(now);
-    this.listen();
+    this.hearFrom();
     const rays = this.fadeRays(now);
-    if (moving || turning || this.keys.size || this.ease || this.looking || this.drag || this.bdrag || this.dirty || animated || rays) {
+    if (moving || turning || this.keys.size || this.ease || this.looking || this.drag || this.bdrag || this.dirty || animated || rays || (this.mode && this.mode !== 'fly')) {
       this.dirty = false;
       this.render();
       this.info(false);
     }
-    requestAnimationFrame(this.loop);
   }
 
   render() {
@@ -2430,7 +2766,8 @@ export class Space {
     this.infoAt = t;
     const p = this.camera.position;
     const state = this.paused ? 'paused' : this.asleep() ? 'still' : 'moving';
-    const text = `${p.x.toFixed(1)} ${p.y.toFixed(1)} ${(-p.z).toFixed(1)}   speed ${this.speed.toFixed(1)}   roll ${Math.round(this.roll())}°   ${this.order.length} texts   spread ${state}`;
+    const mode = this.mode === 'walk' ? (this.rope ? '   on the grapple' : '   walking') : this.mode === 'super' ? `   superflight ${this.flight ? this.flight.v.length().toFixed(0) : 0}` : '';
+    const text = `${p.x.toFixed(1)} ${p.y.toFixed(1)} ${(-p.z).toFixed(1)}   speed ${this.speed.toFixed(1)}   roll ${Math.round(this.roll())}°   ${this.order.length} texts   spread ${state}${mode}`;
     if (text === this.lastInfo) return;
     this.lastInfo = text;
     this.send({ ...this.ev('info', null), text });

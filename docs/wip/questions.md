@@ -273,3 +273,22 @@ The answers left these open. Each is written into the design as its default.
     occlusion.
 69. **The save keeps sound files as they were added;** the page decodes them, so a format
     the browser or the desktop's web view can't play is reported when it's first played.
+
+## First-person mode (27 Oct)
+
+70. **The keys:** walk V, superflight B, grapple G, sneak Z (held); walking reuses the
+    flying keys (W A S D, Space to jump, C to crouch, Q and E to lean), so one set of
+    keys moves you in every mode. All of them rebind in the keys menu.
+71. **The body:** 0.6 wide, 1.7 tall standing and 1.05 crouched; walking 3.2 units a
+    second, running 6, sneaking 1.4, crouched 1.6; a jump of 6.2 under a gravity of 20;
+    steps up to 0.35 are climbed, ledges up to 1.3 mantled. The floor is the room's grid.
+    Blocks are bumped into as their boxes (turned and bent ones by the box around them);
+    staging zones and texts let you through.
+72. **The grapple hooks within 60 units** (a block where you look, else the text nearest
+    where you look), the rope as long as the distance; the wheel reels it from 1.2 to 60.
+73. **Superflight passes through blocks** and collects a text when its path comes within
+    0.6 units plus the text's size; a text is collected once. A chain or a list takes the
+    collected texts that are entries of the save (free texts join only the new entry or
+    the bar).
+74. **No pointer lock on the desktop:** under Xvfb, WebKitGTK stopped passing key presses
+    on once the pointer was locked, so the desktop keeps right-drag looking.

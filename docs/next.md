@@ -81,7 +81,12 @@ departure says why in its commit).
   carried by hits and signals.
 - Done (27 Oct): sounds (#17): the sounds table, emitters, the sounds window, programs'
   `sound` and `hush`.
-- Next: the ▶ usable point for logic-world scenes, then first-person mode (#9).
+- Done (27 Oct): the ▶ usable point for logic-world scenes (README, guide, offered on PR #8).
+- Done (27 Oct): first-person mode (#9): walking, the grapple, superflight. Fixed on the
+  way: an audio `listen` method had shadowed the one attaching the room's events (so
+  events were attached every frame since the sounds commit); a guard now checks
+  space.js's methods are defined once, and a fault in a frame is reported, not fatal.
+- Next: placing prefabs in first-person mode (#19), then the ▶ usable point for walking.
   Open further up: the language lines (s, the standard library), taxonomies and pipes,
   the wgpu renderer and culling.
 

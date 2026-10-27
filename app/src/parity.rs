@@ -107,6 +107,10 @@ pub const KEY_ACTIONS: &[&str] = &[
     "back_to_start",
     "slower",
     "faster",
+    "walk",
+    "superflight",
+    "grapple",
+    "sneak",
     "new_text",
     "edit_text",
     "delete_text",
@@ -296,7 +300,7 @@ mod tests {
             "startLoops()",
             "hushAll()",
             "soundData(id, data)",
-            "listen()",
+            "hearFrom()",
         ] {
             assert!(js.contains(needle), "space.js lost {needle}");
         }
@@ -312,6 +316,58 @@ mod tests {
         }
         let sp = include_str!("views/space.rs");
         assert!(sp.contains("show_sounds") && sp.contains("\"soundwant\""));
+    }
+
+    /// space.js defines each method of the room once: a second one replaces the first
+    /// without a word (an audio `listen` once shadowed the one that attaches the events)
+    #[test]
+    fn room_methods_are_unique() {
+        let js = include_str!("space.js");
+        let mut seen = std::collections::HashSet::new();
+        for line in js.lines() {
+            let Some(rest) = line.strip_prefix("  ") else { continue };
+            if rest.starts_with(' ') || !rest.ends_with(") {") {
+                continue;
+            }
+            let Some((name, _)) = rest.split_once('(') else {
+                continue;
+            };
+            if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                continue;
+            }
+            if ["if", "for", "while", "switch", "catch", "constructor"].contains(&name) {
+                continue;
+            }
+            assert!(seen.insert(name.to_string()), "space.js defines {name} twice");
+        }
+        assert!(seen.len() > 100);
+    }
+
+    /// first-person mode: walking, the grapple, superflight and what it collects
+    #[test]
+    fn first_person_stays() {
+        let js = include_str!("space.js");
+        for needle in [
+            "setMode(mode)",
+            "walkStep(dt)",
+            "grapple()",
+            "superflight(dt)",
+            "collect(a, b)",
+            "BODY.mantle",
+        ] {
+            assert!(js.contains(needle), "space.js lost {needle}");
+        }
+        let rs = include_str!("views/space/flightwin.rs");
+        for needle in [
+            "fn Collected(",
+            "\"mem.saturate\"",
+            "\"chains.make\"",
+            "\"lists.enlist\"",
+            "into the bar",
+        ] {
+            assert!(rs.contains(needle), "flightwin.rs lost {needle}");
+        }
+        assert!(include_str!("views/space.rs").contains("\"collected\""));
     }
 
     /// keyframe animations: the window, the room posing blocks

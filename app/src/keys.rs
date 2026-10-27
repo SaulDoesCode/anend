@@ -65,6 +65,10 @@ pub enum Action {
     BackToStart,
     Slower,
     Faster,
+    Walk,
+    SuperFlight,
+    Grapple,
+    Sneak,
     NewText,
     EditText,
     DeleteText,
@@ -110,7 +114,7 @@ impl Scope {
 use Action::*;
 
 impl Action {
-    pub const ALL: [Action; 64] = [
+    pub const ALL: [Action; 68] = [
         GotoMemory,
         GotoSpace,
         GotoLists,
@@ -157,6 +161,10 @@ impl Action {
         BackToStart,
         Slower,
         Faster,
+        Walk,
+        SuperFlight,
+        Grapple,
+        Sneak,
         NewText,
         EditText,
         DeleteText,
@@ -193,7 +201,7 @@ impl Action {
     pub fn held(self) -> bool {
         matches!(
             self,
-            FlyForward | FlyBack | FlyLeft | FlyRight | FlyUp | FlyDown | RollLeft | RollRight
+            FlyForward | FlyBack | FlyLeft | FlyRight | FlyUp | FlyDown | RollLeft | RollRight | Sneak
         )
     }
 
@@ -246,6 +254,10 @@ impl Action {
             BackToStart => "back_to_start",
             Slower => "slower",
             Faster => "faster",
+            Walk => "walk",
+            SuperFlight => "superflight",
+            Grapple => "grapple",
+            Sneak => "sneak",
             NewText => "new_text",
             EditText => "edit_text",
             DeleteText => "delete_text",
@@ -315,6 +327,10 @@ impl Action {
             BackToStart => "back to start",
             Slower => "slower flight",
             Faster => "faster flight",
+            Walk => "walk / fly (first person: gravity, jump, crouch, lean, mantle)",
+            SuperFlight => "superflight / fly (collects the texts flown through)",
+            Grapple => "grapple: hook what's ahead / let go (the wheel reels)",
+            Sneak => "sneak while walking (hold)",
             NewText => "new text ahead",
             EditText => "edit the selected text",
             DeleteText => "remove the selected text",
@@ -385,6 +401,10 @@ impl Action {
             BackToStart => "Home",
             Slower => "[",
             Faster => "]",
+            Walk => "V",
+            SuperFlight => "B",
+            Grapple => "G",
+            Sneak => "Z",
             NewText => "N",
             EditText => "Enter",
             DeleteText => "Delete",
@@ -657,7 +677,7 @@ impl Keymap {
     pub fn flying(&self) -> BTreeMap<&'static str, &'static str> {
         Action::ALL
             .into_iter()
-            .filter(|a| a.held() || matches!(a, Level | BackToStart | Slower | Faster))
+            .filter(|a| a.held() || matches!(a, Level | BackToStart | Slower | Faster | Walk | SuperFlight | Grapple))
             .map(|a| (a.id(), key_code(self.get(a).key).unwrap_or("")))
             .collect()
     }

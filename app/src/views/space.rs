@@ -27,6 +27,7 @@ use crate::ui::*;
 use crate::views::{TChip, use_keys};
 
 mod animwin;
+mod flightwin;
 mod lightwin;
 mod prefabwin;
 mod soundwin;
@@ -488,6 +489,7 @@ fn boot_js() -> String {
         r#"
 const THREE_SRC = {three};
 const ENGINE_SRC = {engine};
+window.__anendNoLock = {no_lock};
 const url = (src) => URL.createObjectURL(new Blob([src], {{ type: 'text/javascript' }}));
 const tu = url(THREE_SRC);
 const eu = url(ENGINE_SRC.split("'__THREE__'").join(JSON.stringify(tu)));
@@ -535,6 +537,7 @@ try {{
     else if (c.cmd === 'sounddata') sp.soundData(c.id, c.data || '');
     else if (c.cmd === 'sounds') sp.sounds(c.sounds || []);
     else if (c.cmd === 'soundpreview') sp.previewSound(c.id);
+    else if (c.cmd === 'clearcollected') sp.clearCollected();
     else if (c.cmd === 'animpreview') sp.previewAnim(c.id, c.anim || null, c.p);
     else if (c.cmd === 'lights') sp.setLights(c.lights || [], c.changed || null);
     else if (c.cmd === 'showlights') sp.showLights(!!c.on, c.picked);
@@ -558,6 +561,7 @@ try {{
 "#,
         three = serde_json::to_string(THREE).unwrap_or_default(),
         engine = serde_json::to_string(ENGINE).unwrap_or_default(),
+        no_lock = cfg!(feature = "desktop"),
     )
 }
 
@@ -597,6 +601,10 @@ struct Sp {
     prefabs: Signal<Vec<Value>>,
     copies: Signal<Vec<Value>>,
     thumbs: Signal<HashMap<u64, String>>,
+    /// how the camera moves: `fly` (the default), `walk` or `super` (superflight)
+    mode: Signal<String>,
+    /// the texts superflight flew through, in order: `{key, text}`
+    collected: Signal<Vec<Value>>,
 }
 
 impl Sp {
@@ -1323,6 +1331,8 @@ pub fn Space() -> Element {
         prefabs: use_signal(Vec::new),
         copies: use_signal(Vec::new),
         thumbs: use_signal(HashMap::new),
+        mode: use_signal(|| "fly".to_string()),
+        collected: use_signal(Vec::new),
     };
     // the engine and its channel
     {
@@ -1576,6 +1586,9 @@ pub fn Space() -> Element {
             if p.space.show_anims {
                 animwin::Anims { sp, block: (sp.block)(), on_changed: { let api = api_b.clone(); move |_| { let api = api.clone(); dioxus::dioxus_core::spawn_forever(count_blocks(api, sp)); } } }
             }
+            if !(sp.collected)().is_empty() {
+                flightwin::Collected { sp }
+            }
             if p.space.show_sounds {
                 soundwin::Sounds { sp }
             }
@@ -1630,6 +1643,7 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
     match e.kind.as_str() {
         "info" => pos.set(e.text),
         "error" => ui.fail(format!("the space couldn't start: {}", e.text)),
+        "fault" => ui.fail(e.text.clone()),
         "toast" => ui.say(e.text),
         "hover" | "focus" => card.set(Some(e.clone())),
         "select" => {
@@ -1700,6 +1714,20 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
         // an undo took back blocks just added, or put back blocks just deleted
         "lightspot" => lightwin::light_spot(ui, api, sp, e.data.clone()),
         "prefabspot" => prefabwin::place_at(ui, api, sp, e.data.clone()),
+        "mode" => {
+            let m = e.data.as_str().unwrap_or("fly").to_string();
+            ui.say(match m.as_str() {
+                "walk" => format!("walking · {} jumps, {} crouches, {} {} lean, {} hooks the grapple · {} flies again", ui.key_of(Action::FlyUp), ui.key_of(Action::FlyDown), ui.key_of(Action::RollLeft), ui.key_of(Action::RollRight), ui.key_of(Action::Grapple), ui.key_of(Action::Walk)),
+                "super" => format!("superflight · {} thrusts where you look, Shift boosts; texts you fly through are collected · {} flies again", ui.key_of(Action::FlyForward), ui.key_of(Action::SuperFlight)),
+                _ => "flying".to_string(),
+            });
+            let mut s = sp.mode;
+            s.set(m);
+        }
+        "collected" => {
+            let mut c = sp.collected;
+            c.set(e.data.as_array().cloned().unwrap_or_default());
+        }
         // the room needs a sound's bytes to play it
         "soundwant" => {
             let id = e.data.as_str().unwrap_or("").to_string();
@@ -3115,6 +3143,37 @@ fn Help() -> Element {
                 (k(Action::Level), "level the horizon"),
                 (k(Action::BackToStart), "back to start"),
                 ("arrows".into(), "hop to the nearest text that way"),
+            ],
+        ),
+        (
+            "walking, the grapple, superflight",
+            vec![
+                (k(Action::Walk), "walk / fly: gravity, blocks to stand on and bump into"),
+                (
+                    format!(
+                        "{} {} {} {}, Shift, {}",
+                        k(Action::FlyForward),
+                        k(Action::FlyLeft),
+                        k(Action::FlyBack),
+                        k(Action::FlyRight),
+                        k(Action::Sneak)
+                    ),
+                    "walk, run, sneak",
+                ),
+                (
+                    format!("{} / {}", k(Action::FlyUp), k(Action::FlyDown)),
+                    "jump (at a ledge: climb onto it) / crouch",
+                ),
+                (format!("{} / {}", k(Action::RollLeft), k(Action::RollRight)), "lean"),
+                (
+                    k(Action::Grapple),
+                    "hook the block or text ahead / let go; the wheel reels in and out",
+                ),
+                (
+                    k(Action::SuperFlight),
+                    "superflight / fly: Shift boosts; texts flown through are collected",
+                ),
+                ("Esc".into(), "let the pointer go (right-drag still looks)"),
             ],
         ),
         (

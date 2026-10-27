@@ -206,6 +206,18 @@ texts inside it a little spread of their own.
 
 ![a floor, a box and two spheres under an ambient, a warm point and a blue cone light](guide/lights.png)
 
+### Walking, the grapple and superflight
+
+The space flies by default. **V** walks instead: you fall to the floor or onto the blocks
+below, bump into blocks, climb low steps, run with Shift, sneak with Z, crouch with C (you
+stay down where there's no room to stand), lean with Q and E, and jump with Space; a jump
+at a ledge within reach climbs onto it. **G** hooks the block or text you look at on a
+rope: swing on it, reel in and out with the wheel, let go with G or a jump. **B** is
+superflight: fast flight where you look, Shift to boost, and every text you fly through
+is collected in order, drawn as a trail. A window lists them: make them one new entry, a
+chain, a list, or put them in the bar, so you can write by flying. On the web the mouse
+looks around while walking (Esc lets the pointer go); right-drag looks anywhere.
+
 ### Blocks that act on each other
 
 ![two switches through an AND gate light a lamp](guide/gates.png)

@@ -185,8 +185,10 @@ docs/architecture.md (the whole).
       room while it plays, `sound` and `hush` from programs.)
 - [x] ▶ **usable:** logic-world scenes, with blocks acting on each other. (27 Oct: README
       and guide written up, offered on PR #8.)
-- [ ] First-person mode with Thief-like movement, the grapple, and superflight that collects
-      texts (#9).
+- [x] First-person mode with Thief-like movement, the grapple, and superflight that collects
+      texts (#9). (27 Oct: walking with gravity, collisions, run, sneak, crouch, lean,
+      mantle; the grapple's rope; superflight's collected texts as an entry, a chain, a
+      list or the bar's text. The desktop doesn't lock the pointer.)
 - [ ] Placing prefabs in first-person mode (#19).
 - [ ] ▶ **usable:** walking through what has been built.
 - [ ] GPU: reading above the CPU at classifier-search batch sizes; training overhead (one
