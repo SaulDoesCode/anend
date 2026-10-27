@@ -157,7 +157,8 @@ docs/architecture.md (the whole).
 - [x] Tag sets of the user's own; word types for other languages through a language
       taxonomy; conlang checking trained by hand (#13, #10). (27 Oct: `tagsets.*`, the
       models view's tag sets tab, English types only on English, checkers with suggestions.)
-- [ ] ▶ **usable:** the taxonomy engine, with effects stacked onto views.
+- [x] ▶ **usable:** the taxonomy engine, with effects stacked onto views. (27 Oct: README
+      "The taxonomy engine", the guide's sections, offered on PR #8.)
 
 The user, 27 Oct: "Prefabs must be grouped and not loose pieces. Items must be multi
 selectable with shift and groupable. Wires need to be intuitive and rendered. And we need to

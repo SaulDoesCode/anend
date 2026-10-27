@@ -98,6 +98,34 @@ output as a toast), from blocks in the space (a block's wiring runs a program wh
 clicked, hit by a ray or signalled), and from a shell with `anend-app run` (below). On a
 shared hub a run takes at most 2 million steps, and the hub's limits apply to what it asks.
 
+## The taxonomy engine
+
+The classifiers are meant to work together rather than one at a time
+([docs/architecture.md](docs/architecture.md)):
+
+- **Taxonomies** put classifiers in a tree: each answer decides which classifier reads the
+  text next ("English or not?" before "which kind of thing?"). Every step of a routing can
+  be marked right or wrong; each node counts its marks beside its classifier's held-out
+  accuracy, and every mark teaches that classifier.
+- **Pipes** take the texts a filter lets through (words, sums, lists, tags, what
+  classifiers say) and give them effects: a colour, a classifier's class colours, an
+  underline, a label, a size, a glow, gathering in the space. Turned on, a pipe's effects
+  show in the memory view and the space, stacked with other pipes'; nothing is written
+  onto the texts. Its actions (a list, a tag, a program on each) run when asked.
+- **Views are programs:** an s program that loads `std/view.s.` says where a view's texts
+  come from (a pipe, or a search), their order, headings and layout, and the reader shows
+  it beside its own views, which are presets of the same thing.
+- **Tag sets** are word types of your own, learned from words you mark: a language's (a
+  set can claim the texts a language classifier picks out), or a checker for a language of
+  your own that flags wrong words with the nearest right ones.
+
+| | |
+|---|---|
+| ![a taxonomy](app/docs/shots/desktop-taxonomy.png) | ![a pipe's effects in the space](app/docs/shots/desktop-pipes-space.png) |
+| a taxonomy: English or not, then which kind of thing; marks per node (desktop) | a pipe's colour, label, size and gathering in the space (desktop) |
+| ![a view program](app/docs/shots/web-view-program.png) | ![a tag set](app/docs/shots/web-tagset.png) |
+| a view of one's own in the reader: a pipe's texts as a list (web) | an Afrikaans tag set, learned from marked words (web) |
+
 ## Saves
 
 A save is one file, an entry graph in [redb](https://www.redb.org). Every text, note,
