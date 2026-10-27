@@ -17,6 +17,70 @@ use crate::shell::set_pref;
 use crate::ui::*;
 
 /// the save's prefabs, and their pictures drawn by the room
+/// whether an id is a prefab's copy (not one of its parts)
+pub(super) fn is_copy(id: &str) -> bool {
+    id.starts_with("prefab:") && !id.contains('/')
+}
+
+/// the selected copy moved or turned in the room (a drag, or an undo of one)
+pub(super) fn copy_set(ui: Ui, api: Api, sp: Sp, data: Value) {
+    dioxus::dioxus_core::spawn_forever(async move {
+        match api.call("prefabs.set", data).await {
+            Ok(r) => {
+                show(ui, &api, sp, &r).await;
+                load_prefabs(ui, &api, sp).await;
+            }
+            Err(e) => ui.fail(e),
+        }
+    });
+}
+
+/// a removed copy put back (an undo)
+pub(super) fn copy_restore(ui: Ui, api: Api, sp: Sp, restore: Value) {
+    dioxus::dioxus_core::spawn_forever(async move {
+        match api.call("prefabs.place", restore).await {
+            Ok(r) => {
+                show(ui, &api, sp, &r).await;
+                load_prefabs(ui, &api, sp).await;
+                sp.send(json!({ "cmd": "pickcopy", "id": r["copy"]["id"] }));
+                ui.say("the copy is back");
+            }
+            Err(e) => ui.fail(e),
+        }
+    });
+}
+
+/// the selected copy taken away, as a whole (Ctrl+Z puts it back)
+pub(super) fn copy_remove(ui: Ui, api: Api, sp: Sp, id: String) {
+    dioxus::dioxus_core::spawn_forever(async move {
+        match api.call("prefabs.remove", json!({ "id": id })).await {
+            Ok(r) => {
+                sp.send(json!({ "cmd": "copygone", "ids": r["removed"], "restore": r["restore"] }));
+                let mut b = sp.block;
+                b.set(None);
+                load_prefabs(ui, &api, sp).await;
+                ui.say("the copy is gone · Ctrl+Z puts it back");
+            }
+            Err(e) => ui.fail(e),
+        }
+    });
+}
+
+/// another copy beside the selected one, with its own values
+pub(super) fn copy_duplicate(ui: Ui, api: Api, sp: Sp, id: String) {
+    dioxus::dioxus_core::spawn_forever(async move {
+        match api.call("prefabs.duplicate", json!({ "id": id })).await {
+            Ok(r) => {
+                show(ui, &api, sp, &r).await;
+                load_prefabs(ui, &api, sp).await;
+                sp.send(json!({ "cmd": "pickcopy", "id": r["copy"]["id"] }));
+                ui.say("a copy of the copy, beside it, with its own changes");
+            }
+            Err(e) => ui.fail(e),
+        }
+    });
+}
+
 pub(super) async fn load_prefabs(ui: Ui, api: &Api, sp: Sp) {
     let r = match api.call("prefabs.list", json!({})).await {
         Ok(r) => r,
@@ -38,6 +102,7 @@ pub(super) async fn load_prefabs(ui: Ui, api: &Api, sp: Sp) {
         .ok()
         .and_then(|v| v.as_array().cloned())
         .unwrap_or_default();
+    sp.send(json!({ "cmd": "copies", "list": copies }));
     let mut c = sp.copies;
     c.set(copies);
 }
@@ -49,11 +114,9 @@ pub(super) fn place_at(ui: Ui, api: Api, sp: Sp, data: Value) {
         match api.call("prefabs.place", args).await {
             Ok(r) => {
                 show(ui, &api, sp, &r).await;
-                if let Some(first) = r["blocks"].as_array().and_then(|a| a.first()) {
-                    sp.send(json!({ "cmd": "pickblock", "id": first["id"] }));
-                }
                 load_prefabs(ui, &api, sp).await;
-                ui.say("a copy · select one of its parts to move, turn or size the whole copy here");
+                sp.send(json!({ "cmd": "pickcopy", "id": r["copy"]["id"] }));
+                ui.say("a copy, selected as one: drag it to move it, its rings turn it · double-click a part to edit the parts");
             }
             Err(e) => ui.fail(e),
         }
@@ -407,6 +470,49 @@ pub(super) fn Prefabs(sp: Sp) -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+/// a copy's menu (a right click on it): it's one group
+#[component]
+pub(super) fn CopyMenu(c: Value, x: f64, y: f64, sp: Sp) -> Element {
+    let ui = ui();
+    let api = api();
+    let mut menu = sp.bmenu;
+    let mut close = move || menu.set(None);
+    let id = c["id"].as_str().unwrap_or("").to_string();
+    let name = c["name"].as_str().unwrap_or("a prefab").to_string();
+    let (a1, a2, a3, a4) = (api.clone(), api.clone(), api.clone(), api.clone());
+    let (i1, i2, i3, i4, i5) = (id.clone(), id.clone(), id.clone(), id.clone(), id.clone());
+    rsx! {
+        div { class: "backdrop", onclick: move |_| close(), oncontextmenu: move |e| { e.prevent_default(); close() } }
+        div { class: "menu smenu", role: "menu",
+            style: "left: min({x}px, calc(100vw - 330px)); top: max(8px, min({y}px, calc(100vh - 300px)));",
+            div { class: "title", "a copy of {name}" }
+            div { class: "title dim small", "one group: it moves, turns, copies and goes as a whole" }
+            button { role: "menuitem", onclick: move |_| { sp.send(json!({ "cmd": "opencopy", "id": i1 })); close(); },
+                Icon { name: "edit" } "open it to edit its parts" kbd { "double-click" } }
+            button { role: "menuitem", onclick: move |_| { copy_set(ui, a1.clone(), sp, json!({ "id": i2, "turn": 1 })); close(); },
+                Icon { name: "refresh" } "a quarter turn about the upright" }
+            button { role: "menuitem", onclick: move |_| { copy_duplicate(ui, a2.clone(), sp, i3.clone()); close(); },
+                Icon { name: "copy" } "a copy beside it" }
+            button { role: "menuitem", onclick: move |_| { set_pref(ui, |p| p.space.show_prefabs = true); close(); },
+                Icon { name: "prefab" } "its prefab…" span { class: "dim small", " (the prefabs window: size, own changes)" } }
+            button { role: "menuitem",
+                onclick: move |_| {
+                    let (api, id) = (a3.clone(), i4.clone());
+                    spawn(async move {
+                        match api.call("prefabs.detach", json!({ "id": id })).await {
+                            Ok(r) => { show(ui, &api, sp, &r).await; load_prefabs(ui, &api, sp).await; ui.say("detached: ordinary blocks now"); }
+                            Err(e) => ui.fail(e),
+                        }
+                    });
+                    close();
+                },
+                Icon { name: "cube" } "detach it into blocks" }
+            button { role: "menuitem", onclick: move |_| { copy_remove(ui, a4.clone(), sp, i5.clone()); close(); },
+                Icon { name: "delete" } "remove it" kbd { "{ui.key_of(crate::keys::Action::DeleteText)}" } }
         }
     }
 }

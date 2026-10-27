@@ -504,6 +504,11 @@ try {{
     const c = await dioxus.recv();
     if (c.cmd === 'place') sp.place(c.texts, c.again);
     else if (c.cmd === 'effects') sp.effects(c.fx);
+    else if (c.cmd === 'copies') sp.setCopies(c.list || []);
+    else if (c.cmd === 'copygone') sp.copyGone(c.ids || [], c.restore);
+    else if (c.cmd === 'opencopy') sp.openCopyNamed(c.id);
+    else if (c.cmd === 'closecopy') sp.closeCopy();
+    else if (c.cmd === 'pickcopy') sp.pickCopy(c.id);
     else if (c.cmd === 'clear') sp.clear(!!c.all);
     else if (c.cmd === 'room') sp.setRoom(c.bg, c.ink);
     else if (c.cmd === 'start') sp.start();
@@ -1589,7 +1594,9 @@ pub fn Space() -> Element {
                     },
                 }
             }
-            if let (Some((x, y)), Some(b)) = ((sp.bmenu)(), (sp.block)()) {
+            if let (Some((x, y)), Some(b)) = ((sp.bmenu)(), (sp.block)().filter(|b| b["copy"] == true)) {
+                prefabwin::CopyMenu { c: b, x, y, sp }
+            } else if let (Some((x, y)), Some(b)) = ((sp.bmenu)(), (sp.block)()) {
                 BlockMenu { b, x, y, sp_bmenu: sp.bmenu, bend_open: sp.bend_open,
                     on_send: move |v: Value| sp.send(v),
                     on_duplicate: { let api = api_b.clone(); move |b: Value| duplicate_block(ui, api.clone(), sp, b) },
@@ -1609,7 +1616,7 @@ pub fn Space() -> Element {
             if p.space.show_blocks {
                 Blocks {
                     selected: (sp.selected)(),
-                    block: (sp.block)(),
+                    block: (sp.block)().filter(|b| b["copy"] != true),
                     counts: (sp.block_use)(),
                     on_send: move |v: Value| sp.send(v),
                     on_duplicate: { let api = api_b.clone(); move |b: Value| duplicate_block(ui, api.clone(), sp, b) },
@@ -1618,7 +1625,7 @@ pub fn Space() -> Element {
                 }
             }
             if p.space.show_anims {
-                animwin::Anims { sp, block: (sp.block)(), on_changed: { let api = api_b.clone(); move |_| { let api = api.clone(); dioxus::dioxus_core::spawn_forever(count_blocks(api, sp)); } } }
+                animwin::Anims { sp, block: (sp.block)().filter(|b| b["copy"] != true), on_changed: { let api = api_b.clone(); move |_| { let api = api.clone(); dioxus::dioxus_core::spawn_forever(count_blocks(api, sp)); } } }
             }
             if !(sp.collected)().is_empty() {
                 flightwin::Collected { sp }
@@ -1638,7 +1645,7 @@ pub fn Space() -> Element {
             if p.space.show_textures {
                 texwin::Textures {
                     selected: (sp.selected)(),
-                    block: (sp.block)(),
+                    block: (sp.block)().filter(|b| b["copy"] != true),
                     on_send: move |v: Value| sp.send(v),
                     on_changed: { let api = api_b.clone(); move |_| { let api = api.clone(); dioxus::dioxus_core::spawn_forever(count_blocks(api, sp)); } },
                 }
@@ -1750,6 +1757,10 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
         "prefabspot" => prefabwin::place_at(ui, api, sp, e.data.clone()),
         // placing a prefab by hand: a copy where the ghost was
         "ghostplace" => prefabwin::place_exactly(ui, api, sp, e.data.clone()),
+        // a prefab's copy, as one group
+        "copyset" => prefabwin::copy_set(ui, api, sp, e.data.clone()),
+        "copyrestore" => prefabwin::copy_restore(ui, api, sp, e.data.clone()),
+        "copyopen" => ui.say("the copy is open: its parts are picked one by one, their changes kept as the copy's own · Esc or a click outside closes it"),
         "ghostdone" => ui.say("placing stopped"),
         "mode" => {
             let m = e.data.as_str().unwrap_or("fly").to_string();
@@ -1972,6 +1983,8 @@ async fn load_blocks(ui: Ui, api: Api, sp: Sp) {
             lightwin::load_lights(&api, sp).await;
             animwin::load_anims(ui, &api, sp).await;
             wirewin::load_wires(&api, sp).await;
+            // the prefabs' copies: each one a group in the room
+            prefabwin::load_prefabs(ui, &api, sp).await;
             count_blocks(api, sp).await;
         }
         // a hub from before blocks: the room has none
@@ -1980,7 +1993,12 @@ async fn load_blocks(ui: Ui, api: Api, sp: Sp) {
 }
 
 fn delete_block(ui: Ui, api: Api, sp: Sp, id: String) {
-    // a part goes with its whole copy (the prefabs window), or after detaching it
+    // a copy goes as a whole
+    if prefabwin::is_copy(&id) {
+        prefabwin::copy_remove(ui, api, sp, id);
+        return;
+    }
+    // a part of an open copy: the whole copy goes, or the part after detaching it
     if id.starts_with("prefab:") {
         ui.say("a part of a prefab's copy: remove the whole copy, or detach it, in the prefabs window");
         return;
@@ -2001,6 +2019,10 @@ fn delete_block(ui: Ui, api: Api, sp: Sp, id: String) {
 
 fn duplicate_block(ui: Ui, api: Api, sp: Sp, b: Value) {
     let id = b["id"].as_str().unwrap_or("").to_string();
+    if prefabwin::is_copy(&id) {
+        prefabwin::copy_duplicate(ui, api, sp, id);
+        return;
+    }
     // side by side, along its width
     let by = b["w"].as_f64().unwrap_or(1.0) + 0.1;
     dioxus::dioxus_core::spawn_forever(async move {

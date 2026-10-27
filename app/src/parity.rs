@@ -228,6 +228,29 @@ mod tests {
         }
     }
 
+    /// a prefab's copy is one group in the room: selected, moved, copied and removed whole
+    #[test]
+    fn copies_are_groups() {
+        let js = include_str!("space.js");
+        for needle in [
+            "pickCopy(cid, quiet) {",
+            "openCopyAt(id) {",
+            "closeCopy() {",
+            "moveCopyParts(d) {",
+            "copyGone(ids, restore) {",
+            "kind: 'copygone'",
+            "'copyset'",
+        ] {
+            assert!(js.contains(needle), "space.js lost {needle}");
+        }
+        let pf = include_str!("views/space/prefabwin.rs");
+        assert!(
+            pf.contains("fn CopyMenu(")
+                && pf.contains("\"prefabs.duplicate\"")
+                && pf.contains("\"open it to edit its parts\"")
+        );
+    }
+
     /// tag sets: the models view's fourth tab; English types only on English
     #[test]
     fn tag_sets_stay() {

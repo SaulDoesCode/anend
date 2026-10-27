@@ -66,7 +66,7 @@ pub(super) fn Sounds(sp: Sp) -> Element {
         }
     };
 
-    let block = (sp.block)();
+    let block = (sp.block)().filter(|b| b["copy"] != true);
     let bid = block.as_ref().and_then(|b| b["id"].as_str().map(str::to_string));
     let em = block.as_ref().map(|b| b["sound"].clone()).unwrap_or(Value::Null);
     // the selected block's emitter changed: kept, and the room shows it

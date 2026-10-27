@@ -464,6 +464,31 @@ impl Graph {
         Ok(copy_id(scene, n))
     }
 
+    /// a new copy with its own values (`own`, as a copy keeps them): a copy of a copy, or a
+    /// removed copy put back
+    pub fn add_copy_with(
+        &self,
+        scene: u64,
+        at: [f32; 3],
+        rot: [f32; 4],
+        scale: f32,
+        own: Option<Map<String, Value>>,
+    ) -> GResult<String> {
+        let id = self.add_copy(scene, at, rot, scale)?;
+        if own.as_ref().is_some_and(|m| !m.is_empty()) {
+            let (_, mut p) = self.copy_placement(&id)?;
+            p.place.set_own(own);
+            let room = self.room()?.ok_or("no room")?;
+            self.place(room, false, SKind::Prefab, p.def, None, vec![p.place])?;
+        }
+        Ok(id)
+    }
+
+    /// a copy's own values (overrides of its parts), as it keeps them
+    pub fn copy_own(&self, id: &str) -> GResult<Option<Map<String, Value>>> {
+        Ok(self.copy_placement(id)?.1.place.own())
+    }
+
     /// moves, turns or sizes a copy (its own values stay)
     pub fn set_copy(&self, id: &str, at: [f32; 3], rot: [f32; 4], scale: f32) -> GResult<Copy> {
         let (_, p) = self.copy_placement(id)?;

@@ -131,7 +131,9 @@ pub(super) fn Wires(sp: Sp) -> Element {
     let mut w: Signal<Value> = use_signal(|| Value::Null);
     let mut dirty = use_signal(|| false);
     let mut programs: Signal<Vec<String>> = use_signal(Vec::new);
-    let sel = (sp.block)().and_then(|b| b["id"].as_str().map(str::to_string));
+    let sel = (sp.block)()
+        .filter(|b| b["copy"] != true)
+        .and_then(|b| b["id"].as_str().map(str::to_string));
 
     // the programs to choose from
     let api_p = api.clone();

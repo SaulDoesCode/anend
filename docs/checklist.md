@@ -168,9 +168,10 @@ still." These lines come after the taxonomy engine's ▶ point above, and before
 below them. Obsidian (the notes side) and Logic World (the building and wiring side) are the
 measures: each line is checked against how the same action feels there.
 
-- [ ] Prefabs placed as one group: a placed prefab is selected, moved, turned, copied and
+- [x] Prefabs placed as one group: a placed prefab is selected, moved, turned, copied and
       deleted as a whole, and stays one group in the save; opening it to edit its parts is
-      a deliberate step, and its parts go back into the group when done.
+      a deliberate step, and its parts go back into the group when done. (27 Oct: a click
+      selects the copy, double-click opens it, Esc closes; its menu, Delete and undo.)
 - [ ] Selection: shift+click adds and removes items, a drag draws a box, and the selection
       is shown clearly. Works on blocks, texts, placements and lights in the space, and on
       entries in the memory, lists, notes and tags views.

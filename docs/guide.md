@@ -162,8 +162,13 @@ text for its menu.
   *pick blocks in the room*, click each one, name it, *make it*. One copy stands where
   they were; the menu shows a picture of each prefab, and *place* puts another copy
   ahead of you. Links inside it (a switch's ray aimed at its lamp) work in every copy on
-  their own. Select a part to move, turn or size its whole copy, or to *detach* it. A part
-  you change by hand changes in that copy only; *make them the prefab's* changes every
+  their own. A copy is one group: a click on any part selects the whole copy (an outline
+  round it); drag its middle ball or arrows to move it, its rings to turn it; right-click
+  for its menu (a quarter turn, *a copy beside it*, *detach it into blocks*, *remove it*),
+  and **Delete** removes it (**Ctrl+Z** brings it back). To change its parts, open it: a
+  double-click on a part (or *open it to edit its parts*) picks parts one by one, until
+  **Esc** or a click outside closes it again. A part you change by hand changes in that
+  copy only; *make them the prefab's* changes every
   copy, or *…but not the other copies* keeps the rest as they were. *by hand* places
   copies yourself, flying or walking: a see-through copy follows where you look, resting
   on blocks or the floor and snapped to half units (Shift: free); the wheel turns it, a

@@ -354,11 +354,14 @@ pub fn call(g: &Graph, op: &str, args: &Value) -> Res {
                 num(args, "y").unwrap_or(0.0),
                 num(args, "z").unwrap_or(0.0),
             ];
-            let id = g.add_copy(
+            // `own`: the copy's own values, as a removed copy had them (an undo)
+            let own = args.get("own").and_then(Value::as_object).cloned();
+            let id = g.add_copy_with(
                 scene,
                 at,
                 rot(args).unwrap_or(crate::graph::place::IDENTITY),
                 num(args, "scale").unwrap_or(1.0),
+                own,
             )?;
             copy_out(g, &id)
         }
@@ -397,12 +400,41 @@ pub fn call(g: &Graph, op: &str, args: &Value) -> Res {
             g.set_copy(id, at, q, num(args, "scale").unwrap_or(c.scale))?;
             copy_out(g, id)
         }
-        // `{id}`: the copy taken away; its parts' addresses
+        // `{id}`: the copy taken away; its parts' addresses, and what puts it back
+        // (`prefabs.place` with `restore`)
         "prefabs.remove" => {
             let id = s(args, "id");
+            let c = g
+                .copies()?
+                .into_iter()
+                .find(|c| c.id == id)
+                .ok_or_else(|| format!("no copy {id}"))?;
+            let own = g.copy_own(id)?;
             let parts: Vec<String> = g.copy_parts(id)?.into_iter().map(|b| b.id).collect();
             g.delete_copy(id)?;
-            Ok(json!({ "removed": parts }))
+            Ok(json!({
+                "removed": parts,
+                "restore": { "prefab": c.scene, "x": c.x, "y": c.y, "z": c.z, "rot": c.rot, "scale": c.scale, "own": own },
+            }))
+        }
+        // `{id, by?: [x, y, z]}`: another copy beside it (1.5 along x unless `by`), with its
+        // turn, size and own values
+        "prefabs.duplicate" => {
+            let id = s(args, "id");
+            let c = g
+                .copies()?
+                .into_iter()
+                .find(|c| c.id == id)
+                .ok_or_else(|| format!("no copy {id}"))?;
+            let by: Vec<f32> = args
+                .get("by")
+                .and_then(Value::as_array)
+                .filter(|a| a.len() == 3)
+                .map(|a| a.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect())
+                .unwrap_or_else(|| vec![1.5, 0.0, 0.0]);
+            let own = g.copy_own(id)?;
+            let new = g.add_copy_with(c.scene, [c.x + by[0], c.y + by[1], c.z + by[2]], c.rot, c.scale, own)?;
+            copy_out(g, &new)
         }
         // `{id}`: the copy shows the prefab as it is again
         "prefabs.reset" => {
@@ -600,6 +632,18 @@ mod tests {
         // the outside block aims at the first copy's lamp
         c("wiring.fire", json!({ "id": ids[2], "event": "click" }));
         assert_eq!(lamp(&copy), 1.0);
+        // a copy of the copy comes with its own values (the lifted lamp), beside it
+        let dup = c("prefabs.duplicate", json!({ "id": copy, "by": [0, 0, 20] }));
+        let dup_id = dup["copy"]["id"].as_str().unwrap().to_string();
+        assert_eq!(dup["copy"]["z"], 20.0);
+        assert_eq!(lamp(&dup_id), 1.0);
+        // removed, it comes back as it was
+        let gone = c("prefabs.remove", json!({ "id": dup_id }));
+        assert_eq!(gone["removed"].as_array().unwrap().len(), 2);
+        let back = c("prefabs.place", gone["restore"].clone());
+        let back_id = back["copy"]["id"].as_str().unwrap().to_string();
+        assert_eq!(lamp(&back_id), 1.0);
+        c("prefabs.remove", json!({ "id": back_id }));
         let l = c("prefabs.list", json!({}));
         assert_eq!(l["prefabs"][0]["copies"], 2);
         // detaching the second copy keeps its switch aimed at its own lamp

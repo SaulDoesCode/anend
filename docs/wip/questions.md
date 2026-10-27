@@ -406,3 +406,13 @@ The answers left these open. Each is written into the design as its default.
     in for it (it errs towards English).
 102. **A checker's suggestions are the nearest words marked right** (edit distance ≤ 3, the
     three nearest), not a trained corrector; #10's corruption-trained corrector waits.
+
+## Prefabs as one group (27 Oct)
+
+103. **A copy's gizmo stands at the middle of its parts,** and turning turns about that
+    middle; the copy's own origin (where the prefab's zero lands) is carried along. Size
+    stays a step in the prefabs window, not a knob, since a copy scales uniformly.
+104. **Opening a copy is a double-click** (as entering a group in drawing tools and
+    Logic World's boards is), or its menu; Esc or a click outside closes it.
+105. **An undone removal is a new copy** with the same place, turn, size and own changes;
+    rays from outside that aimed at its parts aim at the old address until re-aimed.

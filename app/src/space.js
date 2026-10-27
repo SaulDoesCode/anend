@@ -747,6 +747,7 @@ export class Space {
     this.selected = n;
     if (n) n.el.classList.add('selected');
     if (n && this.selBlock != null) this.pickBlock(null);
+    if (n && this.selCopy) this.pickCopy(null);
     this.send(this.ev('select', n));
   }
 
@@ -787,6 +788,10 @@ export class Space {
       for (const i of u.items) textures[i.key] = i.about;
       this.setBlocks(u.items.map((i) => i.b), textures);
       this.send({ ...this.ev('blockrestore', null), data: u.items.map((i) => i.b) });
+    } else if (u.kind === 'copy') {
+      this.send({ ...this.ev('copyset', null), data: { id: u.id, ...u.t } });
+    } else if (u.kind === 'copygone') {
+      this.send({ ...this.ev('copyrestore', null), data: u.restore });
     } else if (u.kind === 'block') {
       const o = this.blocks.get(u.id);
       if (o) {
@@ -2215,6 +2220,8 @@ export class Space {
       this.shapeBlock(o);
       this.scene.add(mesh);
     }
+    if (this.selCopy) { this.copyO = this.copyBlock(this.selCopy); this.placeGizmo(); }
+    if (this.selCopy || this.openCopy) this.outlineCopy();
     this.render();
   }
 
@@ -2266,6 +2273,10 @@ export class Space {
   }
 
   pickBlock(id) {
+    // a part of a prefab's copy stands for its whole copy, unless that copy is open
+    const cid = id != null ? this.copyOf(id) : null;
+    if (cid && this.openCopy !== cid) return this.pickCopy(cid);
+    if (this.selCopy) this.pickCopy(null, true);
     this.selBlock = id;
     if (id != null) {
       if (this.selected) this.pick(null);
@@ -2278,6 +2289,137 @@ export class Space {
     const o = id != null ? this.blocks.get(id) : null;
     this.send({ ...this.ev('block', null), data: o ? { ...this.blockOut(o), about: o.about } : null });
     this.render();
+  }
+
+  // ------------------------------------------------------------------ copies as groups
+  //
+  // A placed prefab is one group: a click on any of its parts selects the whole copy (an
+  // outline round it, the gizmo at its origin), which moves, turns, copies and goes as a
+  // whole. A double click opens it: its parts are picked one by one (their changes kept
+  // as the copy's own values) until Esc or a click outside closes it again.
+
+  copyOf(id) {
+    return typeof id === 'string' && id.startsWith('prefab:') && id.includes('/') ? id.slice(0, id.indexOf('/')) : null;
+  }
+
+  setCopies(list) {
+    this.copyInfo = new Map((list || []).map((c) => [c.id, c]));
+    if (this.openCopy && !this.copyInfo.has(this.openCopy)) this.openCopy = null;
+    if (this.selCopy && !this.copyInfo.has(this.selCopy)) this.pickCopy(null);
+    else if (this.selCopy) { this.copyO = this.copyBlock(this.selCopy); this.placeGizmo(); }
+    this.outlineCopy();
+  }
+
+  partsOf(cid) {
+    return [...this.blocks.values()].filter((o) => this.copyOf(o.b.id) === cid);
+  }
+
+  // the copy as the gizmo handles it: its origin and turn, and the parts' box
+  copyBlock(cid) {
+    const c = this.copyInfo && this.copyInfo.get(cid);
+    if (!c) return null;
+    const box = new THREE.Box3();
+    for (const o of this.partsOf(cid)) box.expandByObject(o.mesh);
+    const size = box.isEmpty() ? new THREE.Vector3(1, 1, 1) : box.getSize(new THREE.Vector3());
+    // the gizmo stands at the middle of its parts; the copy's own origin goes with it
+    const mid = box.isEmpty() ? new THREE.Vector3(c.x, c.y, c.z) : box.getCenter(new THREE.Vector3());
+    return {
+      group: true, origin: new THREE.Vector3(c.x, c.y, c.z),
+      b: { id: cid, x: mid.x, y: mid.y, z: mid.z, rot: c.rot || [0, 0, 0, 1], w: size.x, h: size.y, d: size.z, scale: c.scale || 1 },
+      name: c.name,
+    };
+  }
+
+  pickCopy(cid, quiet) {
+    this.selCopy = cid || null;
+    this.copyO = cid ? this.copyBlock(cid) : null;
+    if (cid) {
+      this.selBlock = null;
+      if (this.selected) this.pick(null);
+    }
+    this.outlineCopy();
+    this.placeGizmo();
+    if (!quiet) {
+      const o = this.copyO;
+      this.send({ ...this.ev('block', null), data: o ? { id: cid, copy: true, part_of: cid, name: o.name, x: o.b.x, y: o.b.y, z: o.b.z, rot: o.b.rot, scale: o.b.scale } : null });
+    }
+    this.render();
+  }
+
+  // the outline round the selected copy, or round the open one (dashed)
+  outlineCopy() {
+    if (this.copyBox) { this.scene.remove(this.copyBox); this.copyBox.geometry.dispose(); this.copyBox = null; }
+    const cid = this.selCopy || this.openCopy;
+    if (!cid) return;
+    const box = new THREE.Box3();
+    for (const o of this.partsOf(cid)) box.expandByObject(o.mesh);
+    if (box.isEmpty()) return;
+    box.expandByScalar(0.06);
+    const open = !this.selCopy && this.openCopy === cid;
+    const geo = new THREE.EdgesGeometry(new THREE.BoxGeometry(...box.getSize(new THREE.Vector3()).toArray()));
+    const mat = open
+      ? new THREE.LineDashedMaterial({ color: 0xe0a03f, dashSize: 0.2, gapSize: 0.12, fog: false, depthTest: false, transparent: true })
+      : new THREE.LineBasicMaterial({ color: 0xe0a03f, fog: false, depthTest: false, transparent: true });
+    const line = new THREE.LineSegments(geo, mat);
+    line.position.copy(box.getCenter(new THREE.Vector3()));
+    if (open) line.computeLineDistances();
+    line.renderOrder = 998;
+    this.copyBox = line;
+    this.scene.add(line);
+  }
+
+  // a copy Rust removed: its parts out of the room, kept for an undo
+  copyGone(ids, restore) {
+    this.record({ kind: 'copygone', restore });
+    if (this.openCopy && (ids || []).some((i) => this.copyOf(i) === this.openCopy)) this.openCopy = null;
+    for (const id of ids || []) this.dropBlock(id);
+    if (this.selCopy) this.pickCopy(null);
+    this.outlineCopy();
+    this.render();
+  }
+
+  // the copy opened from its menu: its first part selected
+  openCopyNamed(cid) {
+    const first = this.partsOf(cid)[0];
+    return first ? this.openCopyAt(first.b.id) : false;
+  }
+
+  // a double click on a part: its copy opens, the part selected
+  openCopyAt(id) {
+    const cid = this.copyOf(id);
+    if (!cid) return false;
+    this.openCopy = cid;
+    this.selCopy = null;
+    this.copyO = null;
+    this.pickBlock(id);
+    this.outlineCopy();
+    this.send({ ...this.ev('copyopen', null), data: cid });
+    return true;
+  }
+
+  closeCopy() {
+    const cid = this.openCopy;
+    if (!cid) return false;
+    this.openCopy = null;
+    this.selBlock = null;
+    this.pickCopy(cid);
+    return true;
+  }
+
+  // the parts follow the copy while it's dragged (Rust places them again when it ends)
+  moveCopyParts(d) {
+    const b = d.o.b;
+    const q0 = new THREE.Quaternion(...d.from.rot);
+    const q1 = new THREE.Quaternion(...b.rot);
+    const turn = q1.clone().multiply(q0.clone().invert());
+    const p0 = new THREE.Vector3(d.from.x, d.from.y, d.from.z);
+    const p1 = new THREE.Vector3(b.x, b.y, b.z);
+    for (const s of d.parts) {
+      const rel = s.p.clone().sub(p0).applyQuaternion(turn);
+      s.o.mesh.position.copy(p1).add(rel);
+      s.o.mesh.quaternion.copy(turn.clone().multiply(s.q));
+    }
+    this.outlineCopy();
   }
 
   // where a new block goes: ahead of the camera, or at the selected text
@@ -2337,10 +2479,11 @@ export class Space {
 
   // the gizmo at the selected block, the same size on screen wherever it is
   placeGizmo() {
-    const o = this.blocks.get(this.selBlock);
+    const o = this.selCopy ? this.copyO : this.blocks.get(this.selBlock);
     const on = !!o;
     this.gizmo.visible = on;
-    for (const k of this.gizmoKnobs) k.visible = on;
+    // a copy is moved and turned as a whole; its size is the prefabs window's
+    for (const k of this.gizmoKnobs) k.visible = on && !o.group;
     if (!o) return;
     const b = o.b;
     const c = new THREE.Vector3(b.x, b.y, b.z);
@@ -2368,9 +2511,13 @@ export class Space {
   // the gizmo handle or block under the pointer
   blockHit(e) {
     const ray = this.rayFrom(e);
-    if (this.selBlock != null && this.gizmo.visible) {
-      const h = ray.intersectObjects([...this.gizmo.children, ...this.gizmoKnobs], false)[0];
-      if (h) return { handle: h.object.userData.handle };
+    if ((this.selBlock != null || this.selCopy) && this.gizmo.visible) {
+      // the middle ball first, then the arrows and knobs, then the rings (a ring seen
+      // edge-on crosses the middle)
+      const hs = ray.intersectObjects([...this.gizmo.children, ...this.gizmoKnobs], false).filter((x) => x.object.visible !== false || x.object.userData.handle);
+      const rank = { plane: 0, move: 1, scale: 2, rotate: 3 };
+      hs.sort((a, b) => rank[a.object.userData.handle.mode] - rank[b.object.userData.handle.mode] || a.distance - b.distance);
+      if (hs[0]) return { handle: hs[0].object.userData.handle };
     }
     const meshes = [...this.blocks.values()].map((o) => o.mesh);
     const h = ray.intersectObjects(meshes, false)[0];
@@ -2389,8 +2536,9 @@ export class Space {
   }
 
   startBlockDrag(e, hit) {
-    const o = this.blocks.get(this.selBlock);
+    const o = this.selCopy ? this.copyO : this.blocks.get(this.selBlock);
     if (!o) return false;
+    if (o.group && hit.handle && hit.handle.mode === 'scale') return false;
     const b = o.b;
     const at = new THREE.Vector3(b.x, b.y, b.z);
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
@@ -2407,6 +2555,8 @@ export class Space {
       centre: c, a0: Math.atan2(e.clientY - c.y, e.clientX - c.x),
       // turning about an axis that points at the viewer turns the other way on screen
       toward: localAxis(Math.max(0, axis)).dot(this.camera.position.clone().sub(at)) > 0,
+      // a copy's parts, where they were
+      parts: o.group ? this.partsOf(b.id).map((p) => ({ o: p, p: p.mesh.position.clone(), q: p.mesh.quaternion.clone() })) : null,
     };
     try { this.host.setPointerCapture(e.pointerId); } catch { /* fine without */ }
     return true;
@@ -2447,7 +2597,10 @@ export class Space {
         b.x = f.x + d.along.x * shift; b.y = f.y + d.along.y * shift; b.z = f.z + d.along.z * shift;
       }
     }
-    this.shapeBlock(d.o);
+    if (d.o.group) {
+      this.moveCopyParts(d);
+      this.placeGizmo();
+    } else this.shapeBlock(d.o);
     this.render();
   }
 
@@ -2455,6 +2608,17 @@ export class Space {
     const d = this.bdrag;
     this.bdrag = null;
     if (!d || !d.moved) return;
+    if (d.o.group) {
+      // the copy's origin, carried as the middle was
+      const b = d.o.b;
+      const o0 = d.o.origin;
+      const turn = new THREE.Quaternion(...b.rot).multiply(new THREE.Quaternion(...d.from.rot).invert());
+      const o1 = o0.clone().sub(new THREE.Vector3(d.from.x, d.from.y, d.from.z)).applyQuaternion(turn).add(new THREE.Vector3(b.x, b.y, b.z));
+      const r = (v) => +v.toFixed(4);
+      this.record({ kind: 'copy', id: b.id, t: { x: o0.x, y: o0.y, z: o0.z, rot: d.from.rot } });
+      this.send({ ...this.ev('copyset', null), data: { id: b.id, x: r(o1.x), y: r(o1.y), z: r(o1.z), rot: b.rot } });
+      return;
+    }
     this.record({ kind: 'block', id: d.o.b.id, t: d.from });
     this.send({ ...this.ev('blockset', null), data: this.blockOut(d.o) });
     this.pickBlock(d.o.b.id);
@@ -2670,6 +2834,14 @@ export class Space {
   listen() {
     const h = this.host;
     h.addEventListener('contextmenu', (e) => e.preventDefault());
+    // a double click on a prefab copy's part opens the copy to edit its parts
+    h.addEventListener('dblclick', (e) => {
+      if (e.target.closest('.slabel') || !this.blocks.size) return;
+      // the block itself, not the gizmo over it
+      const m = this.rayFrom(e).intersectObjects([...this.blocks.values()].map((o) => o.mesh), false)[0];
+      const id = m && m.object.userData.block;
+      if (id != null && this.copyOf(id) && this.openCopy !== this.copyOf(id)) this.openCopyAt(id);
+    });
     h.addEventListener('pointerdown', (e) => {
       if (e.target.closest('.slabel')) return;
       // placing a prefab: a click places it, a right click stops
@@ -2692,10 +2864,17 @@ export class Space {
         }
         const hit = this.blocks.size ? this.blockHit(e) : null;
         if (hit) {
-          if (hit.block != null && hit.block !== this.selBlock) this.pickBlock(hit.block);
+          // a click outside the open copy closes it
+          if (this.openCopy && hit.block != null && this.copyOf(hit.block) !== this.openCopy) this.openCopy = null;
+          const cid = hit.block != null ? this.copyOf(hit.block) : null;
+          if (cid && this.openCopy !== cid) {
+            if (this.selCopy !== cid) this.pickCopy(cid);
+          } else if (hit.block != null && hit.block !== this.selBlock) this.pickBlock(hit.block);
           this.startBlockDrag(e, hit);
           return;
         }
+        if (this.openCopy) { this.openCopy = null; this.outlineCopy(); }
+        if (this.selCopy) this.pickCopy(null);
         if (this.selBlock != null) this.pickBlock(null);
         // a click on empty room lets go of the selection; a double click makes a text
         const now = performance.now();
@@ -2739,10 +2918,12 @@ export class Space {
         const r = this.rdown;
         this.rdown = null;
         if (e.button === 2 && r && Math.hypot(e.clientX - r.x, e.clientY - r.y) < 4 && this.blocks.size) {
-          const hit = this.blockHit(e);
-          if (hit && hit.block != null) {
-            this.pickBlock(hit.block);
-            this.send({ ...this.ev('blockmenu', null, e), data: hit.block });
+          // the block itself, not the gizmo over it
+          const m = this.rayFrom(e).intersectObjects([...this.blocks.values()].map((o) => o.mesh), false)[0];
+          const id = m && m.object.userData.block;
+          if (id != null) {
+            this.pickBlock(id);
+            this.send({ ...this.ev('blockmenu', null, e), data: id });
           }
         }
       }
@@ -2771,6 +2952,7 @@ export class Space {
         e.preventDefault();
         this.hop(k);
       } else if (k === 'Escape' && this.ghost) { this.stopGhost(); this.send({ ...this.ev('ghostdone', null) }); }
+      else if (k === 'Escape' && this.openCopy) this.closeCopy();
       else if (k === b.level) this.level();
       else if (k === b.walk) this.setMode(this.mode === 'walk' ? 'fly' : 'walk');
       else if (k === b.superflight) this.setMode(this.mode === 'super' ? 'fly' : 'super');
