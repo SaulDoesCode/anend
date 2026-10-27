@@ -154,8 +154,40 @@ docs/architecture.md (the whole).
 - [ ] Tag sets of the user's own; word types for other languages through a language
       taxonomy; conlang checking trained by hand (#13, #10).
 - [ ] ▶ **usable:** the taxonomy engine, with effects stacked onto views.
-- [ ] The renderer on wgpu, with WebGPU on the web sharing the code (#25).
+
+The user, 27 Oct: "Prefabs must be grouped and not loose pieces. Items must be multi
+selectable with shift and groupable. Wires need to be intuitive and rendered. And we need to
+get away from using js in the desktop app. … I really want that AAA smooth and polished app
+and game experience. In that sense compared to obsidian and logic world we have a way to go
+still." These lines come after the taxonomy engine's ▶ point above, and before everything
+below them. Obsidian (the notes side) and Logic World (the building and wiring side) are the
+measures: each line is checked against how the same action feels there.
+
+- [ ] Prefabs placed as one group: a placed prefab is selected, moved, turned, copied and
+      deleted as a whole, and stays one group in the save; opening it to edit its parts is
+      a deliberate step, and its parts go back into the group when done.
+- [ ] Selection: shift+click adds and removes items, a drag draws a box, and the selection
+      is shown clearly. Works on blocks, texts, placements and lights in the space, and on
+      entries in the memory, lists, notes and tags views.
+- [ ] Groups: a selection can be grouped and ungrouped (Ctrl+G and Ctrl+Shift+G, and from the
+      menu); groups nest; a group is moved, turned, copied and saved as a prefab as a whole.
+- [ ] Wires drawn in the room: each connection shown as a wire from its sender to its target,
+      lit while a signal passes. Wiring made by dragging from one block to another, with the
+      ports visible while wiring, the same way in the window and in first-person mode.
+      Undo covers wiring changes.
+- [ ] The renderer on wgpu, with WebGPU on the web sharing the code (#25). On the desktop the
+      space, its windows' 3D previews and first-person mode run in Rust with no JavaScript;
+      `space.js` and three.js leave the desktop build. Whatever JavaScript remains on the
+      desktop (the webview's own glue, as long as Dioxus runs in a webview) is named in
+      parity.md, and the choice of how to remove it is written in docs/wip/questions.md.
 - [ ] Culling (#24); far billboards with deterministic fall-off (#22).
+- [ ] Polish across the app, measured against Obsidian and Logic World: 60 fps or better in
+      the space with a full save on the user's GTX 1070 Ti class of machine; no visible
+      layout jumps, flicker or white frames; motion and transitions eased; every action
+      reachable by key and by menu; consistent spacing, type and icons in every view and
+      window; undo everywhere a change is made. Each view gets a pass with screenshots
+      before and after in app/docs/shots/.
+- [ ] ▶ **usable:** building, grouping and wiring that feel finished, on the native renderer.
 - [x] Block rotation and packed storage (#5); the picture-to-texture pipeline (#7); the skybox
       (#23).
       (26 Oct: rotation done, with the gizmo's rings, stored packed; texture recipes in
