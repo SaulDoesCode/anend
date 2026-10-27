@@ -1,44 +1,27 @@
 //! The reader: notes and texts as cards, a page at a time; short texts flow in a tight
 //! grid. Clicking one (or Enter on it) expands it to read big, one at a time, ← and →
 //! stepping through; Esc goes back. The bar narrows by words.
+//!
+//! What it shows is a view (`views.run`, docs/architecture.md part 4): its own three
+//! (everything, notes, texts) are built-in presets, and any s program that loads
+//! `std/view.s.` is a view of its own beside them: where its texts come from, their order,
+//! headings, a layout (cards, a tight grid or a list) and the pipes whose effects it shows.
 
 use dioxus::prelude::*;
 
-use crate::backend::{EntryQuery, Hit};
+use serde_json::Value;
+
+use crate::backend::Hit;
 use crate::keys::Action;
 
 use crate::ui::*;
 use crate::views::use_keys;
 
-#[derive(Clone, Copy, PartialEq)]
-enum Kind {
-    Notes,
-    Texts,
-    All,
-}
-
-impl Kind {
-    fn name(self) -> &'static str {
-        match self {
-            Kind::Notes => "notes",
-            Kind::Texts => "texts",
-            Kind::All => "everything",
-        }
-    }
-    fn query(self) -> &'static str {
-        match self {
-            Kind::Notes => "notes",
-            Kind::Texts => "memories",
-            Kind::All => "",
-        }
-    }
-}
-
 #[component]
 pub fn Reader() -> Element {
     let ui = ui();
     let api = api();
-    let mut kind = use_signal(|| Kind::All);
+    let mut view = use_signal(|| "everything".to_string());
     let mut page = use_signal(|| 0usize);
     let mut words = use_signal(String::new);
     let mut expanded: Signal<Option<usize>> = use_signal(|| None);
@@ -47,15 +30,25 @@ pub fn Reader() -> Element {
     let found = use_resource(move || {
         let api = api_r.clone();
         let _ = (ui.changed)();
-        let q = EntryQuery {
-            words: words(),
-            kind: kind().query().to_string(),
-            tag: tag(),
-            limit: 20_000,
-            ..Default::default()
-        };
-        async move { api.query(&q).await }
+        let mut a = serde_json::json!({ "name": view(), "words": words() });
+        if let Some(t) = tag() {
+            a["tag"] = serde_json::json!(t);
+        }
+        async move { api.call("views.run", a).await }
     });
+    let api_v = api.clone();
+    let views = use_resource(move || {
+        let api = api_v.clone();
+        let _ = (ui.changed)();
+        async move {
+            api.call("views.list", serde_json::json!({}))
+                .await
+                .ok()
+                .and_then(|v| v.as_array().cloned())
+                .unwrap_or_default()
+        }
+    });
+    let views = views.read().clone().unwrap_or_default();
     // each note's dates, for its card (as the Bevy reader showed them)
     let api_n = api.clone();
     let dates = use_resource(move || {
@@ -71,19 +64,52 @@ pub fn Reader() -> Element {
         }
     });
     let dates = dates.read().clone().unwrap_or_default();
-    let all: Vec<Hit> = match &*found.read() {
-        Some(Ok((_, h))) => h.clone(),
-        _ => vec![],
+    let got: Value = match &*found.read() {
+        Some(Ok(v)) => v.clone(),
+        _ => Value::Null,
     };
-    let tiny = all.iter().filter(|h| h.text.chars().count() <= 40 && !h.note).count() * 2 > all.len();
-    let per = if tiny { 240 } else { 48 };
+    let fail = match &*found.read() {
+        Some(Err(e)) => Some(e.clone()),
+        _ => None,
+    };
+    let raw: Vec<Value> = got["hits"].as_array().cloned().unwrap_or_default();
+    let all: Vec<Hit> = raw
+        .iter()
+        .filter_map(|h| serde_json::from_value(h.clone()).ok())
+        .collect();
+    let fx: Vec<Value> = raw.iter().map(|h| h["fx"].clone()).collect();
+    // a group's heading goes before its first text
+    let heads: std::collections::HashMap<usize, (String, u64)> = got["groups"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|g| !g["name"].as_str().unwrap_or("").is_empty())
+        .map(|g| {
+            (
+                g["from"].as_u64().unwrap_or(0) as usize,
+                (
+                    g["name"].as_str().unwrap_or("").to_string(),
+                    g["count"].as_u64().unwrap_or(0),
+                ),
+            )
+        })
+        .collect();
+    let layout = got["layout"].as_str().unwrap_or("auto").to_string();
+    let title = got["title"].as_str().unwrap_or("").to_string();
+    let builtin = views
+        .iter()
+        .any(|v| v["name"] == view().as_str() && v["builtin"] == true);
+    let tiny = match layout.as_str() {
+        "grid" => true,
+        "cards" | "list" => false,
+        _ => all.iter().filter(|h| h.text.chars().count() <= 40 && !h.note).count() * 2 > all.len(),
+    };
+    let listed = layout == "list";
+    let per = if tiny || listed { 240 } else { 48 };
     let pages = all.len().div_ceil(per).max(1);
     let p = page().min(pages - 1);
     let n = all.len();
-    let total = match &*found.read() {
-        Some(Ok((t, _))) => *t as usize,
-        _ => n,
-    };
+    let total = got["total"].as_u64().map(|t| t as usize).unwrap_or(n);
     use_keys(View::Reader, move |k: KeyPress| {
         if k.bar && k.key == "Enter" {
             words.set(k.text.trim().to_string());
@@ -132,19 +158,39 @@ pub fn Reader() -> Element {
         div { class: "page", style: "max-width: 1200px;",
             div { class: "row",
                 h2 { "reader" }
-                for k in [Kind::All, Kind::Notes, Kind::Texts] {
-                    button { key: "{k.name()}", class: if kind() == k { "chip on" } else { "chip" }, onclick: move |_| { kind.set(k); page.set(0); }, "{k.name()}" }
+                for v in views.iter() {
+                    {
+                        let name = v["name"].as_str().unwrap_or("").to_string();
+                        let own = v["builtin"] != true;
+                        let tip = if own { format!("your view: the s program “{name}”") } else { v["about"].as_str().unwrap_or("").to_string() };
+                        rsx! {
+                            button { key: "{name}", class: if view() == name { if own { "chip on own" } else { "chip on" } } else if own { "chip own" } else { "chip" },
+                                "data-tip": "{tip}",
+                                onclick: { let n = name.clone(); move |_| { view.set(n.clone()); page.set(0); expanded.set(None); } },
+                                if own { Icon { name: "editor" } } "{name}" }
+                        }
+                    }
                 }
                 span { class: "dim small", "{total} found" if total > n { " (the first {n} here)" } if !words().is_empty() { " for “{words}”" } " · click one to read it big" }
+                if !builtin && !title.is_empty() {
+                    span { class: "small view-title", "{title}" }
+                }
                 if let Some(t) = tag() {
                     button { class: "chip on", "data-tip": "show them all again", onclick: move |_| { tag.set(None); page.set(0); }, "#{t}" span { class: "x", " ×" } }
                 }
             }
-            div { class: if tiny { "reader-grid tiny" } else { "reader-grid" },
+            if let Some(e) = fail {
+                div { class: "card bad", "{e}" }
+            }
+            div { class: if listed { "reader-list" } else if tiny { "reader-grid tiny" } else { "reader-grid" },
                 for (i , h) in shown {
+                    div { key: "{h.key}", style: "display: contents;",
+                    if let Some((g, c)) = heads.get(&i) {
+                        h3 { class: "reader-head", "{g}" span { class: "dim small", " {c}" } }
+                    }
                     div {
-                        key: "{h.key}",
-                        class: if tiny { "card rcard tiny" } else { "card rcard" },
+                        class: if listed { "rrow" } else if tiny { "card rcard tiny" } else { "card rcard" },
+                        style: fx_style(&fx[i]),
                         tabindex: "0",
                         role: "button",
                         title: "{h.text}",
@@ -169,6 +215,10 @@ pub fn Reader() -> Element {
                         } else {
                             div { class: "body", "{h.text}" }
                         }
+                        if let Some(l) = fx[i]["label"].as_str() {
+                            span { class: "fx-label", "{l}" }
+                        }
+                    }
                     }
                 }
             }
@@ -181,6 +231,24 @@ pub fn Reader() -> Element {
             }
         }
     }
+}
+
+/// a pipe's effects on a card: its colour as the left edge, its glow, its size
+fn fx_style(fx: &Value) -> String {
+    let mut s = String::new();
+    if let Some(c) = fx["colour"].as_str() {
+        s.push_str(&format!("border-left: 5px solid {c};"));
+    }
+    if let Some(c) = fx["underline"].as_str() {
+        s.push_str(&format!("text-decoration: underline; text-decoration-color: {c};"));
+    }
+    if let Some(c) = fx["glow"].as_str() {
+        s.push_str(&format!("box-shadow: 0 0 10px {c};"));
+    }
+    if let Some(z) = fx["size"].as_f64() {
+        s.push_str(&format!("font-size: {z:.2}em;"));
+    }
+    s
 }
 
 /// a card's date: `19 October 2026`

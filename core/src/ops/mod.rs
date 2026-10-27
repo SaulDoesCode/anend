@@ -32,6 +32,8 @@ pub mod taxonomy;
 pub mod templates;
 pub mod texts;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod views;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod wiring;
 
 #[cfg(not(target_arch = "wasm32"))]

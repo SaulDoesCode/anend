@@ -228,6 +228,28 @@ mod tests {
         }
     }
 
+    /// views as programs: the reader's presets and view programs
+    #[test]
+    fn views_as_programs_stay() {
+        let r = include_str!("views/reader.rs");
+        for needle in [
+            "\"views.run\"",
+            "\"views.list\"",
+            "\"reader-list\"",
+            "\"reader-head\"",
+            "fn fx_style(",
+        ] {
+            assert!(r.contains(needle), "reader.rs lost {needle}");
+        }
+        let core = include_str!("../../core/src/ops/views.rs");
+        assert!(
+            core.contains("(\"everything\", \"everything\"")
+                && core.contains("(\"notes\", \"notes\"")
+                && core.contains("(\"texts\", \"texts\"")
+        );
+        assert!(include_str!("../../core/src/s/lib.rs").contains("\"view\" => (&[], VIEW)"));
+    }
+
     /// pipes: the filters view's pipe editor, effects in the memory view and the space
     #[test]
     fn pipes_stay() {

@@ -268,6 +268,19 @@ memoized outputs. It's an entry of the save, out of search and counts.
 | `pipes.effects` | `{names, keys}` (≤ 5000 keys) | `{effects: [{key, pipes, colour?, underline?, label?, size?, glow?, gather?}], missing: [names not kept]}`: each key's effects from those pipes, stacked in order |
 | `pipes.apply` | `{name}` | `{name, texts, done: [{kind, …, texts}]}`: its actions on every text it lets through (a program's `out`s and `failed` count with it); not from inside an s run |
 
+### Views
+
+A view (`core/src/ops/views.rs`, docs/architecture.md part 4) is where its texts come from
+(a pipe, or a search by words, kind and tag), their order, headings, a layout and the pipes
+whose effects it shows. The reader's everything, notes and texts are built-in presets; an s
+program that loads `std/view.s.` is a view of its own (docs/format.md), run with the bar's
+words as its first argument.
+
+| op | args | data |
+|---|---|---|
+| `views.list` | | `[{name, builtin, about?, key?}]`: the presets, then the save's view programs |
+| `views.run` | `{name, words?, tag?}` | `{name, title, layout, total, hits: [hit + fx?], groups: [{name, from, count}], described}`: at most 20,000 texts (5,000 from a pipe); not from inside an s run |
+
 ### Classifier buckets, filters and modules
 
 Outputs are memoized per classifier and memory/note (`core/src/memo.rs`), under a stamp

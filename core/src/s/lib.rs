@@ -24,6 +24,7 @@ fn module(name: &str) -> Option<(&'static [&'static str], Natives)> {
         "elec" => (&["line"], ELEC),
         "anend" => (&[], ANEND),
         "learn" => (&["anend"], LEARN),
+        "view" => (&[], VIEW),
         _ => return None,
     })
 }
@@ -1838,6 +1839,64 @@ const LEARN: Natives = &[
     }),
 ];
 
+// ------------------------------------------------------------ std:view
+
+/// sets a view's field from the line, checked against what it may be
+fn view_field(rt: &mut Rt, field: &str, allowed: &[&str]) -> Res {
+    let vals = line(rt);
+    let v = vals.iter().map(|v| v.text().to_string()).collect::<Vec<_>>().join(" ");
+    if !allowed.is_empty() && !allowed.contains(&v.as_str()) {
+        return err(format!("{field}: one of {}", allowed.join(", ")));
+    }
+    rt.global.mem.insert(format!("view/{field}").into(), V::from(v));
+    Ok(())
+}
+
+/// what a view is, said by a program (the reader shows it; anend's own, not s 1.0): each
+/// word sets one thing about the view from the line
+const VIEW: Natives = &[
+    // cards, grid, list, or auto (cards, or a tight grid when most texts are short)
+    ("layout", |rt| {
+        view_field(rt, "layout", &["cards", "grid", "list", "auto"])
+    }),
+    // a pipe's name: its texts (and their effects) are the view's
+    ("from", |rt| view_field(rt, "from", &[])),
+    // notes, texts or everything
+    ("kind", |rt| view_field(rt, "kind", &["notes", "texts", "everything"])),
+    // the words search
+    ("matching", |rt| view_field(rt, "words", &[])),
+    // notes with this tag
+    ("tagged", |rt| view_field(rt, "tag", &[])),
+    ("order", |rt| {
+        view_field(
+            rt,
+            "order",
+            &[
+                "found",
+                "newest",
+                "oldest",
+                "ordinal",
+                "reversed",
+                "alphabetical",
+                "length",
+            ],
+        )
+    }),
+    // headings: by kind, by a sum, by length, or by a classifier's class (its name)
+    ("group", |rt| view_field(rt, "group", &[])),
+    // the view's heading
+    ("named", |rt| view_field(rt, "title", &[])),
+    ("limit", |rt| view_field(rt, "limit", &[])),
+    // pipes whose effects the view shows, stacked in order
+    ("effects", |rt| {
+        let vals = line(rt);
+        for v in vals {
+            rt.list_mut("view/effects").push(v);
+        }
+        Ok(())
+    }),
+];
+
 fn need_vals(vals: &[V], n: usize, who: &str) -> Res {
     if vals.len() < n {
         return err(format!("{who} needs {n} value{}", if n == 1 { "" } else { "s" }));
@@ -1847,8 +1906,10 @@ fn need_vals(vals: &[V], n: usize, who: &str) -> Res {
 
 /// every library word, by module (for completion and highlighting)
 pub fn words() -> Vec<(&'static str, Vec<&'static str>)> {
-    ["core", "line", "text", "gem", "sh", "logic", "elec", "anend", "learn"]
-        .iter()
-        .filter_map(|m| module(m).map(|(_, w)| (*m, w.iter().map(|(n, _)| *n).collect())))
-        .collect()
+    [
+        "core", "line", "text", "gem", "sh", "logic", "elec", "anend", "learn", "view",
+    ]
+    .iter()
+    .filter_map(|m| module(m).map(|(_, w)| (*m, w.iter().map(|(n, _)| *n).collect())))
+    .collect()
 }

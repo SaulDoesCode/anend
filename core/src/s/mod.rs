@@ -32,6 +32,34 @@ pub fn run(
     rt.run_program(src, args)
 }
 
+/// a view program's run (`std:view`): its outcome, and what it said the view is: each
+/// `view/<field>` it set, and the pipes it named for effects
+pub fn run_view(
+    src: &str,
+    files: BTreeMap<String, String>,
+    args: &[String],
+    max_steps: u64,
+    host: Option<machine::Host<'_>>,
+) -> (Outcome, BTreeMap<String, String>, Vec<String>) {
+    let mut rt = Rt::new("", files, 0);
+    rt.max_steps = max_steps;
+    rt.host = host;
+    let o = rt.run_program(src, args);
+    let fields = rt
+        .global
+        .mem
+        .iter()
+        .filter_map(|(k, v)| k.strip_prefix("view/").map(|f| (f.to_string(), v.text().to_string())))
+        .collect();
+    let effects = rt
+        .global
+        .lists
+        .get("view/effects")
+        .map(|l| l.iter().map(|v| v.text().to_string()).collect())
+        .unwrap_or_default();
+    (o, fields, effects)
+}
+
 /// a run with its inline results: the output each of the program's own tokens wrote
 /// (while it or a call it made ran), by the token's place in `src` (byte offsets)
 pub fn run_traced(

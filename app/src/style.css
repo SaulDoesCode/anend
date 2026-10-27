@@ -962,3 +962,13 @@ input.tax-about { width: 100%; }
 .pipe-parts > .row { gap: 8px; align-items: center; flex-wrap: wrap; }
 .pipe-n { display: inline-grid; place-items: center; min-width: 16px; height: 16px; border-radius: 8px; background: var(--accent); color: var(--on-button); font-size: 11px; font-weight: 700; }
 .fx-label { display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 7px; font-size: 0.6em; vertical-align: middle; background: color-mix(in srgb, var(--accent) 80%, transparent); color: var(--on-button); text-decoration: none; }
+/* the reader's views of one's own */
+.chip.own { font-style: italic; }
+.reader-head { margin: 12px 0 4px; grid-column: 1 / -1; display: flex; gap: 6px; align-items: baseline; }
+.reader-list { display: flex; flex-direction: column; gap: 2px; }
+.reader-list .reader-head { margin: 10px 0 2px; }
+.rrow { padding: 4px 8px; border-radius: var(--radius); background: var(--cards); cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
+.rrow:hover { background: color-mix(in srgb, var(--buttons) 30%, var(--cards)); }
+.rrow h3 { margin: 0; font-size: 1em; }
+.rrow .body { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.view-title { font-style: italic; }

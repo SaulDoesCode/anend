@@ -857,3 +857,115 @@ fn pipes_stack_effects_and_act() {
     drop(ws);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// views as programs: the reader's presets, and views said by s programs
+#[test]
+fn views_are_presets_and_programs() {
+    let dir = temp("views");
+    let ws = Saves::new(&dir, "notes").with_models(Limits::NONE);
+    save(&ws);
+    let c = |op: &str, a: Value| ws.call(op, &a);
+    let lists = c("lists.stats", json!({})).unwrap()["lists"].clone();
+    let keys: Vec<Value> = lists.as_array().unwrap().iter().map(|l| l["list"].clone()).collect();
+    c(
+        "classify.create",
+        json!({ "name": "sorter", "classes": keys, "preset": "tiny" }),
+    )
+    .unwrap();
+    c(
+        "classify.train",
+        json!({ "name": "sorter", "epochs": 30, "wait": true }),
+    )
+    .unwrap();
+    c(
+        "pipes.save",
+        json!({ "pipe": {
+        "name": "fruity", "from": { "op": "class", "classifier": "sorter", "class": "fruit", "top": true },
+        "effects": [{ "kind": "colour", "colour": "#ff8800" }] } }),
+    )
+    .unwrap();
+    let prog = |text: &str| c("notes.save", json!({ "note": { "tags": ["s"] }, "text": text })).unwrap();
+    prog("# bowl\n\nstd/view.s.\n{fruity} from\n{list} layout\n{alphabetical} order\n{the fruit bowl} named");
+    prog("# sorted\n\nstd/view.s.\n{texts} kind\n{sorter} group\n{ordinal} order");
+    prog("# broken\n\nstd/view.s.\n{sideways} layout");
+    prog("# not a view\n\n{hello} >");
+
+    let list = c("views.list", json!({})).unwrap();
+    let names: Vec<&str> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        ["everything", "notes", "texts", "bowl", "broken", "sorted"],
+        "{list}"
+    );
+
+    // a preset is the query it always was
+    let p = c("views.run", json!({ "name": "texts", "words": "apple" })).unwrap();
+    let q = c(
+        "entries.query",
+        json!({ "words": "apple", "kind": "memories", "limit": 20000 }),
+    )
+    .unwrap();
+    assert_eq!(p["hits"].as_array().unwrap().len(), q["hits"].as_array().unwrap().len());
+    assert_eq!(p["hits"][0]["key"], q["hits"][0]["key"]);
+    assert_eq!(p["layout"], "auto");
+    let all = c("views.run", json!({ "name": "everything" })).unwrap();
+    assert!(all["total"].as_u64().unwrap() > 40, "{}", all["total"]);
+
+    // a program: its pipe's texts, in its order and layout, with the pipe's effects
+    let b = c("views.run", json!({ "name": "bowl" })).unwrap();
+    assert_eq!(b["layout"], "list");
+    assert_eq!(b["title"], "the fruit bowl");
+    let texts: Vec<String> = b["hits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["text"].as_str().unwrap().to_string())
+        .collect();
+    assert!(texts.len() >= 15, "{b}");
+    let mut sorted = texts.clone();
+    sorted.sort_by_key(|t| t.to_lowercase());
+    assert_eq!(texts, sorted);
+    assert_eq!(b["hits"][0]["fx"]["colour"], "#ff8800");
+    // the bar's words narrow it
+    let n = c("views.run", json!({ "name": "bowl", "words": "apple" })).unwrap();
+    assert!(
+        n["hits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|h| h["text"].as_str().unwrap().contains("apple"))
+    );
+    assert!(n["hits"].as_array().unwrap().len() < texts.len());
+
+    // grouped by a classifier's class
+    let g = c("views.run", json!({ "name": "sorted" })).unwrap();
+    let groups: Vec<&str> = g["groups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x["name"].as_str().unwrap())
+        .collect();
+    assert!(groups.contains(&"fruit") && groups.contains(&"rocks"), "{groups:?}");
+    let counted: u64 = g["groups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x["count"].as_u64().unwrap())
+        .sum();
+    assert_eq!(counted as usize, g["hits"].as_array().unwrap().len());
+
+    let e = c("views.run", json!({ "name": "broken" })).unwrap_err();
+    assert!(e.contains("layout: one of"), "{e}");
+    assert!(
+        c("views.run", json!({ "name": "not a view" }))
+            .unwrap_err()
+            .contains("no view")
+    );
+    drop(ws);
+    let _ = std::fs::remove_dir_all(dir);
+}

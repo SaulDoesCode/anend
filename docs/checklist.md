@@ -150,8 +150,10 @@ docs/architecture.md (the whole).
 - [x] Pipes: sources through filters to stacked effects, computed rather than stored; the
       filters page becomes the pipe editor (docs/architecture.md 2, 3).
       (27 Oct: `pipes.*`; effects in the memory view and the space; actions on demand.)
-- [ ] Views as programs: today's views rebuilt as presets, with parity.md's guards passing
-      (docs/architecture.md 4).
+- [x] Views as programs: today's views rebuilt as presets, with parity.md's guards passing
+      (docs/architecture.md 4). (27 Oct: `views.*` and `std:view`; the reader's three views
+      are presets and it shows any view program. The memory view, lists and the space stay
+      their own code, questions.md 95.)
 - [ ] Tag sets of the user's own; word types for other languages through a language
       taxonomy; conlang checking trained by hand (#13, #10).
 - [ ] ▶ **usable:** the taxonomy engine, with effects stacked onto views.

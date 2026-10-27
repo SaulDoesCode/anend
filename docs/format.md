@@ -95,6 +95,13 @@ classes on the way; ow = it reached the end. A class is named as the classifier 
 the starter's name: `fruit, stones and animals: fruit`). Each word goes through the same
 ops as the app, so a shared hub's limits apply, and a failure leaves mem[err] and ow false.
 
+`std:view` (`std/view.s.`) says what a view is, for the reader (`views.run`): each word sets
+one field from the line, kept in mem `view/<field>`: `layout` (cards, grid, list, auto),
+`from` (a pipe), `kind` (notes, texts, everything), `matching` (words), `tagged`, `order`
+(found, newest, oldest, ordinal, reversed, alphabetical, length), `group` (kind, ordinal,
+reversed, length, or a classifier), `named` (its heading), `limit`; `effects` adds pipes to
+list `view/effects`. A word given something it can't be stops the run with what it can be.
+
 ## Rendering and the interpreter (`interp`)
 
 Rendering a body decodes it, transcludes `REF`s and evaluates `CALL`s. A function is any

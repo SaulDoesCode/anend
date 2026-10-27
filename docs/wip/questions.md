@@ -361,3 +361,31 @@ The answers left these open. Each is written into the design as its default.
     as an action waits for sound outside the space; programs can't apply pipes themselves.
 94. **In the space, a pipe's force is "gather"**: its texts pull together in the spread
     and away from the rest. Other forces and set positions wait for the views as programs.
+
+## Views as programs (27 Oct)
+
+95. **The reader hosts views; the other views stay their own code.** A view is a source
+    (a pipe, or a search), an order, headings, a layout and effects, which is what the
+    reader is, so its three views became presets of that and any view program shows
+    there. The memory view (gsearch, buckets, picking lists and candidates), the lists,
+    the space and the editors are tools with their own interactions; rebuilding them as a
+    source and a layout would lose those, so they take pipes' effects instead.
+96. **A view is an s program that loads `std/view.s.`** (no tag of its own), and its words
+    set fields rather than draw; the reader draws. Its run gets the bar's words as its
+    first argument, and the bar's words narrow whatever it says.
+97. **Layouts are cards, a tight grid, a list, and auto** (the reader's old choice between
+    cards and the grid); headings group by kind, a sum, length, or a classifier's classes.
+
+## Views as programs (27 Oct)
+
+95. **The reader hosts views; the other views stay their own code.** A view is a source
+    (a pipe, or a search), an order, headings, a layout and effects, which is what the
+    reader is, so its three views became presets of that and any view program shows
+    there. The memory view (gsearch, buckets, picking lists and candidates), the lists,
+    the space and the editors are tools with their own interactions; rebuilding them as a
+    source and a layout would lose those, so they take pipes' effects instead.
+96. **A view is an s program that loads `std/view.s.`** (no tag of its own), and its words
+    set fields rather than draw; the reader draws. Its run gets the bar's words as its
+    first argument, and the bar's words narrow whatever it says.
+97. **Layouts are cards, a tight grid, a list, and auto** (the reader's old choice between
+    cards and the grid); headings group by kind, a sum, length, or a classifier's classes.

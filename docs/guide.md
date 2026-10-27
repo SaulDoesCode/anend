@@ -269,7 +269,10 @@ Lists are how you tell anend what goes together, and what models learn from.
   coloured again.
 - **s programs** have a section of their own, below.
 - **The reader** (**Ctrl+4**): notes and texts as cards, a page at a time. Click one (or
-  Enter on it) to read it big; **← →** step through, **Esc** goes back.
+  Enter on it) to read it big; **← →** step through, **Esc** goes back. Its chips pick the
+  view: **everything**, **notes** and **texts** are built in, and any s program that loads
+  `std/view.s.` is a view of yours beside them (in italics). See "Views of your own"
+  under Programs.
 - **Tags** (**Ctrl+6**): every tag with its count. Click picks one, Ctrl or Shift+click
   adds or drops it; **all** or **any** decides how several combine. The bar finds tags;
   Enter picks the first.
@@ -310,6 +313,26 @@ code.
 
 On a shared hub a run takes at most 2 million steps (50 million on your own machine), and
 the hub's limits apply to whatever it asks.
+
+### Views of your own
+
+![a view of one's own: a pipe's texts as a list, a to z](guide/views.png)
+
+A program that loads `std/view.s.` says what a view is, and the reader shows it as a chip
+beside its own three. Each word sets one thing:
+
+```
+std/view.s.
+{fruity} from                 {its texts: a pipe's (or, without it, a search)} //
+{list} layout                 {cards, grid, list or auto} //
+{alphabetical} order          {found, newest, oldest, ordinal, reversed, alphabetical, length} //
+{what the fruity pipe lets through} named
+```
+
+`kind` (notes, texts, everything), `matching` (words) and `tagged` narrow a search;
+`group` puts headings in (by `kind`, `ordinal`, `reversed`, `length`, or a classifier's
+name for its classes); `effects` names pipes whose effects show on the cards; `limit`
+caps it. The bar's words narrow any view.
 
 ## Models
 
