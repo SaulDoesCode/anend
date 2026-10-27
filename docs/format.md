@@ -204,7 +204,9 @@ wiring entry's id (u64); wirings are entries of mime 10 (`application/x-anend-wi
 their text the wiring's JSON (`core/src/graph/wiring.rs`). Taxonomies are entries of mime 11
 (`application/x-anend-taxonomy`), their text the taxonomy's JSON (`core/src/ops/taxonomy.rs`:
 `{name, about?, root}`, a node `{classifier, routes?: {class: node}, right, wrong}`); like
-wirings they're left out of search and counts. A sound emitter is `S` 1, the
+wirings they're left out of search and counts. Pipes are entries of mime 12
+(`application/x-anend-pipe`), their text the pipe's JSON (`core/src/ops/pipes.rs`: `{name,
+about?, from: filter or null, effects, actions}`), left out the same way. A sound emitter is `S` 1, the
 sound's 16-byte id, its volume and reach (f32s) and a byte of flags (1: loops); sounds
 are kept in `graph sounds` (sound id, 32 hex digits → `{id, mime, name, added, size,
 seconds?}` JSON) and `graph sound bytes` (`core/src/graph/sounds.rs`). `graph lights` (`core/src/graph/lights.rs`): the

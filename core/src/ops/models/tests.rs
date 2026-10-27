@@ -700,3 +700,160 @@ fn taxonomies_route_and_count_marks() {
     drop(ws);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// pipes: a filter's texts with stacked effects, and actions done on demand
+#[test]
+fn pipes_stack_effects_and_act() {
+    let dir = temp("pipes");
+    let ws = Saves::new(&dir, "notes").with_models(Limits::NONE);
+    save(&ws);
+    let c = |op: &str, a: Value| ws.call(op, &a);
+    let lists = c("lists.stats", json!({})).unwrap()["lists"].clone();
+    let keys: Vec<Value> = lists.as_array().unwrap().iter().map(|l| l["list"].clone()).collect();
+    c(
+        "classify.create",
+        json!({ "name": "sorter", "classes": keys, "preset": "tiny" }),
+    )
+    .unwrap();
+    c(
+        "classify.train",
+        json!({ "name": "sorter", "epochs": 30, "wait": true }),
+    )
+    .unwrap();
+    let fruity = json!({
+        "name": "fruity",
+        "from": { "op": "class", "classifier": "sorter", "class": "fruit", "top": true },
+        "effects": [
+            { "kind": "colour", "colour": "#ff8800" },
+            { "kind": "label", "text": "fruit" },
+            { "kind": "size", "scale": 2.0 },
+            { "kind": "gather" }
+        ],
+        "actions": [ { "kind": "enlist", "list": "fruit bowl" }, { "kind": "tag", "tag": "ripe" } ]
+    });
+    let everything = json!({
+        "name": "everything",
+        "effects": [ { "kind": "label", "text": "seen" }, { "kind": "size", "scale": 0.5 }, { "kind": "colour_by", "classifier": "sorter" } ]
+    });
+
+    // checked
+    let mut bad = fruity.clone();
+    bad["effects"][0]["colour"] = json!("orange");
+    assert!(
+        c("pipes.save", json!({ "pipe": bad }))
+            .unwrap_err()
+            .contains("isn't a colour")
+    );
+    let mut bad = fruity.clone();
+    bad["from"]["classifier"] = json!("nobody");
+    assert!(c("pipes.save", json!({ "pipe": bad })).is_err());
+    let mut bad = fruity.clone();
+    bad["actions"] = json!([{ "kind": "run", "program": "nothing here" }]);
+    assert!(
+        c("pipes.save", json!({ "pipe": bad }))
+            .unwrap_err()
+            .contains("no s program")
+    );
+
+    c("pipes.save", json!({ "pipe": fruity, "new": true })).unwrap();
+    c("pipes.save", json!({ "pipe": everything, "new": true })).unwrap();
+    assert!(
+        c("pipes.save", json!({ "pipe": everything, "new": true }))
+            .unwrap_err()
+            .contains("already")
+    );
+    assert_eq!(c("pipes.list", json!({})).unwrap().as_array().unwrap().len(), 2);
+    assert_eq!(c("mem.search", json!({ "q": "fruity" })).unwrap(), json!([]));
+
+    // a fruit and a rock, as a view would ask
+    let find = |q: &str| {
+        c("mem.search", json!({ "q": q })).unwrap()[0]["key"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let (fruit, rock) = (find("apple"), find("granite"));
+    let fx = c(
+        "pipes.effects",
+        json!({ "names": ["everything", "fruity", "gone"], "keys": [fruit, rock] }),
+    )
+    .unwrap();
+    assert_eq!(fx["missing"], json!(["gone"]));
+    let of = |k: &str| {
+        fx["effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["key"] == k)
+            .cloned()
+            .unwrap()
+    };
+    let (f, r) = (of(&fruit), of(&rock));
+    assert_eq!(f["colour"], "#ff8800", "the later pipe's colour wins: {f}");
+    assert_eq!(f["label"], "seen · fruit");
+    assert_eq!(f["size"], 1.0, "sizes multiply: {f}");
+    assert_eq!(f["gather"], "fruity");
+    assert_eq!(f["pipes"], json!(["everything", "fruity"]));
+    assert_eq!(r["label"], "seen");
+    assert_eq!(r["size"], 0.5);
+    assert!(
+        r["colour"].as_str().unwrap().starts_with('#'),
+        "the classifier's colour: {r}"
+    );
+    assert!(r.get("gather").is_none());
+
+    // a pipe not yet kept runs as given
+    let mut stony = fruity.clone();
+    stony["from"]["class"] = json!("rocks");
+    let run = c("pipes.run", json!({ "pipe": stony, "limit": 5 })).unwrap();
+    assert!(run["matched"].as_u64().unwrap() >= 5, "{run}");
+    assert_eq!(run["results"].as_array().unwrap().len(), 5);
+    assert_eq!(run["effects"].as_array().unwrap().len(), 5);
+
+    // actions: a list and a tag; a program on each
+    let done = c("pipes.apply", json!({ "name": "fruity" })).unwrap();
+    let n = done["texts"].as_u64().unwrap();
+    assert!(n >= 15, "{done}");
+    assert_eq!(done["done"][0]["texts"], n);
+    let bowl = done["done"][0]["key"].as_str().unwrap().to_string();
+    let stats = c("lists.stats", json!({})).unwrap();
+    let held = stats["lists"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["list"] == bowl.as_str())
+        .unwrap()["count"]
+        .clone();
+    assert_eq!(held.as_u64().unwrap(), n, "{stats}");
+    assert_eq!(
+        c("tags.entries", json!({ "tags": ["ripe"] }))
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len() as u64,
+        n
+    );
+    c(
+        "notes.save",
+        json!({ "note": { "tags": ["s"] }, "text": "# shout\n\nargs 0 it [l]\n{~it~!} >" }),
+    )
+    .unwrap();
+    let mut loud = fruity.clone();
+    loud["actions"] = json!([{ "kind": "run", "program": "shout" }]);
+    c("pipes.save", json!({ "pipe": loud })).unwrap();
+    let done = c("pipes.apply", json!({ "name": "fruity" })).unwrap();
+    assert_eq!(done["done"][0]["failed"], 0, "{done}");
+    assert!(done["done"][0]["out"][0].as_str().unwrap().ends_with('!'), "{done}");
+    // a program can't apply a pipe itself
+    let r = c(
+        "s.run",
+        json!({ "code": "std/anend.s.\n{pipes.apply} {{\"name\": \"fruity\"}} op {~err~} >" }),
+    )
+    .unwrap();
+    assert!(r["out"].as_str().unwrap().contains("can't start pipes.apply"), "{r}");
+
+    c("pipes.delete", json!({ "name": "fruity" })).unwrap();
+    assert_eq!(c("pipes.list", json!({})).unwrap().as_array().unwrap().len(), 1);
+    drop(ws);
+    let _ = std::fs::remove_dir_all(dir);
+}

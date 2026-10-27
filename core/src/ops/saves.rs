@@ -466,7 +466,7 @@ impl Saves {
     /// an op asked for by an s program (`std:anend`'s `op`): any op but a run of its own
     /// (a program calls another with `name.`), with the same limits as the app's
     fn hosted(&self, op: &str, args: &Value) -> Res {
-        if op.starts_with("s.") || (op == "wiring.fire") {
+        if op.starts_with("s.") || op == "wiring.fire" || op == "pipes.apply" {
             return Err(format!("a program can't start {op} itself (call a program with name.)"));
         }
         self.call(op, args)
@@ -511,6 +511,13 @@ impl Saves {
             let (_, g) = self.current()?;
             let limits = self.models.unwrap_or(super::classify::Limits::NONE);
             return super::pictures::call(&g, op, args, &limits);
+        }
+        if super::pipes::routed(op) {
+            if self.models.is_none() {
+                return Err("these saves keep no models".into());
+            }
+            let (_, g) = self.current()?;
+            return super::pipes::call(self, &g, op, args);
         }
         if super::taxonomy::routed(op) {
             if self.models.is_none() {

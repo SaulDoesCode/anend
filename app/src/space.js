@@ -285,9 +285,11 @@ export class Space {
         const now = (Array.isArray(t.chain) ? t.chain : []).map((m) => m.key + '|' + m.text).join('\n');
         if (was !== now) this.link(n, t.chain);
         n.el.style.borderBottomColor = t.under || 'transparent';
+        this.dress(n);
         continue;
       }
       n = this.make(t, false);
+      this.dress(n);
       this.seed(n);
     }
     this.sim = null;
@@ -295,6 +297,35 @@ export class Space {
     this.render();
     this.info(true);
     return this.order.length - before;
+  }
+
+  // the pipes' effects on the room's texts, by key ({colour, underline, label, size, glow,
+  // gather}); a text without any goes back to how it was
+  effects(fx) {
+    this.fx = fx || {};
+    for (const n of this.order) this.dress(n);
+    this.sim = null;
+    this.wake(1);
+  }
+
+  dress(n) {
+    const e = (this.fx && !n.free && this.fx[n.f.key]) || null;
+    const el = n.el;
+    n.f.gather = e && e.gather ? e.gather : null;
+    el.style.color = (e && e.colour) || n.f.colour || '';
+    el.style.borderBottomColor = (e && e.underline) || n.f.under || 'transparent';
+    el.style.textShadow = e && e.glow ? `0 0 6px ${e.glow}, 0 0 14px ${e.glow}` : '';
+    n.fxSize = e && e.size ? e.size : 1;
+    let tag = el.querySelector(':scope > .fx-label');
+    if (e && e.label) {
+      if (!tag) {
+        tag = document.createElement('span');
+        tag.className = 'fx-label';
+        el.append(tag);
+      }
+      tag.textContent = e.label;
+    } else if (tag) tag.remove();
+    this.measure(n);
   }
 
   // a placement of a text: `free` is the room's own text (no entry); `how` says how a
@@ -431,7 +462,7 @@ export class Space {
     n.el.style.maxWidth = free ? '80ch' : `${this.p.wrap}ch`;
     const w = n.el.offsetWidth || BASE_PX * 0.55 * n.f.text.length;
     const h = n.el.offsetHeight || BASE_PX * 1.2;
-    const size = n.size || this.p.size;
+    const size = (n.size || this.p.size) * (n.fxSize || 1);
     n.hw = (w / BASE_PX / 2) * size;
     n.hh = (h / BASE_PX / 2) * size;
     if (hidden) n.el.style.display = 'none';
@@ -498,6 +529,8 @@ export class Space {
     if (A.cls !== undefined && A.cls !== null && B.cls !== undefined && B.cls !== null) {
       add(p.w_class, A.cls === B.cls ? Math.min(A.strength ?? 1, B.strength ?? 1) : 0);
     }
+    // a pipe that gathers pulls its texts together, and apart from the rest
+    if (A.gather || B.gather) add(2, A.gather === B.gather ? 1 : 0);
     if (A.created && B.created) add(p.w_time, Math.exp(-Math.abs(A.created - B.created) / (7 * 864e5)));
     if (A.freq && B.freq) add(p.w_letters, cosine(A.freq, B.freq));
     return w ? sum / w : 0;
@@ -801,6 +834,8 @@ export class Space {
     n.el.textContent = n.f.note && !n.f.virt ? `✎ ${t}` : t;
     n.el.classList.toggle('det', !!n.det);
     n.el.classList.toggle('own', n.own != null);
+    // the text was set afresh: a pipe's label goes back on
+    if (this.fx && this.fx[n.f.key] && this.fx[n.f.key].label) this.dress(n);
   }
 
   // another placement of the selected (or named) text beside it: the same entry, not a
@@ -2844,7 +2879,7 @@ export class Space {
         if (el.style.display !== 'none') el.style.display = 'none';
         continue;
       }
-      const size = n.size || this.p.size;
+      const size = (n.size || this.p.size) * (n.fxSize || 1);
       // a text's em on screen, in pixels
       const px = (size * focal) / dist;
       const x = w / 2 + (v.x / dist) * focal;

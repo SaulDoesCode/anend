@@ -783,6 +783,31 @@ fn Field(style: String, header: Option<Header>, results: Vec<Hit>, mode: Mode, p
     });
     let tinted = tints.read().clone().flatten();
     let (tint_of, legend) = tint_map(tinted.as_ref());
+    // the effects of the pipes turned on (stacked in their order)
+    let api_fx = use_context::<Api>();
+    let fx = use_resource(move || {
+        let api = api_fx.clone();
+        let names = ui.prefs.read().pipes.clone();
+        let keys = keys();
+        let _ = (ui.changed)();
+        async move {
+            if names.is_empty() || keys.is_empty() {
+                return std::collections::HashMap::new();
+            }
+            let keys: Vec<String> = keys.into_iter().take(5000).collect();
+            let v = api
+                .call("pipes.effects", serde_json::json!({ "names": names, "keys": keys }))
+                .await
+                .unwrap_or_default();
+            v["effects"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|e| (e["key"].as_str().unwrap_or("").to_string(), e.clone()))
+                .collect::<std::collections::HashMap<String, serde_json::Value>>()
+        }
+    });
+    let fx_of = fx.read().clone().unwrap_or_default();
     // the search filter (the square at the strip's right): what it keeps of the results
     let filter = ui.prefs.read().filter.clone();
     let filter_open = ui.prefs.read().filter_open;
@@ -889,6 +914,7 @@ fn Field(style: String, header: Option<Header>, results: Vec<Hit>, mode: Mode, p
                     Art {
                         key: "{h.key}",
                         tint: tint_of.get(&h.key).cloned(),
+                        fx: fx_of.get(&h.key).cloned(),
                         under: gem::underline(&h.text, mode),
                         is_list: picks.list.as_ref().is_some_and(|l| l.key == h.key),
                         is_cand: picks.candidate.as_ref().is_some_and(|l| l.key == h.key),
@@ -1091,7 +1117,15 @@ pub(crate) fn PfLine(n: u64) -> Element {
 }
 
 #[component]
-fn Art(hit: Hit, under: Option<String>, is_list: bool, is_cand: bool, selected: bool, tint: Option<String>) -> Element {
+fn Art(
+    hit: Hit,
+    under: Option<String>,
+    is_list: bool,
+    is_cand: bool,
+    selected: bool,
+    tint: Option<String>,
+    fx: Option<serde_json::Value>,
+) -> Element {
     let mut ui = ui();
     let api = api();
     let m = use_context::<Mem>();
@@ -1122,14 +1156,23 @@ fn Art(hit: Hit, under: Option<String>, is_list: bool, is_cand: bool, selected: 
             class.push_str(c);
         }
     }
-    let under_style = match &under {
+    // a pipe's underline stands in for the gematria one
+    let fx_s = |k: &str| fx.as_ref().and_then(|f| f[k].as_str()).map(String::from);
+    let under_style = match fx_s("underline").or(under.clone()) {
         Some(c) => format!("text-decoration: underline; text-decoration-color: {c};"),
         None => String::new(),
     };
+    let label = fx_s("label");
     // a long text underlines its piece, not the controls under it
     let mut style = if long { String::new() } else { under_style.clone() };
-    if let Some(t) = &tint {
+    if let Some(t) = fx_s("colour").as_ref().or(tint.as_ref()) {
         style.push_str(&format!(" border-left: 5px solid {t};"));
+    }
+    if let Some(sz) = fx.as_ref().and_then(|f| f["size"].as_f64()) {
+        style.push_str(&format!(" font-size: calc(var(--mfs, 20px) * {sz:.2});"));
+    }
+    if let Some(g) = fx_s("glow") {
+        style.push_str(&format!(" text-shadow: 0 0 6px {g}, 0 0 12px {g};"));
     }
     if long {
         style.push_str(&format!(" --piece-ch: {pw}ch;"));
@@ -1241,6 +1284,9 @@ fn Art(hit: Hit, under: Option<String>, is_list: bool, is_cand: bool, selected: 
                     }
                 }
             } else if tagged { TaggedText { text: hit.text.clone(), labels: true, ruby: true } } else { "{hit.text}" }
+            if let Some(l) = label {
+                span { class: "fx-label", "{l}" }
+            }
         }
     }
 }

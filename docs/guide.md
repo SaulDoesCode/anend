@@ -425,6 +425,22 @@ condition must hold. In the bar, a number (`79`) or a range (`70-90`) sets the s
 else the words. **keep** saves a filter by name in the save; the kept ones are chips to
 run again.
 
+### Pipes
+
+![a pipe in the editor: fruit, orange, labelled, bigger, gathered, into a list](guide/pipes.png)
+
+Below, the second card builds a filter from what classifiers say (and words, sums, lists,
+tags, kinds, kept filters), in groups. Give it **effects** and it's a pipe: a colour, each
+class in its classifier's colour, an underline, a label, a size, a glow, or, in the space,
+pulling its texts together. **Actions** are done only when you ask: put the texts in a
+list, tag them, or run an s program on each. **keep as a pipe** keeps it by name.
+
+The **pipes** card lists the kept ones. Tick a pipe to turn it on: its effects show in the
+memory view and the space on every text it lets through, worked out as you look (nothing is
+written onto the texts). Several on at once stack in the order you ticked them (the number
+beside each): a later colour wins, sizes multiply, labels add up. ✎ opens one in the
+builder to change; **act** does its actions now.
+
 ## Settings and saves
 
 ![settings](guide/settings.png)

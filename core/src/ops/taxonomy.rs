@@ -100,22 +100,42 @@ pub fn routed(op: &str) -> bool {
     op.starts_with("taxonomy.")
 }
 
-/// the save's taxonomies, by entry
-fn all(g: &Graph) -> Result<Vec<(u64, Taxonomy)>, String> {
+/// the save's entries of a mime whose text reads as `T`, by entry
+pub(super) fn entries<T: serde::de::DeserializeOwned>(g: &Graph, m: u16) -> Result<Vec<(u64, T)>, String> {
     let v = g.view()?;
     let found = v.query(
         &Query {
-            mime: Some(mime::TAXONOMY),
+            mime: Some(m),
             ..Query::default()
         },
         Page::all(),
     )?;
     let mut out = Vec::new();
     for id in found.ids {
-        if let Ok(t) = serde_json::from_str::<Taxonomy>(&v.render(id)?) {
+        if let Ok(t) = serde_json::from_str::<T>(&v.render(id)?) {
             out.push((id, t));
         }
     }
+    Ok(out)
+}
+
+/// writes an entry's JSON: a new entry, or the old one edited
+pub(super) fn put<T: Serialize>(g: &Graph, id: Option<u64>, m: u16, t: &T) -> Result<u64, String> {
+    let text = serde_json::to_string(t).map_err(|e| e.to_string())?;
+    Ok(match id {
+        Some(id) => {
+            if g.render(id)? != text {
+                g.edit_text(id, &text)?;
+            }
+            id
+        }
+        None => g.save_text(&text, m)?.0,
+    })
+}
+
+/// the save's taxonomies, by name
+fn all(g: &Graph) -> Result<Vec<(u64, Taxonomy)>, String> {
+    let mut out: Vec<(u64, Taxonomy)> = entries(g, mime::TAXONOMY)?;
     out.sort_by(|a, b| a.1.name.cmp(&b.1.name));
     Ok(out)
 }
@@ -128,16 +148,7 @@ fn named(g: &Graph, name: &str) -> Result<(u64, Taxonomy), String> {
 }
 
 fn write(g: &Graph, id: Option<u64>, t: &Taxonomy) -> Result<u64, String> {
-    let text = serde_json::to_string(t).map_err(|e| e.to_string())?;
-    Ok(match id {
-        Some(id) => {
-            if g.render(id)? != text {
-                g.edit_text(id, &text)?;
-            }
-            id
-        }
-        None => g.save_text(&text, mime::TAXONOMY)?.0,
-    })
+    put(g, id, mime::TAXONOMY, t)
 }
 
 /// a classifier as a taxonomy sees it: its classes, whether it's trained, its held-out accuracy

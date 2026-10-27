@@ -956,3 +956,9 @@ input.tax-title { font-size: 1.2em; font-weight: 700; min-width: 0; flex: 1 1 20
 .tax-step .t { white-space: normal; }
 .tax-which { flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 6px 52px; }
 input.tax-about { width: 100%; }
+
+/* ---------------------------------------------------------------- pipes */
+.pipe-parts { display: flex; flex-direction: column; gap: 4px; padding: 6px 0; border-top: 1px solid var(--pad); margin-top: 6px; }
+.pipe-parts > .row { gap: 8px; align-items: center; flex-wrap: wrap; }
+.pipe-n { display: inline-grid; place-items: center; min-width: 16px; height: 16px; border-radius: 8px; background: var(--accent); color: var(--on-button); font-size: 11px; font-weight: 700; }
+.fx-label { display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 7px; font-size: 0.6em; vertical-align: middle; background: color-mix(in srgb, var(--accent) 80%, transparent); color: var(--on-button); text-decoration: none; }

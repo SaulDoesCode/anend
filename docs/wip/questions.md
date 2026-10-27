@@ -345,3 +345,19 @@ The answers left these open. Each is written into the design as its default.
 89. **A node's accuracy is shown two ways:** by hand (right out of marked, at that node)
     and its classifier's held-out accuracy. Saving keeps a node's counts while the same
     classifier stands at the same place.
+
+## Pipes (27 Oct)
+
+90. **A pipe's source and filter are one thing, the filter builder's expression** (words,
+    sums, lists, tags, kinds, classifier verdicts, kept filters); an empty one lets every
+    text through. A scene or a taxonomy branch as a source waits.
+91. **Pipes are turned on per viewer** (the app's settings, like the colouring
+    classifier), for the memory view and the space, and stack in the order turned on: a
+    later colour, underline or glow wins, sizes multiply, labels join.
+92. **Effects are worked out when a view asks**, from the classifiers' memoized outputs;
+    nothing is cached beyond that memo, so an edit or a retrain shows at once.
+93. **Actions run only when asked** ("act"), never as a view is drawn: a list (by name,
+    made when missing), a tag, or an s program on each text (at most 200 a time). A sound
+    as an action waits for sound outside the space; programs can't apply pipes themselves.
+94. **In the space, a pipe's force is "gather"**: its texts pull together in the spread
+    and away from the rest. Other forces and set positions wait for the views as programs.

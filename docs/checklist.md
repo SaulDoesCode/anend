@@ -147,8 +147,9 @@ docs/architecture.md (the whole).
 - [x] Taxonomies: classifiers in hierarchies that route a text to further classifiers,
       trained by hand in the UI, with accuracy per node (docs/architecture.md 1).
       (27 Oct: `taxonomy.*`, the models view's taxonomies tab, `route` in `std:learn`.)
-- [ ] Pipes: sources through filters to stacked effects, computed rather than stored; the
+- [x] Pipes: sources through filters to stacked effects, computed rather than stored; the
       filters page becomes the pipe editor (docs/architecture.md 2, 3).
+      (27 Oct: `pipes.*`; effects in the memory view and the space; actions on demand.)
 - [ ] Views as programs: today's views rebuilt as presets, with parity.md's guards passing
       (docs/architecture.md 4).
 - [ ] Tag sets of the user's own; word types for other languages through a language

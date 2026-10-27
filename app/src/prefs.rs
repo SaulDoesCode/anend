@@ -38,6 +38,8 @@ pub struct Prefs {
     /// Enter in the memory view searches with that classifier: a class's name finds the
     /// texts most likely in it, any other text the texts it reads most like
     pub cls_search: bool,
+    /// the pipes whose effects the memory view and the space show, stacked in this order
+    pub pipes: Vec<String>,
     /// how the space's bar searches: normal, classifier or random
     pub space_search: String,
     /// the space's background colour
@@ -198,6 +200,7 @@ impl Default for Prefs {
             letters: true,
             tint: String::new(),
             cls_search: false,
+            pipes: Vec::new(),
             space_search: "normal".into(),
             space_bg: "#e4d4be".into(),
             space_reversed: false,

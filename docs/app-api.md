@@ -244,6 +244,30 @@ saves that keep models, like `classify.*`.
 | `taxonomy.route` | `{name, text or key}` | `{name, steps: [{path, classifier, class, prob, trained, right, wrong, by_hand}], class, reached}`: each node's top class, on until a class leads nowhere or a classifier isn't trained (`reached` false) |
 | `taxonomy.mark` | `{name, text or key, path, right, class?}` | as `taxonomy.get`: the node counts a right or a wrong; right tells its classifier yes for the class it gives, wrong tells it no (and yes for `class`, the right one, when given) |
 
+### Pipes
+
+A pipe (`core/src/ops/pipes.rs`, docs/architecture.md parts 2 and 3) is a filter (`from`,
+a `filters.run` expression; null lets every text through) with **effects** on the texts it
+lets through, shown where the pipe is turned on (the app's `pipes` setting: the memory view
+and the space), and **actions** done when asked. Effects: `{kind: colour, colour}`,
+`{kind: colour_by, classifier}` (its class colours), `{kind: underline, colour}`, `{kind:
+label, text}` (≤ 40 characters), `{kind: size, scale}` (0.25 to 4), `{kind: glow, colour}`,
+`{kind: gather}` (the space pulls them together). Actions: `{kind: enlist, list}` (a list by
+its name, made when there's none), `{kind: tag, tag}`, `{kind: run, program}` (an s program
+by title on each text, the text as its first argument; at most 200). Several pipes stack in
+order: a later colour, underline or glow wins, sizes multiply, labels join with " · ".
+Nothing is stored about the texts: effects are worked out when asked, from the classifiers'
+memoized outputs. It's an entry of the save, out of search and counts.
+
+| op | args | data |
+|---|---|---|
+| `pipes.list` | | `[{key, pipe}]` |
+| `pipes.save` | `{pipe, was?: its old name, new?: true}` | `{key, pipe}`; colours are `#rrggbb`, a `colour_by` classifier and a `run` program must exist, the filter must read; `new` refuses a name that's taken |
+| `pipes.delete` | `{name}` | `{removed}` |
+| `pipes.run` | `{name or pipe, limit?: 200}` | `{scanned, matched, results: [{key, text, note, score}], untrained, effects: [effect per key]}`: a kept pipe or one as given |
+| `pipes.effects` | `{names, keys}` (≤ 5000 keys) | `{effects: [{key, pipes, colour?, underline?, label?, size?, glow?, gather?}], missing: [names not kept]}`: each key's effects from those pipes, stacked in order |
+| `pipes.apply` | `{name}` | `{name, texts, done: [{kind, …, texts}]}`: its actions on every text it lets through (a program's `out`s and `failed` count with it); not from inside an s run |
+
 ### Classifier buckets, filters and modules
 
 Outputs are memoized per classifier and memory/note (`core/src/memo.rs`), under a stamp

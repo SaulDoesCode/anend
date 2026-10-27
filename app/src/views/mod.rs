@@ -12,6 +12,7 @@ pub mod memory;
 pub mod models;
 pub mod notes;
 pub mod pictures;
+pub mod pipes;
 pub mod reader;
 pub mod scode;
 pub mod settings;

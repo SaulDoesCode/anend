@@ -85,7 +85,7 @@ pub fn Filters() -> Element {
     let run2 = run.clone();
     rsx! {
         div { class: "page",
-            div { class: "row", h2 { "filters" } span { class: "dim small", "find texts by words, sums, time, tags and kind; below, by what classifiers say, in groups" } }
+            div { class: "row", h2 { "filters and pipes" } span { class: "dim small", "find texts by words, sums, time, tags and kind; below, by what classifiers say, in groups, and pipes: a filter with effects shown in the views" } }
             // remade when a kept filter or the bar fills it (its inputs aren't bound while typing)
             for g in [form()] {
             div { key: "{g}", class: "card",

@@ -63,8 +63,14 @@ struct Ctx {
 pub fn Builder() -> Element {
     let ui = ui();
     let api = api();
-    let expr = use_signal(|| json!({ "op": "and", "of": [] }));
+    let mut expr = use_signal(|| json!({ "op": "and", "of": [] }));
     let mut name = use_signal(String::new);
+    // a pipe's effects and actions on what the filter lets through
+    let mut effects: Signal<Vec<Value>> = use_signal(Vec::new);
+    let mut actions: Signal<Vec<Value>> = use_signal(Vec::new);
+    // the kept pipe being edited, and the kept pipes' revision
+    let mut editing: Signal<Option<String>> = use_signal(|| None);
+    let mut pipes_rev = use_signal(|| 0u64);
     let mut found: Signal<Option<FilterRun>> = use_signal(|| None);
     let api_c = api.clone();
     let ctx = use_resource(move || {
@@ -137,14 +143,58 @@ pub fn Builder() -> Element {
             }
         });
     };
+    let api_p = api.clone();
+    let keep_pipe = move |_| {
+        let api = api_p.clone();
+        let n = name().trim().to_string();
+        let e = prune(&expr());
+        let pipe = json!({ "name": n, "from": e, "effects": effects(), "actions": actions() });
+        let was = editing();
+        spawn(async move {
+            let mut args = json!({ "pipe": pipe });
+            match &was {
+                Some(w) => args["was"] = json!(w),
+                None => args["new"] = json!(true),
+            }
+            match api.call("pipes.save", args).await {
+                Ok(_) => {
+                    ui.say(format!(
+                        "kept the pipe “{n}”: turn it on below to see its effects in the memory view and the space"
+                    ));
+                    if let Some(w) = was.filter(|w| *w != n) {
+                        crate::shell::set_pref(ui, |p| {
+                            for x in p.pipes.iter_mut() {
+                                if *x == w {
+                                    *x = n.clone();
+                                }
+                            }
+                        });
+                    }
+                    editing.set(Some(n));
+                    pipes_rev += 1;
+                    ui.touched();
+                }
+                Err(e) => ui.fail(e),
+            }
+        });
+    };
+    let classifier_names: Vec<String> = cx.classifiers.iter().map(|c| c.0.clone()).collect();
     rsx! {
         div { class: "card",
-            h3 { Icon { name: "classifier" } "by what classifiers say" span { class: "dim small", " conditions in groups: all of them, or any; each can be turned round" } }
+            h3 { Icon { name: "classifier" } "by what classifiers say, and pipes" span { class: "dim small", " conditions in groups: all of them, or any; each can be turned round. With effects, it's a pipe." } }
             Group { expr, path: vec![], depth: 0 }
+            crate::views::pipes::Parts { effects, actions, classifiers: classifier_names }
             div { class: "row",
                 button { class: "primary", onclick: run, Icon { name: "play" } "run" }
-                input { r#type: "text", placeholder: "a name to keep it", oninput: move |e| name.set(e.value()) }
-                button { disabled: name().trim().is_empty(), onclick: save, Icon { name: "save" } "keep" }
+                input { r#type: "text", placeholder: "a name to keep it", value: "{name}", oninput: move |e| name.set(e.value()) }
+                button { disabled: name().trim().is_empty(), "data-tip": "keep the filter, to use in other filters", onclick: save, Icon { name: "save" } "keep the filter" }
+                button { disabled: name().trim().is_empty(), "data-tip": "keep the filter with its effects and actions",
+                    onclick: keep_pipe, Icon { name: "save" } if editing().is_some() { "save the pipe" } else { "keep as a pipe" } }
+                if let Some(w) = editing() {
+                    span { class: "dim small", "editing the pipe “{w}”" }
+                    button { class: "plain", onclick: move |_| { editing.set(None); effects.set(vec![]); actions.set(vec![]); expr.set(json!({ "op": "and", "of": [] })); name.set(String::new()); },
+                        Icon { name: "close" } "new" }
+                }
             }
             if let Some(r) = found() {
                 div { class: "dim small", "{r.matched} of {r.scanned} texts" }
@@ -158,6 +208,15 @@ pub fn Builder() -> Element {
                 }
             }
         }
+        crate::views::pipes::KeptPipes { rev: pipes_rev, on_open: move |p: Value| {
+            let from = p["from"].clone();
+            expr.set(if from.is_null() { json!({ "op": "and", "of": [] }) } else if from["op"] == "and" || from["op"] == "or" { from } else { json!({ "op": "and", "of": [from] }) });
+            effects.set(p["effects"].as_array().cloned().unwrap_or_default());
+            actions.set(p["actions"].as_array().cloned().unwrap_or_default());
+            let n = p["name"].as_str().unwrap_or("").to_string();
+            name.set(n.clone());
+            editing.set(Some(n));
+        } }
         if !presets.is_empty() {
             div { class: "card",
                 h3 { Icon { name: "save" } "kept filters" }

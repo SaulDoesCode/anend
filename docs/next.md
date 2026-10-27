@@ -96,8 +96,11 @@ departure says why in its commit).
 - Done (27 Oct): the ▶ usable point for scripting (README, guide "Programs", offered on
   PR #8).
 - Done (27 Oct): taxonomies (`taxonomy.*`, the models view's third tab, `route` in s).
-- Next: pipes (sources through filters to stacked effects; the filters page becomes the
-  pipe editor; docs/architecture.md 2, 3).
+- Done (27 Oct): pipes (`pipes.*`, the filters view as the pipe editor, effects in the
+  memory view and the space).
+- Next: views as programs, tag sets, the taxonomy engine's ▶ point; then the user's 27 Oct
+  lines (grouped prefabs, shift and box selection, Ctrl+G groups, drawn wires, wgpu with no
+  JavaScript on the desktop, culling, polish, ▶).
   Open further up: the language lines (s, the standard library), taxonomies and pipes,
   the wgpu renderer and culling.
 

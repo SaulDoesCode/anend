@@ -49,6 +49,7 @@ pub const SETTINGS: &[&str] = &[
     "read_device",
     "piece_line",
     "piece_lines",
+    "pipes",
 ];
 
 /// the views, in their tab order
@@ -225,6 +226,42 @@ mod tests {
         ] {
             assert!(rs.contains(needle), "space.rs lost {needle}");
         }
+    }
+
+    /// pipes: the filters view's pipe editor, effects in the memory view and the space
+    #[test]
+    fn pipes_stay() {
+        let p = include_str!("views/pipes.rs");
+        for needle in [
+            "(\"colour\", \"a colour\")",
+            "(\"colour_by\", \"a classifier's colours\")",
+            "(\"underline\", \"an underline\")",
+            "(\"label\", \"a label\")",
+            "(\"size\", \"a size\")",
+            "(\"glow\", \"a glow\")",
+            "(\"gather\", \"gather in the space\")",
+            "(\"enlist\", \"put them in a list\")",
+            "(\"tag\", \"tag them\")",
+            "(\"run\", \"run a program on each\")",
+            "\"pipes.apply\"",
+            "\"pipes.delete\"",
+            "\"pipes.list\"",
+        ] {
+            assert!(p.contains(needle), "pipes.rs lost {needle}");
+        }
+        let b = include_str!("views/flt.rs");
+        assert!(
+            b.contains("\"pipes.save\"")
+                && b.contains("crate::views::pipes::Parts")
+                && b.contains("crate::views::pipes::KeptPipes")
+        );
+        assert!(
+            include_str!("views/memory.rs").contains("\"pipes.effects\"")
+                && include_str!("views/memory.rs").contains("fx-label")
+        );
+        assert!(include_str!("views/space.rs").contains("\"cmd\": \"effects\""));
+        let js = include_str!("space.js");
+        assert!(js.contains("effects(fx) {") && js.contains("dress(n) {") && js.contains("A.gather"));
     }
 
     /// taxonomies: the models view's third tab, the tree editor, routing and marking

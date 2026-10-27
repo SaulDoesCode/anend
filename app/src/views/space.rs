@@ -503,6 +503,7 @@ try {{
   while (true) {{
     const c = await dioxus.recv();
     if (c.cmd === 'place') sp.place(c.texts, c.again);
+    else if (c.cmd === 'effects') sp.effects(c.fx);
     else if (c.cmd === 'clear') sp.clear(!!c.all);
     else if (c.cmd === 'room') sp.setRoom(c.bg, c.ink);
     else if (c.cmd === 'start') sp.start();
@@ -1340,6 +1341,33 @@ pub fn Space() -> Element {
         mode: use_signal(|| "fly".to_string()),
         collected: use_signal(Vec::new),
     };
+    // the pipes turned on: their effects on the room's texts, sent whenever they or the texts change
+    {
+        let api = api.clone();
+        let texts = sp.texts;
+        let _fx = use_resource(move || {
+            let api = api.clone();
+            let names = ui.prefs.read().pipes.clone();
+            let keys: Vec<String> = texts.read().iter().map(|h| h.key.clone()).take(5000).collect();
+            let _ = (ui.changed)();
+            async move {
+                let fx = if names.is_empty() || keys.is_empty() {
+                    json!({})
+                } else {
+                    let v = api
+                        .call("pipes.effects", json!({ "names": names, "keys": keys }))
+                        .await
+                        .unwrap_or_default();
+                    let mut m = serde_json::Map::new();
+                    for e in v["effects"].as_array().into_iter().flatten() {
+                        m.insert(e["key"].as_str().unwrap_or("").to_string(), e.clone());
+                    }
+                    Value::Object(m)
+                };
+                sp.send(json!({ "cmd": "effects", "fx": fx }));
+            }
+        });
+    }
     // the engine and its channel
     {
         let api = api.clone();

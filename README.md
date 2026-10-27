@@ -53,7 +53,7 @@ Every view has the command bar at the bottom, and each view keeps its own text t
 | **tags** (Ctrl+6) | tags on any entry: pick tags (all or any) and see the entries that have them. |
 | **stats** (Ctrl+7) | figures for the whole save |
 | **models** (Ctrl+8) | classifiers (learned from lists, trained and run here) and spec models: models described as data (what they read, their heads, what they learn from, critics for a writer), made in a builder with a control for every part or as JSON, then trained, run and, for a writer, asked to write. Taxonomies put classifiers in a tree: each answer picks the next classifier, and every step can be marked right or wrong, which each node counts and its classifier learns from. |
-| **filters** (Ctrl+9) | words, a sum range, written between two dates, a tag, a kind. Each filter is kept by name in the save. |
+| **filters** (Ctrl+9) | words, a sum range, written between two dates, a tag, a kind. Each filter is kept by name in the save. It's also the pipe editor: a filter with effects (a colour, a classifier's colours, an underline, a label, a size, a glow, gathering in the space) shown in the memory view and the space while it's on, stacked with other pipes, and actions (a list, a tag, a program on each) done when asked. |
 
 The top bar holds the view icons, the search line with its triangle, undo (**Ctrl+Z**) and
 settings. **Ctrl+= / Ctrl+−** zoom and **0** resets it.
