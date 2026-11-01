@@ -1,0 +1,954 @@
+diff --git a/app/src/keys.rs b/app/src/keys.rs
+index 4aa5e69..7c9c8d4 100644
+--- a/app/src/keys.rs
++++ b/app/src/keys.rs
+@@ -73,6 +73,8 @@ pub enum Action {
+     EditText,
+     DeleteText,
+     CopyText,
++    Group,
++    Ungroup,
+     Reversed,
+     Pin,
+     Physics,
+@@ -114,7 +116,7 @@ impl Scope {
+ use Action::*;
+ 
+ impl Action {
+-    pub const ALL: [Action; 68] = [
++    pub const ALL: [Action; 70] = [
+         GotoMemory,
+         GotoSpace,
+         GotoLists,
+@@ -169,6 +171,8 @@ impl Action {
+         EditText,
+         DeleteText,
+         CopyText,
++        Group,
++        Ungroup,
+         Reversed,
+         Pin,
+         Physics,
+@@ -262,6 +266,8 @@ impl Action {
+             EditText => "edit_text",
+             DeleteText => "delete_text",
+             CopyText => "copy_text",
++            Group => "group",
++            Ungroup => "ungroup",
+             Reversed => "reversed",
+             Pin => "pin",
+             Physics => "physics",
+@@ -335,6 +341,8 @@ impl Action {
+             EditText => "edit the selected text",
+             DeleteText => "remove the selected text",
+             CopyText => "copy the selected text",
++            Group => "group what's selected",
++            Ungroup => "ungroup the selected group",
+             Reversed => "reversed on / off",
+             Pin => "pin / unpin the selected text",
+             Physics => "the physics panel",
+@@ -409,6 +417,8 @@ impl Action {
+             EditText => "Enter",
+             DeleteText => "Delete",
+             CopyText => "Ctrl+C",
++            Group => "Ctrl+G",
++            Ungroup => "Ctrl+Shift+G",
+             Reversed => "F",
+             Pin => "U",
+             Physics => "O",
+diff --git a/app/src/parity.rs b/app/src/parity.rs
+index deb1fb0..9de6322 100644
+--- a/app/src/parity.rs
++++ b/app/src/parity.rs
+@@ -116,6 +116,8 @@ pub const KEY_ACTIONS: &[&str] = &[
+     "edit_text",
+     "delete_text",
+     "copy_text",
++    "group",
++    "ungroup",
+     "reversed",
+     "pin",
+     "physics",
+@@ -228,6 +230,30 @@ mod tests {
+         }
+     }
+ 
++    /// groups: Ctrl+G, nesting, picked whole, opened, copied, made a prefab
++    #[test]
++    fn groups_stay() {
++        let js = include_str!("space.js");
++        for needle in [
++            "setGroups(list) {",
++            "outer(key) {",
++            "pickGroup(gid, add) {",
++            "groupMembers() {",
++            "openGroupAt(key) {",
++            "kind: 'grouped'",
++            "kind: 'ungrouped'",
++        ] {
++            assert!(js.contains(needle), "space.js lost {needle}");
++        }
++        let sp = include_str!("views/space.rs");
++        assert!(
++            sp.contains("fn group_copy(")
++                && sp.contains("fn group_prefab(")
++                && sp.contains("Some(Action::Group)")
++                && sp.contains("Some(Action::Ungroup)")
++        );
++    }
++
+     /// selecting many: Shift+click and boxes in the space and the memory view; notes, lists
+     #[test]
+     fn selection_of_many_stays() {
+diff --git a/app/src/space.js b/app/src/space.js
+index 4bb84eb..5bfa367 100644
+--- a/app/src/space.js
++++ b/app/src/space.js
+@@ -144,6 +144,12 @@ export class Space {
+     // the selection of many (Shift+click, or a box drawn): kind:id → { kind, id }, kinds
+     // b (a block), c (a prefab's copy), t (a text's placement, by its node key), l (a light)
+     this.multi = new Map();
++    // groups made by hand (Ctrl+G; core's ops::groups): id → members, a member's group,
++    // the selected group, and the groups opened (a double click) to pick inside them
++    this.groups = new Map();
++    this.parent = new Map();
++    this.selGroup = null;
++    this.openGroups = [];
+     this.freeN = 0;
+     this.infoAt = 0;
+     this.origin = new THREE.Vector3();
+@@ -820,6 +826,10 @@ export class Space {
+         this.shapeBlock(o);
+         this.send({ ...this.ev('blockset', null), data: this.blockOut(o) });
+       }
++    } else if (u.kind === 'grouped') {
++      this.send({ ...this.ev('groupbreak', null), data: { id: u.id, quiet: true } });
++    } else if (u.kind === 'ungrouped') {
++      this.send({ ...this.ev('grouprestore', null), data: { members: u.members, name: u.name || '' } });
+     } else if (u.kind === 'lightgone') {
+       this.send({ ...this.ev('lightrestore', null), data: u.light });
+     } else if (u.kind === 'light') {
+@@ -2463,6 +2473,17 @@ export class Space {
+   }
+ 
+   toggleMulti(kind, id) {
++    this.selGroup = null;
++    // a thing in a group comes and goes with its whole group
++    const g = kind === 'b' || kind === 'c' ? this.outer(`${kind}:${id}`) : null;
++    if (g) {
++      if (!this.multi.size) this.seedMulti();
++      const ls = this.leaves(g);
++      const all = ls.every((x) => this.multi.has(`${x.kind}:${x.id}`));
++      for (const x of ls) { if (all) this.multi.delete(`${x.kind}:${x.id}`); else this.multi.set(`${x.kind}:${x.id}`, x); }
++      this.afterMulti();
++      return;
++    }
+     if (!this.multi.size) this.seedMulti();
+     const k = `${kind}:${id}`;
+     if (this.multi.has(k)) this.multi.delete(k); else this.multi.set(k, { kind, id });
+@@ -2476,6 +2497,7 @@ export class Space {
+   }
+ 
+   clearMulti() {
++    this.selGroup = null;
+     if (!this.multi.size) return false;
+     this.multi.clear();
+     this.afterMulti();
+@@ -2525,7 +2547,8 @@ export class Space {
+     if (!quiet) {
+       const n = { blocks: 0, copies: 0, texts: 0, lights: 0 };
+       for (const x of this.multi.values()) n[{ b: 'blocks', c: 'copies', t: 'texts', l: 'lights' }[x.kind]]++;
+-      this.send({ ...this.ev('multi', null), data: { count: this.multi.size, ...n } });
++      const g = this.selGroup && this.groups.get(this.selGroup);
++      this.send({ ...this.ev('multi', null), data: { count: this.multi.size, ...n, group: g ? g.id : null, name: g ? g.name || '' : null } });
+     }
+     this.render();
+   }
+@@ -2732,6 +2755,66 @@ export class Space {
+     this.setMulti(items, b.add);
+   }
+ 
++  // ------------------------------------------------------------------ groups
++  //
++  // A group (Ctrl+G on what's selected) is picked as one: a click on any of its things
++  // selects all of it, and it moves, turns, copies and becomes a prefab as one. Groups
++  // nest. A double click opens a group to pick inside it; Esc closes it again.
++
++  setGroups(list) {
++    this.groups = new Map((list || []).map((g) => [g.id, g]));
++    this.parent = new Map();
++    for (const g of this.groups.values()) for (const m of g.members) this.parent.set(`${m.kind}:${m.id}`, g.id);
++    this.openGroups = this.openGroups.filter((id) => this.groups.has(id));
++    if (this.selGroup && !this.groups.has(this.selGroup)) this.selGroup = null;
++  }
++
++  // the outermost closed group a thing is in (an open group lets its things be picked)
++  outer(key) {
++    let g = this.parent.get(key), top = null;
++    while (g && !this.openGroups.includes(g)) {
++      top = g;
++      g = this.parent.get(`g:${g}`);
++    }
++    return top;
++  }
++
++  leaves(gid, out = []) {
++    const g = this.groups.get(gid);
++    for (const m of (g && g.members) || []) {
++      if (m.kind === 'g') this.leaves(m.id, out);
++      else out.push({ kind: m.kind, id: m.id });
++    }
++    return out;
++  }
++
++  pickGroup(gid, add) {
++    this.setMulti(this.leaves(gid), add);
++    this.selGroup = add ? null : gid;
++    this.afterMulti();
++  }
++
++  // what Ctrl+G groups: the things selected, each as its outermost group
++  groupMembers() {
++    const out = new Map();
++    for (const x of this.multi.values()) {
++      if (x.kind !== 'b' && x.kind !== 'c') continue;
++      const g = this.outer(`${x.kind}:${x.id}`);
++      const m = g ? { kind: 'g', id: g } : { kind: x.kind, id: x.id };
++      out.set(`${m.kind}:${m.id}`, m);
++    }
++    return [...out.values()];
++  }
++
++  openGroupAt(key) {
++    const g = this.outer(key);
++    if (!g) return false;
++    this.openGroups.push(g);
++    this.clearMulti();
++    this.send({ ...this.ev('groupopen', null), data: g });
++    return true;
++  }
++
+   // where a new block goes: ahead of the camera, or at the selected text
+   blockSpot() {
+     let at;
+@@ -3164,7 +3247,10 @@ export class Space {
+       // the block itself, not the gizmo over it
+       const m = this.rayFrom(e).intersectObjects([...this.blocks.values()].map((o) => o.mesh), false)[0];
+       const id = m && m.object.userData.block;
+-      if (id != null && this.copyOf(id) && this.openCopy !== this.copyOf(id)) this.openCopyAt(id);
++      if (id == null) return;
++      const c = this.copyOf(id);
++      if (this.outer(c && this.openCopy !== c ? `c:${c}` : `b:${id}`) && this.openGroupAt(c && this.openCopy !== c ? `c:${c}` : `b:${id}`)) return;
++      if (c && this.openCopy !== c) this.openCopyAt(id);
+     });
+     h.addEventListener('pointerdown', (e) => {
+       if (e.target.closest('.slabel')) return;
+@@ -3197,11 +3283,27 @@ export class Space {
+           }
+         }
+         const hit = this.blocks.size ? this.blockHit(e) : null;
+-        // Shift+click on a block or a copy: one of many, in or out
+-        if (hit && hit.block != null && e.shiftKey) {
++        // Shift+click on a block or a copy (the block itself, not the gizmo over it): one
++        // of many, in or out
++        if (e.shiftKey && this.blocks.size) {
++          const m = this.rayFrom(e).intersectObjects([...this.blocks.values()].map((o) => o.mesh), false)[0];
++          const sid = m && m.object.userData.block;
++          if (sid != null) {
++            const c = this.copyOf(sid);
++            if (c && this.openCopy !== c) this.toggleMulti('c', c); else this.toggleMulti('b', sid);
++            return;
++          }
++        }
++        // a thing in a group: the whole group, dragged by any of it
++        if (hit && hit.block != null) {
+           const c = this.copyOf(hit.block);
+-          if (c && this.openCopy !== c) this.toggleMulti('c', c); else this.toggleMulti('b', hit.block);
+-          return;
++          const key = c && this.openCopy !== c ? `c:${c}` : `b:${hit.block}`;
++          const g = this.outer(key);
++          if (g) {
++            if (this.selGroup !== g) this.pickGroup(g);
++            this.startBlockDrag(e, { handle: { mode: 'plane', axis: -1 } });
++            return;
++          }
+         }
+         if (hit && hit.block != null && this.multi.size) this.clearMulti();
+         if (hit) {
+@@ -3290,6 +3392,7 @@ export class Space {
+       } else if (k === 'Escape' && this.ghost) { this.stopGhost(); this.send({ ...this.ev('ghostdone', null) }); }
+       else if (k === 'Escape' && this.openCopy) this.closeCopy();
+       else if (k === 'Escape' && this.multi.size) this.clearMulti();
++      else if (k === 'Escape' && this.openGroups.length) { const g = this.openGroups.pop(); this.pickGroup(g); }
+       else if (k === b.level) this.level();
+       else if (k === b.walk) this.setMode(this.mode === 'walk' ? 'fly' : 'walk');
+       else if (k === b.superflight) this.setMode(this.mode === 'super' ? 'fly' : 'super');
+diff --git a/app/src/views/space.rs b/app/src/views/space.rs
+index 0e624c1..3a3e125 100644
+--- a/app/src/views/space.rs
++++ b/app/src/views/space.rs
+@@ -506,6 +506,14 @@ try {{
+     else if (c.cmd === 'effects') sp.effects(c.fx);
+     else if (c.cmd === 'copies') sp.setCopies(c.list || []);
+     else if (c.cmd === 'batch') sp.setBatch(!!c.on);
++    else if (c.cmd === 'groups') {{
++      sp.setGroups(c.list || []);
++      if (c.made) {{ sp.record({{ kind: 'grouped', id: c.made }}); sp.pickGroup(c.made); }}
++      if (c.broke) {{ sp.record({{ kind: 'ungrouped', members: c.broke.members, name: c.broke.name }}); sp.afterMulti(); }}
++      if (c.select) sp.pickGroup(c.select);
++    }}
++    else if (c.cmd === 'group') dioxus.send({{ kind: 'groupmake', data: {{ members: sp.groupMembers() }} }});
++    else if (c.cmd === 'ungroup') dioxus.send({{ kind: 'groupbreak', data: {{ id: sp.selGroup }} }});
+     else if (c.cmd === 'removemulti') dioxus.send({{ kind: 'removedmulti', data: sp.removeMulti() }});
+     else if (c.cmd === 'clearmulti') sp.clearMulti();
+     else if (c.cmd === 'copygone') sp.copyGone(c.ids || [], c.restore);
+@@ -1514,6 +1522,8 @@ pub fn Space() -> Element {
+                 Some(Action::Settle) => sp.send(json!({ "cmd": "settle" })),
+                 Some(Action::Pin) => sp.send(json!({ "cmd": "pin" })),
+                 Some(Action::DeleteText) if sp.multi.peek().is_some() => sp.send(json!({ "cmd": "removemulti" })),
++                Some(Action::Group) => sp.send(json!({ "cmd": "group" })),
++                Some(Action::Ungroup) => sp.send(json!({ "cmd": "ungroup" })),
+                 Some(Action::DeleteText) => match sp
+                     .block
+                     .peek()
+@@ -1617,6 +1627,14 @@ pub fn Space() -> Element {
+                             (n > 0).then(|| format!("{n} {}", if n == 1 { one.to_string() } else { k.to_string() }))
+                         }).collect::<Vec<_>>().join(" · ")}
+                     }
++                    if let Some(g) = m["group"].as_str().map(String::from) {
++                        span { class: "small", b { {if m["name"].as_str().unwrap_or("").is_empty() { "a group".to_string() } else { format!("the group “{}”", m["name"].as_str().unwrap_or("")) }} } }
++                        button { class: "btn small", onclick: move |_| sp.send(json!({ "cmd": "ungroup" })), Icon { name: "close" } "ungroup" kbd { "{ui.key_of(Action::Ungroup)}" } }
++                        button { class: "btn small", onclick: { let (g, api) = (g.clone(), api_b.clone()); move |_| group_copy(ui, api.clone(), sp, g.clone()) }, Icon { name: "copy" } "a copy beside it" }
++                        button { class: "btn small", onclick: { let (g, api, n) = (g.clone(), api_b.clone(), m["name"].as_str().unwrap_or("").to_string()); move |_| group_prefab(ui, api.clone(), sp, g.clone(), n.clone()) }, Icon { name: "prefab" } "make a prefab of it" }
++                    } else {
++                        button { class: "btn small", onclick: move |_| sp.send(json!({ "cmd": "group" })), Icon { name: "prefab" } "group them" kbd { "{ui.key_of(Action::Group)}" } }
++                    }
+                     span { class: "dim small", "drag the gizmo to move or turn them all · Shift+click adds or takes out" }
+                     button { class: "btn small", onclick: move |_| sp.send(json!({ "cmd": "removemulti" })), Icon { name: "delete" } "delete them" kbd { "{ui.key_of(Action::DeleteText)}" } }
+                     button { class: "btn small", onclick: move |_| sp.send(json!({ "cmd": "clearmulti" })), Icon { name: "close" } "let go" kbd { "Esc" } }
+@@ -1822,6 +1840,18 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
+                 ui.say(format!("{n} taken away · Ctrl+Z puts them back"));
+             });
+         }
++        // groups (Ctrl+G, Ctrl+Shift+G, the bar's buttons, an undo)
++        "groupmake" => groups_call(ui, api, sp, "groups.make", json!({ "members": e.data["members"] }), "made"),
++        "groupbreak" => {
++            if e.data["id"].is_null() {
++                ui.say("select a group first (a click on any of it)");
++                return;
++            }
++            let why = if e.data["quiet"] == true { "quiet" } else { "broke" };
++            groups_call(ui, api, sp, "groups.ungroup", json!({ "id": e.data["id"] }), why)
++        }
++        "grouprestore" => groups_call(ui, api, sp, "groups.restore", e.data.clone(), "select"),
++        "groupopen" => ui.say("the group is open: its things are picked one by one · Esc closes it"),
+         "lightpick" => {
+             let mut l = sp.lightpick;
+             l.set(e.data.as_u64());
+@@ -2071,8 +2101,9 @@ async fn load_blocks(ui: Ui, api: Api, sp: Sp) {
+             lightwin::load_lights(&api, sp).await;
+             animwin::load_anims(ui, &api, sp).await;
+             wirewin::load_wires(&api, sp).await;
+-            // the prefabs' copies: each one a group in the room
++            // the prefabs' copies: each one a group in the room; and the groups made by hand
+             prefabwin::load_prefabs(ui, &api, sp).await;
++            load_groups(&api, sp).await;
+             count_blocks(api, sp).await;
+         }
+         // a hub from before blocks: the room has none
+@@ -2080,6 +2111,162 @@ async fn load_blocks(ui: Ui, api: Api, sp: Sp) {
+     }
+ }
+ 
++async fn load_groups(api: &Api, sp: Sp) {
++    if let Ok(l) = api.call("groups.list", json!({})).await {
++        sp.send(json!({ "cmd": "groups", "list": l }));
++    }
++}
++
++/// a groups op; `how` says what the room does after: `made` (select it, one undo step),
++/// `broke` (one undo step), `select` (select it), `quiet` (nothing: an undo's own work)
++fn groups_call(ui: Ui, api: Api, sp: Sp, op: &'static str, args: Value, how: &'static str) {
++    dioxus::dioxus_core::spawn_forever(async move {
++        match api.call(op, args).await {
++            Ok(r) => {
++                let mut c = json!({ "cmd": "groups", "list": r["groups"] });
++                match how {
++                    "made" => {
++                        c["made"] = r["id"].clone();
++                        ui.say("grouped: a click on any of it picks it all · double-click opens it · Ctrl+Shift+G ungroups");
++                    }
++                    "broke" => {
++                        c["broke"] = json!({ "members": r["members"] });
++                        ui.say("ungrouped · Ctrl+Z groups it again");
++                    }
++                    "select" => c["select"] = r["id"].clone(),
++                    _ => {}
++                }
++                sp.send(c);
++            }
++            Err(e) => ui.fail(e),
++        }
++    });
++}
++
++/// the selected group: a copy beside it (groups inside it copied as groups), or a prefab
++/// of its blocks
++fn group_copy(ui: Ui, api: Api, sp: Sp, gid: String) {
++    dioxus::dioxus_core::spawn_forever(async move {
++        let list = match api.call("groups.list", json!({})).await {
++            Ok(l) => l.as_array().cloned().unwrap_or_default(),
++            Err(e) => return ui.fail(e),
++        };
++        let by = json!([2.0, 0.0, 0.0]);
++        // copies of every block and prefab copy in it, old id → new
++        let mut new: HashMap<String, String> = HashMap::new();
++        fn leaves(list: &[Value], gid: &str, out: &mut Vec<(String, String)>) {
++            if let Some(g) = list.iter().find(|g| g["id"] == gid) {
++                for m in g["members"].as_array().into_iter().flatten() {
++                    let (k, id) = (m["kind"].as_str().unwrap_or(""), m["id"].as_str().unwrap_or(""));
++                    if k == "g" {
++                        leaves(list, id, out)
++                    } else {
++                        out.push((k.to_string(), id.to_string()))
++                    }
++                }
++            }
++        }
++        let mut ls = Vec::new();
++        leaves(&list, &gid, &mut ls);
++        sp.send(json!({ "cmd": "batch", "on": true }));
++        for (k, id) in &ls {
++            let r = if k == "b" {
++                api.call("blocks.duplicate", json!({ "ids": [id], "by": by }))
++                    .await
++                    .map(|r| (r["ids"][0].as_str().unwrap_or("").to_string(), r))
++            } else {
++                api.call("prefabs.duplicate", json!({ "id": id, "by": by }))
++                    .await
++                    .map(|r| (r["copy"]["id"].as_str().unwrap_or("").to_string(), r))
++            };
++            match r {
++                Ok((nid, r)) => {
++                    let textures = dress(ui, &api, r["textures"].clone()).await;
++                    sp.send(json!({ "cmd": "blocks", "blocks": r["blocks"], "textures": textures, "added": if k == "b" { json!([nid]) } else { json!([]) } }));
++                    new.insert(format!("{k}:{id}"), nid);
++                }
++                Err(e) => {
++                    sp.send(json!({ "cmd": "batch", "on": false }));
++                    return ui.fail(e);
++                }
++            }
++        }
++        // the groups again, innermost first
++        fn remake<'a>(
++            api: &'a Api,
++            list: &'a [Value],
++            gid: &'a str,
++            new: &'a HashMap<String, String>,
++        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + 'a>> {
++            Box::pin(async move {
++                let g = list.iter().find(|g| g["id"] == gid)?;
++                let mut members = Vec::new();
++                for m in g["members"].as_array().into_iter().flatten() {
++                    let (k, id) = (m["kind"].as_str().unwrap_or(""), m["id"].as_str().unwrap_or(""));
++                    let nid = if k == "g" {
++                        remake(api, list, id, new).await?
++                    } else {
++                        new.get(&format!("{k}:{id}"))?.clone()
++                    };
++                    members.push(json!({ "kind": k, "id": nid }));
++                }
++                api.call("groups.make", json!({ "members": members, "name": g["name"] }))
++                    .await
++                    .ok()
++                    .and_then(|r| r["id"].as_str().map(String::from))
++            })
++        }
++        let made = remake(&api, &list, &gid, &new).await;
++        sp.send(json!({ "cmd": "batch", "on": false }));
++        prefabwin::load_prefabs(ui, &api, sp).await;
++        if let Ok(l) = api.call("groups.list", json!({})).await {
++            sp.send(json!({ "cmd": "groups", "list": l, "select": made }));
++        }
++        count_blocks(api, sp).await;
++        ui.say("a copy of the group beside it");
++    });
++}
++
++fn group_prefab(ui: Ui, api: Api, sp: Sp, gid: String, name: String) {
++    dioxus::dioxus_core::spawn_forever(async move {
++        let list = api
++            .call("groups.list", json!({}))
++            .await
++            .ok()
++            .and_then(|l| l.as_array().cloned())
++            .unwrap_or_default();
++        let mut blocks = Vec::new();
++        let mut copies = 0;
++        fn walk(list: &[Value], gid: &str, blocks: &mut Vec<String>, copies: &mut usize) {
++            if let Some(g) = list.iter().find(|g| g["id"] == gid) {
++                for m in g["members"].as_array().into_iter().flatten() {
++                    match m["kind"].as_str().unwrap_or("") {
++                        "g" => walk(list, m["id"].as_str().unwrap_or(""), blocks, copies),
++                        "b" => blocks.push(m["id"].as_str().unwrap_or("").to_string()),
++                        _ => *copies += 1,
++                    }
++                }
++            }
++        }
++        walk(&list, &gid, &mut blocks, &mut copies);
++        if copies > 0 {
++            return ui.fail("a prefab is made of blocks: detach the copies in the group first (their menu)");
++        }
++        let name = if name.trim().is_empty() {
++            "a group".to_string()
++        } else {
++            name
++        };
++        match api.call("prefabs.make", json!({ "name": name, "ids": blocks })).await {
++            Ok(_) => {
++                load_blocks(ui, api.clone(), sp).await;
++                ui.say(format!("a prefab, “{name}”: its copy stands where the group was"));
++            }
++            Err(e) => ui.fail(e),
++        }
++    });
++}
++
+ fn delete_block(ui: Ui, api: Api, sp: Sp, id: String) {
+     // a copy goes as a whole
+     if prefabwin::is_copy(&id) {
+diff --git a/core/src/graph/record.rs b/core/src/graph/record.rs
+index e4ab0e5..3283077 100644
+--- a/core/src/graph/record.rs
++++ b/core/src/graph/record.rs
+@@ -35,13 +35,15 @@ pub mod mime {
+     pub const PIPE: u16 = 12;
+     /// a tag set: its text the set's JSON, word types of one's own (`ops::tagsets`)
+     pub const TAGSET: u16 = 13;
++    /// a group of things in the room: its text the group's JSON (`ops::groups`)
++    pub const GROUP: u16 = 14;
+ 
+     /// entries that are a block's data rather than texts: left out of search and counts
+     pub fn hidden(m: u16) -> bool {
+-        m == ANIMATION || m == WIRING || m == TAXONOMY || m == PIPE || m == TAGSET
++        m == ANIMATION || m == WIRING || m == TAXONOMY || m == PIPE || m == TAGSET || m == GROUP
+     }
+ 
+-    pub const NAMES: [&str; 14] = [
++    pub const NAMES: [&str; 15] = [
+         "text/plain",
+         "text/markdown",
+         "application/x-anend-fn",
+@@ -56,6 +58,7 @@ pub mod mime {
+         "application/x-anend-taxonomy",
+         "application/x-anend-pipe",
+         "application/x-anend-tagset",
++        "application/x-anend-group",
+     ];
+ 
+     pub fn builtin(name: &str) -> Option<u16> {
+diff --git a/core/src/ops/groups.rs b/core/src/ops/groups.rs
+new file mode 100644
+index 0000000..7883762
+--- /dev/null
++++ b/core/src/ops/groups.rs
+@@ -0,0 +1,244 @@
++//! Groups (the user's 27 Oct direction): things in the room grouped by hand (Ctrl+G) to be
++//! selected, moved, turned, copied and made into a prefab as one. A group's members are
++//! blocks (`b`), prefab copies (`c`) and other groups (`g`), so groups nest; a thing is
++//! directly in one group at most. A group is an entry of the save (mime
++//! `application/x-anend-group`, its text the [`Group`]'s JSON), out of search and counts;
++//! its id is `group:<key>`. Members that are gone (deleted blocks, removed copies) are left
++//! out when the groups are read, and a group left with fewer than two goes.
++
++use std::collections::{HashMap, HashSet};
++
++use serde::{Deserialize, Serialize};
++use serde_json::{Value, json};
++
++use super::taxonomy::{entries, put};
++use super::{Res, s};
++use crate::graph::Graph;
++use crate::graph::record::{self, mime};
++
++#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
++pub struct Member {
++    /// b (a block), c (a prefab's copy) or g (a group)
++    pub kind: String,
++    pub id: String,
++}
++
++#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
++pub struct Group {
++    #[serde(default, skip_serializing_if = "String::is_empty")]
++    pub name: String,
++    pub members: Vec<Member>,
++}
++
++pub fn routed(op: &str) -> bool {
++    op.starts_with("groups.")
++}
++
++fn gid(id: u64) -> String {
++    format!("group:{}", record::label(id))
++}
++
++fn entry_of(id: &str) -> Result<u64, String> {
++    id.strip_prefix("group:")
++        .and_then(record::parse_label)
++        .ok_or_else(|| format!("{id:?} isn't a group"))
++}
++
++/// the room's groups as they stand: gone members out, groups of fewer than two gone
++fn live(g: &Graph) -> Result<Vec<(String, Group)>, String> {
++    let blocks: HashSet<String> = g.blocks(None)?.into_iter().map(|b| b.id).collect();
++    let copies: HashSet<String> = g.copies()?.into_iter().map(|c| c.id).collect();
++    let mut all: HashMap<String, Group> = entries::<Group>(g, mime::GROUP)?
++        .into_iter()
++        .map(|(id, gr)| (gid(id), gr))
++        .collect();
++    // members gone, then groups emptied, until nothing changes
++    loop {
++        let ids: HashSet<String> = all.keys().cloned().collect();
++        let mut changed = false;
++        for gr in all.values_mut() {
++            let before = gr.members.len();
++            gr.members.retain(|m| match m.kind.as_str() {
++                "b" => blocks.contains(&m.id),
++                "c" => copies.contains(&m.id),
++                "g" => ids.contains(&m.id),
++                _ => false,
++            });
++            changed |= gr.members.len() != before;
++        }
++        let small: Vec<String> = all
++            .iter()
++            .filter(|(_, gr)| gr.members.len() < 2)
++            .map(|(k, _)| k.clone())
++            .collect();
++        changed |= !small.is_empty();
++        for k in small {
++            all.remove(&k);
++        }
++        if !changed {
++            break;
++        }
++    }
++    let mut out: Vec<(String, Group)> = all.into_iter().collect();
++    out.sort_by(|a, b| a.0.cmp(&b.0));
++    Ok(out)
++}
++
++fn listed(g: &Graph) -> Res {
++    Ok(json!(
++        live(g)?
++            .into_iter()
++            .map(|(id, gr)| json!({ "id": id, "name": gr.name, "members": gr.members }))
++            .collect::<Vec<_>>()
++    ))
++}
++
++pub fn call(g: &Graph, op: &str, args: &Value) -> Res {
++    match op {
++        "groups.list" => listed(g),
++        // `{members: [{kind, id}], name?}`: a new group of them; the groups
++        "groups.make" => {
++            let members: Vec<Member> = serde_json::from_value(args.get("members").cloned().unwrap_or(json!([])))
++                .map_err(|e| format!("members are {{kind, id}}: {e}"))?;
++            let mut seen = HashSet::new();
++            let members: Vec<Member> = members.into_iter().filter(|m| seen.insert(m.clone())).collect();
++            if members.len() < 2 {
++                return Err("a group needs two things or more".into());
++            }
++            let now = live(g)?;
++            let blocks: HashSet<String> = g.blocks(None)?.into_iter().map(|b| b.id).collect();
++            let copies: HashSet<String> = g.copies()?.into_iter().map(|c| c.id).collect();
++            for m in &members {
++                let there = match m.kind.as_str() {
++                    "b" => blocks.contains(&m.id) && !m.id.starts_with("prefab:"),
++                    "c" => copies.contains(&m.id),
++                    "g" => now.iter().any(|(k, _)| *k == m.id),
++                    _ => false,
++                };
++                if !there {
++                    return Err(format!(
++                        "{} {:?} can't be grouped (it's not in the room, or it's a copy's part)",
++                        m.kind, m.id
++                    ));
++                }
++                if let Some((k, _)) = now.iter().find(|(_, gr)| gr.members.contains(m)) {
++                    return Err(format!(
++                        "{:?} is in the group {k} already: select that group to group it",
++                        m.id
++                    ));
++                }
++            }
++            let id = put(
++                g,
++                None,
++                mime::GROUP,
++                &Group {
++                    name: s(args, "name").trim().to_string(),
++                    members,
++                },
++            )?;
++            let mut out = json!({ "id": gid(id) });
++            out["groups"] = listed(g)?;
++            Ok(out)
++        }
++        // `{id}`: the group undone; its members stay (a nested group stays a group)
++        "groups.ungroup" => {
++            let id = s(args, "id");
++            let e = entry_of(id)?;
++            let gr = live(g)?
++                .into_iter()
++                .find(|(k, _)| k == id)
++                .ok_or_else(|| format!("there's no group {id}"))?
++                .1;
++            g.delete(e)?;
++            Ok(json!({ "members": gr.members, "groups": listed(g)? }))
++        }
++        // `{id, name}`
++        "groups.rename" => {
++            let id = s(args, "id");
++            let e = entry_of(id)?;
++            let mut gr = live(g)?
++                .into_iter()
++                .find(|(k, _)| k == id)
++                .ok_or_else(|| format!("there's no group {id}"))?
++                .1;
++            gr.name = s(args, "name").trim().to_string();
++            put(g, Some(e), mime::GROUP, &gr)?;
++            listed(g)
++        }
++        // `{members: [{kind, id}]}`: groups made again as they were (an undo of ungroup)
++        "groups.restore" => {
++            let members: Vec<Member> =
++                serde_json::from_value(args.get("members").cloned().unwrap_or(json!([]))).map_err(|e| e.to_string())?;
++            let id = put(
++                g,
++                None,
++                mime::GROUP,
++                &Group {
++                    name: s(args, "name").to_string(),
++                    members,
++                },
++            )?;
++            let mut out = json!({ "id": gid(id) });
++            out["groups"] = listed(g)?;
++            Ok(out)
++        }
++        _ => Err(format!("unknown op {op:?}")),
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn groups_nest_and_drop_what_goes() {
++        let g = Graph::in_memory().unwrap();
++        let lim = super::super::classify::Limits::NONE;
++        let add = |x: f32| {
++            super::super::blocks::call(
++                &g,
++                "blocks.add",
++                &json!({ "blocks": [{ "kind": "plain", "texture": "#aa0000", "x": x }] }),
++                &lim,
++            )
++            .unwrap()["ids"][0]
++                .as_str()
++                .unwrap()
++                .to_string()
++        };
++        let (a, b, c) = (add(0.0), add(2.0), add(4.0));
++        let m = |k: &str, id: &str| json!({ "kind": k, "id": id });
++        assert!(
++            call(&g, "groups.make", &json!({ "members": [m("b", &a)] }))
++                .unwrap_err()
++                .contains("two")
++        );
++        let one = call(&g, "groups.make", &json!({ "members": [m("b", &a), m("b", &b)] })).unwrap();
++        let one_id = one["id"].as_str().unwrap().to_string();
++        // a block can't be in two groups; the group can be in another
++        assert!(
++            call(&g, "groups.make", &json!({ "members": [m("b", &a), m("b", &c)] }))
++                .unwrap_err()
++                .contains("already")
++        );
++        let two = call(
++            &g,
++            "groups.make",
++            &json!({ "members": [m("g", &one_id), m("b", &c)], "name": "both" }),
++        )
++        .unwrap();
++        assert_eq!(two["groups"].as_array().unwrap().len(), 2);
++        // gone members drop out; a group of one goes, and the group holding it shrinks
++        super::super::blocks::call(&g, "blocks.delete", &json!({ "ids": [b] }), &lim).unwrap();
++        let l = call(&g, "groups.list", &json!({})).unwrap();
++        assert_eq!(l.as_array().unwrap().len(), 0, "{l}");
++        // ungroup keeps the members
++        let x = call(&g, "groups.make", &json!({ "members": [m("b", &a), m("b", &c)] })).unwrap();
++        let u = call(&g, "groups.ungroup", &json!({ "id": x["id"] })).unwrap();
++        assert_eq!(u["members"].as_array().unwrap().len(), 2);
++        assert_eq!(u["groups"], json!([]));
++        let r = call(&g, "groups.restore", &json!({ "members": u["members"] })).unwrap();
++        assert_eq!(r["groups"].as_array().unwrap().len(), 1);
++    }
++}
+diff --git a/core/src/ops/mod.rs b/core/src/ops/mod.rs
+index cc981d4..4fb7c2c 100644
+--- a/core/src/ops/mod.rs
++++ b/core/src/ops/mod.rs
+@@ -12,6 +12,8 @@ pub mod blocks;
+ pub mod chains;
+ #[cfg(not(target_arch = "wasm32"))]
+ pub mod classify;
++#[cfg(not(target_arch = "wasm32"))]
++pub mod groups;
+ pub mod merge;
+ #[cfg(not(target_arch = "wasm32"))]
+ pub mod models;
+@@ -208,7 +210,12 @@ pub fn counts(v: &View) -> Result<(u64, u64), String> {
+     };
+     let notes = of(mime::MARKDOWN)?;
+     let tags = of(mime::TAG)?;
+-    let anims = of(mime::ANIMATION)? + of(mime::WIRING)? + of(mime::TAXONOMY)? + of(mime::PIPE)? + of(mime::TAGSET)?;
++    let anims = of(mime::ANIMATION)?
++        + of(mime::WIRING)?
++        + of(mime::TAXONOMY)?
++        + of(mime::PIPE)?
++        + of(mime::TAGSET)?
++        + of(mime::GROUP)?;
+     Ok((notes, all.saturating_sub(notes + tags + anims)))
+ }
+ 
+diff --git a/core/src/ops/saves.rs b/core/src/ops/saves.rs
+index 436b721..abdc227 100644
+--- a/core/src/ops/saves.rs
++++ b/core/src/ops/saves.rs
+@@ -487,6 +487,10 @@ impl Saves {
+             let (_, g) = self.current()?;
+             return super::prefabs::call(&g, op, args);
+         }
++        if super::groups::routed(op) {
++            let (_, g) = self.current()?;
++            return super::groups::call(&g, op, args);
++        }
+         if super::wiring::routed(op) {
+             let (_, g) = self.current()?;
+             let shared = self.models.is_some_and(|l| l.shared);
+diff --git a/docs/app-api.md b/docs/app-api.md
+index f1d8d3c..b3f1c54 100644
+--- a/docs/app-api.md
++++ b/docs/app-api.md
+@@ -302,6 +302,21 @@ has the types right and wrong, and gives each wrong word the nearest words marke
+ | `tagsets.score` | `{name}` | `{marked: [{type, words, some}], trained, training, accuracy, measured_on, types: [{type, precision, recall, support}]}` |
+ | `classify.set_train` | `{name, val_fraction?: 0–0.5, patience?}` | details: how a classifier trains from now on |
+ 
++### Groups
++
++Things in the room grouped by hand (`core/src/ops/groups.rs`): a group's members are blocks
++(`b`), prefab copies (`c`) and groups (`g`, so groups nest); a thing is directly in one
++group at most. Members that are gone are left out when read, and a group left with fewer
++than two goes.
++
++| op | args | data |
++|---|---|---|
++| `groups.list` | | `[{id, name, members: [{kind, id}]}]` |
++| `groups.make` | `{members, name?}` | `{id, groups}`; two or more, each in the room and in no group yet (a copy's parts can't) |
++| `groups.ungroup` | `{id}` | `{members, groups}`; the members stay |
++| `groups.rename` | `{id, name}` | the groups |
++| `groups.restore` | `{members, name?}` | `{id, groups}`: a group made again (an undo of ungroup) |
++
+ ### Classifier buckets, filters and modules
+ 
+ Outputs are memoized per classifier and memory/note (`core/src/memo.rs`), under a stamp
+diff --git a/docs/checklist.md b/docs/checklist.md
+index e88410e..a71ca3d 100644
+--- a/docs/checklist.md
++++ b/docs/checklist.md
+@@ -176,8 +176,9 @@ measures: each line is checked against how the same action feels there.
+       is shown clearly. Works on blocks, texts, placements and lights in the space, and on
+       entries in the memory, lists, notes and tags views. (1 Nov: the space's many, moved,
+       turned and deleted together with one undo; memory box and Shift; notes and lists.)
+-- [ ] Groups: a selection can be grouped and ungrouped (Ctrl+G and Ctrl+Shift+G, and from the
++- [x] Groups: a selection can be grouped and ungrouped (Ctrl+G and Ctrl+Shift+G, and from the
+       menu); groups nest; a group is moved, turned, copied and saved as a prefab as a whole.
++      (1 Nov: `groups.*`; picked whole, opened by a double-click, copied, made a prefab.)
+ - [ ] Wires drawn in the room: each connection shown as a wire from its sender to its target,
+       lit while a signal passes. Wiring made by dragging from one block to another, with the
+       ports visible while wiring, the same way in the window and in first-person mode.
+diff --git a/docs/format.md b/docs/format.md
+index 28b12df..277e32e 100644
+--- a/docs/format.md
++++ b/docs/format.md
+@@ -215,7 +215,8 @@ wirings they're left out of search and counts. Pipes are entries of mime 12
+ (`application/x-anend-pipe`), their text the pipe's JSON (`core/src/ops/pipes.rs`: `{name,
+ about?, from: filter or null, effects, actions}`), left out the same way. Tag sets are entries of mime 13 (`application/x-anend-tagset`, `core/src/ops/tagsets.rs`:
+ `{name, about?, types: [{name, colour, about?}], check, for_texts?: {classifier or taxonomy, class}, threshold}`),
+-also left out; a set's marked words are lists named `<set>: <type>`, and its classifier is `tags: <set>`. A sound emitter is `S` 1, the
++also left out. Groups are entries of mime 14 (`application/x-anend-group`, `core/src/ops/groups.rs`:
++`{name?, members: [{kind: b|c|g, id}]}`, id `group:<key>`), left out the same way; a set's marked words are lists named `<set>: <type>`, and its classifier is `tags: <set>`. A sound emitter is `S` 1, the
+ sound's 16-byte id, its volume and reach (f32s) and a byte of flags (1: loops); sounds
+ are kept in `graph sounds` (sound id, 32 hex digits → `{id, mime, name, added, size,
+ seconds?}` JSON) and `graph sound bytes` (`core/src/graph/sounds.rs`). `graph lights` (`core/src/graph/lights.rs`): the
+diff --git a/docs/guide.md b/docs/guide.md
+index 18428af..1ada4c5 100644
+--- a/docs/guide.md
++++ b/docs/guide.md
+@@ -113,7 +113,12 @@ list and candidate. **Shift+click** selects many: texts, blocks, prefab copies,
+ while the lights window shows them; a box dragged on empty room selects what's in it
+ (Shift adds). The selected are outlined in blue; the gizmo at their middle moves and turns
+ them all, **Delete** takes them all away, **Ctrl+Z** takes either back in one step, and
+-**Esc** (or a click on empty room) lets them go. The room's colour is a setting.
++**Esc** (or a click on empty room) lets them go. **Ctrl+G** (or *group them*) makes the
++selected blocks and copies a group: a click on any of it picks all of it, dragging any of
++it moves it all, and groups go inside groups. A double-click opens a group to pick inside
++it (Esc closes it); **Ctrl+Shift+G** ungroups (Ctrl+Z groups it again). A selected group
++has *a copy beside it* and *make a prefab of it* (of its blocks). The room's colour is a
++setting.
+ 
+ ### Building in the space
+ 
+diff --git a/docs/next.md b/docs/next.md
+index 9303e2f..3f2a9a3 100644
+--- a/docs/next.md
++++ b/docs/next.md
+@@ -105,6 +105,7 @@ departure says why in its commit).
+   to edit parts).
+ - Done (1 Nov): selecting many (Shift+click and boxes in the space and the memory view;
+   notes and lists).
++- Done (1 Nov): groups (Ctrl+G, nesting, open by double-click, copy, prefab).
+ - Next: the rest of the user's 27 Oct
+   lines (grouped prefabs, shift and box selection, Ctrl+G groups, drawn wires, wgpu with no
+   JavaScript on the desktop, culling, polish, ▶).
+diff --git a/docs/parity.md b/docs/parity.md
+index 2e73e99..714a7e5 100644
+--- a/docs/parity.md
++++ b/docs/parity.md
+@@ -179,6 +179,7 @@ Audited 19 Oct 2026 (before the fixes of that day); the status column is kept cu
+ | switch and logic-gate prefabs (#27, 27 Oct): the prefabs window's "add the starters" makes a switch (a white block with a paddle), AND, OR, XOR and NOT gates, a latch, a lamp and a door, as prefabs, and the s programs they run as notes tagged `s` (each skipped when the save has it). The programs are composed: every gate is `inputs.` (its inputs' last values, kept by sender in its state), a rule, and `gate-out.` (its output kept, shown by its colour, told ahead by its ray); the switch, lamp and door are programs of their own. A hit or signal carries the sender's value (the first word of its kept state) as the program's fourth argument. Every starter's ray leaves its right side (+x) at the copy's height, so copies placed in a row at one height wire themselves: two switches into an AND gate into a lamp light it when both are on. Checked: a core test runs switches through AND, OR, XOR and the latch to lamps and a NOT to a door; on the web (the menu's pictures; one switch: dark, both: the gate and lamp lit) and the desktop under Xvfb (a switch turned off: the paddle up, the gate and lamp dark). The gate labels are texts of the save (AND, OR, XOR, NOT, LATCH) | queued requests #27 | has: app/docs/shots/web-gates-menu.png, web-gates-lit.png, desktop-gates.png; guard `parity::tests::prefabs_stay` |
+ | sounds: audio emitters and the sounds table (#17, 27 Oct): sound files (WAV, OGG, MP3, FLAC, WebM, M4A, known by their first bytes) are kept in the save as pictures are (`graph sounds`, by the hash of their bytes; backups and merges carry them). A sounds window (the speaker chip) adds files, plays one (▶), renames (a double click) and deletes (two clicks); the selected block plays a sound of the save, with a volume, a reach (it fades to nothing there) and whether it loops. While the room plays (the wiring window's ▶ play), looping emitters sound from the start and the others when a program prints `sound` (and stop at `hush`), so zone events, clicks, hits and timers can trigger them; each is placed where its block is and heard from the camera (Web Audio, a panner per voice), and stopping play silences them. Checked on the web (a 440 Hz WAV added from the window, one block looping it and one played by a program on a click: the voices start, the audio clock runs, stopping empties them) and on the desktop under Xvfb (the window, an emitter set, playing with no error; the container has no audio device, so nothing was heard) | queued requests #17 | has: app/docs/shots/web-sounds.png, desktop-sounds.png; guard `parity::tests::sounds_stay` |
+ | first-person mode (#9, 27 Oct): besides flying, the space can walk (V): gravity, the floor and blocks to stand on and bump into (their boxes as turned and bent; zones let you through), low steps climbed, run (Shift), sneak (Z, held), crouch (C; it stays down under a low ceiling), jump (Space), lean (Q, E) and mantle (a jump at a ledge within reach climbs onto it). The grapple (G) hooks the block or text you look at (60 units at most) on a rope you swing on; the wheel reels it in and out, G or a jump lets go. Superflight (B) thrusts where you look (Shift boosts) and collects the texts flown through in the order met, drawn as a trail; a window lists them and makes them one new entry, a chain (the first its title), a list (the first its head) or the bar's text. The body moves in fixed steps of 1/120 s. On the web walking and superflight lock the pointer (Esc lets go); on the desktop they don't, since the web view there stopped passing keys on while locked (under Xvfb), so right-drag looks. Every key is rebindable (four new actions: walk, superflight, grapple, sneak; the rest reuse the flying keys), and the help lists them. Checked on the web (fall to the floor, walk into a box and stop at its face, mantle onto it, hook a beam, reel in and swing, let go and land, superflight through four texts collected in order, made into the entry "we write by flying") and on the desktop under Xvfb (walking, stopping at the box, superflight). Not yet: placing prefabs in first-person mode (its own line); texts don't collide; the same steps on two browsers can still differ in the last bits of a sine | queued requests #9 | has: app/docs/shots/web-superflight.png, web-grapple.png, desktop-walking.png, desktop-help-walking.png; guard `parity::tests::first_person_stays` |
++| groups (the user's 27 Oct direction): Ctrl+G (key action `group`, or the selection bar's "group them") groups the selected blocks and copies (each as its outermost group, so groups nest); a click on any of a group's things selects the whole group ("a group" in the bar), dragging any of it moves it all, Shift+click adds or takes out a whole group; a double-click opens a group to pick inside it, Esc closes it; Ctrl+Shift+G (`ungroup`, or "ungroup") ungroups and Ctrl+Z groups it again (and Ctrl+Z takes back a grouping). A selected group has "a copy beside it" (its blocks and copies copied, its groups inside it remade) and "make a prefab of it" (of its blocks; copies inside are detached first). Groups are entries of the save (mime 14) that drop members gone. Not yet: an undo of a group's copy takes back its blocks but not its copied prefab copies. Checked: a core test (two at least, one group each, nesting, gone members dropping out, ungroup and restore); on the web (two blocks grouped, a click on one picks both, nested with a door, opened by a double-click to pick the inner group, closed with Esc, ungrouped and undone, copied beside) and on the desktop under Xvfb (a nested group picked by a click, its bar) | the user, 27 Oct; Logic World's and drawing tools' groups | has: app/docs/shots/web-groups.png, desktop-group.png; guard `parity::tests::groups_stay`; key actions `group`, `ungroup` |
+ | selecting many (the user's 27 Oct direction): in the space, Shift+click adds a text, a block, a prefab copy or a light (its marker, while the lights window shows them) to the selection or takes it out; a box dragged on empty room selects the texts, blocks, copies and shown lights in it (Shift adds to the selection); a click on empty room or Esc lets them go. The selected are outlined in blue (texts ringed), a bar shows how many of each with "delete them" and "let go", the gizmo at their middle moves and turns them all (texts are pinned where they go), Delete takes them all away (copies and lights too), and Ctrl+Z takes back a move or a delete of many in one step (the room's undo now batches). A light's marker can be clicked to pick it in the lights window. In the memory view Shift+click selects (as Alt+click) and a box dragged from the field's empty space selects what it touches (Shift adds); the list moved to Ctrl+Shift+click. In the notes view Shift+click picks notes (a box above the list tags them all or deletes them, two clicks); in the lists view Shift+click on a list's name picks it (unlist them together, each undoable). The tags view's Ctrl/Shift+click multi-pick stays. Checked: on the web (three items Shift+clicked, dragged together, the move undone in one step; a box round everything, deleted, brought back by one Ctrl+Z; memory texts by Shift+click and by a box; two notes picked and tagged) and on the desktop under Xvfb (a block and two copies Shift+clicked, the bar and outlines) | the user, 27 Oct; Logic World's and Obsidian's selection | has: app/docs/shots/web-select-box.png, desktop-select-many.png, web-memory-box.png, web-notes-picked.png; guard `parity::tests::selection_of_many_stays` |
+ | prefabs placed as one group (the user's 27 Oct direction): a click on a copy's part selects the whole copy (an orange outline round its parts, the gizmo at their middle with arrows and rings, no size knobs: size stays in the prefabs window); dragging moves or turns all its parts together and keeps the copy's own origin with them; right-click gives the copy's menu (open it to edit its parts, a quarter turn, a copy beside it with its own changes, its prefab, detach it into blocks, remove it); Delete removes the whole copy and Ctrl+Z puts it back (with its own changes); Ctrl+Z also takes back a drag. Editing parts is a deliberate step: a double-click on a part (or the menu) opens the copy, its parts picked one by one; Esc or a click outside closes it. Placing a copy selects it whole. A copy put back by an undo is a new copy with the same place, turn, size and own changes (an outside ray aimed at one of its parts aims at the old one). Core: `prefabs.duplicate`, `prefabs.remove` answering `restore`, `prefabs.place` taking `own`. The gizmo's middle ball is picked before the arrows, knobs and rings (a ring seen edge-on crossed it). Checked: a core test (a copy of a copy keeps its own changes; removed and put back as it was); on the web (a door selected whole, dragged, copied from the menu, deleted and undone, opened by a double-click and closed with Esc) and on the desktop under Xvfb (a lamp selected whole, its menu) | the user, 27 Oct; Logic World's placed components | has: app/docs/shots/web-copy-group.png, web-copy-open.png, desktop-copy-menu.png; guard `parity::tests::copies_are_groups` |
+ | placing prefabs by hand (#19, 27 Oct): each prefab in the prefabs window has "by hand": a see-through copy (the ghost) follows where you look while walking, or the pointer while flying, resting on the face of a block or on the floor (12 units ahead when the view meets neither), snapped to a half-unit grid (Shift: free); the wheel turns it a quarter; it shows green where it fits and red where it would overlap a block, where a click is refused. A click places a copy and the ghost stays to place more; Esc or a right click stops. Checked on the web (walking: a lamp on the floor in front of a box, the same spot again red and refused, turned a quarter and placed aside, Esc) and on the desktop under Xvfb (flying: an AND gate placed where the pointer was) | queued requests #19 | has: app/docs/shots/web-ghost-red.png, desktop-ghost.png; guard `parity::tests::prefabs_stay` |
+diff --git a/docs/wip/questions.md b/docs/wip/questions.md
+index 18373ef..e49e4e0 100644
+--- a/docs/wip/questions.md
++++ b/docs/wip/questions.md
+@@ -428,3 +428,9 @@ The answers left these open. Each is written into the design as its default.
+     stray drag can't scatter a selection; texts moved with them are pinned.
+ 109. **The room's undo batches:** what one action did (many moved, many deleted, copies
+     removed by Rust in the same step) goes back with one Ctrl+Z.
++110. **Groups hold blocks and prefab copies, not texts or lights:** they're what's built;
++    texts and lights still join a selection of many. A thing is in one group directly; a
++    group goes inside another when it's grouped again with more.
++111. **A group's copy goes 2 units along x**, its inner groups remade as groups; a prefab
++    of a group takes its blocks (copies inside must be detached first: a prefab's parts
++    are blocks).
