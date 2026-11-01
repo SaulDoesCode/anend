@@ -469,3 +469,8 @@ The answers left these open. Each is written into the design as its default.
     wires, walking, the ghost, sounds (outside the webview: rodio, or WebKit's audio
     through a page with no script), animations and zones. space.js leaves the desktop
     build when all of it is there, checked against the shots of each line.
+117. **The webview is drawn at 99 % opacity in native mode.** At full opacity GTK puts the
+    WebKit view on screen by itself and its see-through parts come out black; just under
+    full, GTK draws it into the window over the drawing area, so the room shows through
+    and the bars and windows stay (a 1 % blend of what's under them, which isn't seen).
+    The window is see-through (an RGBA visual) in native mode only.

@@ -109,8 +109,12 @@ departure says why in its commit).
 - Done (1 Nov): wires drawn and made by dragging (J).
 - In progress (1 Nov): the space on wgpu with no JavaScript on the desktop. `render/`
   (`anend-render`) draws blocks, spheres and lines into a picture (a headless test reads it
-  back); next: the GTK drawing area under the transparent webview, then the room's parts
-  one by one (questions.md 114–116).
+  back). On the Linux desktop, `ANEND_NATIVE_SPACE=1` shows the room drawn that way under
+  the see-through webview (app/src/native.rs, views/space/native_room.rs): the save's
+  blocks and wires, flying with W A S D and looking with the right button
+  (app/docs/shots/desktop-native-space.png). Next: picking, texts, textures, lights, bends,
+  the gizmo and selection, groups and wires, walking, the ghost, sounds, animations,
+  zones; then space.js leaves the desktop build (questions.md 114–117).
 - Next: the rest of the user's 27 Oct
   lines (grouped prefabs, shift and box selection, Ctrl+G groups, drawn wires, wgpu with no
   JavaScript on the desktop, culling, polish, ▶).

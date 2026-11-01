@@ -7,6 +7,7 @@
 //! one soft light from above; lines (wires and rays); the sky's colour. Texts, textures,
 //! baked lights, bends, the gizmo and picking come in the slices after it.
 
+pub use glam;
 use glam::{Mat4, Quat, Vec3};
 use wgpu::util::DeviceExt;
 

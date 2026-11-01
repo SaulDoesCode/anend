@@ -994,3 +994,6 @@ input.tax-about { width: 100%; }
 .many .row { gap: 4px; flex-wrap: wrap; }
 .many input { min-width: 0; flex: 1; }
 .listcard.picked { box-shadow: inset 4px 0 0 #3f8cff; }
+/* the space drawn natively under the page: the page is see-through over it */
+.app:has(.space-host.native) { background: transparent; }
+.space-host.native { background: transparent; }

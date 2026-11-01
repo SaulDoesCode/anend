@@ -9,6 +9,8 @@ mod hubnet;
 mod icons;
 mod keys;
 mod md;
+#[cfg(all(feature = "desktop", target_os = "linux"))]
+mod native;
 mod parity;
 mod prefs;
 mod shell;
@@ -169,6 +171,9 @@ fn main() {
         .with_title("anend")
         .with_window_icon(window_icon())
         .with_inner_size(LogicalSize::new(1200.0, 820.0));
+    // the native space shows through the page: the window (and so the webview) is see-through
+    #[cfg(target_os = "linux")]
+    let window = window.with_transparent(native::enabled());
     #[cfg(target_os = "linux")]
     desktop_entry();
     let cfg = Config::new()

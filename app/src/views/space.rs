@@ -29,6 +29,8 @@ use crate::views::{TChip, use_keys};
 mod animwin;
 mod flightwin;
 mod lightwin;
+#[cfg(all(feature = "desktop", target_os = "linux"))]
+mod native_room;
 mod prefabwin;
 mod soundwin;
 mod texwin;
@@ -1343,6 +1345,11 @@ fn export(ui: Ui, name: &str, rows: &Value) {
 
 #[component]
 pub fn Space() -> Element {
+    // the room drawn natively, with no JavaScript (the renderer line, while it moves over)
+    #[cfg(all(feature = "desktop", target_os = "linux"))]
+    if crate::native::enabled() {
+        return rsx! { native_room::NativeRoom {} };
+    }
     let ui = ui();
     let api = api();
     let sp = Sp {
