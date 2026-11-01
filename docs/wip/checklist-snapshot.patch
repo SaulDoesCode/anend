@@ -1,0 +1,487 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index af1f786..57a8658 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -105,10 +105,12 @@ name = "anend-app"
+ version = "0.1.0"
+ dependencies = [
+  "anend-core",
++ "anend-render",
+  "chrono",
+  "dioxus",
+  "futures-channel",
+  "futures-util",
++ "gtk",
+  "js-sys",
+  "png 0.17.16",
+  "pulldown-cmark",
+diff --git a/app/Cargo.toml b/app/Cargo.toml
+index 5a22304..a544ad3 100644
+--- a/app/Cargo.toml
++++ b/app/Cargo.toml
+@@ -13,7 +13,7 @@ path = "src/main.rs"
+ [features]
+ default = ["desktop", "hub"]
+ # the desktop app: the system webview (wry), the saves on disk through anend-core's Store
+-desktop = ["dioxus/desktop", "dep:tokio", "dep:png", "dep:ureq", "anend-core/gpu", "anend-core/fetch"]
++desktop = ["dioxus/desktop", "dep:tokio", "dep:png", "dep:ureq", "anend-core/gpu", "anend-core/fetch", "dep:anend-render", "dep:gtk"]
+ # the web app: WebAssembly in the browser, talking to the hub's app API over a WebSocket
+ web = ["dioxus/web", "dep:wasm-bindgen", "dep:web-sys", "dep:js-sys", "dep:wasm-bindgen-futures"]
+ # the hub's settings (its address, the app token); leave out for a hub-free build
+@@ -29,6 +29,8 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
+ chrono = "0.4"
+ pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+ redb = "4.3"
++# the space drawn natively (wgpu), on the desktop
++anend-render = { path = "../render", optional = true }
+ 
+ tokio = { version = "1", features = ["rt", "time"], optional = true }
+ png = { version = "0.17", optional = true }
+@@ -38,3 +40,7 @@ wasm-bindgen = { version = "=0.2.129", optional = true }
+ wasm-bindgen-futures = { version = "0.4", optional = true }
+ js-sys = { version = "0.3", optional = true }
+ web-sys = { version = "0.3", optional = true, features = ["WebSocket", "MessageEvent", "Window", "Storage", "Location", "CloseEvent", "BinaryType"] }
++
++# the native space's drawing area under the webview (Linux: GTK, as tao and wry use)
++[target.'cfg(target_os = "linux")'.dependencies]
++gtk = { version = "0.18", optional = true }
+diff --git a/app/src/main.rs b/app/src/main.rs
+index 6b4c9d3..03a4471 100644
+--- a/app/src/main.rs
++++ b/app/src/main.rs
+@@ -9,6 +9,8 @@ mod hubnet;
+ mod icons;
+ mod keys;
+ mod md;
++#[cfg(all(feature = "desktop", target_os = "linux"))]
++mod native;
+ mod parity;
+ mod prefs;
+ mod shell;
+@@ -169,6 +171,9 @@ fn main() {
+         .with_title("anend")
+         .with_window_icon(window_icon())
+         .with_inner_size(LogicalSize::new(1200.0, 820.0));
++    // the native space shows through the page: the window (and so the webview) is see-through
++    #[cfg(target_os = "linux")]
++    let window = window.with_transparent(native::enabled());
+     #[cfg(target_os = "linux")]
+     desktop_entry();
+     let cfg = Config::new()
+diff --git a/app/src/native.rs b/app/src/native.rs
+new file mode 100644
+index 0000000..514e786
+--- /dev/null
++++ b/app/src/native.rs
+@@ -0,0 +1,180 @@
++//! The space drawn natively on the Linux desktop, with no JavaScript (docs/wip/questions.md
++//! 114): `anend-render` draws the room on a thread of its own, and a GTK drawing area
++//! *under* the (transparent) webview paints each picture where the space's element is.
++//! The HTML around and over the room (bars, windows, menus) stays on top; GTK puts the two
++//! together in one window.
++//!
++//! While the room moves over (the renderer line), this path is taken when the app starts
++//! with `ANEND_NATIVE_SPACE=1`; otherwise the space is space.js in the webview as before.
++
++use std::cell::RefCell;
++use std::sync::mpsc::{Receiver, Sender, channel};
++use std::sync::{Arc, Mutex, OnceLock};
++
++use gtk::prelude::*;
++
++/// whether the space is drawn natively (`ANEND_NATIVE_SPACE=1`)
++pub fn enabled() -> bool {
++    static ON: OnceLock<bool> = OnceLock::new();
++    *ON.get_or_init(|| std::env::var("ANEND_NATIVE_SPACE").is_ok_and(|v| v == "1"))
++}
++
++/// a picture ready to paint: BGRA (cairo's order), where it goes in the window
++struct Frame {
++    x: f64,
++    y: f64,
++    w: i32,
++    h: i32,
++    bgra: Vec<u8>,
++}
++
++/// what the drawing area paints: the window's colour, then the room's picture (while shown)
++#[derive(Default)]
++struct Paint {
++    window: (f64, f64, f64),
++    frame: Option<Frame>,
++    shown: bool,
++}
++
++fn paint() -> &'static Arc<Mutex<Paint>> {
++    static P: OnceLock<Arc<Mutex<Paint>>> = OnceLock::new();
++    P.get_or_init(Default::default)
++}
++
++thread_local! {
++    static AREA: RefCell<Option<gtk::DrawingArea>> = const { RefCell::new(None) };
++}
++
++/// asks GTK (on its own thread) to paint again
++fn redraw() {
++    gtk::glib::MainContext::default().invoke(|| {
++        AREA.with(|a| {
++            if let Some(a) = a.borrow().as_ref() {
++                a.queue_draw();
++            }
++        })
++    });
++}
++
++/// puts the drawing area under the webview and makes the webview see-through; once
++pub fn install(window: &dioxus::desktop::tao::window::Window, webview: &dioxus::desktop::wry::WebView) {
++    use dioxus::desktop::tao::platform::unix::WindowExtUnix;
++    if AREA.with(|a| a.borrow().is_some()) {
++        return;
++    }
++    let Some(vbox) = window.default_vbox() else { return };
++    eprintln!("native: vbox children {}", vbox.children().len());
++    let Some(web) = vbox.children().into_iter().next() else { return };
++    eprintln!("native: web has_window={} type={}", web.has_window(), web.type_().name());
++    vbox.remove(&web);
++    let overlay = gtk::Overlay::new();
++    let area = gtk::DrawingArea::new();
++    area.connect_draw(|_, cr| {
++        let p = paint().lock().unwrap_or_else(|e| e.into_inner());
++        eprintln!("native: draw shown={} frame={}", p.shown, p.frame.is_some());
++        let (r, g, b) = p.window;
++        cr.set_source_rgb(r, g, b);
++        let _ = cr.paint();
++        if let Some(f) = &p.frame { eprintln!("native: paint at {},{} {}x{} len {} win {:?}", f.x, f.y, f.w, f.h, f.bgra.len(), p.window); }
++        if p.shown
++            && let Some(f) = &p.frame
++            && let Ok(s) = gtk::cairo::ImageSurface::create_for_data(
++                f.bgra.clone(),
++                gtk::cairo::Format::Rgb24,
++                f.w,
++                f.h,
++                f.w * 4,
++            )
++        {
++            let _ = cr.set_source_surface(&s, f.x, f.y);
++            let _ = cr.paint();
++        }
++        gtk::glib::Propagation::Stop
++    });
++    overlay.add(&area);
++    overlay.add_overlay(&web);
++    vbox.pack_start(&overlay, true, true, 0);
++    overlay.show_all();
++    let _ = webview.set_background_color((0, 0, 0, 0));
++    AREA.with(|a| *a.borrow_mut() = Some(area));
++}
++
++/// the window's colour (behind the see-through parts of the page), `#rrggbb`
++pub fn set_window_colour(hex: &str) {
++    let h = |i: usize| u8::from_str_radix(hex.get(i..i + 2).unwrap_or("00"), 16).unwrap_or(0) as f64 / 255.0;
++    paint().lock().unwrap_or_else(|e| e.into_inner()).window = (h(1), h(3), h(5));
++    redraw();
++}
++
++/// whether the room's picture shows (the space is the view on screen)
++pub fn show(on: bool) {
++    paint().lock().unwrap_or_else(|e| e.into_inner()).shown = on;
++    redraw();
++}
++
++/// one picture to draw: the room, from where, into which part of the window
++pub struct Job {
++    pub scene: anend_render::Scene,
++    pub camera: anend_render::Camera,
++    pub x: f64,
++    pub y: f64,
++    pub w: u32,
++    pub h: u32,
++}
++
++fn worker() -> &'static Mutex<Sender<Job>> {
++    static W: OnceLock<Mutex<Sender<Job>>> = OnceLock::new();
++    W.get_or_init(|| {
++        let (tx, rx) = channel::<Job>();
++        std::thread::Builder::new()
++            .name("anend space".into())
++            .spawn(move || draw_loop(rx))
++            .expect("the space's thread");
++        Mutex::new(tx)
++    })
++}
++
++/// asks for a picture; only the newest asked for is drawn
++pub fn draw(job: Job) {
++    let _ = worker().lock().unwrap_or_else(|e| e.into_inner()).send(job);
++}
++
++fn draw_loop(rx: Receiver<Job>) {
++    let mut renderer: Option<anend_render::Renderer> = None;
++    while let Ok(mut job) = rx.recv() {
++        while let Ok(newer) = rx.try_recv() {
++            job = newer;
++        }
++        if job.w == 0 || job.h == 0 {
++            continue;
++        }
++        let r = match &mut renderer {
++            Some(r) => {
++                r.resize(job.w, job.h);
++                r
++            }
++            None => match anend_render::Renderer::new(job.w, job.h) {
++                Ok(r) => renderer.insert(r),
++                Err(e) => {
++                    eprintln!("anend: the space can't be drawn natively: {e}");
++                    return;
++                }
++            },
++        };
++        let mut px = r.render(&job.scene, &job.camera);
++        eprintln!("native: frame {}x{} at {},{} blocks {}", job.w, job.h, job.x, job.y, job.scene.blocks.len());
++        static DUMPED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
++        if std::env::var("ANEND_NATIVE_DUMP").is_ok() && DUMPED.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 40 {
++            let f = std::fs::File::create(std::env::var("ANEND_NATIVE_DUMP").unwrap()).unwrap();
++            let mut e = png::Encoder::new(std::io::BufWriter::new(f), job.w, job.h);
++            e.set_color(png::ColorType::Rgba);
++            e.write_header().unwrap().write_image_data(&px).unwrap();
++        }
++        for p in px.chunks_exact_mut(4) {
++            p.swap(0, 2);
++        }
++        paint().lock().unwrap_or_else(|e| e.into_inner()).frame =
++            Some(Frame { x: job.x, y: job.y, w: job.w as i32, h: job.h as i32, bgra: px });
++        redraw();
++    }
++}
+diff --git a/app/src/style.css b/app/src/style.css
+index 83b1b09..cc9fc86 100644
+--- a/app/src/style.css
++++ b/app/src/style.css
+@@ -994,3 +994,6 @@ input.tax-about { width: 100%; }
+ .many .row { gap: 4px; flex-wrap: wrap; }
+ .many input { min-width: 0; flex: 1; }
+ .listcard.picked { box-shadow: inset 4px 0 0 #3f8cff; }
++/* the space drawn natively under the page: the page is see-through over it */
++.app:has(.space-host.native) { background: transparent; }
++.space-host.native { background: transparent; }
+diff --git a/app/src/views/space.rs b/app/src/views/space.rs
+index 5d24005..edd9af7 100644
+--- a/app/src/views/space.rs
++++ b/app/src/views/space.rs
+@@ -29,6 +29,8 @@ use crate::views::{TChip, use_keys};
+ mod animwin;
+ mod flightwin;
+ mod lightwin;
++#[cfg(all(feature = "desktop", target_os = "linux"))]
++mod native_room;
+ mod prefabwin;
+ mod soundwin;
+ mod texwin;
+@@ -1343,6 +1345,11 @@ fn export(ui: Ui, name: &str, rows: &Value) {
+ 
+ #[component]
+ pub fn Space() -> Element {
++    // the room drawn natively, with no JavaScript (the renderer line, while it moves over)
++    #[cfg(all(feature = "desktop", target_os = "linux"))]
++    if crate::native::enabled() {
++        return rsx! { native_room::NativeRoom {} };
++    }
+     let ui = ui();
+     let api = api();
+     let sp = Sp {
+diff --git a/app/src/views/space/native_room.rs b/app/src/views/space/native_room.rs
+new file mode 100644
+index 0000000..affb853
+--- /dev/null
++++ b/app/src/views/space/native_room.rs
+@@ -0,0 +1,177 @@
++//! The space drawn natively (Linux desktop, `ANEND_NATIVE_SPACE=1`; crate::native): the
++//! room's element stays empty and see-through, the room is drawn under it by
++//! `anend-render`, and its pointer and keys come here through Dioxus's own handlers.
++//!
++//! What it does so far (the renderer line moves the room over in slices): the save's
++//! blocks in their colours, boxes and spheres, and the wires between them, on the room's
++//! colour; flying (W A S D, Space and C, Shift faster) and looking (the right button held).
++
++use std::collections::HashSet;
++
++use dioxus::prelude::*;
++use serde_json::Value;
++
++use crate::ui::*;
++
++fn hex(c: &str) -> [f32; 3] {
++    let h = |i: usize| u8::from_str_radix(c.get(i..i + 2).unwrap_or("80"), 16).unwrap_or(128) as f32 / 255.0;
++    // sRGB to linear: the renderer writes an sRGB picture
++    let lin = |v: f32| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
++    if c.starts_with('#') && c.len() == 7 { [lin(h(1)), lin(h(3)), lin(h(5))] } else { [0.5, 0.5, 0.5] }
++}
++
++/// the room's blocks and wires as the renderer draws them
++fn scene(blocks: &[Value], wires: &[Value], sky: &str) -> anend_render::Scene {
++    use anend_render::glam::{Quat, Vec3};
++    let mut out = anend_render::Scene { sky: hex(sky), ..Default::default() };
++    let f = |v: &Value, k: &str, d: f32| v[k].as_f64().map(|x| x as f32).unwrap_or(d);
++    let mut at = std::collections::HashMap::new();
++    for b in blocks {
++        let r = b["rot"].as_array().map(|a| a.iter().map(|x| x.as_f64().unwrap_or(0.0) as f32).collect::<Vec<_>>()).unwrap_or_default();
++        let rot = if r.len() == 4 { Quat::from_xyzw(r[0], r[1], r[2], r[3]).normalize() } else { Quat::IDENTITY };
++        let pos = Vec3::new(f(b, "x", 0.0), f(b, "y", 0.0), f(b, "z", 0.0));
++        let tex = b["texture"].as_str().unwrap_or("");
++        out.blocks.push(anend_render::Block {
++            at: pos,
++            rot,
++            size: Vec3::new(f(b, "w", 1.0), f(b, "h", 1.0), f(b, "d", 1.0)),
++            colour: if tex.starts_with('#') { hex(tex) } else { [0.75, 0.72, 0.68] },
++            sphere: b["shape"] == "sphere",
++        });
++        at.insert(b["id"].as_str().unwrap_or("").to_string(), pos);
++    }
++    for w in wires {
++        let Some(p0) = at.get(w["id"].as_str().unwrap_or("")) else { continue };
++        for t in w["links"].as_array().into_iter().flatten() {
++            let Some(p1) = at.get(t.as_str().unwrap_or("")) else { continue };
++            let mid = (*p0 + *p1) * 0.5 - Vec3::Y * (p0.distance(*p1) * 0.18).min(1.2);
++            let points = (0..=20)
++                .map(|i| {
++                    let t = i as f32 / 20.0;
++                    *p0 * (1.0 - t) * (1.0 - t) + mid * 2.0 * t * (1.0 - t) + *p1 * t * t
++                })
++                .collect();
++            out.lines.push(anend_render::Line { points, colour: [0.35, 0.27, 0.15] });
++        }
++    }
++    out
++}
++
++#[component]
++pub fn NativeRoom() -> Element {
++    let ui = ui();
++    let api = api();
++    // the window: the drawing area goes under the webview once
++    use_hook(|| {
++        let d = dioxus::desktop::window();
++        crate::native::install(&d.window, &d.webview);
++        crate::native::show(true);
++    });
++    use_drop(|| crate::native::show(false));
++    use_effect(move || {
++        let p = ui.prefs.read();
++        crate::native::set_window_colour(&crate::theme::colour(&p.palette, &p.colours, "window"));
++    });
++    let blocks = use_resource({
++        let api = api.clone();
++        move || {
++            let api = api.clone();
++            let _ = (ui.changed)();
++            async move { api.call("blocks.list", serde_json::json!({})).await.ok().and_then(|r| r["blocks"].as_array().cloned()).unwrap_or_default() }
++        }
++    });
++    let wires = use_resource({
++        let api = api.clone();
++        move || {
++            let api = api.clone();
++            let _ = (ui.changed)();
++            async move { api.call("wiring.list", serde_json::json!({})).await.ok().and_then(|r| r.as_array().cloned()).unwrap_or_default() }
++        }
++    });
++    let mut rect = use_signal(|| (0.0f64, 0.0f64, 0.0f64, 0.0f64));
++    let mut el: Signal<Option<std::rc::Rc<MountedData>>> = use_signal(|| None);
++    let mut camera = use_signal(|| anend_render::Camera { at: anend_render::glam::Vec3::new(0.0, 0.5, 6.0), ..Default::default() });
++    let mut keys: Signal<HashSet<String>> = use_signal(HashSet::new);
++    let mut looking: Signal<Option<(f64, f64)>> = use_signal(|| None);
++    // the frame loop: fly by the held keys, keep the element's place, ask for a picture
++    use_future(move || async move {
++        let mut last = std::time::Instant::now();
++        let mut tick = 0u32;
++        loop {
++            crate::ui::sleep_ms(16).await;
++            let dt = last.elapsed().as_secs_f32().min(0.1);
++            last = std::time::Instant::now();
++            tick += 1;
++            if tick % 30 == 1
++                && let Some(m) = el.peek().clone()
++                && let Ok(r) = m.get_client_rect().await
++            {
++                rect.set((r.origin.x, r.origin.y, r.size.width, r.size.height));
++            }
++            let held = keys.peek().clone();
++            if !held.is_empty() {
++                use anend_render::glam::{Quat, Vec3};
++                let mut c = *camera.peek();
++                let rot = Quat::from_euler(anend_render::glam::EulerRot::YXZ, c.yaw, c.pitch, 0.0);
++                let fast = if held.contains("Shift") { 4.0 } else { 1.0 };
++                let v = 6.0 * fast * dt;
++                let mut mv = Vec3::ZERO;
++                for (k, d) in [("w", Vec3::NEG_Z), ("s", Vec3::Z), ("a", Vec3::NEG_X), ("d", Vec3::X)] {
++                    if held.contains(k) {
++                        mv += rot * d;
++                    }
++                }
++                if held.contains(" ") {
++                    mv += Vec3::Y;
++                }
++                if held.contains("c") {
++                    mv -= Vec3::Y;
++                }
++                c.at += mv * v;
++                camera.set(c);
++            }
++            let (x, y, w, h) = *rect.peek();
++            if w < 2.0 || h < 2.0 {
++                continue;
++            }
++            let sky = std::env::var("ANEND_SKY").unwrap_or_else(|_| ui.prefs.peek().space_bg.clone());
++            let s = scene(&blocks.peek().clone().unwrap_or_default(), &wires.peek().clone().unwrap_or_default(), &sky);
++            crate::native::draw(crate::native::Job { scene: s, camera: *camera.peek(), x, y, w: w as u32, h: h as u32 });
++        }
++    });
++    rsx! {
++        // the page is see-through where the room is: the window's colour is painted under it
++        style { "html, body, #main, .app, .view.space {{ background: transparent !important; }}" }
++        div { id: "space-host", class: "space-host native", tabindex: "0",
++            "aria-label": "the space: right drag looks, W A S D fly",
++            onmounted: move |e| el.set(Some(e.data())),
++            onkeydown: move |e: KeyboardEvent| {
++                let k = match e.key() { Key::Character(c) => c.to_lowercase(), Key::Shift => "Shift".into(), _ => return };
++                keys.write().insert(k);
++            },
++            onkeyup: move |e: KeyboardEvent| {
++                let k = match e.key() { Key::Character(c) => c.to_lowercase(), Key::Shift => "Shift".into(), _ => return };
++                keys.write().remove(&k);
++            },
++            onblur: move |_| keys.write().clear(),
++            onmousedown: move |e: MouseEvent| {
++                if e.trigger_button() == Some(dioxus::html::input_data::MouseButton::Secondary) {
++                    let p = e.client_coordinates();
++                    looking.set(Some((p.x, p.y)));
++                }
++            },
++            onmousemove: move |e: MouseEvent| {
++                if let Some((x0, y0)) = looking() {
++                    let p = e.client_coordinates();
++                    let mut c = *camera.peek();
++                    c.yaw -= ((p.x - x0) * 0.004) as f32;
++                    c.pitch = (c.pitch - ((p.y - y0) * 0.004) as f32).clamp(-1.55, 1.55);
++                    camera.set(c);
++                    looking.set(Some((p.x, p.y)));
++                }
++            },
++            onmouseup: move |_| looking.set(None),
++            oncontextmenu: move |e| e.prevent_default(),
++        }
++    }
++}
+diff --git a/render/src/lib.rs b/render/src/lib.rs
+index 8845b82..f270ccc 100644
+--- a/render/src/lib.rs
++++ b/render/src/lib.rs
+@@ -7,6 +7,7 @@
+ //! one soft light from above; lines (wires and rays); the sky's colour. Texts, textures,
+ //! baked lights, bends, the gizmo and picking come in the slices after it.
+ 
++pub use glam;
+ use glam::{Mat4, Quat, Vec3};
+ use wgpu::util::DeviceExt;
+ 
