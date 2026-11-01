@@ -42,7 +42,7 @@ pub(super) async fn load_wires(api: &Api, sp: Sp) {
     };
     let wires: Vec<Value> = list
         .iter()
-        .map(|w| json!({ "id": w["id"], "on": w["wiring"]["on"], "every": w["wiring"]["every"] }))
+        .map(|w| json!({ "id": w["id"], "on": w["wiring"]["on"], "every": w["wiring"]["every"], "links": w["links"] }))
         .collect();
     let live = *sp.live.peek();
     sp.send(json!({ "cmd": "wires", "wires": wires, "live": live }));
@@ -259,6 +259,11 @@ pub(super) fn Wires(sp: Sp) -> Element {
                     },
                     if live { "■ stop playing" } else { "▶ play" }
                 }
+                button { class: if (sp.wiremode)() { "btn small primary" } else { "btn small" },
+                    "aria-pressed": "{(sp.wiremode)()}",
+                    title: "drag from one block to another to wire them; every block shows a port while it's on (J)",
+                    onclick: move |_| sp.send(json!({ "cmd": "wiremode", "toggle": true })),
+                    "connect by dragging" }
                 if let Some(id) = wired() {
                     span { class: "small", "wiring " b { {short(&id)} } }
                 }

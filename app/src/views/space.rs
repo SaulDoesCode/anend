@@ -506,6 +506,8 @@ try {{
     else if (c.cmd === 'effects') sp.effects(c.fx);
     else if (c.cmd === 'copies') sp.setCopies(c.list || []);
     else if (c.cmd === 'batch') sp.setBatch(!!c.on);
+    else if (c.cmd === 'wiremode') sp.setWiring(c.toggle ? null : !!c.on);
+    else if (c.cmd === 'wired') sp.record({{ kind: 'wired', items: c.items || [] }});
     else if (c.cmd === 'groups') {{
       sp.setGroups(c.list || []);
       if (c.made) {{ sp.record({{ kind: 'grouped', id: c.made }}); sp.pickGroup(c.made); }}
@@ -604,6 +606,8 @@ struct Sp {
     block_use: Signal<(u64, u64)>,
     /// the room's lights (`lights.list`), as the room bakes them
     lights: Signal<Vec<Value>>,
+    /// wiring by dragging is on
+    wiremode: Signal<bool>,
     /// a light picked in the room (its marker clicked), for the lights window
     lightpick: Signal<Option<u64>>,
     /// the selection of many in the room: `{count, blocks, copies, texts, lights}`
@@ -1354,6 +1358,7 @@ pub fn Space() -> Element {
         block_use: use_signal(|| (0, 0)),
         lights: use_signal(Vec::new),
         lightpick: use_signal(|| None),
+        wiremode: use_signal(|| false),
         multi: use_signal(|| None),
         menu: use_signal(|| None),
         scenes_rev: use_signal(|| 0),
@@ -1523,6 +1528,7 @@ pub fn Space() -> Element {
                 Some(Action::Pin) => sp.send(json!({ "cmd": "pin" })),
                 Some(Action::DeleteText) if sp.multi.peek().is_some() => sp.send(json!({ "cmd": "removemulti" })),
                 Some(Action::Group) => sp.send(json!({ "cmd": "group" })),
+                Some(Action::WireMode) => sp.send(json!({ "cmd": "wiremode", "toggle": true })),
                 Some(Action::Ungroup) => sp.send(json!({ "cmd": "ungroup" })),
                 Some(Action::DeleteText) => match sp
                     .block
@@ -1851,6 +1857,37 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
             groups_call(ui, api, sp, "groups.ungroup", json!({ "id": e.data["id"] }), why)
         }
         "grouprestore" => groups_call(ui, api, sp, "groups.restore", e.data.clone(), "select"),
+        // wires made by dragging (and taken back by an undo)
+        "wiremode" => {
+            let on = e.data == true;
+            let mut w = sp.wiremode;
+            w.set(on);
+            ui.say(if on { "wiring: drag from one block to another to wire it (again to take the wire away) · J stops" } else { "wiring stopped" });
+        }
+        "wirelink" => {
+            let args = e.data.clone();
+            dioxus::dioxus_core::spawn_forever(async move {
+                match api.call("wiring.link", args).await {
+                    Ok(r) => {
+                        let textures = dress(ui, &api, r["textures"].clone()).await;
+                        sp.send(json!({ "cmd": "blocks", "blocks": r["blocks"], "textures": textures }));
+                        sp.send(json!({ "cmd": "wired", "items": r["changed"] }));
+                        wirewin::load_wires(&api, sp).await;
+                        ui.say(if r["made"] == true { "wired: a click on the first casts its ray to the second · Ctrl+Z takes it back" } else { "the wire is gone · Ctrl+Z puts it back" });
+                    }
+                    Err(err) => ui.fail(err),
+                }
+            });
+        }
+        "wireset" => {
+            let args = e.data.clone();
+            dioxus::dioxus_core::spawn_forever(async move {
+                match api.call("wiring.set", args).await {
+                    Ok(_) => wirewin::load_wires(&api, sp).await,
+                    Err(err) => ui.fail(err),
+                }
+            });
+        }
         "groupopen" => ui.say("the group is open: its things are picked one by one · Esc closes it"),
         "lightpick" => {
             let mut l = sp.lightpick;

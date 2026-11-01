@@ -118,6 +118,7 @@ pub const KEY_ACTIONS: &[&str] = &[
     "copy_text",
     "group",
     "ungroup",
+    "wire_mode",
     "reversed",
     "pin",
     "physics",
@@ -228,6 +229,27 @@ mod tests {
         ] {
             assert!(rs.contains(needle), "space.rs lost {needle}");
         }
+    }
+
+    /// wires drawn in the room and made by dragging
+    #[test]
+    fn wires_drawn_stay() {
+        let js = include_str!("space.js");
+        for needle in [
+            "drawWires() {",
+            "lightWires(rays) {",
+            "setWiring(on) {",
+            "startWire(e) {",
+            "endWire(e) {",
+            "u.kind === 'wired'",
+            "TubeGeometry",
+        ] {
+            assert!(js.contains(needle), "space.js lost {needle}");
+        }
+        assert!(
+            include_str!("views/space.rs").contains("\"wirelink\"")
+                && include_str!("views/space/wirewin.rs").contains("\"connect by dragging\"")
+        );
     }
 
     /// groups: Ctrl+G, nesting, picked whole, opened, copied, made a prefab

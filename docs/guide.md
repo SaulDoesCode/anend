@@ -257,6 +257,16 @@ and its ray; a timer, a text entering a zone or a signal can start a cause too; 
 animations move blocks, and sounds play from them while the room plays. Group what you
 build into a prefab of your own and place it as often as you like.
 
+**Wires.** Every connection shows as a cable from a block to what its ray aims at, and it
+lights while a ray passes along it. To wire by hand, press **J** (or *connect by
+dragging* in the wiring window): each block shows a blue port, and a drag from one block
+to another wires them: a click on the first then casts its ray to the second (a block
+wired from nothing listens for clicks, and its target for hits). Drag the same pair again
+to take the wire away; **Ctrl+Z** takes a wire back. Walking, the drag starts and ends on
+what's ahead. **J** again stops wiring.
+
+![wires lit while a ray passes](../app/docs/shots/web-wires-lit.png)
+
 ## Lists
 
 ![a list's page](guide/lists.png)

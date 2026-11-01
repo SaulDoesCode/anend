@@ -826,6 +826,8 @@ export class Space {
         this.shapeBlock(o);
         this.send({ ...this.ev('blockset', null), data: this.blockOut(o) });
       }
+    } else if (u.kind === 'wired') {
+      for (const x of u.items) this.send({ ...this.ev('wireset', null), data: { id: x.id, wiring: x.before } });
     } else if (u.kind === 'grouped') {
       this.send({ ...this.ev('groupbreak', null), data: { id: u.id, quiet: true } });
     } else if (u.kind === 'ungrouped') {
@@ -1767,6 +1769,7 @@ export class Space {
   // The rays a cause casts show for a moment.
   setWires(list, live) {
     this.wires = new Map((list || []).map((w) => [w.id, w]));
+    this.wiresDirty = true;
     // timers keep their beat across a reload of the list (a cause reloads it)
     const was = this.live;
     this.live = !!live;
@@ -1776,6 +1779,120 @@ export class Space {
     // the looping sound emitters play while the room plays
     if (this.live && !was) this.startLoops();
     if (!this.live && was) this.hushAll();
+  }
+
+  // ------------------------------------------------------------------ wires
+  //
+  // Each sticky ray is drawn as a wire from its block to each target: a sagging line,
+  // lit while a ray passes along it. In wiring mode (J, or the wiring window's "connect
+  // by dragging") every block shows a port, and a drag from one block to another makes a
+  // wire (or takes it away, when it's there); flying or walking alike (walking, what's
+  // ahead is what the drag starts and ends on). Ctrl+Z takes a wire back.
+
+  drawWires() {
+    this.wiresDirty = false;
+    if (this.wireLines) {
+      this.scene.remove(this.wireLines);
+      this.wireLines.traverse((x) => { x.geometry?.dispose(); x.material?.dispose(); });
+      this.wireLines = null;
+    }
+    const g = new THREE.Group();
+    this.wireIdx = [];
+    const now = performance.now();
+    for (const w of (this.wires || new Map()).values()) {
+      const a = this.blocks.get(w.id);
+      if (!a) continue;
+      for (const t of w.links || []) {
+        const b = this.blocks.get(t);
+        if (!b) continue;
+        const p0 = a.mesh.position, p1 = b.mesh.position;
+        const mid = p0.clone().add(p1).multiplyScalar(0.5);
+        mid.y -= Math.min(1.2, p0.distanceTo(p1) * 0.18);
+        const curve = new THREE.QuadraticBezierCurve3(p0.clone(), mid, p1.clone());
+        const lit = this.wireLit && this.wireLit.get(`${w.id}>${t}`) > now;
+        // a cable with some thickness (lines are a pixel wide whatever the distance)
+        const line = new THREE.Mesh(new THREE.TubeGeometry(curve, 28, lit ? 0.045 : 0.028, 6, false), new THREE.MeshBasicMaterial({ color: lit ? 0xffd23f : 0x5a4a32, transparent: true, opacity: lit ? 1 : 0.85, depthTest: !lit }));
+        line.renderOrder = lit ? 11 : 1;
+        g.add(line);
+        this.wireIdx.push({ from: w.id, to: t });
+      }
+    }
+    // the ports, while wiring
+    if (this.wiring) {
+      const mat = new THREE.MeshBasicMaterial({ color: 0x3f8cff, fog: false, depthTest: false, transparent: true, opacity: 0.9 });
+      for (const o of this.blocks.values()) {
+        const box = new THREE.Box3().setFromObject(o.mesh);
+        const port = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 8), mat.clone());
+        port.position.set((box.min.x + box.max.x) / 2, box.max.y + 0.12, (box.min.z + box.max.z) / 2);
+        port.renderOrder = 1003;
+        g.add(port);
+      }
+    }
+    this.wireLines = g;
+    this.scene.add(g);
+    this.dirty = true;
+  }
+
+  // a ray passed: the wires it went along light up for a moment
+  lightWires(rays) {
+    if (!this.wires) return;
+    this.wireLit = this.wireLit || new Map();
+    const until = performance.now() + 700;
+    for (const r of rays || []) {
+      const from = new THREE.Vector3(...r.from);
+      for (const w of this.wires.values()) {
+        const a = this.blocks.get(w.id);
+        if (!a || a.mesh.position.distanceTo(from) > 0.6) continue;
+        for (const t of r.hits || []) if ((w.links || []).includes(t)) this.wireLit.set(`${w.id}>${t}`, until);
+      }
+    }
+    this.wiresDirty = true;
+    setTimeout(() => { this.wiresDirty = true; this.dirty = true; }, 760);
+  }
+
+  setWiring(on) {
+    this.wiring = on == null ? !this.wiring : !!on;
+    this.wiresDirty = true;
+    this.send({ ...this.ev('wiremode', null), data: this.wiring });
+    this.render();
+  }
+
+  // the block under the pointer (or ahead, walking), not the gizmo over it
+  blockUnder(e) {
+    const m = this.rayFrom(e).intersectObjects([...this.blocks.values()].map((o) => o.mesh), false)[0];
+    return m ? m.object.userData.block : null;
+  }
+
+  startWire(e) {
+    const from = this.blockUnder(e);
+    if (from == null) return false;
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    const at = this.blocks.get(from).mesh.position;
+    this.wdrag = { from, depth: at.clone().sub(this.camera.position).dot(fwd), line: null };
+    try { this.host.setPointerCapture(e.pointerId); } catch { /* fine without */ }
+    return true;
+  }
+
+  dragWire(e) {
+    const d = this.wdrag;
+    const p0 = this.blocks.get(d.from).mesh.position;
+    const to = this.blockUnder(e);
+    const p1 = to != null && to !== d.from ? this.blocks.get(to).mesh.position : this.rayAt(e.clientX, e.clientY, d.depth);
+    if (d.line) { this.scene.remove(d.line); d.line.geometry.dispose(); }
+    d.line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([p0.clone(), p1.clone()]), new THREE.LineDashedMaterial({ color: 0x3f8cff, dashSize: 0.15, gapSize: 0.08, depthTest: false }));
+    d.line.computeLineDistances();
+    d.line.renderOrder = 1004;
+    this.scene.add(d.line);
+    this.dirty = true;
+  }
+
+  endWire(e) {
+    const d = this.wdrag;
+    this.wdrag = null;
+    if (d.line) { this.scene.remove(d.line); d.line.geometry.dispose(); }
+    const to = this.blockUnder(e);
+    if (to != null && to !== d.from) this.send({ ...this.ev('wirelink', null), data: { from: d.from, to } });
+    this.render();
   }
 
   // ------------------------------------------------------------------ sounds
@@ -1963,6 +2080,7 @@ export class Space {
   // the rays a cause cast, drawn for a moment
   showRays(rays) {
     if (!rays || !rays.length) return;
+    this.lightWires(rays);
     const pts = [];
     for (const r of rays) pts.push(new THREE.Vector3(...r.from), new THREE.Vector3(...r.to));
     const g = new THREE.BufferGeometry().setFromPoints(pts);
@@ -2285,6 +2403,7 @@ export class Space {
     if (!o.preview && !b.anim) mesh.scale.set(1, 1, 1);
     this.bake(o);
     if (this.selBlock === b.id) this.placeGizmo();
+    this.wiresDirty = true;
   }
 
   dropBlock(id) {
@@ -2456,6 +2575,7 @@ export class Space {
       s.o.mesh.quaternion.copy(turn.clone().multiply(s.q));
     }
     this.outlineCopy();
+    this.wiresDirty = true;
   }
 
   // ------------------------------------------------------------------ the selection of many
@@ -2636,6 +2756,7 @@ export class Space {
       }
     }
     if (d.items.some((s) => s.x.kind === 'l')) this.markLights();
+    this.wiresDirty = true;
     this.showMulti();
     this.wake(0.3);
   }
@@ -3260,6 +3381,10 @@ export class Space {
         if (e.button === 0) this.placeGhost(); else { this.stopGhost(); this.send({ ...this.ev('ghostdone', null) }); }
         return;
       }
+      // wiring: a drag from a block to another makes a wire
+      if (e.button === 0 && this.wiring && !this.live) {
+        if (this.startWire(e)) { e.preventDefault(); return; }
+      }
       if (e.button === 0) {
         // a block's gizmo, or a block: select it (and drag it in the view's plane)
         // playing, a click on a block listening for clicks fires it (through the gizmo)
@@ -3341,6 +3466,7 @@ export class Space {
       if (this.ghost) this.dirty = true;
       if (this.bdrag) { this.dragBlock(e); return; }
       if (this.boxSel) { this.drawBox(e); return; }
+      if (this.wdrag) { this.dragWire(e); return; }
       if (!this.looking) return;
       const k = LOOK * (this.p.look || 1);
       this.tyaw -= (e.movementX || 0) * k;
@@ -3349,6 +3475,7 @@ export class Space {
     const up = (e) => {
       if (this.bdrag && (e.button === 0 || e.type === 'lostpointercapture')) this.endBlockDrag();
       if (this.boxSel && (e.button === 0 || e.type === 'lostpointercapture')) this.endBox(e);
+      if (this.wdrag && (e.button === 0 || e.type === 'lostpointercapture')) this.endWire(e);
       if (e.button === 2 || e.type === 'lostpointercapture') {
         this.looking = false;
         h.classList.remove('looking');
@@ -3423,6 +3550,7 @@ export class Space {
   }
 
   frame(now) {
+    if (this.wiresDirty) this.drawWires();
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     const c = this.camera;

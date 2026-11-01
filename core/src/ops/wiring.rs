@@ -417,6 +417,26 @@ pub fn call(g: &Graph, op: &str, args: &Value, shared: bool) -> Res {
     call_hosted(g, op, args, shared, None)
 }
 
+/// a sticky ray's targets as the room's blocks: a part's target inside its prefab is that
+/// part of its own copy, else the block of that address
+fn links(g: &Graph, id: &str, targets: &[String]) -> Result<Vec<String>, String> {
+    let copy = crate::graph::prefabs::split_part(id).map(|(c, _)| c.to_string());
+    let mut out = Vec::new();
+    for t in targets {
+        if let Some(c) = &copy {
+            let inside = format!("{c}/{t}");
+            if g.block(&inside)?.is_some() {
+                out.push(inside);
+                continue;
+            }
+        }
+        if g.block(t)?.is_some() {
+            out.push(t.clone());
+        }
+    }
+    Ok(out)
+}
+
 /// `call`, with a host whose ops a block's program reaches through `std:anend`'s `op`
 pub fn call_hosted(g: &Graph, op: &str, args: &Value, shared: bool, host: Option<crate::s::machine::Host<'_>>) -> Res {
     let block = |args: &Value| -> Result<Block, String> {
@@ -429,10 +449,65 @@ pub fn call_hosted(g: &Graph, op: &str, args: &Value, shared: bool, host: Option
             let mut out = Vec::new();
             for b in g.world_blocks()? {
                 if let Some(w) = wiring_of(g, &b)? {
-                    out.push(json!({ "id": b.id, "key": b.t.wire.map(|r| record::label(r.entry)), "wiring": w }));
+                    let to = links(g, &b.id, w.ray.as_ref().map(|r| r.targets.as_slice()).unwrap_or(&[]))?;
+                    out.push(json!({ "id": b.id, "key": b.t.wire.map(|r| record::label(r.entry)), "wiring": w, "links": to }));
                 }
             }
             Ok(json!(out))
+        }
+        // `{from, to}`: a wire from one block to another, made by dragging: `to` joins
+        // `from`'s sticky ray (which a click on `from` then casts; a block wired from
+        // nothing listens for clicks), and `to` listens for hits if it listened for
+        // nothing; a wire that's there already is taken away. What each was before (to undo)
+        "wiring.link" => {
+            let from = s(args, "from");
+            let to = s(args, "to");
+            if from == to {
+                return Err("a wire goes from one block to another".into());
+            }
+            let fb = g.block(from)?.ok_or_else(|| format!("no block {from}"))?;
+            let tb = g.block(to)?.ok_or_else(|| format!("no block {to}"))?;
+            let fw0 = wiring_of(g, &fb)?;
+            let tw0 = wiring_of(g, &tb)?;
+            let mut fw = fw0.clone().unwrap_or_default();
+            if fw.on.is_empty() {
+                fw.on = vec![Event::Click];
+            }
+            let mut ray = fw
+                .ray
+                .clone()
+                .unwrap_or_else(|| serde_json::from_value(json!({})).expect("a ray of defaults"));
+            let there = links(g, from, &ray.targets)?;
+            let made = if let Some(i) = there.iter().position(|t| t == to) {
+                // the address as it's kept (inner for a part's own copy)
+                let kept = ray
+                    .targets
+                    .iter()
+                    .position(|t| *t == there[i] || there[i].ends_with(&format!("/{t}")))
+                    .unwrap_or(i);
+                ray.targets.remove(kept);
+                false
+            } else {
+                ray.targets.push(to.to_string());
+                ray.stick = false;
+                true
+            };
+            fw.ray = Some(ray);
+            let mut changed = vec![json!({ "id": from, "before": fw0 })];
+            let fb = set_wiring(g, &fb, Some(fw))?;
+            let mut blocks = vec![fb];
+            if made && tw0.is_none() {
+                let tw = Wiring {
+                    on: vec![Event::Hit],
+                    ..Wiring::default()
+                };
+                blocks.push(set_wiring(g, &tb, Some(tw))?);
+                changed.push(json!({ "id": to, "before": Value::Null }));
+            }
+            let mut out = super::blocks::listed(g, &blocks)?;
+            out["made"] = json!(made);
+            out["changed"] = json!(changed);
+            Ok(out)
         }
         "wiring.get" => {
             let b = block(args)?;
@@ -475,6 +550,47 @@ pub fn call_hosted(g: &Graph, op: &str, args: &Value, shared: bool, host: Option
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wires_made_by_dragging() {
+        let g = Graph::in_memory().unwrap();
+        let lim = super::super::classify::Limits::NONE;
+        let r = super::super::blocks::call(
+            &g,
+            "blocks.add",
+            &json!({ "blocks": [{ "kind": "plain", "texture": "#aa0000", "x": 0 }, { "kind": "plain", "texture": "#00aa00", "x": 3 }] }),
+            &lim,
+        )
+        .unwrap();
+        let (a, b) = (
+            r["ids"][0].as_str().unwrap().to_string(),
+            r["ids"][1].as_str().unwrap().to_string(),
+        );
+        let l = call(&g, "wiring.link", &json!({ "from": a, "to": b }), false).unwrap();
+        assert_eq!(l["made"], true);
+        assert_eq!(l["changed"].as_array().unwrap().len(), 2, "{l}");
+        let list = call(&g, "wiring.list", &json!({}), false).unwrap();
+        let wa = list.as_array().unwrap().iter().find(|w| w["id"] == a.as_str()).unwrap();
+        assert_eq!(wa["links"], json!([b]));
+        assert_eq!(wa["wiring"]["on"], json!(["click"]));
+        // a click on the first hits the second
+        let f = call(&g, "wiring.fire", &json!({ "id": a, "event": "click" }), false).unwrap();
+        assert!(
+            f["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["block"] == b.as_str() && e["event"] == "hit"),
+            "{f}"
+        );
+        // dragged again: the wire goes; the second keeps listening
+        let l = call(&g, "wiring.link", &json!({ "from": a, "to": b }), false).unwrap();
+        assert_eq!(l["made"], false);
+        let list = call(&g, "wiring.list", &json!({}), false).unwrap();
+        let wa = list.as_array().unwrap().iter().find(|w| w["id"] == a.as_str()).unwrap();
+        assert_eq!(wa["links"], json!([]));
+        assert!(call(&g, "wiring.link", &json!({ "from": a, "to": a }), false).is_err());
+    }
 
     #[test]
     fn dominos_fall_in_order() {

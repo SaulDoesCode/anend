@@ -571,7 +571,8 @@ texture key from that moment on, eased between keys along CSS cubic-bezier timin
 | `sounds.get` | `{id}` | `{sound, data}` (base64), for the room to play |
 | `sounds.name` | `{id, name}` | the sound, renamed |
 | `sounds.delete` | `{id}` | `{removed}`; blocks naming it play nothing |
-| `wiring.list` | | `[{id, key, wiring}]`: the wired blocks (`graph::wiring`; a wiring is an entry of mime `application/x-anend-wiring`) |
+| `wiring.list` | | `[{id, key, wiring, links}]`: the wired blocks (`graph::wiring`; a wiring is an entry of mime `application/x-anend-wiring`); `links`: its sticky ray's targets as the room's blocks (a part's inner target resolved to its own copy's part) |
+| `wiring.link` | `{from, to}` | `{blocks, made, changed: [{id, before}]}`: a wire made by dragging: `to` joins `from`'s sticky ray (a block wired from nothing listens for clicks; a target wired from nothing listens for hits); a wire that's there is taken away. `before` is each changed block's wiring before, to undo |
 | `wiring.get` | `{id}` | the block's wiring `{on, every?, signal?, program?, ray?: {dir, targets?, stick?, mode, n, range, sees?}, state?}`, or null |
 | `wiring.set` | `{id, wiring}` | the block (as `blocks.list` has it) and its `wiring`; `wiring: null` unwires it. An entry another block shares isn't changed: the block gets its own |
 | `wiring.fire` | `{id, event, from?, value?}` | what one cause set off (`ops::wiring`): `{events: [{block, event, from, out?, err?, steps?}], rays: [{from, to, hits}], says, sounds: [{block, play}], blocks, textures, removed, cut}` (`blocks` the blocks it changed, `removed` addresses that went; `cut` when it stopped at 200 events or the steps' budget) |

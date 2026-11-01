@@ -75,6 +75,7 @@ pub enum Action {
     CopyText,
     Group,
     Ungroup,
+    WireMode,
     Reversed,
     Pin,
     Physics,
@@ -116,7 +117,7 @@ impl Scope {
 use Action::*;
 
 impl Action {
-    pub const ALL: [Action; 70] = [
+    pub const ALL: [Action; 71] = [
         GotoMemory,
         GotoSpace,
         GotoLists,
@@ -173,6 +174,7 @@ impl Action {
         CopyText,
         Group,
         Ungroup,
+        WireMode,
         Reversed,
         Pin,
         Physics,
@@ -268,6 +270,7 @@ impl Action {
             CopyText => "copy_text",
             Group => "group",
             Ungroup => "ungroup",
+            WireMode => "wire_mode",
             Reversed => "reversed",
             Pin => "pin",
             Physics => "physics",
@@ -343,6 +346,7 @@ impl Action {
             CopyText => "copy the selected text",
             Group => "group what's selected",
             Ungroup => "ungroup the selected group",
+            WireMode => "wiring: drag from block to block to wire them",
             Reversed => "reversed on / off",
             Pin => "pin / unpin the selected text",
             Physics => "the physics panel",
@@ -419,6 +423,7 @@ impl Action {
             CopyText => "Ctrl+C",
             Group => "Ctrl+G",
             Ungroup => "Ctrl+Shift+G",
+            WireMode => "J",
             Reversed => "F",
             Pin => "U",
             Physics => "O",

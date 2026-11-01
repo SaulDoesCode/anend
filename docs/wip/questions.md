@@ -434,3 +434,11 @@ The answers left these open. Each is written into the design as its default.
 111. **A group's copy goes 2 units along x**, its inner groups remade as groups; a prefab
     of a group takes its blocks (copies inside must be detached first: a prefab's parts
     are blocks).
+
+## Wires (1 Nov)
+
+112. **A wire is a sticky ray's target,** drawn from block centre to block centre as a
+    sagging cable; signals by name aren't drawn (their senders are programs).
+113. **A dragged wire makes a working connection at once:** a sender wired from nothing
+    listens for clicks, a target wired from nothing for hits; dragging the same pair again
+    unwires. Wiring mode is J (Logic World wires with the mouse; J was free).

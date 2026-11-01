@@ -179,10 +179,11 @@ measures: each line is checked against how the same action feels there.
 - [x] Groups: a selection can be grouped and ungrouped (Ctrl+G and Ctrl+Shift+G, and from the
       menu); groups nest; a group is moved, turned, copied and saved as a prefab as a whole.
       (1 Nov: `groups.*`; picked whole, opened by a double-click, copied, made a prefab.)
-- [ ] Wires drawn in the room: each connection shown as a wire from its sender to its target,
+- [x] Wires drawn in the room: each connection shown as a wire from its sender to its target,
       lit while a signal passes. Wiring made by dragging from one block to another, with the
       ports visible while wiring, the same way in the window and in first-person mode.
-      Undo covers wiring changes.
+      Undo covers wiring changes. (1 Nov: cables, lit by rays; J or the window's
+      "connect by dragging", ports, drag to wire or unwire; `wiring.link`; undo.)
 - [ ] The renderer on wgpu, with WebGPU on the web sharing the code (#25). On the desktop the
       space, its windows' 3D previews and first-person mode run in Rust with no JavaScript;
       `space.js` and three.js leave the desktop build. Whatever JavaScript remains on the
