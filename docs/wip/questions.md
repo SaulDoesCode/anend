@@ -442,3 +442,30 @@ The answers left these open. Each is written into the design as its default.
 113. **A dragged wire makes a working connection at once:** a sender wired from nothing
     listens for clicks, a target wired from nothing for hits; dragging the same pair again
     unwires. Wiring mode is J (Logic World wires with the mouse; J was free).
+
+## The space on wgpu, without JavaScript on the desktop (1 Nov)
+
+114. **How the native space shows in the desktop app:** Dioxus desktop runs in a webview
+    (WebKitGTK on Linux, the user's platform, Vulkan on an NVIDIA card). The room is drawn
+    by `anend-render` (wgpu) into a picture, and on the desktop that picture is painted by
+    a GTK drawing area *under* the webview, which is transparent where the space is: the
+    space's HTML windows and bars stay on top, GTK puts the two together in one window (no
+    compositor needed), and the pointer and keys reach Rust through Dioxus's own event
+    handlers on the space's (empty) element. No JavaScript is involved. The first version
+    reads each picture back from the GPU (a copy per frame); drawing into a GtkGLArea with
+    wgpu on the same GL context would save that copy, and comes after if the copy costs
+    frames. A native child window over the webview was the other way, but it hides the
+    HTML windows over the room and can't be see-through without a compositor.
+115. **What stays JavaScript on the desktop after this line:** the webview's own glue
+    (Dioxus's bridge) and the `document::eval` calls the other views make (the notes
+    editor's highlight layer, completion, the memory view's box selection, focus and
+    blur). Removing those is a move from the webview to Dioxus's native renderer (Blitz,
+    which has no JavaScript at all) once it renders the app's HTML and CSS faithfully;
+    until then they're named in parity.md. On the web, space.js stays until the WebGPU
+    canvas path is built from the same crate.
+116. **The order the room moves over:** blocks (boxes, spheres, colours) and lines first,
+    then the camera and flying, picking (core's ray tests), texts (a glyph atlas with
+    ab_glyph), texture recipes, baked lights, bends, the gizmo and selection, groups and
+    wires, walking, the ghost, sounds (outside the webview: rodio, or WebKit's audio
+    through a page with no script), animations and zones. space.js leaves the desktop
+    build when all of it is there, checked against the shots of each line.

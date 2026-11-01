@@ -1,5 +1,5 @@
 # anend: the core (the entry graph, models), the hub (the server: the sharing site and the
 # web app's API) and the app (Dioxus: the desktop app, and the web app from the same code)
 [workspace]
-members = ["core", "hub", "app"]
+members = ["core", "hub", "app", "render"]
 resolver = "3"

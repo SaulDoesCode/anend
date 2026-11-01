@@ -107,6 +107,10 @@ departure says why in its commit).
   notes and lists).
 - Done (1 Nov): groups (Ctrl+G, nesting, open by double-click, copy, prefab).
 - Done (1 Nov): wires drawn and made by dragging (J).
+- In progress (1 Nov): the space on wgpu with no JavaScript on the desktop. `render/`
+  (`anend-render`) draws blocks, spheres and lines into a picture (a headless test reads it
+  back); next: the GTK drawing area under the transparent webview, then the room's parts
+  one by one (questions.md 114–116).
 - Next: the rest of the user's 27 Oct
   lines (grouped prefabs, shift and box selection, Ctrl+G groups, drawn wires, wgpu with no
   JavaScript on the desktop, culling, polish, ▶).
