@@ -76,8 +76,9 @@ the bar holds the same toggles, the sidecar of the bar's sums (click one to gsea
 and the sum buckets.
 
 On the texts: **click** puts one in the bar, **double-click** its key, **Shift+click**
-makes it the list, **Ctrl+click** the candidate, **Alt+click** selects several (then pick
-a list or type a tag for them all), **right-click** opens a menu (edit, tag, list,
+(or **Alt+click**) selects several, and so does a box dragged from the field's empty space
+(Shift adds to what's selected; then pick a list or type a tag for them all),
+**Ctrl+Shift+click** makes it the list, **Ctrl+click** the candidate, **right-click** opens a menu (edit, tag, list,
 candidate, key, forget), **Ctrl+right-click** gsearches ⌊√(ordinal·reversed)⌋. The menu
 also says when the text was written and what kind it is (a link, an email address, a
 number, a date, a name, a phrase, a sentence…), told by its pattern; when the guess is
@@ -107,8 +108,12 @@ memory view.
 | **H** | help |
 
 Hover a text for its card of numbers; click puts it in the bar and its triangle (sides
-ordinal, reversed and ⌊√(s·r)⌋) in the top bar. Shift+click and Ctrl+click pick the list
-and candidate. The room's colour is a setting.
+ordinal, reversed and ⌊√(s·r)⌋) in the top bar. Ctrl+Shift+click and Ctrl+click pick the
+list and candidate. **Shift+click** selects many: texts, blocks, prefab copies, and lights
+while the lights window shows them; a box dragged on empty room selects what's in it
+(Shift adds). The selected are outlined in blue; the gizmo at their middle moves and turns
+them all, **Delete** takes them all away, **Ctrl+Z** takes either back in one step, and
+**Esc** (or a click on empty room) lets them go. The room's colour is a setting.
 
 ### Building in the space
 
@@ -255,9 +260,9 @@ A **list** is a text heading other texts: `fruit` heading `apple`, `plum`, `cher
 Lists are how you tell anend what goes together, and what models learn from.
 
 - **Making one**: in the lists view (**Ctrl+3**), type a new name and press Enter; or in
-  the memory view, Shift+click a text to make it the list.
+  the memory view, Ctrl+Shift+click a text to make it the list.
 - **Filling it**: in the memory view or the space, Ctrl+click a text (the candidate) and
-  type `Enlist`; or Alt+click several and put them in a list.
+  type `Enlist`; or Shift+click several and put them in a list.
 - **The lists view** shows every list as a tile; the bar finds lists by name. A list's
   page has its name (editable), its members a page at a time (edit them, or take one out)
   and its figures: its letters, its sums. Deleting a list takes two clicks; its members

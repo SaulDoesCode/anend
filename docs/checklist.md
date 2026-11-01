@@ -172,9 +172,10 @@ measures: each line is checked against how the same action feels there.
       deleted as a whole, and stays one group in the save; opening it to edit its parts is
       a deliberate step, and its parts go back into the group when done. (27 Oct: a click
       selects the copy, double-click opens it, Esc closes; its menu, Delete and undo.)
-- [ ] Selection: shift+click adds and removes items, a drag draws a box, and the selection
+- [x] Selection: shift+click adds and removes items, a drag draws a box, and the selection
       is shown clearly. Works on blocks, texts, placements and lights in the space, and on
-      entries in the memory, lists, notes and tags views.
+      entries in the memory, lists, notes and tags views. (1 Nov: the space's many, moved,
+      turned and deleted together with one undo; memory box and Shift; notes and lists.)
 - [ ] Groups: a selection can be grouped and ungrouped (Ctrl+G and Ctrl+Shift+G, and from the
       menu); groups nest; a group is moved, turned, copied and saved as a prefab as a whole.
 - [ ] Wires drawn in the room: each connection shown as a wire from its sender to its target,

@@ -141,6 +141,9 @@ export class Space {
     this.hover = null;
     this.drag = null;
     this.undo = [];
+    // the selection of many (Shift+click, or a box drawn): kind:id → { kind, id }, kinds
+    // b (a block), c (a prefab's copy), t (a text's placement, by its node key), l (a light)
+    this.multi = new Map();
     this.freeN = 0;
     this.infoAt = 0;
     this.origin = new THREE.Vector3();
@@ -751,7 +754,9 @@ export class Space {
     this.send(this.ev('select', n));
   }
 
+  // records made together (a batch) go back together, the last first
   record(u) {
+    if (this.batch) { this.batch.push(u); return; }
     this.undo.push(u);
     if (this.undo.length > 300) this.undo.shift();
   }
@@ -759,7 +764,23 @@ export class Space {
   undoLast() {
     const u = this.undo.pop();
     if (!u) return 'nothing';
-    if (u.kind === 'move') {
+    this.applyUndo(u);
+    this.wake(0.5);
+    this.render();
+    return u.kind;
+  }
+
+  setBatch(on) {
+    if (on) { this.batch = this.batch || []; return; }
+    const b = this.batch;
+    this.batch = null;
+    if (b && b.length) this.record(b.length === 1 ? b[0] : { kind: 'many', items: b });
+  }
+
+  applyUndo(u) {
+    if (u.kind === 'many') {
+      for (const x of [...u.items].reverse()) this.applyUndo(x);
+    } else if (u.kind === 'move') {
       Object.assign(u.n, { x: u.x, y: u.y, z: u.z, pinned: u.pinned });
     } else if (u.kind === 'pin') {
       u.n.pinned = u.was;
@@ -799,10 +820,14 @@ export class Space {
         this.shapeBlock(o);
         this.send({ ...this.ev('blockset', null), data: this.blockOut(o) });
       }
+    } else if (u.kind === 'lightgone') {
+      this.send({ ...this.ev('lightrestore', null), data: u.light });
+    } else if (u.kind === 'light') {
+      const x = this.lights.find((l) => l.id === u.id);
+      if (x) Object.assign(x, u.t);
+      this.markLights();
+      this.send({ ...this.ev('lightset', null), data: { id: u.id, ...u.t } });
     }
-    this.wake(0.5);
-    this.render();
-    return u.kind;
   }
 
   pinSelected() {
@@ -2147,6 +2172,7 @@ export class Space {
       const mat = new THREE.MeshBasicMaterial({ color: x.colour, fog: false, depthTest: false, transparent: true, opacity: picked ? 1 : 0.8 });
       const ball = new THREE.Mesh(new THREE.SphereGeometry(picked ? 0.22 : 0.15, 16, 12), mat);
       ball.position.set(x.x, x.y, x.z);
+      ball.userData.light = x.id;
       ball.renderOrder = 998;
       g.add(ball);
       const ring = new THREE.Mesh(new THREE.TorusGeometry(picked ? 0.34 : 0.26, 0.02, 6, 32), new THREE.MeshBasicMaterial({ color: picked ? 0xffffff : 0x333333, fog: false, depthTest: false, transparent: true }));
@@ -2422,6 +2448,290 @@ export class Space {
     this.outlineCopy();
   }
 
+  // ------------------------------------------------------------------ the selection of many
+  //
+  // Shift+click adds an item to the selection or takes it out: a block, a prefab's copy, a
+  // text, or a light while the lights show. A box drawn on empty room selects what's in it
+  // (with Shift, adds to it). Selected, they're outlined (texts ringed); the gizmo at their
+  // middle moves and turns them all, Delete takes them all away, and Ctrl+Z takes either
+  // back in one step. Esc, or a click on empty room, lets them go.
+
+  seedMulti() {
+    if (this.selCopy) this.multi.set(`c:${this.selCopy}`, { kind: 'c', id: this.selCopy });
+    else if (this.selBlock != null) this.multi.set(`b:${this.selBlock}`, { kind: 'b', id: this.selBlock });
+    if (this.selected) this.multi.set(`t:${this.selected.key}`, { kind: 't', id: this.selected.key });
+  }
+
+  toggleMulti(kind, id) {
+    if (!this.multi.size) this.seedMulti();
+    const k = `${kind}:${id}`;
+    if (this.multi.has(k)) this.multi.delete(k); else this.multi.set(k, { kind, id });
+    this.afterMulti();
+  }
+
+  setMulti(items, add) {
+    if (!add) this.multi.clear(); else if (!this.multi.size) this.seedMulti();
+    for (const x of items) this.multi.set(`${x.kind}:${x.id}`, x);
+    this.afterMulti();
+  }
+
+  clearMulti() {
+    if (!this.multi.size) return false;
+    this.multi.clear();
+    this.afterMulti();
+    return true;
+  }
+
+  itemThere(x) {
+    if (x.kind === 'b') return this.blocks.has(x.id);
+    if (x.kind === 'c') return !!(this.copyInfo && this.copyInfo.has(x.id));
+    if (x.kind === 't') return this.nodes.has(x.id);
+    return this.lights.some((l) => l.id === x.id);
+  }
+
+  // where an item is, in the room
+  itemAt(x) {
+    if (x.kind === 'b') return this.blocks.get(x.id).mesh.position.clone();
+    if (x.kind === 'c') {
+      const box = new THREE.Box3();
+      for (const o of this.partsOf(x.id)) box.expandByObject(o.mesh);
+      return box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
+    }
+    if (x.kind === 't') return this.world(this.nodes.get(x.id));
+    const l = this.lights.find((y) => y.id === x.id);
+    return new THREE.Vector3(l.x, l.y, l.z);
+  }
+
+  afterMulti(quiet) {
+    for (const [k, x] of [...this.multi]) if (!this.itemThere(x)) this.multi.delete(k);
+    if (this.multi.size) {
+      // the one selected becomes one of many
+      if (this.selBlock != null || this.selCopy) {
+        this.selBlock = null;
+        this.selCopy = null;
+        this.copyO = null;
+        this.send({ ...this.ev('block', null), data: null });
+      }
+      if (this.selected) {
+        this.selected.el.classList.remove('selected');
+        this.selected = null;
+        this.send(this.ev('select', null));
+      }
+    }
+    this.showMulti();
+    this.multiO = this.multi.size ? this.multiBlock() : null;
+    this.outlineCopy();
+    this.placeGizmo();
+    if (!quiet) {
+      const n = { blocks: 0, copies: 0, texts: 0, lights: 0 };
+      for (const x of this.multi.values()) n[{ b: 'blocks', c: 'copies', t: 'texts', l: 'lights' }[x.kind]]++;
+      this.send({ ...this.ev('multi', null), data: { count: this.multi.size, ...n } });
+    }
+    this.render();
+  }
+
+  showMulti() {
+    for (const n of this.order) n.el.classList.toggle('multi', this.multi.has(`t:${n.key}`));
+    if (this.multiLines) {
+      this.scene.remove(this.multiLines);
+      this.multiLines.traverse((x) => { x.geometry?.dispose(); x.material?.dispose(); });
+      this.multiLines = null;
+    }
+    const g = new THREE.Group();
+    for (const x of this.multi.values()) {
+      if (x.kind === 't') continue;
+      const box = new THREE.Box3();
+      if (x.kind === 'b') box.expandByObject(this.blocks.get(x.id).mesh);
+      else if (x.kind === 'c') for (const o of this.partsOf(x.id)) box.expandByObject(o.mesh);
+      else box.setFromCenterAndSize(this.itemAt(x), new THREE.Vector3(0.5, 0.5, 0.5));
+      if (box.isEmpty()) continue;
+      box.expandByScalar(0.05);
+      const line = new THREE.LineSegments(
+        new THREE.EdgesGeometry(new THREE.BoxGeometry(...box.getSize(new THREE.Vector3()).toArray())),
+        new THREE.LineBasicMaterial({ color: 0x3f8cff, fog: false, depthTest: false, transparent: true }),
+      );
+      line.position.copy(box.getCenter(new THREE.Vector3()));
+      line.renderOrder = 997;
+      g.add(line);
+    }
+    this.multiLines = g;
+    this.scene.add(g);
+  }
+
+  // the many as the gizmo handles them: their middle
+  multiBlock() {
+    const c = new THREE.Vector3();
+    for (const x of this.multi.values()) c.add(this.itemAt(x));
+    c.divideScalar(Math.max(1, this.multi.size));
+    return { group: true, multi: true, b: { id: 'many', x: c.x, y: c.y, z: c.z, rot: [0, 0, 0, 1], w: 1, h: 1, d: 1 } };
+  }
+
+  // each item where it was when a drag began
+  multiStart() {
+    const out = [];
+    for (const x of this.multi.values()) {
+      if (x.kind === 'b') {
+        const o = this.blocks.get(x.id);
+        out.push({ x, o, from: { ...o.b, rot: [...(o.b.rot || [0, 0, 0, 1])] }, p: o.mesh.position.clone(), q: o.mesh.quaternion.clone() });
+      } else if (x.kind === 'c') {
+        const c = this.copyInfo.get(x.id);
+        out.push({ x, origin: new THREE.Vector3(c.x, c.y, c.z), rot: c.rot || [0, 0, 0, 1], parts: this.partsOf(x.id).map((o) => ({ o, p: o.mesh.position.clone(), q: o.mesh.quaternion.clone() })) });
+      } else if (x.kind === 't') {
+        const n = this.nodes.get(x.id);
+        out.push({ x, n, p: this.world(n), from: { x: n.x, y: n.y, z: n.z, pinned: n.pinned } });
+      } else {
+        const l = this.lights.find((y) => y.id === x.id);
+        out.push({ x, l, p: new THREE.Vector3(l.x, l.y, l.z), from: { x: l.x, y: l.y, z: l.z } });
+      }
+    }
+    return out;
+  }
+
+  // the many follow the gizmo: moved, and turned about their middle
+  moveMulti(d) {
+    const b = d.o.b;
+    const turn = new THREE.Quaternion(...b.rot).multiply(new THREE.Quaternion(...d.from.rot).invert());
+    const p0 = new THREE.Vector3(d.from.x, d.from.y, d.from.z);
+    const p1 = new THREE.Vector3(b.x, b.y, b.z);
+    const to = (p) => p.clone().sub(p0).applyQuaternion(turn).add(p1);
+    for (const s of d.items) {
+      if (s.x.kind === 'b') {
+        s.o.mesh.position.copy(to(s.p));
+        s.o.mesh.quaternion.copy(turn.clone().multiply(s.q));
+      } else if (s.x.kind === 'c') {
+        for (const pt of s.parts) {
+          pt.o.mesh.position.copy(to(pt.p));
+          pt.o.mesh.quaternion.copy(turn.clone().multiply(pt.q));
+        }
+      } else if (s.x.kind === 't') {
+        s.n.pinned = true;
+        s.n.el.classList.add('pinned');
+        this.local(to(s.p), s.n);
+      } else {
+        const w = to(s.p);
+        Object.assign(s.l, { x: w.x, y: w.y, z: w.z });
+      }
+    }
+    if (d.items.some((s) => s.x.kind === 'l')) this.markLights();
+    this.showMulti();
+    this.wake(0.3);
+  }
+
+  // a drag of many ended: each kept where it went, one step to undo
+  endMulti(d) {
+    const b = d.o.b;
+    const turn = new THREE.Quaternion(...b.rot).multiply(new THREE.Quaternion(...d.from.rot).invert());
+    const p0 = new THREE.Vector3(d.from.x, d.from.y, d.from.z);
+    const p1 = new THREE.Vector3(b.x, b.y, b.z);
+    const r = (v) => +v.toFixed(4);
+    this.setBatch(true);
+    for (const s of d.items) {
+      if (s.x.kind === 'b') {
+        const o = s.o;
+        this.record({ kind: 'block', id: o.b.id, t: s.from });
+        const q = o.mesh.quaternion;
+        Object.assign(o.b, { x: r(o.mesh.position.x), y: r(o.mesh.position.y), z: r(o.mesh.position.z), rot: [q.x, q.y, q.z, q.w] });
+        this.shapeBlock(o);
+        this.send({ ...this.ev('blockset', null), data: this.blockOut(o) });
+      } else if (s.x.kind === 'c') {
+        const o1 = s.origin.clone().sub(p0).applyQuaternion(turn).add(p1);
+        const rot = turn.clone().multiply(new THREE.Quaternion(...s.rot));
+        this.record({ kind: 'copy', id: s.x.id, t: { x: s.origin.x, y: s.origin.y, z: s.origin.z, rot: s.rot } });
+        this.send({ ...this.ev('copyset', null), data: { id: s.x.id, x: r(o1.x), y: r(o1.y), z: r(o1.z), rot: [rot.x, rot.y, rot.z, rot.w] } });
+      } else if (s.x.kind === 't') {
+        this.record({ kind: 'move', n: s.n, ...s.from });
+        this.send(this.ev('moved', s.n));
+      } else {
+        this.record({ kind: 'light', id: s.l.id, t: s.from });
+        this.send({ ...this.ev('lightset', null), data: { id: s.l.id, x: r(s.l.x), y: r(s.l.y), z: r(s.l.z) } });
+      }
+    }
+    this.setBatch(false);
+    this.afterMulti(true);
+  }
+
+  // Delete with many selected: texts out of the room and blocks deleted here, the rest
+  // (copies, lights) by Rust, which closes the undo step when it's done
+  removeMulti() {
+    if (!this.multi.size) return null;
+    const items = [...this.multi.values()];
+    this.multi.clear();
+    this.setBatch(true);
+    const blocks = items.filter((x) => x.kind === 'b').map((x) => x.id);
+    for (const x of items.filter((y) => y.kind === 't')) this.removeNode(x.id);
+    if (blocks.length) {
+      this.unblock(blocks);
+      this.send({ ...this.ev('blockgone', null), data: blocks });
+    }
+    const lights = items.filter((x) => x.kind === 'l').map((x) => this.lights.find((l) => l.id === x.id)).filter(Boolean);
+    for (const l of lights) this.record({ kind: 'lightgone', light: { ...l } });
+    const copies = items.filter((x) => x.kind === 'c').map((x) => x.id);
+    const rest = { copies, lights: lights.map((l) => l.id) };
+    if (!copies.length) this.setBatch(false);
+    this.afterMulti();
+    return { count: items.length, ...rest };
+  }
+
+  drawBox(e) {
+    const b = this.boxSel;
+    if (!b.el && Math.hypot(e.clientX - b.x0, e.clientY - b.y0) < 5) return;
+    if (!b.el) {
+      b.el = document.createElement('div');
+      b.el.className = 'selbox';
+      document.body.append(b.el);
+    }
+    const x = Math.min(b.x0, e.clientX), y = Math.min(b.y0, e.clientY);
+    Object.assign(b.el.style, { left: `${x}px`, top: `${y}px`, width: `${Math.abs(e.clientX - b.x0)}px`, height: `${Math.abs(e.clientY - b.y0)}px` });
+  }
+
+  endBox(e) {
+    const b = this.boxSel;
+    this.boxSel = null;
+    if (!b.el) {
+      // a click on empty room: everything let go; a double click makes a text
+      if (this.openCopy) { this.openCopy = null; this.outlineCopy(); }
+      if (this.selCopy) this.pickCopy(null);
+      if (this.selBlock != null) this.pickBlock(null);
+      this.clearMulti();
+      const now = performance.now();
+      if (this.lastEmpty && now - this.lastEmpty < 450) {
+        this.lastEmpty = 0;
+        this.send(this.ev('newtext', null, b.e));
+      } else this.lastEmpty = now;
+      if (this.selected) this.pick(null);
+      return;
+    }
+    const r = b.el.getBoundingClientRect();
+    b.el.remove();
+    const inside = (v) => {
+      const p = v.clone().project(this.camera);
+      if (p.z > 1 || p.z < -1) return false;
+      const host = this.host.getBoundingClientRect();
+      const sx = host.left + (p.x + 1) / 2 * host.width, sy = host.top + (1 - p.y) / 2 * host.height;
+      return sx >= r.left && sx <= r.right && sy >= r.top && sy <= r.bottom;
+    };
+    const items = [];
+    for (const n of this.order) {
+      if (n.el.style.display === 'none' || n.head) continue;
+      const er = n.el.getBoundingClientRect();
+      const cx = er.left + er.width / 2, cy = er.top + er.height / 2;
+      if (cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom) items.push({ kind: 't', id: n.key });
+    }
+    const seen = new Set();
+    for (const o of this.blocks.values()) {
+      const c = this.copyOf(o.b.id);
+      if (c && this.openCopy !== c) {
+        if (seen.has(c)) continue;
+        seen.add(c);
+        if (inside(this.itemAt({ kind: 'c', id: c }))) items.push({ kind: 'c', id: c });
+      } else if (inside(o.mesh.position)) items.push({ kind: 'b', id: o.b.id });
+    }
+    if (this.lightsShown) for (const l of this.lights) if ((l.kind === 'point' || l.kind === 'spot') && inside(new THREE.Vector3(l.x, l.y, l.z))) items.push({ kind: 'l', id: l.id });
+    if (!b.add && this.selCopy) this.pickCopy(null);
+    if (!b.add && this.selBlock != null) this.pickBlock(null);
+    this.setMulti(items, b.add);
+  }
+
   // where a new block goes: ahead of the camera, or at the selected text
   blockSpot() {
     let at;
@@ -2479,7 +2789,7 @@ export class Space {
 
   // the gizmo at the selected block, the same size on screen wherever it is
   placeGizmo() {
-    const o = this.selCopy ? this.copyO : this.blocks.get(this.selBlock);
+    const o = this.multi.size ? this.multiO : this.selCopy ? this.copyO : this.blocks.get(this.selBlock);
     const on = !!o;
     this.gizmo.visible = on;
     // a copy is moved and turned as a whole; its size is the prefabs window's
@@ -2511,7 +2821,7 @@ export class Space {
   // the gizmo handle or block under the pointer
   blockHit(e) {
     const ray = this.rayFrom(e);
-    if ((this.selBlock != null || this.selCopy) && this.gizmo.visible) {
+    if ((this.selBlock != null || this.selCopy || this.multi.size) && this.gizmo.visible) {
       // the middle ball first, then the arrows and knobs, then the rings (a ring seen
       // edge-on crosses the middle)
       const hs = ray.intersectObjects([...this.gizmo.children, ...this.gizmoKnobs], false).filter((x) => x.object.visible !== false || x.object.userData.handle);
@@ -2536,9 +2846,11 @@ export class Space {
   }
 
   startBlockDrag(e, hit) {
-    const o = this.selCopy ? this.copyO : this.blocks.get(this.selBlock);
+    const o = this.multi.size ? this.multiO : this.selCopy ? this.copyO : this.blocks.get(this.selBlock);
     if (!o) return false;
     if (o.group && hit.handle && hit.handle.mode === 'scale') return false;
+    // many move only by the gizmo
+    if (o.multi && !hit.handle) return false;
     const b = o.b;
     const at = new THREE.Vector3(b.x, b.y, b.z);
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
@@ -2556,7 +2868,8 @@ export class Space {
       // turning about an axis that points at the viewer turns the other way on screen
       toward: localAxis(Math.max(0, axis)).dot(this.camera.position.clone().sub(at)) > 0,
       // a copy's parts, where they were
-      parts: o.group ? this.partsOf(b.id).map((p) => ({ o: p, p: p.mesh.position.clone(), q: p.mesh.quaternion.clone() })) : null,
+      parts: o.group && !o.multi ? this.partsOf(b.id).map((p) => ({ o: p, p: p.mesh.position.clone(), q: p.mesh.quaternion.clone() })) : null,
+      items: o.multi ? this.multiStart() : null,
     };
     try { this.host.setPointerCapture(e.pointerId); } catch { /* fine without */ }
     return true;
@@ -2597,7 +2910,10 @@ export class Space {
         b.x = f.x + d.along.x * shift; b.y = f.y + d.along.y * shift; b.z = f.z + d.along.z * shift;
       }
     }
-    if (d.o.group) {
+    if (d.o.multi) {
+      this.moveMulti(d);
+      this.placeGizmo();
+    } else if (d.o.group) {
       this.moveCopyParts(d);
       this.placeGizmo();
     } else this.shapeBlock(d.o);
@@ -2608,6 +2924,10 @@ export class Space {
     const d = this.bdrag;
     this.bdrag = null;
     if (!d || !d.moved) return;
+    if (d.o.multi) {
+      this.endMulti(d);
+      return;
+    }
     if (d.o.group) {
       // the copy's origin, carried as the middle was
       const b = d.o.b;
@@ -2681,6 +3001,10 @@ export class Space {
       if (e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
+      // Shift+click: one of many, in or out
+      // (Ctrl+Shift+click makes it the list, as a click goes)
+      if (e.shiftKey && !e.ctrlKey && !e.metaKey) { this.toggleMulti('t', n.key); return; }
+      if (this.multi.size) this.clearMulti();
       try { el.setPointerCapture(e.pointerId); } catch { /* fine without */ }
       // a chain's member drags its head (the chain comes along)
       const t = n.head || n;
@@ -2862,7 +3186,24 @@ export class Space {
             return;
           }
         }
+        // a light's marker (while the lights show): picked, or with Shift one of many
+        if (this.lightMarks) {
+          const m = this.rayFrom(e).intersectObjects(this.lightMarks.children.filter((x) => x.userData.light != null), false)[0];
+          if (m) {
+            const id = m.object.userData.light;
+            if (e.shiftKey) this.toggleMulti('l', id);
+            else { this.clearMulti(); this.send({ ...this.ev('lightpick', null), data: id }); }
+            return;
+          }
+        }
         const hit = this.blocks.size ? this.blockHit(e) : null;
+        // Shift+click on a block or a copy: one of many, in or out
+        if (hit && hit.block != null && e.shiftKey) {
+          const c = this.copyOf(hit.block);
+          if (c && this.openCopy !== c) this.toggleMulti('c', c); else this.toggleMulti('b', hit.block);
+          return;
+        }
+        if (hit && hit.block != null && this.multi.size) this.clearMulti();
         if (hit) {
           // a click outside the open copy closes it
           if (this.openCopy && hit.block != null && this.copyOf(hit.block) !== this.openCopy) this.openCopy = null;
@@ -2873,16 +3214,9 @@ export class Space {
           this.startBlockDrag(e, hit);
           return;
         }
-        if (this.openCopy) { this.openCopy = null; this.outlineCopy(); }
-        if (this.selCopy) this.pickCopy(null);
-        if (this.selBlock != null) this.pickBlock(null);
-        // a click on empty room lets go of the selection; a double click makes a text
-        const now = performance.now();
-        if (this.lastEmpty && now - this.lastEmpty < 450) {
-          this.lastEmpty = 0;
-          this.send(this.ev('newtext', null, e));
-        } else this.lastEmpty = now;
-        if (this.selected) this.pick(null);
+        // empty room: a drag draws a box to select what's in it; a click lets go
+        this.boxSel = { x0: e.clientX, y0: e.clientY, add: e.shiftKey, el: null, e };
+        try { h.setPointerCapture(e.pointerId); } catch { /* fine without */ }
         return;
       }
       if (e.button !== 2) return;
@@ -2904,6 +3238,7 @@ export class Space {
       this.pointer = { clientX: e.clientX, clientY: e.clientY };
       if (this.ghost) this.dirty = true;
       if (this.bdrag) { this.dragBlock(e); return; }
+      if (this.boxSel) { this.drawBox(e); return; }
       if (!this.looking) return;
       const k = LOOK * (this.p.look || 1);
       this.tyaw -= (e.movementX || 0) * k;
@@ -2911,6 +3246,7 @@ export class Space {
     });
     const up = (e) => {
       if (this.bdrag && (e.button === 0 || e.type === 'lostpointercapture')) this.endBlockDrag();
+      if (this.boxSel && (e.button === 0 || e.type === 'lostpointercapture')) this.endBox(e);
       if (e.button === 2 || e.type === 'lostpointercapture') {
         this.looking = false;
         h.classList.remove('looking');
@@ -2953,6 +3289,7 @@ export class Space {
         this.hop(k);
       } else if (k === 'Escape' && this.ghost) { this.stopGhost(); this.send({ ...this.ev('ghostdone', null) }); }
       else if (k === 'Escape' && this.openCopy) this.closeCopy();
+      else if (k === 'Escape' && this.multi.size) this.clearMulti();
       else if (k === b.level) this.level();
       else if (k === b.walk) this.setMode(this.mode === 'walk' ? 'fly' : 'walk');
       else if (k === b.superflight) this.setMode(this.mode === 'super' ? 'fly' : 'super');

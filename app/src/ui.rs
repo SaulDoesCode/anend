@@ -121,7 +121,7 @@ pub struct TopLine {
     pub pf: Option<u64>,
 }
 
-/// the list (Shift+click), its candidate (Ctrl+click) and a selection of texts
+/// the list (Ctrl+Shift+click), its candidate (Ctrl+click) and a selection of texts
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Picks {
     pub list: Option<Hit>,

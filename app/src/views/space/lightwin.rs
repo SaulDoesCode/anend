@@ -69,6 +69,12 @@ pub(super) fn Lights(sp: Sp) -> Element {
     let ui = ui();
     let api = api();
     let mut picked: Signal<Option<u64>> = use_signal(|| None);
+    // a marker clicked in the room picks its light here
+    use_effect(move || {
+        if let Some(id) = (sp.lightpick)() {
+            picked.set(Some(id));
+        }
+    });
     let mut armed = use_signal(|| false);
     // the markers show while the window is open, the picked one bigger
     use_effect(move || {

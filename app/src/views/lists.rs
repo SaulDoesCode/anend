@@ -22,6 +22,8 @@ pub fn Lists() -> Element {
     let mut open: Signal<Option<String>> = use_signal(|| None);
     // the list the bar fills (the Bevy app's "chosen"): Enter adds what's typed to it
     let mut chosen: Signal<Option<Hit>> = use_signal(|| None);
+    // lists picked with Shift+click on their names
+    let mut picked: Signal<Vec<String>> = use_signal(Vec::new);
     let api_r = api.clone();
     let lists = use_resource(move || {
         let api = api_r.clone();
@@ -145,7 +147,7 @@ pub fn Lists() -> Element {
                         }
                     },
                     None => rsx! {
-                        div { class: "dim", "Type in the bar to start a new list headed by that text (or a list's name to choose it); choose a list below to add to it. In the memory view, Shift+click a text to head a list and Ctrl+click another, then Enlist." }
+                        div { class: "dim", "Type in the bar to start a new list headed by that text (or a list's name to choose it); choose a list below to add to it. In the memory view, Ctrl+Shift+click a text to head a list and Ctrl+click another, then Enlist." }
                     },
                 }
             }
@@ -155,10 +157,13 @@ pub fn Lists() -> Element {
             if shown.is_empty() && all.is_empty() {
                 div { class: "card empty", "No lists yet." }
             }
+            ManyLists { picked, all: all.clone() }
             for l in shown {
                 ListCard {
                     key: "{l.list}",
                     is_chosen: cur.as_ref().is_some_and(|c| c.key == l.list),
+                    is_picked: picked().contains(&l.list),
+                    on_pick: move |k: String| { let mut p = picked.write(); if let Some(i) = p.iter().position(|x| *x == k) { p.remove(i); } else { p.push(k); } },
                     list: l.clone(),
                     on_choose: move |h: Hit| chosen.set(Some(h)),
                     on_open: move |k: String| open.set(Some(k)),
@@ -206,7 +211,14 @@ fn Alike(all: Vec<ListInfo>, dot: Vec<Vec<f64>>) -> Element {
 /// a list as the Bevy app showed it: its name and key, choose and unlist, its figures, the
 /// list read as one text, its letters as bars, and its members as chips with their sums
 #[component]
-fn ListCard(list: ListInfo, is_chosen: bool, on_choose: EventHandler<Hit>, on_open: EventHandler<String>) -> Element {
+fn ListCard(
+    list: ListInfo,
+    is_chosen: bool,
+    is_picked: bool,
+    on_pick: EventHandler<String>,
+    on_choose: EventHandler<Hit>,
+    on_open: EventHandler<String>,
+) -> Element {
     let ui = ui();
     let api = api();
     let mut armed = use_signal(|| false);
@@ -222,9 +234,10 @@ fn ListCard(list: ListInfo, is_chosen: bool, on_choose: EventHandler<Hit>, on_op
     let api_u = api.clone();
     let members_keys: Vec<String> = list.members.iter().map(|h| h.key.clone()).collect();
     rsx! {
-        div { class: if is_chosen { "card listcard chosen" } else { "card listcard" },
+        div { class: match (is_chosen, is_picked) { (true, true) => "card listcard chosen picked", (true, false) => "card listcard chosen", (false, true) => "card listcard picked", _ => "card listcard" },
             div { class: "row",
-                button { class: "plain lname", "data-tip": "its page: rename, edit members, pictures", onclick: move |_| on_open.call(k1.clone()), h3 { "{list.name}" } }
+                button { class: "plain lname", "data-tip": "its page: rename, edit members, pictures · Shift+click picks lists, several at once",
+                    onclick: move |e: MouseEvent| if e.modifiers().shift() { on_pick.call(k1.clone()) } else { on_open.call(k1.clone()) }, h3 { "{list.name}" } }
                 span { class: "dim small mono", "{list.list}" }
                 span { class: "grow" }
                 button { class: if is_chosen { "primary" } else { "" }, "data-tip": "the bar's Enter adds to it",
@@ -459,6 +472,47 @@ fn Figures(list: ListInfo) -> Element {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// the lists picked with Shift+click on their names: unlist them together, or let go
+#[component]
+fn ManyLists(picked: Signal<Vec<String>>, all: Vec<ListInfo>) -> Element {
+    let ui = ui();
+    let api = api();
+    let mut armed = use_signal(|| false);
+    let n = picked().len();
+    if n == 0 {
+        return rsx! {};
+    }
+    rsx! {
+        div { class: "card many", role: "status",
+            div { class: "row",
+                b { {format!("{n} list{} picked", if n == 1 { "" } else { "s" })} }
+                span { class: "dim small", {all.iter().filter(|l| picked().contains(&l.list)).map(|l| l.name.clone()).collect::<Vec<_>>().join(" · ")} }
+                span { class: "grow" }
+                button { class: if armed() { "btn small danger" } else { "btn small" },
+                    onclick: move |_| {
+                        if !armed() { armed.set(true); return; }
+                        let (api, keys) = (api.clone(), picked());
+                        let members: Vec<(String, Vec<String>)> = all.iter().filter(|l| keys.contains(&l.list)).map(|l| (l.list.clone(), l.members.iter().map(|h| h.key.clone()).collect())).collect();
+                        spawn(async move {
+                            for (key, m) in members {
+                                match api.unlist(&key).await {
+                                    Ok(_) => ui.did(Did::Unlisted { list: key, members: m }),
+                                    Err(e) => { ui.fail(e); return; }
+                                }
+                            }
+                            picked.set(vec![]);
+                            armed.set(false);
+                            ui.say(format!("unlisted {} lists (their members stay) · Ctrl+Z brings them back one by one", keys.len()));
+                            ui.touched();
+                        });
+                    },
+                    Icon { name: "delete" } if armed() { "sure? unlist them" } else { "unlist them" } }
+                button { class: "btn small", onclick: move |_| picked.set(vec![]), Icon { name: "close" } "let go" }
             }
         }
     }

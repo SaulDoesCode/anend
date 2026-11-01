@@ -416,3 +416,15 @@ The answers left these open. Each is written into the design as its default.
     Logic World's boards is), or its menu; Esc or a click outside closes it.
 105. **An undone removal is a new copy** with the same place, turn, size and own changes;
     rays from outside that aimed at its parts aim at the old address until re-aimed.
+
+## Selecting many (1 Nov)
+
+106. **Shift+click selects, so the list moved to Ctrl+Shift+click** in the memory view and
+    the space (weum's Shift+click list). Alt+click still selects in the memory view.
+107. **A left drag on empty room draws a selection box** (looking around stays the right
+    button); a texts' box takes what it touches in the memory view, and in the space what
+    has its middle inside.
+108. **Many move only by their gizmo** (a drag on one of them doesn't move them all), so a
+    stray drag can't scatter a selection; texts moved with them are pinned.
+109. **The room's undo batches:** what one action did (many moved, many deleted, copies
+    removed by Rust in the same step) goes back with one Ctrl+Z.

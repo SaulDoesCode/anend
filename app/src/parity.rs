@@ -228,6 +228,32 @@ mod tests {
         }
     }
 
+    /// selecting many: Shift+click and boxes in the space and the memory view; notes, lists
+    #[test]
+    fn selection_of_many_stays() {
+        let js = include_str!("space.js");
+        for needle in [
+            "toggleMulti(kind, id) {",
+            "endBox(e) {",
+            "moveMulti(d) {",
+            "removeMulti() {",
+            "setBatch(on) {",
+            "kind: 'many'",
+        ] {
+            assert!(js.contains(needle), "space.js lost {needle}");
+        }
+        assert!(
+            include_str!("views/space.rs").contains("\"removedmulti\"")
+                && include_str!("views/space.rs").contains("class: \"multibar\"")
+        );
+        let m = include_str!("views/memory.rs");
+        assert!(m.contains("BOX_SELECT") && m.contains("md.shift() || md.alt()"));
+        assert!(
+            include_str!("views/notes.rs").contains("fn ManyNotes(")
+                && include_str!("views/lists.rs").contains("fn ManyLists(")
+        );
+    }
+
     /// a prefab's copy is one group in the room: selected, moved, copied and removed whole
     #[test]
     fn copies_are_groups() {

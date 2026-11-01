@@ -5,7 +5,7 @@
 //!
 //! weum's behaviour, kept: the hover title is the key and `gsum(text, 1)`; click puts a
 //! text in the bar (its sums in the sidecar), Ctrl+click makes it the list candidate,
-//! Shift+click the list, double click puts its key in the bar, Ctrl+right click gsearches
+//! Ctrl+Shift+click the list (Shift+click selects, as Alt+click; a box drawn selects), double click puts its key in the bar, Ctrl+right click gsearches
 //! ⌊√(ordinal·reversed)⌋; underlines by the opposite sum's group with seedCLR; toasts; `r`
 //! toggles reversed; ← → gsearch the sidecar's first and last; Enter, Ctrl+Enter,
 //! Shift+Enter and Delete as weum; Enlist, List, Delist, Unlist. Added: Alt+click selects
@@ -92,7 +92,7 @@ async fn list_command(ui: Ui, api: Api, m: Mem, word: &str) -> bool {
     }
     let p = ui.picks.peek().clone();
     let Some(list) = p.list else {
-        ui.fail("Shift+click a text to pick the list first");
+        ui.fail("Ctrl+Shift+click a text to pick the list first");
         return true;
     };
     let r = match word {
@@ -561,7 +561,7 @@ pub fn Memory() -> Element {
                 if header.is_none() && results.is_empty() {
                     div { class: "mem-intro",
                         p { "Type a word below and press Enter: it is remembered, and everything sharing its sum comes up." }
-                        p { "A number gsearches it; Shift+Enter brings back a key (like 0,12). Shift+click a text to head a list, Ctrl+click a candidate, Alt+click to select." }
+                        p { "A number gsearches it; Shift+Enter brings back a key (like 0,12). Shift+click (or Alt+click) selects texts, a box drawn round them too; Ctrl+Shift+click heads a list, Ctrl+click picks a candidate." }
                     }
                 } else {
                     div { class: "spacer" }
@@ -678,7 +678,7 @@ fn TypesLegend(texts: Vec<String>) -> Element {
     }
 }
 
-/// the lists, and the picked list (Shift+click, or a new one) even while it's empty
+/// the lists, and the picked list (Ctrl+Shift+click, or a new one) even while it's empty
 fn with_picked(mut lists: Vec<crate::backend::ListInfo>, picked: Option<Hit>) -> Vec<crate::backend::ListInfo> {
     if let Some(h) = picked
         && !lists.iter().any(|l| l.list == h.key)
@@ -757,13 +757,50 @@ fn SelBar(n: usize) -> Element {
                             }
                         }
                     },
-                    Some(Some(_)) => rsx! { span { "no lists yet: Shift+click a text to make one its head" } },
+                    Some(Some(_)) => rsx! { span { "no lists yet: Ctrl+Shift+click a text to make one its head" } },
                     _ => rsx! { span { "…" } },
                 }
             }
         }
     }
 }
+
+/// the memory view's box selection: a drag that starts on the field's empty space draws a
+/// box; on release, the keys of the texts it touches go to Rust (`add` with Shift)
+const BOX_SELECT: &str = r#"
+// the newest field's channel; the listeners go in once
+window.__anendBoxSend = (m) => dioxus.send(m);
+if (!window.__anendBoxSel) {
+  window.__anendBoxSel = true;
+  let b = null;
+  document.addEventListener('mousedown', (e) => {
+    const arts = e.target.closest && e.target.closest('.arts');
+    if (e.button !== 0 || !arts || e.target.closest('.art')) return;
+    b = { x0: e.clientX, y0: e.clientY, add: e.shiftKey, el: null };
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!b) return;
+    if (!b.el && Math.hypot(e.clientX - b.x0, e.clientY - b.y0) < 5) return;
+    if (!b.el) { b.el = document.createElement('div'); b.el.className = 'selbox'; document.body.append(b.el); }
+    const x = Math.min(b.x0, e.clientX), y = Math.min(b.y0, e.clientY);
+    Object.assign(b.el.style, { left: x + 'px', top: y + 'px', width: Math.abs(e.clientX - b.x0) + 'px', height: Math.abs(e.clientY - b.y0) + 'px' });
+    e.preventDefault();
+  });
+  document.addEventListener('mouseup', () => {
+    if (!b) return;
+    const was = b; b = null;
+    if (!was.el) return;
+    const r = was.el.getBoundingClientRect();
+    was.el.remove();
+    const keys = [...document.querySelectorAll('.arts .art[data-key]')].filter((el) => {
+      const q = el.getBoundingClientRect();
+      return q.right >= r.left && q.left <= r.right && q.bottom >= r.top && q.top <= r.bottom;
+    }).map((el) => el.dataset.key);
+    if (window.__anendBoxSend) window.__anendBoxSend({ keys, add: was.add });
+  });
+}
+await new Promise(() => {});
+"#;
 
 #[component]
 fn Field(style: String, header: Option<Header>, results: Vec<Hit>, mode: Mode, picks: Picks) -> Element {
@@ -788,6 +825,34 @@ fn Field(style: String, header: Option<Header>, results: Vec<Hit>, mode: Mode, p
     });
     let tinted = tints.read().clone().flatten();
     let (tint_of, legend) = tint_map(tinted.as_ref());
+    // a box drawn on the field's empty space selects the texts it touches (Shift adds)
+    let shown = use_signal(Vec::<Hit>::new);
+    {
+        let mut shown = shown;
+        if *shown.peek() != results {
+            shown.set(results.clone());
+        }
+    }
+    use_hook(move || {
+        let mut ev = document::eval(BOX_SELECT);
+        spawn(async move {
+            while let Ok(v) = ev.recv::<serde_json::Value>().await {
+                let keys: Vec<String> = crate::views::classifiers::strs(&v["keys"]);
+                let add = v["add"] == true;
+                let all = shown.peek().clone();
+                let mut picks = ui.picks;
+                let mut p = picks.write();
+                if !add {
+                    p.selected.clear();
+                }
+                for h in all.into_iter().filter(|h| keys.contains(&h.key)) {
+                    if !p.selected.iter().any(|x| x.key == h.key) {
+                        p.selected.push(h);
+                    }
+                }
+            }
+        });
+    });
     // the effects of the pipes turned on (stacked in their order)
     let api_fx = use_context::<Api>();
     let fx = use_resource(move || {
@@ -1213,6 +1278,7 @@ fn Art(
             class: "{class}",
             style: "{style}",
             role: "listitem",
+            "data-key": "{hit.key}",
             tabindex: "0",
             title: "{tip}",
             onmouseenter: move |_| {
@@ -1221,16 +1287,16 @@ fn Art(
             },
             onclick: move |e: MouseEvent| {
                 let md = e.modifiers();
-                if md.ctrl() || md.meta() {
-                    ui.picks.write().candidate = Some(h1.clone());
-                    ui.say(format!("candidate: {}", h1.text));
-                } else if md.shift() {
+                if (md.ctrl() || md.meta()) && md.shift() {
                     let mut p = ui.picks.write();
                     p.candidate = None;
                     p.list = Some(h1.clone());
                     drop(p);
                     ui.say(format!("list: {}", h1.text));
-                } else if md.alt() {
+                } else if md.ctrl() || md.meta() {
+                    ui.picks.write().candidate = Some(h1.clone());
+                    ui.say(format!("candidate: {}", h1.text));
+                } else if md.shift() || md.alt() {
                     let mut p = ui.picks.write();
                     if let Some(i) = p.selected.iter().position(|x| x.key == h1.key) {
                         p.selected.remove(i);

@@ -265,6 +265,8 @@ pub fn Notes() -> Element {
     let mut tags: Signal<Vec<String>> = use_signal(Vec::new);
     let mut dirty = use_signal(|| false);
     let mut armed = use_signal(|| false);
+    // notes picked with Shift+click, to tag or delete together
+    let mut picked: Signal<Vec<String>> = use_signal(Vec::new);
     let mut seq = use_signal(|| 0u64);
     let mut reading = use_signal(|| false);
     let mut judging = use_signal(|| false);
@@ -801,6 +803,7 @@ pub fn Notes() -> Element {
         }));
     }
     let api_d = api.clone();
+    let api_m = api.clone();
     let mut class = String::from("notes");
     if hide_list {
         class.push_str(" no-list");
@@ -819,7 +822,8 @@ pub fn Notes() -> Element {
             div { class: "card notelist",
                 button { class: "primary", "data-tip": "start a new note · {ui.key_of(Action::NewNote)}", onclick: move |_| new_note(),
                     Icon { name: "new" } "a new note" }
-                ul { role: "listbox", "aria-label": "notes, newest first",
+                ManyNotes { picked, api: api_m.clone() }
+                ul { role: "listbox", "aria-label": "notes, newest first", "aria-multiselectable": "true",
                     if open().is_some_and(|n| n.key.is_empty()) {
                         li { class: "on", role: "option", {if shown_title.trim().is_empty() { "untitled".to_string() } else { shown_title.clone() }} if unsaved { " •" } span { class: "when", "not saved yet" } }
                     }
@@ -829,14 +833,22 @@ pub fn Notes() -> Element {
                     for n in notes {
                         li {
                             key: "{n.key}",
-                            class: if n.key == cur_key { "on" } else { "" },
+                            class: match (n.key == cur_key, picked().contains(&n.key)) { (true, true) => "on picked", (true, false) => "on", (false, true) => "picked", _ => "" },
                             title: "{n.title}",
                             role: "option",
+                            "aria-selected": "{picked().contains(&n.key)}",
                             tabindex: "0",
                             onclick: {
                                 let api = api.clone();
                                 let key = n.key.clone();
-                                move |_| {
+                                move |e: MouseEvent| {
+                                    // Shift+click picks notes, several at once
+                                    if e.modifiers().shift() {
+                                        let mut p = picked.write();
+                                        if let Some(i) = p.iter().position(|k| *k == key) { p.remove(i); } else { p.push(key.clone()); }
+                                        return;
+                                    }
+                                    picked.write().clear();
                                     let api = api.clone();
                                     let key = key.clone();
                                     dioxus::dioxus_core::spawn_forever(async move {
@@ -1411,6 +1423,57 @@ fn Replace(text: Signal<String>, dirty: Signal<bool>, seq: Signal<u64>) -> Eleme
                 }
             }
             button { onclick: move |_| insert2(), "put in" }
+        }
+    }
+}
+
+/// the notes picked with Shift+click: tag them, delete them (two clicks), or let them go
+#[component]
+fn ManyNotes(picked: Signal<Vec<String>>, api: Api) -> Element {
+    let ui = ui();
+    let mut tag = use_signal(String::new);
+    let mut armed = use_signal(|| false);
+    let n = picked().len();
+    if n == 0 {
+        return rsx! {};
+    }
+    let (a1, a2) = (api.clone(), api.clone());
+    rsx! {
+        div { class: "many", role: "status",
+            b { {format!("{n} note{} picked", if n == 1 { "" } else { "s" })} }
+            div { class: "row",
+                input { r#type: "text", placeholder: "a tag", "aria-label": "a tag for them", value: "{tag}", oninput: move |e| tag.set(e.value()) }
+                button { class: "btn small", disabled: tag().trim().is_empty(),
+                    onclick: move |_| {
+                        let (api, keys, t) = (a1.clone(), picked(), tag().trim().trim_start_matches('#').to_string());
+                        spawn(async move {
+                            for k in &keys {
+                                if let Err(e) = api.call("tags.add", serde_json::json!({ "key": k, "tag": t })).await { ui.fail(e); return; }
+                            }
+                            ui.say(format!("tagged #{t}: {} notes", keys.len()));
+                            ui.touched();
+                        });
+                    },
+                    Icon { name: "tag" } "tag them" }
+            }
+            div { class: "row",
+                button { class: if armed() { "btn small danger" } else { "btn small" },
+                    onclick: move |_| {
+                        if !armed() { armed.set(true); return; }
+                        let (api, keys) = (a2.clone(), picked());
+                        spawn(async move {
+                            for k in &keys {
+                                if let Err(e) = api.delete_note(k).await { ui.fail(e); return; }
+                            }
+                            picked.set(vec![]);
+                            armed.set(false);
+                            ui.say(format!("{} notes deleted", keys.len()));
+                            ui.touched();
+                        });
+                    },
+                    Icon { name: "delete" } if armed() { "sure? delete them" } else { "delete them" } }
+                button { class: "btn small", onclick: move |_| picked.set(vec![]), Icon { name: "close" } "let go" }
+            }
         }
     }
 }

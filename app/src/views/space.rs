@@ -505,6 +505,9 @@ try {{
     if (c.cmd === 'place') sp.place(c.texts, c.again);
     else if (c.cmd === 'effects') sp.effects(c.fx);
     else if (c.cmd === 'copies') sp.setCopies(c.list || []);
+    else if (c.cmd === 'batch') sp.setBatch(!!c.on);
+    else if (c.cmd === 'removemulti') dioxus.send({{ kind: 'removedmulti', data: sp.removeMulti() }});
+    else if (c.cmd === 'clearmulti') sp.clearMulti();
     else if (c.cmd === 'copygone') sp.copyGone(c.ids || [], c.restore);
     else if (c.cmd === 'opencopy') sp.openCopyNamed(c.id);
     else if (c.cmd === 'closecopy') sp.closeCopy();
@@ -593,6 +596,10 @@ struct Sp {
     block_use: Signal<(u64, u64)>,
     /// the room's lights (`lights.list`), as the room bakes them
     lights: Signal<Vec<Value>>,
+    /// a light picked in the room (its marker clicked), for the lights window
+    lightpick: Signal<Option<u64>>,
+    /// the selection of many in the room: `{count, blocks, copies, texts, lights}`
+    multi: Signal<Option<Value>>,
     /// the right-click menu on a text
     menu: Signal<Option<SpaceEvent>>,
     /// bumped when a scene is saved, so the scenes window reads them again
@@ -906,7 +913,11 @@ fn need(ui: Ui, h: Option<Hit>, what: &str) -> Option<Hit> {
     if h.is_none() {
         ui.fail(format!(
             "no {what}: {} a text to set it",
-            if what == "list" { "Shift+click" } else { "Ctrl+click" }
+            if what == "list" {
+                "Ctrl+Shift+click"
+            } else {
+                "Ctrl+click"
+            }
         ));
     }
     h
@@ -1334,6 +1345,8 @@ pub fn Space() -> Element {
         block: use_signal(|| None),
         block_use: use_signal(|| (0, 0)),
         lights: use_signal(Vec::new),
+        lightpick: use_signal(|| None),
+        multi: use_signal(|| None),
         menu: use_signal(|| None),
         scenes_rev: use_signal(|| 0),
         bmenu: use_signal(|| None),
@@ -1500,6 +1513,7 @@ pub fn Space() -> Element {
                 }
                 Some(Action::Settle) => sp.send(json!({ "cmd": "settle" })),
                 Some(Action::Pin) => sp.send(json!({ "cmd": "pin" })),
+                Some(Action::DeleteText) if sp.multi.peek().is_some() => sp.send(json!({ "cmd": "removemulti" })),
                 Some(Action::DeleteText) => match sp
                     .block
                     .peek()
@@ -1592,6 +1606,20 @@ pub fn Space() -> Element {
                         ps.set(on);
                         sp.send(json!({ "cmd": "pause", "on": on }));
                     },
+                }
+            }
+            if let Some(m) = (sp.multi)() {
+                div { class: "multibar", role: "status",
+                    b { {format!("{} selected", m["count"])} }
+                    span { class: "dim small",
+                        {[("blocks", "block"), ("copies", "copy"), ("texts", "text"), ("lights", "light")].iter().filter_map(|(k, one)| {
+                            let n = m[*k].as_u64().unwrap_or(0);
+                            (n > 0).then(|| format!("{n} {}", if n == 1 { one.to_string() } else { k.to_string() }))
+                        }).collect::<Vec<_>>().join(" · ")}
+                    }
+                    span { class: "dim small", "drag the gizmo to move or turn them all · Shift+click adds or takes out" }
+                    button { class: "btn small", onclick: move |_| sp.send(json!({ "cmd": "removemulti" })), Icon { name: "delete" } "delete them" kbd { "{ui.key_of(Action::DeleteText)}" } }
+                    button { class: "btn small", onclick: move |_| sp.send(json!({ "cmd": "clearmulti" })), Icon { name: "close" } "let go" kbd { "Esc" } }
                 }
             }
             if let (Some((x, y)), Some(b)) = ((sp.bmenu)(), (sp.block)().filter(|b| b["copy"] == true)) {
@@ -1760,6 +1788,66 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
         // a prefab's copy, as one group
         "copyset" => prefabwin::copy_set(ui, api, sp, e.data.clone()),
         "copyrestore" => prefabwin::copy_restore(ui, api, sp, e.data.clone()),
+        // the selection of many
+        "multi" => {
+            let mut m = sp.multi;
+            m.set((e.data["count"].as_u64().unwrap_or(0) > 0).then(|| e.data.clone()));
+        }
+        // Delete on many: the room took texts and blocks; copies and lights go here, in the
+        // same undo step (the room closes it when told)
+        "removedmulti" => {
+            let copies: Vec<String> = e.data["copies"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
+            let lights: Vec<Value> = e.data["lights"].as_array().cloned().unwrap_or_default();
+            let n = e.data["count"].as_u64().unwrap_or(0);
+            dioxus::dioxus_core::spawn_forever(async move {
+                for id in &copies {
+                    match api.call("prefabs.remove", json!({ "id": id })).await {
+                        Ok(r) => sp.send(json!({ "cmd": "copygone", "ids": r["removed"], "restore": r["restore"] })),
+                        Err(err) => ui.fail(err),
+                    }
+                }
+                for id in &lights {
+                    if let Err(err) = api.call("lights.delete", json!({ "id": id })).await {
+                        ui.fail(err);
+                    }
+                }
+                if !copies.is_empty() {
+                    sp.send(json!({ "cmd": "batch", "on": false }));
+                    prefabwin::load_prefabs(ui, &api, sp).await;
+                }
+                if !lights.is_empty() {
+                    lightwin::load_lights(&api, sp).await;
+                }
+                count_blocks(api, sp).await;
+                ui.say(format!("{n} taken away · Ctrl+Z puts them back"));
+            });
+        }
+        "lightpick" => {
+            let mut l = sp.lightpick;
+            l.set(e.data.as_u64());
+        }
+        // a light moved in the room (with many), or put back by an undo
+        "lightset" => {
+            let args = e.data.clone();
+            dioxus::dioxus_core::spawn_forever(async move {
+                match api.call("lights.set", args).await {
+                    Ok(_) => lightwin::load_lights(&api, sp).await,
+                    Err(err) => ui.fail(err),
+                }
+            });
+        }
+        "lightrestore" => {
+            let mut args = e.data.clone();
+            if let Some(o) = args.as_object_mut() {
+                o.remove("id");
+            }
+            dioxus::dioxus_core::spawn_forever(async move {
+                match api.call("lights.add", json!({ "light": args })).await {
+                    Ok(_) => lightwin::load_lights(&api, sp).await,
+                    Err(err) => ui.fail(err),
+                }
+            });
+        }
         "copyopen" => ui.say("the copy is open: its parts are picked one by one, their changes kept as the copy's own · Esc or a click outside closes it"),
         "ghostdone" => ui.say("placing stopped"),
         "mode" => {
@@ -1892,7 +1980,7 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
                 ui.set_bar(&e.text);
                 return;
             }
-            if e.ctrl {
+            if e.ctrl && !e.shift {
                 ui.picks.write().candidate = Some(hit.clone());
                 ui.say(format!("candidate: {}", hit.text));
             } else if e.shift {
@@ -2689,7 +2777,7 @@ fn SpaceMenu(
                         Icon { name: "list" } "put it in the list “{l.text}”" }
                 }
                 button { role: "menuitem", onclick: { let h = hit.clone(); move |_| { let mut p = ui.picks; p.write().list = Some(h.clone()); ui.say(format!("list: {}", h.text)); close(); } },
-                    Icon { name: "list" } "make it the list" kbd { "Shift+click" } }
+                    Icon { name: "list" } "make it the list" kbd { "Ctrl+Shift+click" } }
                 button { role: "menuitem", onclick: { let h = hit.clone(); move |_| { let mut p = ui.picks; p.write().candidate = Some(h.clone()); ui.say(format!("candidate: {}", h.text)); close(); } },
                     Icon { name: "pick" } "make it the candidate" kbd { "Ctrl+click" } }
                 button { role: "menuitem", onclick: { let h = hit.clone(); move |_| {
@@ -3288,7 +3376,14 @@ fn Help() -> Element {
                     "words".into(),
                     "Enlist List Delist Unlist Count Backup Clear ClearAll Settle Maps Save name",
                 ),
-                ("Ctrl+click / Shift+click".into(), "the list's candidate / the list"),
+                (
+                    "Ctrl+click / Ctrl+Shift+click".into(),
+                    "the list's candidate / the list",
+                ),
+                (
+                    "Shift+click, or a box drawn on empty room".into(),
+                    "select many: blocks, copies, texts, lights",
+                ),
                 ("Ctrl+right click".into(), "gsearch ⌊√(s·r)⌋"),
                 (
                     format!("{} {}", k(Action::SideSum), k(Action::SideReversedSum)),

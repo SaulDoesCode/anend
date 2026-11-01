@@ -223,7 +223,7 @@ pub fn Models() -> Element {
                             None => rsx! {
                                 div { class: "card empty",
                                     p { "A classifier learns from examples, given as lists (each list a class, its members the examples), and then reads any text, in the save or newly typed: it orders classifier search, colours the memory and the space, and answers in the reader and the notes. Classifiers are one use of the project's transformer engine, which also runs spec models (taggers, generators, critics)." }
-                                    p { "Make two or more lists (in the memory view: Shift+click a text to make it a list's head, then Alt+click texts and put them in it), then press " b { "new" } "." }
+                                    p { "Make two or more lists (in the memory view: Ctrl+Shift+click a text to make it a list's head, then Shift+click texts and put them in it), then press " b { "new" } "." }
                                     p { "Or begin with a starter: ready-made texts whose classes a rule knows for certain, so how well a classifier learned them is measured on texts it never saw. "
                                         button { onclick: move |_| side.set(Side::Starters), Icon { name: "star" } "starters" } }
                                 }
