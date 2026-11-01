@@ -105,6 +105,7 @@ departure says why in its commit).
   to edit parts).
 - Done (1 Nov): selecting many (Shift+click and boxes in the space and the memory view;
   notes and lists).
+- Done (1 Nov): groups (Ctrl+G, nesting, open by double-click, copy, prefab).
 - Next: the rest of the user's 27 Oct
   lines (grouped prefabs, shift and box selection, Ctrl+G groups, drawn wires, wgpu with no
   JavaScript on the desktop, culling, polish, ▶).

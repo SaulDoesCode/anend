@@ -302,6 +302,21 @@ has the types right and wrong, and gives each wrong word the nearest words marke
 | `tagsets.score` | `{name}` | `{marked: [{type, words, some}], trained, training, accuracy, measured_on, types: [{type, precision, recall, support}]}` |
 | `classify.set_train` | `{name, val_fraction?: 0–0.5, patience?}` | details: how a classifier trains from now on |
 
+### Groups
+
+Things in the room grouped by hand (`core/src/ops/groups.rs`): a group's members are blocks
+(`b`), prefab copies (`c`) and groups (`g`, so groups nest); a thing is directly in one
+group at most. Members that are gone are left out when read, and a group left with fewer
+than two goes.
+
+| op | args | data |
+|---|---|---|
+| `groups.list` | | `[{id, name, members: [{kind, id}]}]` |
+| `groups.make` | `{members, name?}` | `{id, groups}`; two or more, each in the room and in no group yet (a copy's parts can't) |
+| `groups.ungroup` | `{id}` | `{members, groups}`; the members stay |
+| `groups.rename` | `{id, name}` | the groups |
+| `groups.restore` | `{members, name?}` | `{id, groups}`: a group made again (an undo of ungroup) |
+
 ### Classifier buckets, filters and modules
 
 Outputs are memoized per classifier and memory/note (`core/src/memo.rs`), under a stamp

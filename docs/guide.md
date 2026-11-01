@@ -113,7 +113,12 @@ list and candidate. **Shift+click** selects many: texts, blocks, prefab copies, 
 while the lights window shows them; a box dragged on empty room selects what's in it
 (Shift adds). The selected are outlined in blue; the gizmo at their middle moves and turns
 them all, **Delete** takes them all away, **Ctrl+Z** takes either back in one step, and
-**Esc** (or a click on empty room) lets them go. The room's colour is a setting.
+**Esc** (or a click on empty room) lets them go. **Ctrl+G** (or *group them*) makes the
+selected blocks and copies a group: a click on any of it picks all of it, dragging any of
+it moves it all, and groups go inside groups. A double-click opens a group to pick inside
+it (Esc closes it); **Ctrl+Shift+G** ungroups (Ctrl+Z groups it again). A selected group
+has *a copy beside it* and *make a prefab of it* (of its blocks). The room's colour is a
+setting.
 
 ### Building in the space
 

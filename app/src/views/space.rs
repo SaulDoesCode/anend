@@ -506,6 +506,14 @@ try {{
     else if (c.cmd === 'effects') sp.effects(c.fx);
     else if (c.cmd === 'copies') sp.setCopies(c.list || []);
     else if (c.cmd === 'batch') sp.setBatch(!!c.on);
+    else if (c.cmd === 'groups') {{
+      sp.setGroups(c.list || []);
+      if (c.made) {{ sp.record({{ kind: 'grouped', id: c.made }}); sp.pickGroup(c.made); }}
+      if (c.broke) {{ sp.record({{ kind: 'ungrouped', members: c.broke.members, name: c.broke.name }}); sp.afterMulti(); }}
+      if (c.select) sp.pickGroup(c.select);
+    }}
+    else if (c.cmd === 'group') dioxus.send({{ kind: 'groupmake', data: {{ members: sp.groupMembers() }} }});
+    else if (c.cmd === 'ungroup') dioxus.send({{ kind: 'groupbreak', data: {{ id: sp.selGroup }} }});
     else if (c.cmd === 'removemulti') dioxus.send({{ kind: 'removedmulti', data: sp.removeMulti() }});
     else if (c.cmd === 'clearmulti') sp.clearMulti();
     else if (c.cmd === 'copygone') sp.copyGone(c.ids || [], c.restore);
@@ -1514,6 +1522,8 @@ pub fn Space() -> Element {
                 Some(Action::Settle) => sp.send(json!({ "cmd": "settle" })),
                 Some(Action::Pin) => sp.send(json!({ "cmd": "pin" })),
                 Some(Action::DeleteText) if sp.multi.peek().is_some() => sp.send(json!({ "cmd": "removemulti" })),
+                Some(Action::Group) => sp.send(json!({ "cmd": "group" })),
+                Some(Action::Ungroup) => sp.send(json!({ "cmd": "ungroup" })),
                 Some(Action::DeleteText) => match sp
                     .block
                     .peek()
@@ -1616,6 +1626,14 @@ pub fn Space() -> Element {
                             let n = m[*k].as_u64().unwrap_or(0);
                             (n > 0).then(|| format!("{n} {}", if n == 1 { one.to_string() } else { k.to_string() }))
                         }).collect::<Vec<_>>().join(" · ")}
+                    }
+                    if let Some(g) = m["group"].as_str().map(String::from) {
+                        span { class: "small", b { {if m["name"].as_str().unwrap_or("").is_empty() { "a group".to_string() } else { format!("the group “{}”", m["name"].as_str().unwrap_or("")) }} } }
+                        button { class: "btn small", onclick: move |_| sp.send(json!({ "cmd": "ungroup" })), Icon { name: "close" } "ungroup" kbd { "{ui.key_of(Action::Ungroup)}" } }
+                        button { class: "btn small", onclick: { let (g, api) = (g.clone(), api_b.clone()); move |_| group_copy(ui, api.clone(), sp, g.clone()) }, Icon { name: "copy" } "a copy beside it" }
+                        button { class: "btn small", onclick: { let (g, api, n) = (g.clone(), api_b.clone(), m["name"].as_str().unwrap_or("").to_string()); move |_| group_prefab(ui, api.clone(), sp, g.clone(), n.clone()) }, Icon { name: "prefab" } "make a prefab of it" }
+                    } else {
+                        button { class: "btn small", onclick: move |_| sp.send(json!({ "cmd": "group" })), Icon { name: "prefab" } "group them" kbd { "{ui.key_of(Action::Group)}" } }
                     }
                     span { class: "dim small", "drag the gizmo to move or turn them all · Shift+click adds or takes out" }
                     button { class: "btn small", onclick: move |_| sp.send(json!({ "cmd": "removemulti" })), Icon { name: "delete" } "delete them" kbd { "{ui.key_of(Action::DeleteText)}" } }
@@ -1822,6 +1840,18 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
                 ui.say(format!("{n} taken away · Ctrl+Z puts them back"));
             });
         }
+        // groups (Ctrl+G, Ctrl+Shift+G, the bar's buttons, an undo)
+        "groupmake" => groups_call(ui, api, sp, "groups.make", json!({ "members": e.data["members"] }), "made"),
+        "groupbreak" => {
+            if e.data["id"].is_null() {
+                ui.say("select a group first (a click on any of it)");
+                return;
+            }
+            let why = if e.data["quiet"] == true { "quiet" } else { "broke" };
+            groups_call(ui, api, sp, "groups.ungroup", json!({ "id": e.data["id"] }), why)
+        }
+        "grouprestore" => groups_call(ui, api, sp, "groups.restore", e.data.clone(), "select"),
+        "groupopen" => ui.say("the group is open: its things are picked one by one · Esc closes it"),
         "lightpick" => {
             let mut l = sp.lightpick;
             l.set(e.data.as_u64());
@@ -2071,13 +2101,170 @@ async fn load_blocks(ui: Ui, api: Api, sp: Sp) {
             lightwin::load_lights(&api, sp).await;
             animwin::load_anims(ui, &api, sp).await;
             wirewin::load_wires(&api, sp).await;
-            // the prefabs' copies: each one a group in the room
+            // the prefabs' copies: each one a group in the room; and the groups made by hand
             prefabwin::load_prefabs(ui, &api, sp).await;
+            load_groups(&api, sp).await;
             count_blocks(api, sp).await;
         }
         // a hub from before blocks: the room has none
         Err(_) => sp.send(json!({ "cmd": "blocks", "blocks": [], "replace": true })),
     }
+}
+
+async fn load_groups(api: &Api, sp: Sp) {
+    if let Ok(l) = api.call("groups.list", json!({})).await {
+        sp.send(json!({ "cmd": "groups", "list": l }));
+    }
+}
+
+/// a groups op; `how` says what the room does after: `made` (select it, one undo step),
+/// `broke` (one undo step), `select` (select it), `quiet` (nothing: an undo's own work)
+fn groups_call(ui: Ui, api: Api, sp: Sp, op: &'static str, args: Value, how: &'static str) {
+    dioxus::dioxus_core::spawn_forever(async move {
+        match api.call(op, args).await {
+            Ok(r) => {
+                let mut c = json!({ "cmd": "groups", "list": r["groups"] });
+                match how {
+                    "made" => {
+                        c["made"] = r["id"].clone();
+                        ui.say("grouped: a click on any of it picks it all · double-click opens it · Ctrl+Shift+G ungroups");
+                    }
+                    "broke" => {
+                        c["broke"] = json!({ "members": r["members"] });
+                        ui.say("ungrouped · Ctrl+Z groups it again");
+                    }
+                    "select" => c["select"] = r["id"].clone(),
+                    _ => {}
+                }
+                sp.send(c);
+            }
+            Err(e) => ui.fail(e),
+        }
+    });
+}
+
+/// the selected group: a copy beside it (groups inside it copied as groups), or a prefab
+/// of its blocks
+fn group_copy(ui: Ui, api: Api, sp: Sp, gid: String) {
+    dioxus::dioxus_core::spawn_forever(async move {
+        let list = match api.call("groups.list", json!({})).await {
+            Ok(l) => l.as_array().cloned().unwrap_or_default(),
+            Err(e) => return ui.fail(e),
+        };
+        let by = json!([2.0, 0.0, 0.0]);
+        // copies of every block and prefab copy in it, old id → new
+        let mut new: HashMap<String, String> = HashMap::new();
+        fn leaves(list: &[Value], gid: &str, out: &mut Vec<(String, String)>) {
+            if let Some(g) = list.iter().find(|g| g["id"] == gid) {
+                for m in g["members"].as_array().into_iter().flatten() {
+                    let (k, id) = (m["kind"].as_str().unwrap_or(""), m["id"].as_str().unwrap_or(""));
+                    if k == "g" {
+                        leaves(list, id, out)
+                    } else {
+                        out.push((k.to_string(), id.to_string()))
+                    }
+                }
+            }
+        }
+        let mut ls = Vec::new();
+        leaves(&list, &gid, &mut ls);
+        sp.send(json!({ "cmd": "batch", "on": true }));
+        for (k, id) in &ls {
+            let r = if k == "b" {
+                api.call("blocks.duplicate", json!({ "ids": [id], "by": by }))
+                    .await
+                    .map(|r| (r["ids"][0].as_str().unwrap_or("").to_string(), r))
+            } else {
+                api.call("prefabs.duplicate", json!({ "id": id, "by": by }))
+                    .await
+                    .map(|r| (r["copy"]["id"].as_str().unwrap_or("").to_string(), r))
+            };
+            match r {
+                Ok((nid, r)) => {
+                    let textures = dress(ui, &api, r["textures"].clone()).await;
+                    sp.send(json!({ "cmd": "blocks", "blocks": r["blocks"], "textures": textures, "added": if k == "b" { json!([nid]) } else { json!([]) } }));
+                    new.insert(format!("{k}:{id}"), nid);
+                }
+                Err(e) => {
+                    sp.send(json!({ "cmd": "batch", "on": false }));
+                    return ui.fail(e);
+                }
+            }
+        }
+        // the groups again, innermost first
+        fn remake<'a>(
+            api: &'a Api,
+            list: &'a [Value],
+            gid: &'a str,
+            new: &'a HashMap<String, String>,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + 'a>> {
+            Box::pin(async move {
+                let g = list.iter().find(|g| g["id"] == gid)?;
+                let mut members = Vec::new();
+                for m in g["members"].as_array().into_iter().flatten() {
+                    let (k, id) = (m["kind"].as_str().unwrap_or(""), m["id"].as_str().unwrap_or(""));
+                    let nid = if k == "g" {
+                        remake(api, list, id, new).await?
+                    } else {
+                        new.get(&format!("{k}:{id}"))?.clone()
+                    };
+                    members.push(json!({ "kind": k, "id": nid }));
+                }
+                api.call("groups.make", json!({ "members": members, "name": g["name"] }))
+                    .await
+                    .ok()
+                    .and_then(|r| r["id"].as_str().map(String::from))
+            })
+        }
+        let made = remake(&api, &list, &gid, &new).await;
+        sp.send(json!({ "cmd": "batch", "on": false }));
+        prefabwin::load_prefabs(ui, &api, sp).await;
+        if let Ok(l) = api.call("groups.list", json!({})).await {
+            sp.send(json!({ "cmd": "groups", "list": l, "select": made }));
+        }
+        count_blocks(api, sp).await;
+        ui.say("a copy of the group beside it");
+    });
+}
+
+fn group_prefab(ui: Ui, api: Api, sp: Sp, gid: String, name: String) {
+    dioxus::dioxus_core::spawn_forever(async move {
+        let list = api
+            .call("groups.list", json!({}))
+            .await
+            .ok()
+            .and_then(|l| l.as_array().cloned())
+            .unwrap_or_default();
+        let mut blocks = Vec::new();
+        let mut copies = 0;
+        fn walk(list: &[Value], gid: &str, blocks: &mut Vec<String>, copies: &mut usize) {
+            if let Some(g) = list.iter().find(|g| g["id"] == gid) {
+                for m in g["members"].as_array().into_iter().flatten() {
+                    match m["kind"].as_str().unwrap_or("") {
+                        "g" => walk(list, m["id"].as_str().unwrap_or(""), blocks, copies),
+                        "b" => blocks.push(m["id"].as_str().unwrap_or("").to_string()),
+                        _ => *copies += 1,
+                    }
+                }
+            }
+        }
+        walk(&list, &gid, &mut blocks, &mut copies);
+        if copies > 0 {
+            return ui.fail("a prefab is made of blocks: detach the copies in the group first (their menu)");
+        }
+        let name = if name.trim().is_empty() {
+            "a group".to_string()
+        } else {
+            name
+        };
+        match api.call("prefabs.make", json!({ "name": name, "ids": blocks })).await {
+            Ok(_) => {
+                load_blocks(ui, api.clone(), sp).await;
+                ui.say(format!("a prefab, “{name}”: its copy stands where the group was"));
+            }
+            Err(e) => ui.fail(e),
+        }
+    });
 }
 
 fn delete_block(ui: Ui, api: Api, sp: Sp, id: String) {

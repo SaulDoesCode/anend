@@ -116,6 +116,8 @@ pub const KEY_ACTIONS: &[&str] = &[
     "edit_text",
     "delete_text",
     "copy_text",
+    "group",
+    "ungroup",
     "reversed",
     "pin",
     "physics",
@@ -226,6 +228,30 @@ mod tests {
         ] {
             assert!(rs.contains(needle), "space.rs lost {needle}");
         }
+    }
+
+    /// groups: Ctrl+G, nesting, picked whole, opened, copied, made a prefab
+    #[test]
+    fn groups_stay() {
+        let js = include_str!("space.js");
+        for needle in [
+            "setGroups(list) {",
+            "outer(key) {",
+            "pickGroup(gid, add) {",
+            "groupMembers() {",
+            "openGroupAt(key) {",
+            "u.kind === 'grouped'",
+            "u.kind === 'ungrouped'",
+        ] {
+            assert!(js.contains(needle), "space.js lost {needle}");
+        }
+        let sp = include_str!("views/space.rs");
+        assert!(
+            sp.contains("fn group_copy(")
+                && sp.contains("fn group_prefab(")
+                && sp.contains("Some(Action::Group)")
+                && sp.contains("Some(Action::Ungroup)")
+        );
     }
 
     /// selecting many: Shift+click and boxes in the space and the memory view; notes, lists

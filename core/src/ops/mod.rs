@@ -12,6 +12,8 @@ pub mod blocks;
 pub mod chains;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod classify;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod groups;
 pub mod merge;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod models;
@@ -208,7 +210,12 @@ pub fn counts(v: &View) -> Result<(u64, u64), String> {
     };
     let notes = of(mime::MARKDOWN)?;
     let tags = of(mime::TAG)?;
-    let anims = of(mime::ANIMATION)? + of(mime::WIRING)? + of(mime::TAXONOMY)? + of(mime::PIPE)? + of(mime::TAGSET)?;
+    let anims = of(mime::ANIMATION)?
+        + of(mime::WIRING)?
+        + of(mime::TAXONOMY)?
+        + of(mime::PIPE)?
+        + of(mime::TAGSET)?
+        + of(mime::GROUP)?;
     Ok((notes, all.saturating_sub(notes + tags + anims)))
 }
 

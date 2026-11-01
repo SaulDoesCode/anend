@@ -176,8 +176,9 @@ measures: each line is checked against how the same action feels there.
       is shown clearly. Works on blocks, texts, placements and lights in the space, and on
       entries in the memory, lists, notes and tags views. (1 Nov: the space's many, moved,
       turned and deleted together with one undo; memory box and Shift; notes and lists.)
-- [ ] Groups: a selection can be grouped and ungrouped (Ctrl+G and Ctrl+Shift+G, and from the
+- [x] Groups: a selection can be grouped and ungrouped (Ctrl+G and Ctrl+Shift+G, and from the
       menu); groups nest; a group is moved, turned, copied and saved as a prefab as a whole.
+      (1 Nov: `groups.*`; picked whole, opened by a double-click, copied, made a prefab.)
 - [ ] Wires drawn in the room: each connection shown as a wire from its sender to its target,
       lit while a signal passes. Wiring made by dragging from one block to another, with the
       ports visible while wiring, the same way in the window and in first-person mode.

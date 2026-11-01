@@ -487,6 +487,10 @@ impl Saves {
             let (_, g) = self.current()?;
             return super::prefabs::call(&g, op, args);
         }
+        if super::groups::routed(op) {
+            let (_, g) = self.current()?;
+            return super::groups::call(&g, op, args);
+        }
         if super::wiring::routed(op) {
             let (_, g) = self.current()?;
             let shared = self.models.is_some_and(|l| l.shared);

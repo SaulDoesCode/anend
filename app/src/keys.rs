@@ -73,6 +73,8 @@ pub enum Action {
     EditText,
     DeleteText,
     CopyText,
+    Group,
+    Ungroup,
     Reversed,
     Pin,
     Physics,
@@ -114,7 +116,7 @@ impl Scope {
 use Action::*;
 
 impl Action {
-    pub const ALL: [Action; 68] = [
+    pub const ALL: [Action; 70] = [
         GotoMemory,
         GotoSpace,
         GotoLists,
@@ -169,6 +171,8 @@ impl Action {
         EditText,
         DeleteText,
         CopyText,
+        Group,
+        Ungroup,
         Reversed,
         Pin,
         Physics,
@@ -262,6 +266,8 @@ impl Action {
             EditText => "edit_text",
             DeleteText => "delete_text",
             CopyText => "copy_text",
+            Group => "group",
+            Ungroup => "ungroup",
             Reversed => "reversed",
             Pin => "pin",
             Physics => "physics",
@@ -335,6 +341,8 @@ impl Action {
             EditText => "edit the selected text",
             DeleteText => "remove the selected text",
             CopyText => "copy the selected text",
+            Group => "group what's selected",
+            Ungroup => "ungroup the selected group",
             Reversed => "reversed on / off",
             Pin => "pin / unpin the selected text",
             Physics => "the physics panel",
@@ -409,6 +417,8 @@ impl Action {
             EditText => "Enter",
             DeleteText => "Delete",
             CopyText => "Ctrl+C",
+            Group => "Ctrl+G",
+            Ungroup => "Ctrl+Shift+G",
             Reversed => "F",
             Pin => "U",
             Physics => "O",

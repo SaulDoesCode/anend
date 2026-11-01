@@ -144,6 +144,12 @@ export class Space {
     // the selection of many (Shift+click, or a box drawn): kind:id → { kind, id }, kinds
     // b (a block), c (a prefab's copy), t (a text's placement, by its node key), l (a light)
     this.multi = new Map();
+    // groups made by hand (Ctrl+G; core's ops::groups): id → members, a member's group,
+    // the selected group, and the groups opened (a double click) to pick inside them
+    this.groups = new Map();
+    this.parent = new Map();
+    this.selGroup = null;
+    this.openGroups = [];
     this.freeN = 0;
     this.infoAt = 0;
     this.origin = new THREE.Vector3();
@@ -820,6 +826,10 @@ export class Space {
         this.shapeBlock(o);
         this.send({ ...this.ev('blockset', null), data: this.blockOut(o) });
       }
+    } else if (u.kind === 'grouped') {
+      this.send({ ...this.ev('groupbreak', null), data: { id: u.id, quiet: true } });
+    } else if (u.kind === 'ungrouped') {
+      this.send({ ...this.ev('grouprestore', null), data: { members: u.members, name: u.name || '' } });
     } else if (u.kind === 'lightgone') {
       this.send({ ...this.ev('lightrestore', null), data: u.light });
     } else if (u.kind === 'light') {
@@ -2463,6 +2473,17 @@ export class Space {
   }
 
   toggleMulti(kind, id) {
+    this.selGroup = null;
+    // a thing in a group comes and goes with its whole group
+    const g = kind === 'b' || kind === 'c' ? this.outer(`${kind}:${id}`) : null;
+    if (g) {
+      if (!this.multi.size) this.seedMulti();
+      const ls = this.leaves(g);
+      const all = ls.every((x) => this.multi.has(`${x.kind}:${x.id}`));
+      for (const x of ls) { if (all) this.multi.delete(`${x.kind}:${x.id}`); else this.multi.set(`${x.kind}:${x.id}`, x); }
+      this.afterMulti();
+      return;
+    }
     if (!this.multi.size) this.seedMulti();
     const k = `${kind}:${id}`;
     if (this.multi.has(k)) this.multi.delete(k); else this.multi.set(k, { kind, id });
@@ -2476,6 +2497,7 @@ export class Space {
   }
 
   clearMulti() {
+    this.selGroup = null;
     if (!this.multi.size) return false;
     this.multi.clear();
     this.afterMulti();
@@ -2525,7 +2547,8 @@ export class Space {
     if (!quiet) {
       const n = { blocks: 0, copies: 0, texts: 0, lights: 0 };
       for (const x of this.multi.values()) n[{ b: 'blocks', c: 'copies', t: 'texts', l: 'lights' }[x.kind]]++;
-      this.send({ ...this.ev('multi', null), data: { count: this.multi.size, ...n } });
+      const g = this.selGroup && this.groups.get(this.selGroup);
+      this.send({ ...this.ev('multi', null), data: { count: this.multi.size, ...n, group: g ? g.id : null, name: g ? g.name || '' : null } });
     }
     this.render();
   }
@@ -2730,6 +2753,66 @@ export class Space {
     if (!b.add && this.selCopy) this.pickCopy(null);
     if (!b.add && this.selBlock != null) this.pickBlock(null);
     this.setMulti(items, b.add);
+  }
+
+  // ------------------------------------------------------------------ groups
+  //
+  // A group (Ctrl+G on what's selected) is picked as one: a click on any of its things
+  // selects all of it, and it moves, turns, copies and becomes a prefab as one. Groups
+  // nest. A double click opens a group to pick inside it; Esc closes it again.
+
+  setGroups(list) {
+    this.groups = new Map((list || []).map((g) => [g.id, g]));
+    this.parent = new Map();
+    for (const g of this.groups.values()) for (const m of g.members) this.parent.set(`${m.kind}:${m.id}`, g.id);
+    this.openGroups = this.openGroups.filter((id) => this.groups.has(id));
+    if (this.selGroup && !this.groups.has(this.selGroup)) this.selGroup = null;
+  }
+
+  // the outermost closed group a thing is in (an open group lets its things be picked)
+  outer(key) {
+    let g = this.parent.get(key), top = null;
+    while (g && !this.openGroups.includes(g)) {
+      top = g;
+      g = this.parent.get(`g:${g}`);
+    }
+    return top;
+  }
+
+  leaves(gid, out = []) {
+    const g = this.groups.get(gid);
+    for (const m of (g && g.members) || []) {
+      if (m.kind === 'g') this.leaves(m.id, out);
+      else out.push({ kind: m.kind, id: m.id });
+    }
+    return out;
+  }
+
+  pickGroup(gid, add) {
+    this.setMulti(this.leaves(gid), add);
+    this.selGroup = add ? null : gid;
+    this.afterMulti();
+  }
+
+  // what Ctrl+G groups: the things selected, each as its outermost group
+  groupMembers() {
+    const out = new Map();
+    for (const x of this.multi.values()) {
+      if (x.kind !== 'b' && x.kind !== 'c') continue;
+      const g = this.outer(`${x.kind}:${x.id}`);
+      const m = g ? { kind: 'g', id: g } : { kind: x.kind, id: x.id };
+      out.set(`${m.kind}:${m.id}`, m);
+    }
+    return [...out.values()];
+  }
+
+  openGroupAt(key) {
+    const g = this.outer(key);
+    if (!g) return false;
+    this.openGroups.push(g);
+    this.clearMulti();
+    this.send({ ...this.ev('groupopen', null), data: g });
+    return true;
   }
 
   // where a new block goes: ahead of the camera, or at the selected text
@@ -3164,7 +3247,10 @@ export class Space {
       // the block itself, not the gizmo over it
       const m = this.rayFrom(e).intersectObjects([...this.blocks.values()].map((o) => o.mesh), false)[0];
       const id = m && m.object.userData.block;
-      if (id != null && this.copyOf(id) && this.openCopy !== this.copyOf(id)) this.openCopyAt(id);
+      if (id == null) return;
+      const c = this.copyOf(id);
+      if (this.outer(c && this.openCopy !== c ? `c:${c}` : `b:${id}`) && this.openGroupAt(c && this.openCopy !== c ? `c:${c}` : `b:${id}`)) return;
+      if (c && this.openCopy !== c) this.openCopyAt(id);
     });
     h.addEventListener('pointerdown', (e) => {
       if (e.target.closest('.slabel')) return;
@@ -3197,11 +3283,27 @@ export class Space {
           }
         }
         const hit = this.blocks.size ? this.blockHit(e) : null;
-        // Shift+click on a block or a copy: one of many, in or out
-        if (hit && hit.block != null && e.shiftKey) {
+        // Shift+click on a block or a copy (the block itself, not the gizmo over it): one
+        // of many, in or out
+        if (e.shiftKey && this.blocks.size) {
+          const m = this.rayFrom(e).intersectObjects([...this.blocks.values()].map((o) => o.mesh), false)[0];
+          const sid = m && m.object.userData.block;
+          if (sid != null) {
+            const c = this.copyOf(sid);
+            if (c && this.openCopy !== c) this.toggleMulti('c', c); else this.toggleMulti('b', sid);
+            return;
+          }
+        }
+        // a thing in a group: the whole group, dragged by any of it
+        if (hit && hit.block != null) {
           const c = this.copyOf(hit.block);
-          if (c && this.openCopy !== c) this.toggleMulti('c', c); else this.toggleMulti('b', hit.block);
-          return;
+          const key = c && this.openCopy !== c ? `c:${c}` : `b:${hit.block}`;
+          const g = this.outer(key);
+          if (g) {
+            if (this.selGroup !== g) this.pickGroup(g);
+            this.startBlockDrag(e, { handle: { mode: 'plane', axis: -1 } });
+            return;
+          }
         }
         if (hit && hit.block != null && this.multi.size) this.clearMulti();
         if (hit) {
@@ -3290,6 +3392,7 @@ export class Space {
       } else if (k === 'Escape' && this.ghost) { this.stopGhost(); this.send({ ...this.ev('ghostdone', null) }); }
       else if (k === 'Escape' && this.openCopy) this.closeCopy();
       else if (k === 'Escape' && this.multi.size) this.clearMulti();
+      else if (k === 'Escape' && this.openGroups.length) { const g = this.openGroups.pop(); this.pickGroup(g); }
       else if (k === b.level) this.level();
       else if (k === b.walk) this.setMode(this.mode === 'walk' ? 'fly' : 'walk');
       else if (k === b.superflight) this.setMode(this.mode === 'super' ? 'fly' : 'super');

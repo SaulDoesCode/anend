@@ -428,3 +428,9 @@ The answers left these open. Each is written into the design as its default.
     stray drag can't scatter a selection; texts moved with them are pinned.
 109. **The room's undo batches:** what one action did (many moved, many deleted, copies
     removed by Rust in the same step) goes back with one Ctrl+Z.
+110. **Groups hold blocks and prefab copies, not texts or lights:** they're what's built;
+    texts and lights still join a selection of many. A thing is in one group directly; a
+    group goes inside another when it's grouped again with more.
+111. **A group's copy goes 2 units along x**, its inner groups remade as groups; a prefab
+    of a group takes its blocks (copies inside must be detached first: a prefab's parts
+    are blocks).
