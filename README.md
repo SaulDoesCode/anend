@@ -150,7 +150,7 @@ separate measure, in `core/src/measure.rs`.
 ## Building and running
 
 ```sh
-# the desktop app (Linux needs libwebkit2gtk-4.1-dev and libxdo-dev)
+# the desktop app (Linux needs libwebkit2gtk-4.1-dev, libxdo-dev and libasound2-dev)
 cargo run --release -p anend-app
 
 # the app for the browser: needs the wasm32-unknown-unknown target and wasm-bindgen-cli 0.2.129

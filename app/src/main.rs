@@ -11,6 +11,8 @@ mod keys;
 mod md;
 #[cfg(all(feature = "desktop", target_os = "linux"))]
 mod native;
+#[cfg(all(feature = "desktop", target_os = "linux"))]
+mod native_audio;
 mod parity;
 mod prefs;
 mod shell;

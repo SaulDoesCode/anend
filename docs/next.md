@@ -488,7 +488,7 @@ Clippy clean for the hub's three feature builds and core.
 ## The Dioxus app (`app/`, package `anend-app`): status
 
 Dioxus 0.7.10 (pinned); desktop through dioxus-desktop/wry (needs `libwebkit2gtk-4.1-dev
-libxdo-dev`), web through WebAssembly. Features: `desktop` (default), `web`, `hub`
+libxdo-dev libasound2-dev`), web through WebAssembly. Features: `desktop` (default), `web`, `hub`
 (default; the hub's settings). In the workspace and CI (build, clippy, a wasm32 build).
 - **Done:** `gem.rs`: weum's numbers checked against api.js/memory.js (the gsum line letter
   for letter, pfR via core, seedCLR as JavaScript's string hash, underline groups per mode

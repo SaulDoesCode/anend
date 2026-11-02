@@ -16,7 +16,10 @@ use serde_json::{Map, Value, json};
 use crate::text;
 
 mod edit;
+mod sounds;
+mod wires;
 pub use edit::{block_out, copy_of};
+pub use sounds::Audio;
 
 /// the em the labels are measured at (the webview's labels were 32px)
 pub const BASE_PX: f32 = 32.0;
@@ -441,6 +444,10 @@ pub struct Room {
     pub blocks: crate::blocks::Blocks,
     /// building: the picked block or copy, the many, groups, the gizmo
     ed: edit::Edit,
+    /// wires, zones' events and rays
+    wires: wires::Wires,
+    /// what's sounding
+    sounds: sounds::Sounds,
     /// whether anything changed since the last picture
     pub dirty: bool,
 }
@@ -498,6 +505,8 @@ impl Room {
             wheel_undo: None,
             blocks: Default::default(),
             ed: Default::default(),
+            wires: Default::default(),
+            sounds: Default::default(),
             dirty: true,
         };
         r.set_frame();
@@ -1154,6 +1163,12 @@ impl Room {
             self.mean = (ms, (ss / nn).sqrt(), ml, mt, (tt / k.max(1.0)).sqrt());
         }
         let a = self.alpha;
+        let frames = self.zone_frames();
+        self.assign_zones(&frames);
+        if self.sim.as_ref().is_none_or(|s| s.len() != n * n) {
+            self.weights();
+        }
+        let zones: HashMap<String, wires::Frame> = frames.into_iter().map(|f| (f.id.clone(), f)).collect();
         let (repel, attract, link, gravity, flat, depth, damping, pad) = (
             self.p.f("repel"),
             self.p.f("attract"),
@@ -1173,6 +1188,12 @@ impl Room {
         let mut fz = vec![0.0f32; n];
         for i in 0..n {
             let aa = &nodes[i];
+            // a text in a zone moves under the zone's physics, toward its centre
+            let zf = aa.zone.as_ref().and_then(|z| zones.get(z));
+            let (repel, attract, link) = match zf {
+                Some(f) => (f.p.f("repel"), f.p.f("attract"), f.p.f("link")),
+                None => (repel, attract, link),
+            };
             for j in i + 1..n {
                 let bb = &nodes[j];
                 if aa.head.is_some() || bb.head.is_some() || aa.zone != bb.zone {
@@ -1199,6 +1220,13 @@ impl Room {
                 fy[j] -= f * uy;
                 fz[j] -= f * uz;
             }
+            if let Some(f) = zf {
+                let g = f.p.f("gravity");
+                fx[i] -= g * (aa.x - f.c.x);
+                fy[i] -= g * (aa.y - f.c.y);
+                fz[i] -= flat * (aa.z - f.c.z);
+                continue;
+            }
             fx[i] -= gravity * aa.x;
             fy[i] -= gravity * aa.y;
             let zt = if depth_none { 0.0 } else { self.depth_of(aa) * depth };
@@ -1207,6 +1235,13 @@ impl Room {
         let mut ke = 0.0;
         let drag_k = (-damping * h).exp();
         for (i, key) in self.order.clone().iter().enumerate() {
+            let zf = self
+                .nodes
+                .get(key)
+                .and_then(|n| n.zone.as_ref())
+                .and_then(|z| zones.get(z))
+                .cloned();
+            let drag_k = zf.as_ref().map(|f| (-f.p.f("damping") * h).exp()).unwrap_or(drag_k);
             let Some(aa) = self.nodes.get_mut(key) else { continue };
             if aa.pinned || aa.head.is_some() || dragged.as_deref() == Some(key.as_str()) {
                 (aa.vx, aa.vy, aa.vz) = (0.0, 0.0, 0.0);
@@ -1225,6 +1260,15 @@ impl Room {
             aa.x += aa.vx * h;
             aa.y += aa.vy * h;
             aa.z += aa.vz * h;
+            // bounded by its zone: the speed into a side is lost there
+            if let Some(f) = &zf
+                && self.keep_in(key, f)
+                && let Some(aa) = self.nodes.get_mut(key)
+            {
+                aa.vx *= 0.5;
+                aa.vy *= 0.5;
+                aa.vz *= 0.5;
+            }
             ke += v2;
         }
         ke += self.follow(h) * 100.0;
@@ -1686,7 +1730,8 @@ impl Room {
     pub fn command(&mut self, c: &Value) {
         let cmd = c["cmd"].as_str().unwrap_or("");
         let s = |k: &str| c[k].as_str().unwrap_or("").to_string();
-        if self.edit_command(cmd, c) {
+        if self.edit_command(cmd, c) || self.wire_command(cmd, c) || self.sound_command(cmd, c) {
+            self.dirty = true;
             return;
         }
         match cmd {
@@ -2015,6 +2060,9 @@ impl Room {
             });
             return;
         }
+        if button == 0 && self.wire_down(x, y) {
+            return;
+        }
         if button == 0 {
             // the gizmo, a block, a light, or a box drawn on empty room (a click there lets
             // go of the selection; a double click makes a text)
@@ -2048,7 +2096,7 @@ impl Room {
             self.wake(0.3);
             return;
         }
-        if self.edit_move(x, y, m) {
+        if self.wire_move(x, y) || self.edit_move(x, y, m) {
             return;
         }
         if self.looking {
@@ -2079,6 +2127,7 @@ impl Room {
                     z: fz,
                     pinned: fp,
                 });
+                self.drop_into_zone(&d.n);
                 self.sim = None;
                 self.send_ev("moved", Some(&d.n), Some((x, y, m)), Value::Null);
             } else {
@@ -2097,7 +2146,7 @@ impl Room {
             }
             return;
         }
-        if button == 0 && self.edit_up(x, y) {
+        if button == 0 && (self.wire_up(x, y) || self.edit_up(x, y)) {
             return;
         }
         if button == 2 {
@@ -2215,6 +2264,12 @@ impl Room {
             }
             self.dirty = true;
         }
+        self.zone_check();
+        self.wire_timers();
+        self.place_voices();
+        if self.wires_moving() {
+            self.dirty = true;
+        }
         self.info(false);
     }
 
@@ -2281,6 +2336,7 @@ impl Room {
         scene.meshes = meshes;
         scene.textures = textures;
         scene.meshes.push(self.grid());
+        self.wire_meshes(&mut scene.meshes);
         self.edit_meshes(&mut scene.meshes);
         scene.rects = self.edit_rects();
         // the labels, as the webview placed them: the farthest first

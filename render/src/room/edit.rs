@@ -404,6 +404,7 @@ impl Room {
     }
 
     fn drop_block(&mut self, id: &str) {
+        self.stop_sound(id);
         self.blocks.remove(&[id.to_string()]);
         self.blocks.poses.remove(id);
         if self.ed.sel_block.as_deref() == Some(id) {

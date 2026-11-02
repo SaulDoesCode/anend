@@ -45,6 +45,8 @@ pub fn run(mut rx: futures_channel::mpsc::UnboundedReceiver<Value>, on_event: im
             let dt = last.elapsed().as_secs_f32();
             last = std::time::Instant::now();
             r.borrow_mut().frame(dt);
+            let audio = r.borrow_mut().take_audio();
+            crate::native_audio::play(audio);
             let evs = r.borrow_mut().take_events();
             for e in evs {
                 if let Ok(e) = serde_json::from_value::<SpaceEvent>(e) {
