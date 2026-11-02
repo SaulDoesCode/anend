@@ -11,6 +11,7 @@
 //! everything (the gizmo, outlines, ports), and the labels last.
 
 pub mod blocks;
+pub mod prims;
 pub mod room;
 pub mod text;
 pub mod tiles;
@@ -59,6 +60,20 @@ pub struct Label {
     pub back: Option<[f32; 4]>,
     /// the width it wraps at, in ems
     pub wrap: f32,
+    /// an outline round it (one of many selected), in this colour
+    pub ring: Option<[f32; 4]>,
+}
+
+/// a rectangle over the room (a box being drawn to select), in pixels
+#[derive(Clone, Debug, PartialEq)]
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    /// linear RGBA, premultiplied
+    pub fill: [f32; 4],
+    pub border: [f32; 4],
 }
 
 /// a vertex of a mesh: where (in the mesh's own frame), where in its texture (in tiles: a
@@ -118,6 +133,7 @@ pub struct Scene {
     pub blocks: Vec<Block>,
     pub lines: Vec<Line>,
     pub labels: Vec<Label>,
+    pub rects: Vec<Rect>,
     pub meshes: Vec<Mesh>,
     pub textures: HashMap<String, Texture>,
 }
@@ -806,6 +822,34 @@ impl Renderer {
                     c,
                 );
             }
+            if let Some(c) = l.ring {
+                // 2px wide, 2px out from the label (as `outline-offset`)
+                let (o, t) = (2.0 / s, 2.0 / s);
+                let wh = [white; 4];
+                let (x0, y0, x1, y1) = (-o - t, -o - t, lay.w + o + t, lay.h + o + t);
+                quad(&mut out, x0, y0, x1, y0 + t, wh, c);
+                quad(&mut out, x0, y1 - t, x1, y1, wh, c);
+                quad(&mut out, x0, y0 + t, x0 + t, y1 - t, wh, c);
+                quad(&mut out, x1 - t, y0 + t, x1, y1 - t, wh, c);
+            }
+        }
+        for r in &scene.rects {
+            let p = |x: f32, y: f32| [x / w * 2.0 - 1.0, 1.0 - y / h * 2.0, 0.0];
+            let mut q = |x0: f32, y0: f32, x1: f32, y1: f32, c: [f32; 4]| {
+                let v = |x: f32, y: f32| Vert {
+                    pos: p(x, y),
+                    uv: [white, white],
+                    colour: c,
+                };
+                let (a, b, cc, d) = (v(x0, y0), v(x1, y0), v(x1, y1), v(x0, y1));
+                out.extend_from_slice(&[a, b, cc, a, cc, d]);
+            };
+            let (x1, y1) = (r.x + r.w, r.y + r.h);
+            q(r.x, r.y, x1, y1, r.fill);
+            q(r.x, r.y, x1, r.y + 1.0, r.border);
+            q(r.x, y1 - 1.0, x1, y1, r.border);
+            q(r.x, r.y + 1.0, r.x + 1.0, y1 - 1.0, r.border);
+            q(x1 - 1.0, r.y + 1.0, x1, y1 - 1.0, r.border);
         }
         out
     }
@@ -1207,6 +1251,7 @@ mod tests {
                 under: None,
                 back: None,
                 wrap: 30.0,
+                ring: None,
             }],
             ..scene.clone()
         };

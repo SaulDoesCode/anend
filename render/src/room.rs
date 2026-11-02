@@ -15,6 +15,9 @@ use serde_json::{Map, Value, json};
 
 use crate::text;
 
+mod edit;
+pub use edit::{block_out, copy_of};
+
 /// the em the labels are measured at (the webview's labels were 32px)
 pub const BASE_PX: f32 = 32.0;
 const LOOK: f32 = 0.0026;
@@ -334,6 +337,30 @@ pub enum Undo {
     },
     /// several made together, the last first
     Many(Vec<Undo>),
+    /// blocks added (they go again)
+    BlockAdd {
+        ids: Vec<String>,
+    },
+    /// blocks deleted (they come back, with their textures)
+    Unblock {
+        items: Vec<(Value, Value)>,
+    },
+    /// a block as it was
+    Block {
+        id: String,
+        t: Value,
+    },
+    /// a light's fields as they were
+    Light {
+        id: Value,
+        t: Value,
+    },
+    /// a step Rust takes back: the event it's told with
+    Send {
+        name: &'static str,
+        kind: String,
+        data: Value,
+    },
 }
 
 /// the camera easing onto a text (the arrows' hop)
@@ -412,6 +439,8 @@ pub struct Room {
     wheel_undo: Option<(String, f32)>,
     /// the blocks, their textures and the room's lights
     pub blocks: crate::blocks::Blocks,
+    /// building: the picked block or copy, the many, groups, the gizmo
+    ed: edit::Edit,
     /// whether anything changed since the last picture
     pub dirty: bool,
 }
@@ -468,6 +497,7 @@ impl Room {
             pointer: (0.0, 0.0),
             wheel_undo: None,
             blocks: Default::default(),
+            ed: Default::default(),
             dirty: true,
         };
         r.set_frame();
@@ -1273,6 +1303,12 @@ impl Room {
 
     fn pick(&mut self, key: Option<String>) {
         self.selected = key.clone();
+        if key.is_some() && self.ed.sel_block.is_some() {
+            self.pick_block(None);
+        }
+        if key.is_some() && self.ed.sel_copy.is_some() {
+            self.pick_copy(None, false);
+        }
         self.dirty = true;
         self.send_ev("select", key.as_deref(), None, Value::Null);
     }
@@ -1312,6 +1348,11 @@ impl Room {
             Undo::Own { .. } => "own",
             Undo::Event { .. } => "event",
             Undo::Many(_) => "many",
+            Undo::BlockAdd { .. } => "blockadd",
+            Undo::Unblock { .. } => "unblock",
+            Undo::Block { .. } => "block",
+            Undo::Light { .. } => "light",
+            Undo::Send { name, .. } => name,
         }
         .to_string()
     }
@@ -1365,7 +1406,30 @@ impl Room {
                 self.measure(&n);
             }
             Undo::Event { kind, data } => self.send_ev(&kind, None, None, data),
+            Undo::BlockAdd { ids } => {
+                for id in &ids {
+                    self.blocks.remove(std::slice::from_ref(id));
+                    if self.ed.sel_block.as_deref() == Some(id.as_str()) {
+                        self.pick_block(None);
+                    }
+                }
+                self.send_ev("blockgone", None, None, json!(ids));
+            }
+            Undo::Unblock { items } => self.restore_unblocked(items),
+            Undo::Block { id, t } => self.restore_block(&id, t),
+            Undo::Light { id, t } => {
+                if let (Some(l), Some(t)) = (self.blocks.lights.iter_mut().find(|l| l["id"] == id), t.as_object()) {
+                    for (k, v) in t {
+                        l[k] = v.clone();
+                    }
+                }
+                let mut d = t.clone();
+                d["id"] = id;
+                self.send_ev("lightset", None, None, d);
+            }
+            Undo::Send { kind, data, .. } => self.send_ev(&kind, None, None, data),
         }
+        self.dirty = true;
     }
 
     pub fn pin_selected(&mut self) -> Option<&'static str> {
@@ -1622,6 +1686,9 @@ impl Room {
     pub fn command(&mut self, c: &Value) {
         let cmd = c["cmd"].as_str().unwrap_or("");
         let s = |k: &str| c[k].as_str().unwrap_or("").to_string();
+        if self.edit_command(cmd, c) {
+            return;
+        }
         match cmd {
             "place" => {
                 let texts = c["texts"].as_array().cloned().unwrap_or_default();
@@ -1788,21 +1855,6 @@ impl Room {
                 }
             }
             "batch" => self.set_batch(c["on"] == true),
-            "blocks" => {
-                let list = c["blocks"].as_array().cloned().unwrap_or_default();
-                self.blocks.set(&list, c.get("textures"), c["replace"] == true);
-                self.dirty = true;
-            }
-            "unblock" => {
-                let ids: Vec<String> = c["ids"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|x| x.as_str().map(String::from))
-                    .collect();
-                self.blocks.remove(&ids);
-                self.dirty = true;
-            }
             "sky" => {
                 self.blocks.sky = c.get("about").filter(|a| !a["recipe"].is_null()).cloned();
                 self.dirty = true;
@@ -1810,6 +1862,9 @@ impl Room {
             "lights" => {
                 self.blocks
                     .set_lights(c["lights"].as_array().cloned().unwrap_or_default());
+                if !self.ed.multi.is_empty() {
+                    self.after_multi(true);
+                }
                 self.dirty = true;
             }
             _ => {}
@@ -1856,6 +1911,9 @@ impl Room {
         }
         if code.starts_with("Arrow") && !m.shift {
             self.hop(code);
+            return;
+        }
+        if code == "Escape" && self.edit_escape() {
             return;
         }
         match action.as_deref() {
@@ -1930,6 +1988,14 @@ impl Room {
         if button == 0
             && let Some(k) = self.label_at(x, y)
         {
+            // Shift+click: one of many, in or out (Ctrl+Shift+click makes it the list)
+            if m.shift && !m.ctrl {
+                self.toggle_multi('t', json!(k));
+                return;
+            }
+            if !self.ed.multi.is_empty() {
+                self.clear_multi();
+            }
             let t = self.nodes.get(&k).and_then(|n| n.head.clone()).unwrap_or(k.clone());
             let Some(tn) = self.nodes.get(&t) else { return };
             let w = self.world(tn);
@@ -1947,20 +2013,12 @@ impl Room {
                 from: (tn.x, tn.y, tn.z, tn.pinned),
                 off: w - hit,
             });
-            let _ = m;
             return;
         }
         if button == 0 {
-            // a click on empty room lets go of the selection; a double click makes a text
-            if self.clock - self.last_empty < 0.45 {
-                self.last_empty = -10.0;
-                self.send_ev("newtext", None, Some((x, y, m)), Value::Null);
-            } else {
-                self.last_empty = self.clock;
-            }
-            if self.selected.is_some() {
-                self.pick(None);
-            }
+            // the gizmo, a block, a light, or a box drawn on empty room (a click there lets
+            // go of the selection; a double click makes a text)
+            self.edit_down(x, y, m);
             return;
         }
         if button == 2 {
@@ -1988,6 +2046,9 @@ impl Room {
                 dd.moved = true;
             }
             self.wake(0.3);
+            return;
+        }
+        if self.edit_move(x, y, m) {
             return;
         }
         if self.looking {
@@ -2036,14 +2097,19 @@ impl Room {
             }
             return;
         }
+        if button == 0 && self.edit_up(x, y) {
+            return;
+        }
         if button == 2 {
             self.looking = false;
             let r = self.rdown.take();
-            // a right click that didn't look around, on a text: its menu
-            if r.is_some_and(|(rx, ry)| (x - rx).hypot(y - ry) < 4.0)
-                && let Some(k) = self.label_at(x, y)
-            {
-                self.send_ev("menu", Some(&k), Some((x, y, m)), Value::Null);
+            // a right click that didn't look around, on a text or a block: its menu
+            if r.is_some_and(|(rx, ry)| (x - rx).hypot(y - ry) < 4.0) {
+                if let Some(k) = self.label_at(x, y) {
+                    self.send_ev("menu", Some(&k), Some((x, y, m)), Value::Null);
+                } else {
+                    self.block_menu(x, y, m);
+                }
             }
         }
     }
@@ -2211,10 +2277,12 @@ impl Room {
         };
         // fog in the room's colour, as space.js's (60 to 260 units)
         scene.fog = Some((60.0, 260.0));
-        let (meshes, textures) = self.blocks.meshes(self.at, &|_, _| None);
+        let (meshes, textures) = self.blocks.meshes(self.at);
         scene.meshes = meshes;
         scene.textures = textures;
         scene.meshes.push(self.grid());
+        self.edit_meshes(&mut scene.meshes);
+        scene.rects = self.edit_rects();
         // the labels, as the webview placed them: the farthest first
         let (w, h) = self.size;
         let focal = h / 2.0 / (25f32).to_radians().tan();
@@ -2270,6 +2338,7 @@ impl Room {
                             under,
                             back: n.picked.then(|| Self::colour("#c9a227", 0.4 * alpha)),
                             wrap: wrap_em,
+                            ring: self.text_ringed(&k).then(|| Self::colour("#3f8cff", 1.0)),
                         },
                     ));
                 }
@@ -2291,6 +2360,66 @@ mod tests {
 
     fn text(key: &str, t: &str, s: f64) -> Value {
         json!({ "key": key, "text": t, "note": false, "s": s, "r": 50.0, "q": 3, "chars": t.len() })
+    }
+
+    #[test]
+    fn blocks_are_picked_dragged_and_undone() {
+        let mut r = Room::new();
+        r.resize(800.0, 600.0);
+        r.command(&json!({"cmd": "start"}));
+        r.command(&json!({"cmd": "blocks", "blocks": [
+            {"id": "1", "kind": "plain", "texture": "#ff0000", "x": 0, "y": 0, "z": -8, "w": 2, "h": 2, "d": 2},
+            {"id": "2", "kind": "plain", "texture": "#00ff00", "x": 4, "y": 0, "z": -8, "w": 1, "h": 1, "d": 1}
+        ]}));
+        let none = Mods::default();
+        // a click picks it; a drag moves it in the view's plane
+        r.pointer_down(400.0, 300.0, 0, none);
+        r.pointer_move(450.0, 300.0, none);
+        r.pointer_move(500.0, 300.0, none);
+        r.pointer_up(500.0, 300.0, 0, none);
+        let evs = r.take_events();
+        let kinds: Vec<&str> = evs.iter().filter_map(|e| e["kind"].as_str()).collect();
+        assert!(kinds.contains(&"block") && kinds.contains(&"blockset"), "{kinds:?}");
+        let set = evs.iter().find(|e| e["kind"] == "blockset").unwrap();
+        assert!(set["data"]["x"].as_f64().unwrap() > 0.5, "{set}");
+        // the gizmo shows over it
+        let sc = r.scene();
+        assert!(sc.meshes.iter().any(|m| m.pass == crate::Pass::Over));
+        // Ctrl+Z puts it back
+        assert_eq!(r.undo_last(), "block");
+        let evs = r.take_events();
+        let back = evs.iter().find(|e| e["kind"] == "blockset").unwrap();
+        assert!(back["data"]["x"].as_f64().unwrap().abs() < 1e-6);
+        // Shift+click adds the other: two selected
+        r.command(&json!({"cmd": "pickblock", "id": "1"}));
+        let p2 = r.to_px(Vec3::new(4.0, 0.0, -8.0)).unwrap();
+        r.pointer_down(p2.x, p2.y, 0, Mods { shift: true, ..none });
+        r.pointer_up(p2.x, p2.y, 0, Mods { shift: true, ..none });
+        let evs = r.take_events();
+        let multi = evs.iter().rev().find(|e| e["kind"] == "multi").unwrap();
+        assert_eq!(
+            multi["data"]["count"],
+            2,
+            "{:?}",
+            evs.iter()
+                .map(|e| (e["kind"].clone(), e["data"].clone()))
+                .collect::<Vec<_>>()
+        );
+        // Esc lets them go; a box drawn round both selects them again
+        r.key_down("Escape", none);
+        r.pointer_down(150.0, 150.0, 0, none);
+        r.pointer_move(790.0, 450.0, none);
+        assert_eq!(r.scene().rects.len(), 1);
+        r.pointer_up(790.0, 450.0, 0, none);
+        let evs = r.take_events();
+        let multi = evs.iter().rev().find(|e| e["kind"] == "multi").unwrap();
+        assert_eq!(multi["data"]["blocks"], 2, "{multi}");
+        // Delete takes both, one step back
+        r.command(&json!({"cmd": "removemulti"}));
+        assert!(r.blocks.list.is_empty());
+        r.take_events();
+        r.undo_last();
+        assert_eq!(r.blocks.list.len(), 2);
     }
 
     #[test]

@@ -399,11 +399,90 @@ pub struct Blocks {
     sky_mesh: Option<(String, Mesh)>,
     /// changed since the last scene
     pub rev: u64,
+    /// blocks drawn somewhere other than their place for now (dragged with a copy or
+    /// many, posed by an animation): their whole placement
+    pub poses: HashMap<String, Mat4>,
 }
 
 impl Blocks {
     pub fn get(&self, id: &str) -> Option<&Value> {
         self.list.iter().find(|(k, _)| k == id).map(|(_, b)| b)
+    }
+
+    pub fn get_mut(&mut self, id: &str) -> Option<&mut Value> {
+        self.rev += 1;
+        self.list.iter_mut().find(|(k, _)| k == id).map(|(_, b)| b)
+    }
+
+    pub fn has(&self, id: &str) -> bool {
+        self.list.iter().any(|(k, _)| k == id)
+    }
+
+    /// where a block is drawn now (its pose, else its place)
+    pub fn model(&self, id: &str) -> Option<Mat4> {
+        if let Some(m) = self.poses.get(id) {
+            return Some(*m);
+        }
+        let (at, rot) = place(self.get(id)?);
+        Some(Mat4::from_rotation_translation(rot, at))
+    }
+
+    /// a block's corners (its own frame), built when it's new
+    fn corners(&mut self, id: &str) -> Vec<Vec3> {
+        if !self.built.contains_key(id)
+            && let Some(b) = self.get(id).cloned()
+        {
+            let (at, rot) = place(&b);
+            self.build(id, &b, Mat4::from_rotation_translation(rot, at), rot);
+        }
+        self.built
+            .get(id)
+            .map(|x| {
+                x.meshes
+                    .iter()
+                    .flat_map(|m| m.verts.iter().map(|v| Vec3::from(v.pos)))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// the block a ray meets first, and how far along it
+    pub fn hit(&mut self, o: Vec3, d: Vec3) -> Option<(String, f32)> {
+        let ids: Vec<String> = self.list.iter().map(|(k, _)| k.clone()).collect();
+        let mut best: Option<(String, f32)> = None;
+        for id in ids {
+            let Some(m) = self.model(&id) else { continue };
+            let Some((lo, hi)) = self.bounds(&id) else { continue };
+            // the box round it first
+            let (c, r) = ((lo + hi) / 2.0, (hi - lo).length() / 2.0);
+            let t = (c - o).dot(d);
+            if (o + d * t).distance(c) > r + 1e-3 {
+                continue;
+            }
+            let tris = self.corners(&id);
+            if let Some(t) = crate::prims::ray_tris(o, d, &tris, m)
+                && best.as_ref().is_none_or(|b| t < b.1)
+            {
+                best = Some((id, t));
+            }
+        }
+        best
+    }
+
+    /// the box round a block where it's drawn now (lowest and highest corners)
+    pub fn bounds(&mut self, id: &str) -> Option<(Vec3, Vec3)> {
+        let m = self.model(id)?;
+        let cs = self.corners(id);
+        if cs.is_empty() {
+            return None;
+        }
+        let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+        for c in cs {
+            let p = m.transform_point3(c);
+            lo = lo.min(p);
+            hi = hi.max(p);
+        }
+        Some((lo, hi))
     }
 
     pub fn set(&mut self, list: &[Value], textures: Option<&Value>, replace: bool) {
@@ -580,20 +659,16 @@ impl Blocks {
         meshes
     }
 
-    /// what to draw: every block's meshes (at `pose`'s place when it gives one), the sky
-    /// round the camera, and the textures they show
-    pub fn meshes(
-        &mut self,
-        eye: Vec3,
-        pose: &dyn Fn(&str, &Value) -> Option<Mat4>,
-    ) -> (Vec<Mesh>, HashMap<String, Texture>) {
+    /// what to draw: every block's meshes (at its pose when it has one), the sky round
+    /// the camera, and the textures they show
+    pub fn meshes(&mut self, eye: Vec3) -> (Vec<Mesh>, HashMap<String, Texture>) {
         let mut out = Vec::new();
         let list = self.list.clone();
         for (id, b) in &list {
             let (at, rot) = place(b);
             let model = Mat4::from_rotation_translation(rot, at);
             let mut ms = self.build(id, b, model, rot);
-            if let Some(m) = pose(id, b) {
+            if let Some(m) = self.poses.get(id).copied() {
                 for x in &mut ms {
                     x.model = m;
                 }
@@ -697,13 +772,13 @@ mod tests {
         // the meshes: a plain red box shaded; a light makes its lit side bright
         let mut bl = Blocks::default();
         bl.set(std::slice::from_ref(&b), None, false);
-        let (ms, _) = bl.meshes(Vec3::ZERO, &|_, _| None);
+        let (ms, _) = bl.meshes(Vec3::ZERO);
         assert_eq!(ms.len(), 1);
         assert!(ms[0].verts.iter().all(|v| v.colour[0] > 0.5 && v.colour[1] < 0.01));
         bl.set_lights(vec![
             json!({"kind": "point", "x": 0, "y": 0, "z": 0, "intensity": 1, "range": 30, "colour": "#ffffff"}),
         ]);
-        let (ms, _) = bl.meshes(Vec3::ZERO, &|_, _| None);
+        let (ms, _) = bl.meshes(Vec3::ZERO);
         let front = ms[0]
             .verts
             .iter()
@@ -723,7 +798,7 @@ mod tests {
             Some(&json!({"text:t1": {"text": "hello"}})),
             false,
         );
-        let (ms, tex) = bl.meshes(Vec3::ZERO, &|_, _| None);
+        let (ms, tex) = bl.meshes(Vec3::ZERO);
         assert!(ms.iter().any(|m| m.texture.as_deref() == Some("text:t1")));
         assert!(tex.contains_key("text:t1"));
     }
