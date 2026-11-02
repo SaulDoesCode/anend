@@ -210,7 +210,8 @@ measures: each line is checked against how the same action feels there.
       space's two faults above were the ones found. Not measured: frame times on a real
       GPU (this container draws in software); the spread is about 30 ms a frame for 2000
       texts on four cores, so a room that size needs more cores or fewer steps for 60.)
-- [ ] ▶ **usable:** building, grouping and wiring that feel finished, on the native renderer.
+- [x] ▶ **usable:** building, grouping and wiring that feel finished, on the native renderer.
+      (2 Nov: README and guide describe the native room; offered on PR #8.)
 - [x] Block rotation and packed storage (#5); the picture-to-texture pipeline (#7); the skybox
       (#23).
       (26 Oct: rotation done, with the gizmo's rings, stored packed; texture recipes in
