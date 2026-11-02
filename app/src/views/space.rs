@@ -1646,8 +1646,8 @@ pub fn Space() -> Element {
             if p.space.show_hud {
                 PosCard { pos: sp.pos }
             }
-            // the hint while the room has nothing in it: no texts and no blocks
-            if n == 0 && (sp.block_use)().0 == 0 {
+            // the hint while the room has nothing in it: no texts, no blocks and no prefab copies
+            if n == 0 && (sp.block_use)().0 == 0 && sp.copies.read().is_empty() {
                 div { class: "space-empty",
                     p { "The room is empty." }
                     p { class: "small", "Type a word, a number or a key in the bar and press Enter: its bucket spreads out here, pulled together by how alike the texts are. Hold the right mouse button to look around, W A S D to fly, the arrow keys hop from text to text; H for help." }

@@ -96,6 +96,11 @@ pub fn set_window_colour(hex: &str) {
     redraw();
 }
 
+/// whether the room's picture shows now
+pub fn shown() -> bool {
+    paint().lock().map(|p| p.shown).unwrap_or(false)
+}
+
 /// whether the room's picture shows (the space is the view on screen)
 pub fn show(on: bool) {
     paint().lock().unwrap_or_else(|e| e.into_inner()).shown = on;

@@ -88,7 +88,7 @@ pub fn run(mut rx: futures_channel::mpsc::UnboundedReceiver<Value>, on_event: im
             }
             let mut rm = r.borrow_mut();
             rm.resize(w as f32, h as f32);
-            if rm.dirty || tick.is_multiple_of(30) {
+            if crate::native::shown() && (rm.dirty || tick.is_multiple_of(30)) {
                 let scene = rm.scene();
                 let camera = rm.camera();
                 drop(rm);
@@ -125,9 +125,11 @@ fn button(e: &MouseEvent) -> u8 {
 /// the room's element: empty and see-through, its pointer and keys for the room
 #[component]
 pub fn NativeHost() -> Element {
-    use_hook(|| crate::native::show(true));
-    use_drop(|| crate::native::show(false));
     let ui = crate::ui::ui();
+    // the room shows while the space is the view on screen (views are kept once built)
+    let open = (ui.view)() == crate::ui::View::Space;
+    use_effect(move || crate::native::show((ui.view)() == crate::ui::View::Space));
+    use_drop(|| crate::native::show(false));
     use_effect(move || {
         let p = ui.prefs.read();
         crate::native::set_window_colour(&crate::theme::colour(&p.palette, &p.colours, "window"));
@@ -138,7 +140,9 @@ pub fn NativeHost() -> Element {
     };
     rsx! {
         // the page is see-through where the room is: the window's colour is painted under it
-        style { "html, body, #main, .app, .view.space, .space {{ background: transparent !important; }}" }
+        if open {
+            style { "html, body, #main, .app, .view.space, .space {{ background: transparent !important; }}" }
+        }
         div { id: "space-host", class: "space-host native", tabindex: "0",
             "aria-label": "the space: right drag looks, W A S D fly, arrows hop between texts",
             onmounted: move |e| HOST.with(|h| *h.borrow_mut() = Some(e.data())),
