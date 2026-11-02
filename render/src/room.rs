@@ -2685,6 +2685,41 @@ mod tests {
     }
 
     #[test]
+    fn a_hundred_texts_settle_apart() {
+        let mut r = Room::new();
+        r.resize(1200.0, 800.0);
+        let texts: Vec<Value> = (0..107)
+            .map(|i| {
+                text(
+                    &format!("0,{i}"),
+                    &["gko", "eaaafeam", "wj", "the", "pfdg"][i % 5],
+                    33.0,
+                )
+            })
+            .collect();
+        r.place(&texts, false);
+        r.settle();
+        let ns: Vec<&Node> = r.order.iter().map(|k| &r.nodes[k]).collect();
+        let mut bad = 0;
+        for i in 0..ns.len() {
+            for j in i + 1..ns.len() {
+                let (a, b) = (ns[i], ns[j]);
+                let apart = (a.x - b.x).abs() >= (a.hw + b.hw) * 0.9
+                    || (a.y - b.y).abs() >= (a.hh + b.hh) * 0.9
+                    || (a.z - b.z).abs() > 1.5;
+                bad += (!apart) as usize;
+            }
+        }
+        eprintln!(
+            "overlapping pairs: {bad}; z range {:?}",
+            ns.iter()
+                .map(|n| n.z)
+                .fold((f32::MAX, f32::MIN), |a, z| (a.0.min(z), a.1.max(z)))
+        );
+        assert!(bad <= 3, "{bad} pairs overlap");
+    }
+
+    #[test]
     fn texts_spread_apart_and_settle() {
         let mut r = Room::new();
         r.resize(1200.0, 800.0);

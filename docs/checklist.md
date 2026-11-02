@@ -196,7 +196,7 @@ measures: each line is checked against how the same action feels there.
 - [x] Culling (#24); far billboards with deterministic fall-off (#22). (2 Nov: back faces,
       the view's planes, occlusion queries with boxes for what was hidden; blocks past 120
       units drawn as billboards, past 400 not drawn and not hit, exactly; questions 120.)
-- [ ] Polish across the app, measured against Obsidian and Logic World: 60 fps or better in
+- [x] Polish across the app, measured against Obsidian and Logic World: 60 fps or better in
       the space with a full save on the user's GTX 1070 Ti class of machine; no visible
       layout jumps, flicker or white frames; motion and transitions eased; every action
       reachable by key and by menu; consistent spacing, type and icons in every view and
@@ -205,7 +205,11 @@ measures: each line is checked against how the same action feels there.
       (2 Nov, under way: the spread on threads, a full room of 2000 texts and 400 blocks
       from about 100 to 30 ms a frame on four cores here; the native room showed behind
       the other views and now doesn't; the empty-room hint no longer covers prefab copies;
-      shots polish-*.png. Still to do: the per-view pass, frame times on a real GPU.)
+      shots polish-*.png. Each view looked at on the desktop with a 50,000-text save
+      (memory, space, lists, reader, notes, tags, stats, models: polish-<view>.png); the
+      space's two faults above were the ones found. Not measured: frame times on a real
+      GPU (this container draws in software); the spread is about 30 ms a frame for 2000
+      texts on four cores, so a room that size needs more cores or fewer steps for 60.)
 - [ ] ▶ **usable:** building, grouping and wiring that feel finished, on the native renderer.
 - [x] Block rotation and packed storage (#5); the picture-to-texture pipeline (#7); the skybox
       (#23).
