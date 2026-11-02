@@ -410,8 +410,8 @@ pub struct Room {
     rdown: Option<(f32, f32)>,
     pointer: (f32, f32),
     wheel_undo: Option<(String, f32)>,
-    /// the blocks as Rust sent them (drawn; the block slice moves their editing over)
-    pub blocks: Vec<(String, Value)>,
+    /// the blocks, their textures and the room's lights
+    pub blocks: crate::blocks::Blocks,
     /// whether anything changed since the last picture
     pub dirty: bool,
 }
@@ -467,7 +467,7 @@ impl Room {
             rdown: None,
             pointer: (0.0, 0.0),
             wheel_undo: None,
-            blocks: Vec::new(),
+            blocks: Default::default(),
             dirty: true,
         };
         r.set_frame();
@@ -1789,16 +1789,8 @@ impl Room {
             }
             "batch" => self.set_batch(c["on"] == true),
             "blocks" => {
-                if c["replace"] == true {
-                    self.blocks.clear();
-                }
-                for b in c["blocks"].as_array().into_iter().flatten() {
-                    let id = b["id"].as_str().unwrap_or("").to_string();
-                    match self.blocks.iter_mut().find(|(k, _)| *k == id) {
-                        Some(x) => x.1 = b.clone(),
-                        None => self.blocks.push((id, b.clone())),
-                    }
-                }
+                let list = c["blocks"].as_array().cloned().unwrap_or_default();
+                self.blocks.set(&list, c.get("textures"), c["replace"] == true);
                 self.dirty = true;
             }
             "unblock" => {
@@ -1808,7 +1800,16 @@ impl Room {
                     .flatten()
                     .filter_map(|x| x.as_str().map(String::from))
                     .collect();
-                self.blocks.retain(|(k, _)| !ids.contains(k));
+                self.blocks.remove(&ids);
+                self.dirty = true;
+            }
+            "sky" => {
+                self.blocks.sky = c.get("about").filter(|a| !a["recipe"].is_null()).cloned();
+                self.dirty = true;
+            }
+            "lights" => {
+                self.blocks
+                    .set_lights(c["lights"].as_array().cloned().unwrap_or_default());
                 self.dirty = true;
             }
             _ => {}
@@ -2167,6 +2168,40 @@ impl Room {
         [lin(r) * alpha, lin(g) * alpha, lin(b) * alpha, alpha]
     }
 
+    /// the floor's grid (600 across, 120 lines, 9 below), faint: black on a pale room,
+    /// white on a dark one
+    fn grid(&self) -> crate::Mesh {
+        let [r, g, b] = css_rgb(&self.room).unwrap_or([0.9, 0.85, 0.75]);
+        let dark = r * 0.3 + g * 0.59 + b * 0.11 < 0.35;
+        let (c, a) = if dark { (1.0, 0.05) } else { (0.0, 0.06) };
+        let mut verts = Vec::new();
+        for i in 0..=120 {
+            let t = -300.0 + i as f32 * 5.0;
+            for (p, q) in [
+                ([t, -9.0, -300.0], [t, -9.0, 300.0]),
+                ([-300.0, -9.0, t], [300.0, -9.0, t]),
+            ] {
+                for pos in [p, q] {
+                    verts.push(crate::Vert {
+                        pos,
+                        uv: [0.0, 0.0],
+                        colour: [c, c, c, a],
+                    });
+                }
+            }
+        }
+        crate::Mesh {
+            id: u64::MAX - 2,
+            version: dark as u64,
+            verts: std::sync::Arc::new(verts),
+            texture: None,
+            pass: crate::Pass::Glass,
+            model: glam::Mat4::IDENTITY,
+            cull: false,
+            lines: true,
+        }
+    }
+
     /// what to draw now; it also keeps where each label went, for the pointer
     pub fn scene(&mut self) -> crate::Scene {
         let sky = Self::colour(&self.room, 1.0);
@@ -2174,32 +2209,12 @@ impl Room {
             sky: [sky[0], sky[1], sky[2]],
             ..Default::default()
         };
-        // the blocks (their own slice moves textures, bends and editing over)
-        for (_, b) in &self.blocks {
-            let f = |k: &str, d: f32| b[k].as_f64().map(|x| x as f32).unwrap_or(d);
-            let r: Vec<f32> = b["rot"]
-                .as_array()
-                .map(|a| a.iter().map(|x| x.as_f64().unwrap_or(0.0) as f32).collect())
-                .unwrap_or_default();
-            let rot = if r.len() == 4 {
-                Quat::from_xyzw(r[0], r[1], r[2], r[3]).normalize()
-            } else {
-                Quat::IDENTITY
-            };
-            let tex = b["texture"].as_str().unwrap_or("");
-            let c = if tex.starts_with('#') {
-                Self::colour(tex, 1.0)
-            } else {
-                [0.55, 0.5, 0.45, 1.0]
-            };
-            scene.blocks.push(crate::Block {
-                at: Vec3::new(f("x", 0.0), f("y", 0.0), f("z", 0.0)),
-                rot,
-                size: Vec3::new(f("w", 1.0), f("h", 1.0), f("d", 1.0)),
-                colour: [c[0], c[1], c[2]],
-                sphere: b["shape"] == "sphere",
-            });
-        }
+        // fog in the room's colour, as space.js's (60 to 260 units)
+        scene.fog = Some((60.0, 260.0));
+        let (meshes, textures) = self.blocks.meshes(self.at, &|_, _| None);
+        scene.meshes = meshes;
+        scene.textures = textures;
+        scene.meshes.push(self.grid());
         // the labels, as the webview placed them: the farthest first
         let (w, h) = self.size;
         let focal = h / 2.0 / (25f32).to_radians().tan();

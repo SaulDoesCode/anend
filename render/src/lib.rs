@@ -10,8 +10,10 @@
 //! see-through ones (zones, ghosts) blended without writing depth, then what's drawn over
 //! everything (the gizmo, outlines, ports), and the labels last.
 
+pub mod blocks;
 pub mod room;
 pub mod text;
+pub mod tiles;
 
 use std::collections::HashMap;
 use std::sync::Arc;

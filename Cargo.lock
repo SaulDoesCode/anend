@@ -183,8 +183,10 @@ name = "anend-render"
 version = "0.1.0"
 dependencies = [
  "ab_glyph",
+ "base64 0.22.1",
  "bytemuck",
  "glam",
+ "image",
  "pollster",
  "serde_json",
  "wgpu",
