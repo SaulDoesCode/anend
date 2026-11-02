@@ -193,8 +193,10 @@ measures: each line is checked against how the same action feels there.
       Linux desktop's only room, space.js and three.js compiled out; sounds on cpal; the
       rest named in parity.md, questions 114–119. Later the same day the macOS and Windows
       desktops got the picture path (frames shown in the page through a custom protocol,
-      questions 118), so no desktop build has space.js. Not yet: the web's WebGPU canvas,
-      and running the picture path on a real Mac or Windows machine.)
+      questions 118), so no desktop build has space.js. The web's room on WebGPU from the
+      same crate is built and opted into with `?room=wgpu` (questions 121). Not yet: seeing
+      the WebGPU canvas in a real browser (then it's the web's default), the web room's
+      prefab pictures and sounds, and the picture path on a real Mac or Windows machine.)
 - [x] Culling (#24); far billboards with deterministic fall-off (#22). (2 Nov: back faces,
       the view's planes, occlusion queries with boxes for what was hidden; blocks past 120
       units drawn as billboards, past 400 not drawn and not hit, exactly; questions 120.)

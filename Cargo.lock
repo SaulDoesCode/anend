@@ -213,6 +213,7 @@ dependencies = [
  "image",
  "pollster",
  "serde_json",
+ "web-sys",
  "wgpu",
 ]
 

@@ -516,3 +516,14 @@ The answers left these open. Each is written into the design as its default.
     rule (opacity 1.4 − distance/220, hidden under the smallest size in pixels). Fog (60
     to 260) hides the change to billboards. The spread's no-overlap pass works on plain
     arrays now, so a room of thousands of texts doesn't copy each text in its pair loop.
+121. **The web's room on WebGPU is there, opted into with `?room=wgpu`.** The same crate
+    draws straight into a canvas (`Renderer::for_canvas`, `present`: the canvas's own format
+    drawn through an sRGB view of it, no picture read back, no occlusion tests since their
+    results can't be waited for in a browser), and the same `Room` runs in the page, so the
+    web build and the desktop share the room. It isn't the default yet: this container's
+    headless Chromium has WebGPU (SwiftShader) but shows no WebGPU canvas in screenshots,
+    even a plain red clear, so what it draws hasn't been seen; the room's logic was checked
+    there (a search spread its texts, the canvas sized to the room, the renderer made and
+    presenting without errors). Without the parameter, or without WebGPU, the web keeps
+    space.js. Not yet on the web's native room: the prefab pictures (they need a picture
+    read back, which WebGPU only gives later) and sounds (Web Audio from Rust).

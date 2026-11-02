@@ -119,7 +119,7 @@ departure says why in its commit).
   (app/src/native.rs). It's the Linux desktop's only room: space.js and three.js are out
   of that build (questions 114–119; shots app/docs/shots/native-*.png). macOS and Windows
   show its frames in the page (app/src/picture.rs), so no desktop build has space.js; the
-  web keeps it until WebGPU draws from the same crate.
+  web keeps it by default; `?room=wgpu` runs the same room on WebGPU (questions 121).
 - Done (2 Nov): culling (back faces, the view, occlusion queries) and far billboards (120
   and 400 units, exact; questions 120).
 - In progress (2 Nov): the polish pass (the spread on threads; the room only in the space;

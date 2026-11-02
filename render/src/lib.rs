@@ -330,6 +330,9 @@ pub struct Renderer {
     atlas_bind: wgpu::BindGroup,
     layouts: HashMap<(String, u32), text::Layout>,
     pub adapter_name: String,
+    /// what it draws in: the colour format, and the canvas when it draws into one
+    format: wgpu::TextureFormat,
+    surface: Option<(wgpu::Surface<'static>, wgpu::SurfaceConfiguration)>,
 }
 
 fn padded(width: u32) -> u32 {
@@ -337,25 +340,85 @@ fn padded(width: u32) -> u32 {
 }
 
 impl Renderer {
+    /// a renderer drawing into pictures read back (the desktop's)
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(width: u32, height: u32) -> Result<Renderer, String> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            force_fallback_adapter: false,
-            compatible_surface: None,
-            apply_limit_buckets: false,
-        }))
-        .map_err(|e| format!("no GPU adapter: {e}"))?;
+        pollster::block_on(Self::build(instance, None, width, height))
+    }
+
+    /// a renderer drawing straight into a canvas with WebGPU (the web's)
+    #[cfg(target_arch = "wasm32")]
+    pub async fn for_canvas(canvas: web_sys::HtmlCanvasElement) -> Result<Renderer, String> {
+        let (w, h) = (canvas.width(), canvas.height());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::BROWSER_WEBGPU,
+            ..wgpu::InstanceDescriptor::new_without_display_handle_from_env()
+        });
+        let surface = instance
+            .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
+            .map_err(|e| format!("no WebGPU canvas: {e}"))?;
+        Self::build(instance, Some(surface), w, h).await
+    }
+
+    async fn build(
+        instance: wgpu::Instance,
+        surface: Option<wgpu::Surface<'static>>,
+        width: u32,
+        height: u32,
+    ) -> Result<Renderer, String> {
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                force_fallback_adapter: false,
+                compatible_surface: surface.as_ref(),
+                apply_limit_buckets: false,
+            })
+            .await
+            .map_err(|e| format!("no GPU adapter: {e}"))?;
         let adapter_name = adapter.get_info().name;
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("anend space"),
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
-            experimental_features: wgpu::ExperimentalFeatures::disabled(),
-            memory_hints: wgpu::MemoryHints::Performance,
-            trace: wgpu::Trace::Off,
-        }))
-        .map_err(|e| format!("GPU device: {e}"))?;
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("anend space"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+                experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                memory_hints: wgpu::MemoryHints::Performance,
+                trace: wgpu::Trace::Off,
+            })
+            .await
+            .map_err(|e| format!("GPU device: {e}"))?;
+        // a canvas: its own format, drawn through an sRGB view of it (the shaders write linear
+        // colour, as into the desktop's sRGB pictures)
+        let (format, surface) = match surface {
+            Some(sf) => {
+                let caps = sf.get_capabilities(&adapter);
+                let base = caps
+                    .formats
+                    .first()
+                    .copied()
+                    .unwrap_or(wgpu::TextureFormat::Bgra8Unorm)
+                    .remove_srgb_suffix();
+                let config = wgpu::SurfaceConfiguration {
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    format: base,
+                    width: width.max(1),
+                    height: height.max(1),
+                    present_mode: wgpu::PresentMode::Fifo,
+                    desired_maximum_frame_latency: 2,
+                    alpha_mode: caps
+                        .alpha_modes
+                        .first()
+                        .copied()
+                        .unwrap_or(wgpu::CompositeAlphaMode::Auto),
+                    view_formats: vec![base.add_srgb_suffix()],
+                    color_space: wgpu::SurfaceColorSpace::Auto,
+                };
+                sf.configure(&device, &config);
+                (base.add_srgb_suffix(), Some((sf, config)))
+            }
+            None => (COLOUR, None),
+        };
         let uniform_entry = |dynamic: bool| wgpu::BindGroupLayoutEntry {
             binding: 0,
             visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -486,7 +549,7 @@ impl Renderer {
                             entry_point: Some("fs"),
                             compilation_options: Default::default(),
                             targets: &[Some(wgpu::ColorTargetState {
-                                format: COLOUR,
+                                format,
                                 blend,
                                 write_mask: wgpu::ColorWrites::ALL,
                             })],
@@ -528,7 +591,7 @@ impl Renderer {
                 entry_point: Some("fs"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: COLOUR,
+                    format,
                     blend: None,
                     write_mask: wgpu::ColorWrites::empty(),
                 })],
@@ -544,13 +607,13 @@ impl Renderer {
         let models_cap = 256;
         let (models, model_bind) = Self::model_buffer(&device, &model_layout, models_cap);
         let white = Self::texture_bind(&device, &queue, &tex_layout, &sampler, 1, 1, &[255, 255, 255, 255]);
-        let (glyphs, atlas_tex, atlas_bind) = Self::glyph_pipeline(&device);
+        let (glyphs, atlas_tex, atlas_bind) = Self::glyph_pipeline(&device, format);
         let mut atlas = text::Atlas::new(ATLAS);
         // a solid texel for underlines
         for i in [0, 1, ATLAS as usize, ATLAS as usize + 1] {
             atlas.pixels[i] = 255;
         }
-        let (msaa, depth, target, readback) = Self::targets(&device, width, height);
+        let (msaa, depth, target, readback) = Self::targets(&device, width, height, format);
         Ok(Renderer {
             device,
             queue,
@@ -584,6 +647,8 @@ impl Renderer {
             atlas_bind,
             layouts: HashMap::new(),
             adapter_name,
+            format,
+            surface,
         })
     }
 
@@ -698,7 +763,10 @@ impl Renderer {
     }
 
     /// the labels' pipeline: glyphs from the atlas, blended over the room
-    fn glyph_pipeline(device: &wgpu::Device) -> (wgpu::RenderPipeline, wgpu::Texture, wgpu::BindGroup) {
+    fn glyph_pipeline(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+    ) -> (wgpu::RenderPipeline, wgpu::Texture, wgpu::BindGroup) {
         let gmod = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("glyphs"),
             source: wgpu::ShaderSource::Wgsl(GLYPHS.into()),
@@ -793,7 +861,7 @@ impl Renderer {
                 entry_point: Some("fs"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: COLOUR,
+                    format,
                     blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -808,6 +876,7 @@ impl Renderer {
         device: &wgpu::Device,
         width: u32,
         height: u32,
+        format: wgpu::TextureFormat,
     ) -> (wgpu::TextureView, wgpu::TextureView, wgpu::Texture, wgpu::Buffer) {
         let size = wgpu::Extent3d {
             width: width.max(1),
@@ -826,10 +895,10 @@ impl Renderer {
                 view_formats: &[],
             })
         };
-        let msaa = tex(COLOUR, SAMPLES, wgpu::TextureUsages::RENDER_ATTACHMENT).create_view(&Default::default());
+        let msaa = tex(format, SAMPLES, wgpu::TextureUsages::RENDER_ATTACHMENT).create_view(&Default::default());
         let depth = tex(DEPTH, SAMPLES, wgpu::TextureUsages::RENDER_ATTACHMENT).create_view(&Default::default());
         let target = tex(
-            COLOUR,
+            format,
             1,
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         );
@@ -851,7 +920,12 @@ impl Renderer {
         if (width, height) == (self.width, self.height) {
             return;
         }
-        let (msaa, depth, target, readback) = Self::targets(&self.device, width, height);
+        let (msaa, depth, target, readback) = Self::targets(&self.device, width, height, self.format);
+        if let Some((sf, config)) = &mut self.surface {
+            config.width = width;
+            config.height = height;
+            sf.configure(&self.device, config);
+        }
         (self.msaa, self.depth, self.target, self.readback) = (msaa, depth, target, readback);
         (self.width, self.height) = (width, height);
     }
@@ -951,6 +1025,29 @@ impl Renderer {
 
     /// the scene as a picture: RGBA, row by row from the top, `width × height × 4` bytes
     pub fn render(&mut self, scene: &Scene, camera: &Camera) -> Vec<u8> {
+        self.draw(scene, camera, None)
+    }
+
+    /// the scene drawn straight into the canvas (a renderer made `for_canvas`)
+    pub fn present(&mut self, scene: &Scene, camera: &Camera) -> Result<(), String> {
+        let Some((sf, _)) = &self.surface else {
+            return Err("no canvas".into());
+        };
+        let frame = match sf.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+            other => return Err(format!("the canvas gave no picture: {other:?}")),
+        };
+        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.format),
+            ..Default::default()
+        });
+        self.draw(scene, camera, Some(&view));
+        self.queue.present(frame);
+        Ok(())
+    }
+
+    /// draws into a picture read back (none given), or into a canvas's view
+    fn draw(&mut self, scene: &Scene, camera: &Camera, into: Option<&wgpu::TextureView>) -> Vec<u8> {
         // the convenience shapes as meshes
         let mut meshes: Vec<Mesh> = scene.meshes.clone();
         let extra = convenience(scene);
@@ -1036,7 +1133,7 @@ impl Renderer {
                 continue;
             }
             let testable = m.pass == Pass::Opaque && !m.lines;
-            if testable && self.hidden.contains(&m.id) {
+            if testable && into.is_none() && self.hidden.contains(&m.id) {
                 let eye = m.model.inverse().transform_point3(camera.at);
                 let inside = eye.cmpge(g.lo - 0.05).all() && eye.cmple(g.hi + 0.05).all();
                 if !inside {
@@ -1091,7 +1188,12 @@ impl Renderer {
             .copied()
             .filter(|&i| meshes[i].pass == Pass::Opaque && !meshes[i].lines)
             .collect();
-        let nq = (tested.len() + proxies.len()) as u32;
+        // (no tests on a canvas: their results can't be waited for there)
+        let nq = if into.is_some() {
+            0
+        } else {
+            (tested.len() + proxies.len()) as u32
+        };
         if nq > 0 && self.queries.as_ref().is_none_or(|q| q.0 < nq) {
             let cap = nq.next_power_of_two().max(64);
             let set = self.device.create_query_set(&wgpu::QuerySetDescriptor {
@@ -1155,14 +1257,15 @@ impl Renderer {
         });
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
-            let view = self.target.create_view(&Default::default());
+            let own = self.target.create_view(&Default::default());
+            let view = into.unwrap_or(&own);
             let [r, g, b, alpha] = scene.clear.unwrap_or([scene.sky[0], scene.sky[1], scene.sky[2], 1.0]);
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("space"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &self.msaa,
                     depth_slice: None,
-                    resolve_target: Some(&view),
+                    resolve_target: Some(view),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             r: r as f64,
@@ -1263,6 +1366,10 @@ impl Renderer {
         {
             enc.resolve_query_set(set, 0..nq, resolve, 0);
             enc.copy_buffer_to_buffer(resolve, 0, read, 0, nq as u64 * 8);
+        }
+        if into.is_some() {
+            self.queue.submit([enc.finish()]);
+            return Vec::new();
         }
         let row = padded(self.width);
         enc.copy_texture_to_buffer(

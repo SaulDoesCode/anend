@@ -68,7 +68,7 @@ impl Hub {
         let onopen = Closure::<dyn FnMut()>::new(move || {
             let mut s = st.borrow_mut();
             s.open = true;
-            let queued: Vec<String> = s.queue.drain(..).collect();
+            let queued: Vec<String> = std::mem::take(&mut s.queue);
             if let Some(ws) = &s.ws {
                 for m in queued {
                     let _ = ws.send_with_str(&m);

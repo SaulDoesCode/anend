@@ -33,9 +33,7 @@ use crate::views::{TChip, use_keys};
 mod animwin;
 mod flightwin;
 mod lightwin;
-#[cfg(feature = "desktop")]
 mod native_room;
-#[cfg(feature = "desktop")]
 use native_room::NativeHost;
 mod prefabwin;
 mod soundwin;
@@ -652,15 +650,22 @@ struct Sp {
 #[derive(Clone, Copy)]
 pub(super) struct Previews(pub Signal<HashMap<String, String>>);
 
-/// whether the room is the native one (Rust, drawn by anend-render, no JavaScript)
+/// whether the room is the native one (Rust, drawn by anend-render, no JavaScript): always
+/// on the desktop; on the web with `?room=wgpu` where the browser has WebGPU (else space.js)
 pub(super) fn native_space() -> bool {
-    cfg!(feature = "desktop")
-}
-
-#[cfg(not(feature = "desktop"))]
-#[component]
-fn NativeHost() -> Element {
-    rsx! {}
+    #[cfg(feature = "desktop")]
+    return true;
+    #[cfg(not(feature = "desktop"))]
+    {
+        thread_local! {
+            static GPU: bool = web_sys::window()
+                .and_then(|w| js_sys::Reflect::get(&w.navigator(), &"gpu".into()).ok())
+                .is_some_and(|g| !g.is_undefined() && !g.is_null())
+                // opted into until it's been seen in a real browser (questions 121): `?room=wgpu`
+                && web_sys::window().and_then(|w| w.location().search().ok()).is_some_and(|q| q.contains("room=wgpu"));
+        }
+        GPU.with(|g| *g)
+    }
 }
 
 impl Sp {
@@ -1438,10 +1443,11 @@ pub fn Space() -> Element {
             let mut stx = sp.tx;
             stx.set(Some(tx));
             // the room in Rust, drawn natively (no JavaScript): its loop takes the commands
-            #[cfg(feature = "desktop")]
-            {
+            if native_space() {
                 let api = api.clone();
                 native_room::run(rx, move |e| on_event(ui, api.clone(), sp, e));
+                #[cfg(not(feature = "desktop"))]
+                return;
             }
             #[cfg(not(feature = "desktop"))]
             spawn(async move {
