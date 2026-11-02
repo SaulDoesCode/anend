@@ -112,7 +112,11 @@ departure says why in its commit).
   back). On the Linux desktop, `ANEND_NATIVE_SPACE=1` shows the room drawn that way under
   the see-through webview (app/src/native.rs, views/space/native_room.rs): the save's
   blocks and wires, flying with W A S D and looking with the right button
-  (app/docs/shots/desktop-native-space.png). Next: picking, texts, textures, lights, bends,
+  (app/docs/shots/desktop-native-space.png). The room itself is now Rust in native mode
+  (`render/src/room.rs`, space.js's protocol, so the app's handlers are unchanged): texts
+  laid out by the spread, labels drawn with Fira Sans from a glyph atlas, picked, dragged,
+  wheeled near and far, menus, copies, free texts, rows for scenes, flying, looking and the
+  arrows' hop (app/docs/shots/desktop-native-texts.png). Next: picking blocks, textures, lights, bends,
   the gizmo and selection, groups and wires, walking, the ghost, sounds, animations,
   zones; then space.js leaves the desktop build (questions.md 114–117).
 - Next: the rest of the user's 27 Oct

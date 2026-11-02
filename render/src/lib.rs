@@ -7,6 +7,9 @@
 //! one soft light from above; lines (wires and rays); the sky's colour. Texts, textures,
 //! baked lights, bends, the gizmo and picking come in the slices after it.
 
+pub mod room;
+pub mod text;
+
 pub use glam;
 use glam::{Mat4, Quat, Vec3};
 use wgpu::util::DeviceExt;
@@ -30,12 +33,33 @@ pub struct Line {
     pub colour: [f32; 3],
 }
 
+/// a text over the room, placed on the picture as the webview's labels were: its middle
+/// at a point of the picture, so many pixels an em
+#[derive(Clone, Debug, PartialEq)]
+pub struct Label {
+    /// its middle, in pixels from the picture's top left
+    pub x: f32,
+    pub y: f32,
+    /// pixels an em
+    pub px: f32,
+    pub text: String,
+    /// linear RGBA (alpha: how faded it is with distance)
+    pub colour: [f32; 4],
+    /// an underline under it, in this colour
+    pub under: Option<[f32; 4]>,
+    /// a band behind it (a picked text), in this colour
+    pub back: Option<[f32; 4]>,
+    /// the width it wraps at, in ems
+    pub wrap: f32,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Scene {
     /// the room's colour (linear RGB)
     pub sky: [f32; 3],
     pub blocks: Vec<Block>,
     pub lines: Vec<Line>,
+    pub labels: Vec<Label>,
 }
 
 /// where the room is seen from
@@ -44,6 +68,7 @@ pub struct Camera {
     pub at: Vec3,
     pub yaw: f32,
     pub pitch: f32,
+    pub roll: f32,
     /// vertical field of view, radians
     pub fov: f32,
 }
@@ -54,19 +79,25 @@ impl Default for Camera {
             at: Vec3::ZERO,
             yaw: 0.0,
             pitch: 0.0,
-            fov: 60f32.to_radians(),
+            roll: 0.0,
+            fov: 50f32.to_radians(),
         }
     }
 }
 
 impl Camera {
+    /// its turn: yaw about the world's up, then pitch, then roll (three.js's YXZ order)
+    pub fn rot(&self) -> Quat {
+        Quat::from_euler(glam::EulerRot::YXZ, self.yaw, self.pitch, self.roll)
+    }
+
     /// the way it looks (−z at yaw and pitch 0, as three.js's camera)
     pub fn forward(&self) -> Vec3 {
-        Quat::from_euler(glam::EulerRot::YXZ, self.yaw, self.pitch, 0.0) * Vec3::NEG_Z
+        self.rot() * Vec3::NEG_Z
     }
 
     pub fn view_proj(&self, aspect: f32) -> Mat4 {
-        let rot = Quat::from_euler(glam::EulerRot::YXZ, self.yaw, self.pitch, 0.0);
+        let rot = self.rot();
         let view = glam::camera::rh::view::look_to_mat4(self.at, rot * Vec3::NEG_Z, rot * Vec3::Y);
         glam::camera::rh::proj::directx::perspective(self.fov, aspect.max(1e-3), 0.05, 4000.0) * view
     }
@@ -104,6 +135,39 @@ struct Out { @builtin(position) pos: vec4<f32>, @location(0) normal: vec3<f32>, 
 }
 "#;
 
+const GLYPHS: &str = r#"
+struct U { vp: mat4x4<f32>, light: vec4<f32> };
+@group(0) @binding(0) var<uniform> u: U;
+@group(1) @binding(0) var atlas: texture_2d<f32>;
+@group(1) @binding(1) var smp: sampler;
+
+struct Out { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32>, @location(1) colour: vec4<f32> };
+
+@vertex fn vs(@location(0) pos: vec3<f32>, @location(1) uv: vec2<f32>, @location(2) colour: vec4<f32>) -> Out {
+    var o: Out;
+    // already placed on the picture
+    o.pos = vec4<f32>(pos, 1.0);
+    o.uv = uv;
+    o.colour = colour;
+    return o;
+}
+
+@fragment fn fs(i: Out) -> @location(0) vec4<f32> {
+    let a = textureSample(atlas, smp, i.uv).r * i.colour.a;
+    return vec4<f32>(i.colour.rgb * a, a);
+}
+"#;
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct GlyphVertex {
+    pos: [f32; 3],
+    uv: [f32; 2],
+    colour: [f32; 4],
+}
+
+const ATLAS: u32 = 2048;
+
 const SAMPLES: u32 = 4;
 const COLOUR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -123,6 +187,11 @@ pub struct Renderer {
     target: wgpu::Texture,
     /// where pictures are read back
     readback: wgpu::Buffer,
+    glyphs: wgpu::RenderPipeline,
+    atlas: text::Atlas,
+    atlas_tex: wgpu::Texture,
+    atlas_bind: wgpu::BindGroup,
+    layouts: std::collections::HashMap<(String, u32), text::Layout>,
     pub adapter_name: String,
 }
 
@@ -233,6 +302,12 @@ impl Renderer {
         };
         let tris = pipeline(wgpu::PrimitiveTopology::TriangleList, Some(wgpu::Face::Back));
         let lines = pipeline(wgpu::PrimitiveTopology::LineList, None);
+        let (glyphs, atlas_tex, atlas_bind) = Self::glyph_pipeline(&device, &layout);
+        let mut atlas = text::Atlas::new(ATLAS);
+        // a solid texel for underlines
+        for i in [0, 1, ATLAS as usize, ATLAS as usize + 1] {
+            atlas.pixels[i] = 255;
+        }
         let (msaa, depth, target, readback) = Self::targets(&device, width, height);
         Ok(Renderer {
             device,
@@ -247,8 +322,124 @@ impl Renderer {
             depth,
             target,
             readback,
+            glyphs,
+            atlas,
+            atlas_tex,
+            atlas_bind,
+            layouts: Default::default(),
             adapter_name,
         })
+    }
+
+    /// the labels' pipeline: glyphs from the atlas, blended over the room, never hidden by
+    /// blocks
+    fn glyph_pipeline(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+    ) -> (wgpu::RenderPipeline, wgpu::Texture, wgpu::BindGroup) {
+        let gmod = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("glyphs"),
+            source: wgpu::ShaderSource::Wgsl(GLYPHS.into()),
+        });
+        let tlayout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("atlas"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let atlas_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("atlas"),
+            size: wgpu::Extent3d {
+                width: ATLAS,
+                height: ATLAS,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let atlas_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("atlas"),
+            layout: &tlayout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&atlas_tex.create_view(&Default::default())),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+        let glayout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("glyphs"),
+            bind_group_layouts: &[Some(layout), Some(&tlayout)],
+            immediate_size: 0,
+        });
+        let gattrs = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x4];
+        let glyphs = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("glyphs"),
+            layout: Some(&glayout),
+            vertex: wgpu::VertexState {
+                module: &gmod,
+                entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<GlyphVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &gattrs,
+                })],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Always),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: SAMPLES,
+                ..Default::default()
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &gmod,
+                entry_point: Some("fs"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: COLOUR,
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        (glyphs, atlas_tex, atlas_bind)
     }
 
     fn targets(
@@ -303,8 +494,96 @@ impl Renderer {
     }
 
     /// the scene as a picture: RGBA, row by row from the top, `width × height × 4` bytes
-    pub fn render(&self, scene: &Scene, camera: &Camera) -> Vec<u8> {
+    /// a label's layout (kept while it's asked for)
+    pub fn layout(&mut self, text: &str, wrap: f32) -> &text::Layout {
+        let k = (text.to_string(), (wrap * 16.0) as u32);
+        if self.layouts.len() > 20_000 {
+            self.layouts.clear();
+        }
+        self.layouts.entry(k).or_insert_with(|| text::layout(text, wrap))
+    }
+
+    /// the labels as glyph quads on the picture, in their order (the farthest first)
+    fn label_quads(&mut self, scene: &Scene) -> Vec<GlyphVertex> {
+        let (w, h) = (self.width as f32, self.height as f32);
+        let mut out = Vec::new();
+        let white = 0.5 / ATLAS as f32;
+        for l in &scene.labels {
+            let lay = self.layout(&l.text, l.wrap).clone();
+            let s = l.px;
+            let (ox, oy) = (l.x - lay.w * s / 2.0, l.y - lay.h * s / 2.0);
+            let quad = |out: &mut Vec<GlyphVertex>, x0: f32, y0: f32, x1: f32, y1: f32, uv: [f32; 4], c: [f32; 4]| {
+                let p = |x: f32, y: f32| [(ox + x * s) / w * 2.0 - 1.0, 1.0 - (oy + y * s) / h * 2.0, 0.0];
+                let v = |x: f32, y: f32, u: f32, t: f32| GlyphVertex {
+                    pos: p(x, y),
+                    uv: [u, t],
+                    colour: c,
+                };
+                let (a, b, cc, d) = (
+                    v(x0, y0, uv[0], uv[1]),
+                    v(x1, y0, uv[2], uv[1]),
+                    v(x1, y1, uv[2], uv[3]),
+                    v(x0, y1, uv[0], uv[3]),
+                );
+                out.extend_from_slice(&[a, b, cc, a, cc, d]);
+            };
+            if let Some(c) = l.back {
+                quad(&mut out, 0.0, 0.0, lay.w, lay.h, [white, white, white, white], c);
+            }
+            for g in &lay.glyphs {
+                if let Some(cell) = self.atlas.cell(g.ch) {
+                    quad(
+                        &mut out,
+                        g.x + cell.at[0],
+                        g.y + cell.at[1],
+                        g.x + cell.at[2],
+                        g.y + cell.at[3],
+                        cell.uv,
+                        l.colour,
+                    );
+                }
+            }
+            if let Some(c) = l.under {
+                // the underline: .12em at the label's foot
+                quad(
+                    &mut out,
+                    0.0,
+                    lay.h - 0.12,
+                    lay.w,
+                    lay.h,
+                    [white, white, white, white],
+                    c,
+                );
+            }
+        }
+        out
+    }
+
+    pub fn render(&mut self, scene: &Scene, camera: &Camera) -> Vec<u8> {
         let (tris, lines) = meshes(scene);
+        let glyphs = self.label_quads(scene);
+        if self.atlas.dirty {
+            self.atlas.dirty = false;
+            self.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.atlas_tex,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &self.atlas.pixels,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(ATLAS),
+                    rows_per_image: Some(ATLAS),
+                },
+                wgpu::Extent3d {
+                    width: ATLAS,
+                    height: ATLAS,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
         let vp = camera.view_proj(self.width as f32 / self.height as f32);
         let mut u = [0f32; 20];
         u[..16].copy_from_slice(&vp.to_cols_array());
@@ -320,6 +599,13 @@ impl Renderer {
             })
         };
         let (tb, lb) = (buf(&tris), buf(&lines));
+        let gb = (!glyphs.is_empty()).then(|| {
+            self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("space glyphs"),
+                contents: bytemuck::cast_slice(&glyphs),
+                usage: wgpu::BufferUsages::VERTEX,
+            })
+        });
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
             let view = self.target.create_view(&Default::default());
@@ -362,6 +648,12 @@ impl Renderer {
                 pass.set_pipeline(&self.lines);
                 pass.set_vertex_buffer(0, b.slice(..));
                 pass.draw(0..lines.len() as u32, 0..1);
+            }
+            if let Some(b) = &gb {
+                pass.set_pipeline(&self.glyphs);
+                pass.set_bind_group(1, &self.atlas_bind, &[]);
+                pass.set_vertex_buffer(0, b.slice(..));
+                pass.draw(0..glyphs.len() as u32, 0..1);
             }
         }
         let row = padded(self.width);
@@ -496,7 +788,9 @@ mod tests {
                 points: vec![Vec3::new(-3.0, -1.0, -6.0), Vec3::new(3.0, -1.0, -6.0)],
                 colour: [0.0, 0.0, 1.0],
             }],
+            labels: vec![],
         };
+        let mut r = r;
         let img = r.render(&scene, &Camera::default());
         assert_eq!(img.len(), 160 * 120 * 4);
         let mid = px(&img, 160, 80, 60);
@@ -518,5 +812,27 @@ mod tests {
         assert!(px(&img, 160, 80, 60)[0] > 150);
         let edge = px(&img, 160, 80 - 22, 60 - 22);
         assert!(edge[0] > 200 && edge[2] > 120, "the sphere's corner: {edge:?}");
+        // a label, drawn over the room in its colour
+        let words = Scene {
+            labels: vec![Label {
+                x: 80.0,
+                y: 60.0,
+                px: 24.0,
+                text: "HH".into(),
+                colour: [0.0, 0.6, 0.0, 1.0],
+                under: None,
+                back: None,
+                wrap: 30.0,
+            }],
+            ..scene.clone()
+        };
+        let img = r.render(&words, &Camera::default());
+        let greens = (0..160 * 120)
+            .filter(|i| {
+                let p = &img[i * 4..i * 4 + 3];
+                p[1] > 150 && p[0] < 100
+            })
+            .count();
+        assert!(greens > 20, "the label's green pixels: {greens}");
     }
 }

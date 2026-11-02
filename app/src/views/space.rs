@@ -31,6 +31,8 @@ mod flightwin;
 mod lightwin;
 #[cfg(all(feature = "desktop", target_os = "linux"))]
 mod native_room;
+#[cfg(all(feature = "desktop", target_os = "linux"))]
+use native_room::NativeHost;
 mod prefabwin;
 mod soundwin;
 mod texwin;
@@ -184,7 +186,7 @@ pub const SLIDERS: [Slider; 26] = [
 pub const DEPTH_BY: [&str; 4] = ["none", "ordinal", "length", "time"];
 
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
-struct SpaceEvent {
+pub(crate) struct SpaceEvent {
     kind: String,
     #[serde(default)]
     key: String,
@@ -634,6 +636,20 @@ struct Sp {
     mode: Signal<String>,
     /// the texts superflight flew through, in order: `{key, text}`
     collected: Signal<Vec<Value>>,
+}
+
+/// whether the room is the native one (Rust, drawn by anend-render, no JavaScript)
+fn native_space() -> bool {
+    #[cfg(all(feature = "desktop", target_os = "linux"))]
+    return crate::native::enabled();
+    #[allow(unreachable_code)]
+    false
+}
+
+#[cfg(not(all(feature = "desktop", target_os = "linux")))]
+#[component]
+fn NativeHost() -> Element {
+    rsx! {}
 }
 
 impl Sp {
@@ -1345,11 +1361,6 @@ fn export(ui: Ui, name: &str, rows: &Value) {
 
 #[component]
 pub fn Space() -> Element {
-    // the room drawn natively, with no JavaScript (the renderer line, while it moves over)
-    #[cfg(all(feature = "desktop", target_os = "linux"))]
-    if crate::native::enabled() {
-        return rsx! { native_room::NativeRoom {} };
-    }
     let ui = ui();
     let api = api();
     let sp = Sp {
@@ -1413,6 +1424,13 @@ pub fn Space() -> Element {
             let (tx, mut rx) = futures_channel::mpsc::unbounded::<Value>();
             let mut stx = sp.tx;
             stx.set(Some(tx));
+            // the room in Rust, drawn natively (no JavaScript): its loop takes the commands
+            #[cfg(all(feature = "desktop", target_os = "linux"))]
+            if crate::native::enabled() {
+                let api = api.clone();
+                native_room::run(rx, move |e| on_event(ui, api.clone(), sp, e));
+                return;
+            }
             spawn(async move {
                 let mut ev = document::eval(&boot_js());
                 loop {
@@ -1606,7 +1624,11 @@ pub fn Space() -> Element {
     let api_b = api.clone();
     rsx! {
         div { class: "space", style: "position: absolute; inset: 0; --room-bg: {bg}; --room-ink: {ink};",
-            div { id: "space-host", class: "space-host", tabindex: "0", "aria-label": "the space: right drag looks, W A S D fly, arrows hop between texts" }
+            if native_space() {
+                NativeHost {}
+            } else {
+                div { id: "space-host", class: "space-host", tabindex: "0", "aria-label": "the space: right drag looks, W A S D fly, arrows hop between texts" }
+            }
             if p.space.show_hud {
                 PosCard { pos: sp.pos }
             }
