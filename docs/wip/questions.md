@@ -497,3 +497,17 @@ The answers left these open. Each is written into the design as its default.
     was the other choice; its API changed a lot across 0.20–0.23 and the mixing needed is
     small. On Linux this needs ALSA's headers to build (`libasound2-dev`, added to CI and
     the README); webm/opus sounds don't decode (symphonia has no Opus), the rest do.
+120. **Culling and far billboards in the native room.** Back faces are left out (every
+    block's faces wind outward); meshes wholly outside the view's six planes aren't drawn;
+    occlusion uses the GPU's occlusion queries the classic way: an opaque mesh that drew
+    nothing in the last picture is drawn next time only as its box (no colour, no depth
+    written), and comes back as soon as the box shows (the picture is drawn again at once,
+    so nothing pops in a frame late on the desktop). Far blocks: past 120 units from a
+    block's middle it's drawn as one upright quad turned to the eye, its size and its
+    colour on the whole (vertex light times its texture's mean); past 400 units it isn't
+    drawn and rays don't meet it. Both distances are exact and the same everywhere
+    (`anend_render::blocks::BILLBOARD_AT`, `DRAW_TO`), so they can be designed with; up to
+    400 a ray meets the block's real shape, billboard or not. Texts already fade by a fixed
+    rule (opacity 1.4 − distance/220, hidden under the smallest size in pixels). Fog (60
+    to 260) hides the change to billboards. The spread's no-overlap pass works on plain
+    arrays now, so a room of thousands of texts doesn't copy each text in its pair loop.

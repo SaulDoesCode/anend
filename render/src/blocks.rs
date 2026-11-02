@@ -378,7 +378,18 @@ impl Uv {
 struct Built {
     sig: String,
     meshes: Vec<Mesh>,
+    /// the box round it (its own frame) and its colour on the whole, for its billboard
+    lo: Vec3,
+    hi: Vec3,
+    avg: [f32; 4],
 }
+
+/// past this distance from the eye (exactly, from a block's middle), a block is drawn as
+/// a billboard: one upright quad of its size and its colour on the whole (questions 120)
+pub const BILLBOARD_AT: f32 = 120.0;
+/// past this distance a block isn't drawn, and rays don't meet it (deterministic: the
+/// same distance everywhere, so it can be designed with)
+pub const DRAW_TO: f32 = 400.0;
 
 /// the blocks, the pictures they show (by texture key, as Rust sent them) and the
 /// room's lights, as meshes and textures to draw
@@ -404,6 +415,9 @@ pub struct Blocks {
     pub poses: HashMap<String, Mat4>,
     /// blocks showing another texture for now (an animation's key)
     pub tex_over: HashMap<String, String>,
+    tex_avg: HashMap<String, [f32; 3]>,
+    /// how many blocks the last scene drew whole and as billboards, and left out as too far
+    pub counts: (usize, usize, usize),
 }
 
 impl Blocks {
@@ -473,6 +487,7 @@ impl Blocks {
             }
             let tris = self.corners(&id);
             if let Some(t) = crate::prims::ray_tris(o, d, &tris, m)
+                && t <= DRAW_TO
                 && best.as_ref().is_none_or(|b| t < b.1)
             {
                 best = Some((id, t));
@@ -553,6 +568,24 @@ impl Blocks {
         if self.tex_sig.get(key) != Some(&sig) {
             let c = make(&mut self.pictures);
             let version = self.textures.get(key).map(|t| t.version + 1).unwrap_or(1);
+            // its mean colour, linear, for far billboards
+            let bytes = c.bytes();
+            let lin = |v: u8| {
+                let v = v as f32 / 255.0;
+                if v <= 0.04045 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            let mut m = [0.0f32; 3];
+            for p in bytes.as_chunks::<4>().0 {
+                for i in 0..3 {
+                    m[i] += lin(p[i]);
+                }
+            }
+            let px = (bytes.len() / 4).max(1) as f32;
+            self.tex_avg.insert(key.to_string(), m.map(|x| x / px));
             self.textures.insert(
                 key.to_string(),
                 Texture {
@@ -717,11 +750,35 @@ impl Blocks {
                 lines: false,
             });
         }
+        // its box and its colour on the whole (vertex colours times each texture's mean)
+        let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+        let (mut sum, mut n) = ([0.0f32; 4], 0.0f32);
+        for m in &meshes {
+            let t = m
+                .texture
+                .as_ref()
+                .and_then(|k| self.tex_avg.get(k))
+                .copied()
+                .unwrap_or([1.0; 3]);
+            for v in m.verts.iter() {
+                lo = lo.min(Vec3::from(v.pos));
+                hi = hi.max(Vec3::from(v.pos));
+                for i in 0..3 {
+                    sum[i] += v.colour[i] * t[i];
+                }
+                sum[3] += v.colour[3];
+                n += 1.0;
+            }
+        }
+        let avg = sum.map(|x| x / n.max(1.0));
         self.built.insert(
             id.to_string(),
             Built {
                 sig,
                 meshes: meshes.clone(),
+                lo,
+                hi,
+                avg,
             },
         );
         meshes
@@ -732,16 +789,60 @@ impl Blocks {
     pub fn meshes(&mut self, eye: Vec3) -> (Vec<Mesh>, HashMap<String, Texture>) {
         let mut out = Vec::new();
         let list = self.list.clone();
+        let mut boards: Vec<Vert> = Vec::new();
+        let mut counts = (0, 0, 0);
         for (id, b) in &list {
             let (at, rot) = place(b);
             let model = Mat4::from_rotation_translation(rot, at);
             let mut ms = self.build(id, b, model, rot);
-            if let Some(m) = self.poses.get(id).copied() {
-                for x in &mut ms {
-                    x.model = m;
-                }
+            let placed = self.poses.get(id).copied().unwrap_or(model);
+            let Some(x) = self.built.get(id) else { continue };
+            let mid = placed.transform_point3((x.lo + x.hi) / 2.0);
+            let d = mid.distance(eye);
+            if d > DRAW_TO {
+                counts.2 += 1;
+                continue;
+            }
+            if d > BILLBOARD_AT {
+                counts.1 += 1;
+                // upright, turned to the eye, as wide and tall as its placed box
+                let e = placed.x_axis.truncate().abs() * (x.hi.x - x.lo.x)
+                    + placed.y_axis.truncate().abs() * (x.hi.y - x.lo.y)
+                    + placed.z_axis.truncate().abs() * (x.hi.z - x.lo.z);
+                let f = Vec3::new(eye.x - mid.x, 0.0, eye.z - mid.z).normalize_or(Vec3::Z);
+                let right = Vec3::new(f.z, 0.0, -f.x) * (e.x.max(e.z) / 2.0);
+                let up = Vec3::Y * (e.y / 2.0);
+                let c = x.avg;
+                let v = |p: Vec3| Vert {
+                    pos: p.to_array(),
+                    uv: [0.0, 0.0],
+                    colour: c,
+                };
+                let (p0, p1, p2, p3) = (mid - right - up, mid + right - up, mid + right + up, mid - right + up);
+                boards.extend_from_slice(&[v(p0), v(p1), v(p2), v(p0), v(p2), v(p3)]);
+                continue;
+            }
+            counts.0 += 1;
+            for m in &mut ms {
+                m.model = placed;
             }
             out.extend(ms);
+        }
+        self.counts = counts;
+        if !boards.is_empty() {
+            let h = boards.iter().fold(boards.len() as u64, |h, v| {
+                h.wrapping_mul(1_000_003) ^ v.pos[0].to_bits() as u64 ^ (v.pos[2].to_bits() as u64) << 17
+            });
+            out.push(Mesh {
+                id: u64::MAX - 7,
+                version: h,
+                verts: Arc::new(boards),
+                texture: None,
+                pass: Pass::Opaque,
+                model: Mat4::IDENTITY,
+                cull: false,
+                lines: false,
+            });
         }
         let live: std::collections::HashSet<&String> = list.iter().map(|(k, _)| k).collect();
         self.built.retain(|k, _| live.contains(k));
@@ -869,5 +970,31 @@ mod tests {
         let (ms, tex) = bl.meshes(Vec3::ZERO);
         assert!(ms.iter().any(|m| m.texture.as_deref() == Some("text:t1")));
         assert!(tex.contains_key("text:t1"));
+    }
+
+    #[test]
+    fn far_blocks_are_billboards_then_gone() {
+        let mut bl = Blocks::default();
+        let at = |id: &str, z: f64| json!({"id": id, "kind": "plain", "texture": "#ff0000", "x": 0, "y": 0, "z": z, "w": 2, "h": 3, "d": 1});
+        bl.set(&[at("near", -10.0), at("far", -200.0), at("gone", -500.0)], None, false);
+        let (ms, _) = bl.meshes(Vec3::ZERO);
+        assert_eq!(bl.counts, (1, 1, 1));
+        let board = ms.iter().find(|m| m.id == u64::MAX - 7).unwrap();
+        assert_eq!(board.verts.len(), 6);
+        // as tall as the block, red on the whole
+        let ys: Vec<f32> = board.verts.iter().map(|v| v.pos[1]).collect();
+        assert!((ys.iter().cloned().fold(f32::MIN, f32::max) - 1.5).abs() < 1e-4);
+        assert!(board.verts[0].colour[0] > 0.5 && board.verts[0].colour[1] < 0.01);
+        // rays meet the far one (real geometry), not the one past the limit
+        assert_eq!(
+            bl.hit(Vec3::new(0.0, 0.0, -100.0), Vec3::NEG_Z).map(|h| h.0),
+            Some("far".to_string())
+        );
+        assert!(
+            bl.hit(Vec3::new(0.0, 0.0, -50.0), Vec3::NEG_Z)
+                .is_some_and(|h| h.0 == "far")
+        );
+        bl.remove(&["far".to_string()]);
+        assert!(bl.hit(Vec3::new(0.0, 0.0, -50.0), Vec3::NEG_Z).is_none());
     }
 }

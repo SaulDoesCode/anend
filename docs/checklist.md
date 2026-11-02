@@ -193,7 +193,9 @@ measures: each line is checked against how the same action feels there.
       Linux desktop's only room, space.js and three.js compiled out; sounds on cpal; the
       rest named in parity.md, questions 114–119. Not yet: the macOS and Windows desktops
       (space.js until their picture path, questions 118) and the web's WebGPU canvas.)
-- [ ] Culling (#24); far billboards with deterministic fall-off (#22).
+- [x] Culling (#24); far billboards with deterministic fall-off (#22). (2 Nov: back faces,
+      the view's planes, occlusion queries with boxes for what was hidden; blocks past 120
+      units drawn as billboards, past 400 not drawn and not hit, exactly; questions 120.)
 - [ ] Polish across the app, measured against Obsidian and Logic World: 60 fps or better in
       the space with a full save on the user's GTX 1070 Ti class of machine; no visible
       layout jumps, flicker or white frames; motion and transitions eased; every action

@@ -119,7 +119,9 @@ departure says why in its commit).
   (app/src/native.rs). It's the Linux desktop's only room: space.js and three.js are out
   of that build (questions 114–119; shots app/docs/shots/native-*.png). macOS, Windows
   and the web keep space.js for now.
-- Next: the rest of the user's 27 Oct lines: culling and far billboards, the polish pass,
+- Done (2 Nov): culling (back faces, the view, occlusion queries) and far billboards (120
+  and 400 units, exact; questions 120).
+- Next: the rest of the user's 27 Oct lines: the polish pass,
   then the ▶ point (building, grouping and wiring that feel finished, on the native
   renderer).
   Open further up: the language lines (s, the standard library), taxonomies and pipes,

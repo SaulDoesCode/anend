@@ -1278,51 +1278,61 @@ impl Room {
         }
         ke += self.follow(h) * 100.0;
         // labels never overlap: rectangles apart in the facing plane, the shorter way
+        // (on plain arrays: no text is copied in the pair loop)
         let keys = self.order.clone();
+        let idx: HashMap<&str, usize> = keys.iter().enumerate().map(|(i, k)| (k.as_str(), i)).collect();
+        let (mut xs, mut ys) = (Vec::with_capacity(n), Vec::with_capacity(n));
+        let (mut zs, mut hws, mut hhs, mut zone, mut head, mut moves) =
+            (vec![], vec![], vec![], vec![], vec![], vec![]);
+        let mut zone_ids: HashMap<&str, usize> = HashMap::new();
+        for k in &keys {
+            let x = &self.nodes[k];
+            xs.push(x.x);
+            ys.push(x.y);
+            zs.push(x.z);
+            hws.push(x.hw);
+            hhs.push(x.hh);
+            let zn = zone_ids.len() + 1;
+            zone.push(x.zone.as_deref().map(|z| *zone_ids.entry(z).or_insert(zn)).unwrap_or(0));
+            head.push(x.head.as_deref().and_then(|h| idx.get(h).copied()));
+            let fixed = x.pinned || x.head.is_some() || dragged.as_deref() == Some(x.key.as_str());
+            moves.push(if fixed { 0.0f32 } else { 1.0 });
+        }
         for _pass in 0..2 {
             for i in 0..n {
                 for j in i + 1..n {
-                    let (ka, kb) = (&keys[i], &keys[j]);
-                    let (a0, b0) = (self.nodes[ka].clone(), self.nodes[kb].clone());
-                    if (a0.z - b0.z).abs() > 1.5 || a0.zone != b0.zone {
+                    if (zs[i] - zs[j]).abs() > 1.5 || zone[i] != zone[j] {
                         continue;
                     }
-                    let ox = a0.hw + b0.hw + pad - (b0.x - a0.x).abs();
-                    let oy = a0.hh + b0.hh + pad * 0.5 - (b0.y - a0.y).abs();
+                    let ox = hws[i] + hws[j] + pad - (xs[j] - xs[i]).abs();
+                    let oy = hhs[i] + hhs[j] + pad * 0.5 - (ys[j] - ys[i]).abs();
                     if ox <= 0.0 || oy <= 0.0 {
                         continue;
                     }
-                    if a0.head.as_deref() == Some(kb.as_str())
-                        || (a0.head.is_some() && a0.head == b0.head)
-                        || b0.head.as_deref() == Some(ka.as_str())
-                    {
+                    // a chain's members aren't pushed (their head is), nor off their own head
+                    if head[i] == Some(j) || (head[i].is_some() && head[i] == head[j]) || head[j] == Some(i) {
                         continue;
                     }
-                    let fixed = |x: &Node| x.pinned || x.head.is_some() || dragged.as_deref() == Some(x.key.as_str());
-                    let am = if fixed(&a0) { 0.0 } else { 1.0 };
-                    let bm = if fixed(&b0) { 0.0 } else { 1.0 };
+                    let (am, bm) = (moves[i], moves[j]);
                     if am == 0.0 && bm == 0.0 {
                         continue;
                     }
                     let share = if am > 0.0 && bm > 0.0 { 0.5 } else { 1.0 };
-                    if ox / (a0.hw + b0.hw) < oy / (a0.hh + b0.hh) {
-                        let sgn = if b0.x >= a0.x { 1.0 } else { -1.0 };
-                        if let Some(x) = self.nodes.get_mut(ka) {
-                            x.x -= sgn * ox * share * am;
-                        }
-                        if let Some(x) = self.nodes.get_mut(kb) {
-                            x.x += sgn * ox * share * bm;
-                        }
+                    if ox / (hws[i] + hws[j]) < oy / (hhs[i] + hhs[j]) {
+                        let sgn = if xs[j] >= xs[i] { 1.0 } else { -1.0 };
+                        xs[i] -= sgn * ox * share * am;
+                        xs[j] += sgn * ox * share * bm;
                     } else {
-                        let sgn = if b0.y >= a0.y { 1.0 } else { -1.0 };
-                        if let Some(x) = self.nodes.get_mut(ka) {
-                            x.y -= sgn * oy * share * am;
-                        }
-                        if let Some(x) = self.nodes.get_mut(kb) {
-                            x.y += sgn * oy * share * bm;
-                        }
+                        let sgn = if ys[j] >= ys[i] { 1.0 } else { -1.0 };
+                        ys[i] -= sgn * oy * share * am;
+                        ys[j] += sgn * oy * share * bm;
                     }
                 }
+            }
+        }
+        for (i, k) in keys.iter().enumerate() {
+            if let Some(x) = self.nodes.get_mut(k) {
+                (x.x, x.y) = (xs[i], ys[i]);
             }
         }
         self.alpha = (a - a * self.p.f("cool")).max(0.0);

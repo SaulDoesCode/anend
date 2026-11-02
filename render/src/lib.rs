@@ -256,6 +256,41 @@ struct GpuMesh {
     version: u64,
     buf: Option<wgpu::Buffer>,
     count: u32,
+    /// the box round its corners, in its own frame
+    lo: Vec3,
+    hi: Vec3,
+}
+
+/// what the last picture drew: meshes drawn, left out as outside the view, left out as
+/// hidden behind others (their boxes tested instead)
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Drawn {
+    pub drawn: usize,
+    pub outside: usize,
+    pub hidden: usize,
+}
+
+/// the view's six planes (n·p + d ≥ 0 inside), from a view-projection with depth 0 to 1
+fn frustum(vp: Mat4) -> [glam::Vec4; 6] {
+    let (r0, r1, r2, r3) = (vp.row(0), vp.row(1), vp.row(2), vp.row(3));
+    [r3 + r0, r3 - r0, r3 + r1, r3 - r1, r2, r3 - r2]
+}
+
+/// whether a box (its own frame, placed by `m`) is wholly outside one of the planes
+fn outside(planes: &[glam::Vec4; 6], m: Mat4, lo: Vec3, hi: Vec3) -> bool {
+    let c = m.transform_point3((lo + hi) / 2.0);
+    let h = (hi - lo) / 2.0;
+    // the placed box's half sizes along the room's axes
+    let (ax, ay, az) = (
+        m.x_axis.truncate().abs(),
+        m.y_axis.truncate().abs(),
+        m.z_axis.truncate().abs(),
+    );
+    let e = ax * h.x + ay * h.y + az * h.z;
+    planes.iter().any(|p| {
+        let n = p.truncate();
+        n.dot(c) + p.w < -n.abs().dot(e)
+    })
 }
 
 /// draws scenes into pictures of one size (`resize` for another)
@@ -274,6 +309,15 @@ pub struct Renderer {
     white: wgpu::BindGroup,
     textures: HashMap<String, (u64, wgpu::BindGroup)>,
     gpu: HashMap<u64, GpuMesh>,
+    /// boxes drawn (no colour, no depth) to test hidden meshes, and the tests' results
+    proxy: wgpu::RenderPipeline,
+    cube: wgpu::Buffer,
+    queries: Option<(u32, wgpu::QuerySet, wgpu::Buffer, wgpu::Buffer)>,
+    /// meshes hidden behind others in the last picture (their boxes are tested instead)
+    hidden: std::collections::HashSet<u64>,
+    /// a mesh hidden came into view: draw again for it to show
+    pub wants_again: bool,
+    pub drawn: Drawn,
     width: u32,
     height: u32,
     msaa: wgpu::TextureView,
@@ -454,6 +498,49 @@ impl Renderer {
                 }
             }
         }
+        let proxy = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("proxy"),
+            layout: Some(&playout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vert>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &attrs,
+                })],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: SAMPLES,
+                ..Default::default()
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: COLOUR,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::empty(),
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let cube = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("proxy box"),
+            contents: bytemuck::cast_slice(&unit_shape(false, [1.0; 4])),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
         let models_cap = 256;
         let (models, model_bind) = Self::model_buffer(&device, &model_layout, models_cap);
         let white = Self::texture_bind(&device, &queue, &tex_layout, &sampler, 1, 1, &[255, 255, 255, 255]);
@@ -479,6 +566,12 @@ impl Renderer {
             white,
             textures: HashMap::new(),
             gpu: HashMap::new(),
+            proxy,
+            cube,
+            queries: None,
+            hidden: Default::default(),
+            wants_again: false,
+            drawn: Drawn::default(),
             width: width.max(1),
             height: height.max(1),
             msaa,
@@ -889,37 +982,137 @@ impl Renderer {
                         usage: wgpu::BufferUsages::VERTEX,
                     })
                 });
+                let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+                for v in m.verts.iter() {
+                    lo = lo.min(Vec3::from(v.pos));
+                    hi = hi.max(Vec3::from(v.pos));
+                }
                 self.gpu.insert(
                     m.id,
                     GpuMesh {
                         version: m.version,
                         buf,
                         count: m.verts.len() as u32,
+                        lo,
+                        hi,
                     },
                 );
             }
         }
         self.gpu.retain(|id, _| seen.contains(id));
-        // each mesh's model and flags
-        let need = meshes.len().max(1) as u64;
+        let vp = camera.view_proj(self.width as f32 / self.height as f32);
+        let planes = frustum(vp);
+        // the order: sky, opaque (the nearest first, so what's behind is hidden), see-through
+        // (the farthest first), over everything
+        let rank = |p: Pass| match p {
+            Pass::Sky => 0,
+            Pass::Opaque => 1,
+            Pass::Glass => 2,
+            Pass::Over => 3,
+        };
+        let dist = |m: &Mesh| m.model.w_axis.truncate().distance_squared(camera.at);
+        let mut order: Vec<usize> = (0..meshes.len()).collect();
+        order.sort_by(|&a, &b| {
+            let (ma, mb) = (&meshes[a], &meshes[b]);
+            rank(ma.pass).cmp(&rank(mb.pass)).then_with(|| match ma.pass {
+                Pass::Glass => dist(mb).total_cmp(&dist(ma)),
+                Pass::Opaque => dist(ma).total_cmp(&dist(mb)),
+                _ => std::cmp::Ordering::Equal,
+            })
+        });
+        // what's drawn: not what's outside the view; an opaque mesh hidden last time only
+        // as its box, to test whether it shows again (unless the eye is inside the box)
+        let mut drawn = Drawn::default();
+        let mut draw: Vec<usize> = Vec::new();
+        let mut proxies: Vec<usize> = Vec::new();
+        for &i in &order {
+            let m = &meshes[i];
+            let Some(g) = self.gpu.get(&m.id) else { continue };
+            if g.buf.is_none() {
+                continue;
+            }
+            if m.pass != Pass::Sky && outside(&planes, m.model, g.lo, g.hi) {
+                drawn.outside += 1;
+                continue;
+            }
+            let testable = m.pass == Pass::Opaque && !m.lines;
+            if testable && self.hidden.contains(&m.id) {
+                let eye = m.model.inverse().transform_point3(camera.at);
+                let inside = eye.cmpge(g.lo - 0.05).all() && eye.cmple(g.hi + 0.05).all();
+                if !inside {
+                    proxies.push(i);
+                    drawn.hidden += 1;
+                    continue;
+                }
+            }
+            draw.push(i);
+            drawn.drawn += 1;
+        }
+        self.drawn = drawn;
+        // each mesh's model and flags, then the proxies' boxes
+        let need = (meshes.len() + proxies.len()).max(1) as u64;
         if need > self.models_cap {
             self.models_cap = need.next_power_of_two();
             let (b, g) = Self::model_buffer(&self.device, &self.model_layout, self.models_cap);
             (self.models, self.model_bind) = (b, g);
         }
         let mut mdata = vec![0u8; (need * MODEL_STRIDE) as usize];
-        for (i, m) in meshes.iter().enumerate() {
+        let mut put = |slot: usize, model: Mat4, flag: f32| {
             let mut u = [0f32; 20];
-            u[..16].copy_from_slice(&m.model.to_cols_array());
-            u[16] = if matches!(m.pass, Pass::Sky | Pass::Over) {
-                1.0
-            } else {
-                0.0
-            };
-            let at = i * MODEL_STRIDE as usize;
+            u[..16].copy_from_slice(&model.to_cols_array());
+            u[16] = flag;
+            let at = slot * MODEL_STRIDE as usize;
             mdata[at..at + 80].copy_from_slice(bytemuck::cast_slice(&u));
+        };
+        for (i, m) in meshes.iter().enumerate() {
+            put(
+                i,
+                m.model,
+                if matches!(m.pass, Pass::Sky | Pass::Over) {
+                    1.0
+                } else {
+                    0.0
+                },
+            );
+        }
+        for (k, &i) in proxies.iter().enumerate() {
+            let g = &self.gpu[&meshes[i].id];
+            let size = (g.hi - g.lo).max(Vec3::splat(1e-3));
+            put(
+                meshes.len() + k,
+                meshes[i].model * Mat4::from_scale_rotation_translation(size, Quat::IDENTITY, (g.lo + g.hi) / 2.0),
+                0.0,
+            );
         }
         self.queue.write_buffer(&self.models, 0, &mdata);
+        // occlusion tests: one for each opaque mesh drawn, one for each proxy
+        let tested: Vec<usize> = draw
+            .iter()
+            .copied()
+            .filter(|&i| meshes[i].pass == Pass::Opaque && !meshes[i].lines)
+            .collect();
+        let nq = (tested.len() + proxies.len()) as u32;
+        if nq > 0 && self.queries.as_ref().is_none_or(|q| q.0 < nq) {
+            let cap = nq.next_power_of_two().max(64);
+            let set = self.device.create_query_set(&wgpu::QuerySetDescriptor {
+                label: Some("hidden"),
+                ty: wgpu::QueryType::Occlusion,
+                count: cap,
+            });
+            let resolve = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("hidden resolve"),
+                size: cap as u64 * 8,
+                usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            });
+            let read = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("hidden read"),
+                size: cap as u64 * 8,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            self.queries = Some((cap, set, resolve, read));
+        }
         let glyphs = self.label_quads(scene);
         if self.atlas.dirty {
             self.atlas.dirty = false;
@@ -943,7 +1136,6 @@ impl Renderer {
                 },
             );
         }
-        let vp = camera.view_proj(self.width as f32 / self.height as f32);
         let mut u = [0f32; 28];
         u[..16].copy_from_slice(&vp.to_cols_array());
         u[16..19].copy_from_slice(&camera.at.to_array());
@@ -959,26 +1151,6 @@ impl Renderer {
                 label: Some("space glyphs"),
                 contents: bytemuck::cast_slice(&glyphs),
                 usage: wgpu::BufferUsages::VERTEX,
-            })
-        });
-        // the order: sky, opaque, see-through (the farthest first), over everything
-        let rank = |p: Pass| match p {
-            Pass::Sky => 0,
-            Pass::Opaque => 1,
-            Pass::Glass => 2,
-            Pass::Over => 3,
-        };
-        let mut order: Vec<usize> = (0..meshes.len()).collect();
-        order.sort_by(|&a, &b| {
-            let (ma, mb) = (&meshes[a], &meshes[b]);
-            rank(ma.pass).cmp(&rank(mb.pass)).then_with(|| {
-                if ma.pass == Pass::Glass {
-                    let da = ma.model.w_axis.truncate().distance_squared(camera.at);
-                    let db = mb.model.w_axis.truncate().distance_squared(camera.at);
-                    db.total_cmp(&da)
-                } else {
-                    std::cmp::Ordering::Equal
-                }
             })
         });
         let mut enc = self.device.create_command_encoder(&Default::default());
@@ -1010,12 +1182,35 @@ impl Renderer {
                     stencil_ops: None,
                 }),
                 timestamp_writes: None,
-                occlusion_query_set: None,
+                occlusion_query_set: if nq > 0 {
+                    self.queries.as_ref().map(|q| &q.1)
+                } else {
+                    None
+                },
                 multiview_mask: None,
             });
             pass.set_bind_group(0, &self.bind, &[]);
-            for i in order {
+            let mut q = 0u32;
+            let mut proxies_done = false;
+            for &i in &draw {
                 let m = &meshes[i];
+                // the proxies go after every opaque mesh, before what's see-through
+                if !proxies_done && rank(m.pass) > 1 {
+                    proxies_done = true;
+                    for (k, _) in proxies.iter().enumerate() {
+                        pass.set_pipeline(&self.proxy);
+                        pass.set_bind_group(
+                            1,
+                            &self.model_bind,
+                            &[((meshes.len() + k) as u64 * MODEL_STRIDE) as u32],
+                        );
+                        pass.set_bind_group(2, &self.white, &[]);
+                        pass.set_vertex_buffer(0, self.cube.slice(..));
+                        pass.begin_occlusion_query(tested.len() as u32 + k as u32);
+                        pass.draw(0..36, 0..1);
+                        pass.end_occlusion_query();
+                    }
+                }
                 let Some(g) = self.gpu.get(&m.id) else { continue };
                 let Some(buf) = &g.buf else { continue };
                 let Some(p) = self.pipes.get(&(m.pass, m.cull, m.lines)) else {
@@ -1031,7 +1226,30 @@ impl Renderer {
                     .unwrap_or(&self.white);
                 pass.set_bind_group(2, tex, &[]);
                 pass.set_vertex_buffer(0, buf.slice(..));
+                let test = m.pass == Pass::Opaque && !m.lines;
+                if test {
+                    pass.begin_occlusion_query(q);
+                }
                 pass.draw(0..g.count, 0..1);
+                if test {
+                    pass.end_occlusion_query();
+                    q += 1;
+                }
+            }
+            if !proxies_done {
+                for (k, _) in proxies.iter().enumerate() {
+                    pass.set_pipeline(&self.proxy);
+                    pass.set_bind_group(
+                        1,
+                        &self.model_bind,
+                        &[((meshes.len() + k) as u64 * MODEL_STRIDE) as u32],
+                    );
+                    pass.set_bind_group(2, &self.white, &[]);
+                    pass.set_vertex_buffer(0, self.cube.slice(..));
+                    pass.begin_occlusion_query(tested.len() as u32 + k as u32);
+                    pass.draw(0..36, 0..1);
+                    pass.end_occlusion_query();
+                }
             }
             if let Some(b) = &gb {
                 pass.set_pipeline(&self.glyphs);
@@ -1039,6 +1257,12 @@ impl Renderer {
                 pass.set_vertex_buffer(0, b.slice(..));
                 pass.draw(0..glyphs.len() as u32, 0..1);
             }
+        }
+        if nq > 0
+            && let Some((_, set, resolve, read)) = &self.queries
+        {
+            enc.resolve_query_set(set, 0..nq, resolve, 0);
+            enc.copy_buffer_to_buffer(resolve, 0, read, 0, nq as u64 * 8);
         }
         let row = padded(self.width);
         enc.copy_texture_to_buffer(
@@ -1075,6 +1299,33 @@ impl Renderer {
             }
         }
         self.readback.unmap();
+        // what the tests found: meshes that drew nothing are hidden next time; boxes that
+        // showed bring their meshes back (drawn again at once)
+        self.wants_again = false;
+        if nq > 0
+            && let Some((_, _, _, read)) = &self.queries
+        {
+            let slice = read.slice(..nq as u64 * 8);
+            slice.map_async(wgpu::MapMode::Read, |_| {});
+            let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+            if let Ok(data) = slice.get_mapped_range() {
+                let counts: &[u64] = bytemuck::cast_slice(&data);
+                for (k, &i) in tested.iter().enumerate() {
+                    if counts[k] == 0 {
+                        self.hidden.insert(meshes[i].id);
+                    }
+                }
+                for (k, &i) in proxies.iter().enumerate() {
+                    if counts[tested.len() + k] > 0 {
+                        self.hidden.remove(&meshes[i].id);
+                        self.wants_again = true;
+                    }
+                }
+            }
+            read.unmap();
+        }
+        let live: std::collections::HashSet<u64> = meshes.iter().map(|m| m.id).collect();
+        self.hidden.retain(|id| live.contains(id));
         out
     }
 }
@@ -1318,5 +1569,51 @@ mod tests {
         let img = r.render(&fogged, &Camera::default());
         let mid = px(&img, 160, 80, 60);
         assert!(mid[0] < 20 && mid[2] < 20, "all fog (the room's black): {mid:?}");
+    }
+
+    #[test]
+    fn what_is_outside_or_hidden_is_left_out() {
+        let Ok(mut r) = Renderer::new(160, 120) else {
+            eprintln!("no GPU here: skipped");
+            return;
+        };
+        let block = |id: u64, at: Vec3, size: Vec3| Mesh {
+            id,
+            version: 1,
+            verts: Arc::new(unit_shape(false, [0.5, 0.5, 0.5, 1.0])),
+            texture: None,
+            pass: Pass::Opaque,
+            model: Mat4::from_scale_rotation_translation(size, Quat::IDENTITY, at),
+            cull: true,
+            lines: false,
+        };
+        // a wall, a box behind it, a box behind the camera
+        let wall = block(1, Vec3::new(0.0, 0.0, -5.0), Vec3::new(40.0, 40.0, 0.5));
+        let hid = block(2, Vec3::new(0.0, 0.0, -12.0), Vec3::ONE);
+        let back = block(3, Vec3::new(0.0, 0.0, 8.0), Vec3::ONE);
+        let scene = Scene {
+            meshes: vec![wall.clone(), hid.clone(), back],
+            ..Default::default()
+        };
+        r.render(&scene, &Camera::default());
+        assert_eq!(r.drawn.outside, 1);
+        r.render(&scene, &Camera::default());
+        assert_eq!(r.drawn.hidden, 1, "{:?}", r.drawn);
+        // the wall goes: the box behind shows again
+        let open = Scene {
+            meshes: vec![hid],
+            ..Default::default()
+        };
+        r.render(&open, &Camera::default());
+        assert!(r.wants_again);
+        r.render(&open, &Camera::default());
+        assert_eq!(
+            r.drawn,
+            Drawn {
+                drawn: 1,
+                outside: 0,
+                hidden: 0
+            }
+        );
     }
 }

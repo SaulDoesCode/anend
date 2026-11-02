@@ -152,6 +152,10 @@ fn draw_loop(rx: Receiver<Job>) {
             },
         };
         let mut px = r.render(&job.scene, &job.camera);
+        // something hidden behind came into view: drawn again, so it shows now
+        if r.wants_again {
+            px = r.render(&job.scene, &job.camera);
+        }
         for p in px.as_chunks_mut::<4>().0 {
             p.swap(0, 2);
         }
