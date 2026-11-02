@@ -13,11 +13,13 @@
 use serde::{Deserialize, Serialize};
 
 use super::math::fnv;
-use super::model::{Config, HeadSpec, Net, Rope};
+use super::model::{Config, GenSpec, HeadSpec, Net, Rope};
 use super::{Classifier, Meta, Steer};
 
 pub const MAGIC: &[u8; 8] = b"ANENDCLS";
-pub const VERSION: u32 = 1;
+/// 2 adds optional feature channels, NUM tokens, causal models and the generative head;
+/// version 1 files read as version 2 files with the gematria channels on
+pub const VERSION: u32 = 2;
 
 /// the largest shapes a file may claim, so a damaged or hostile header can't make the
 /// reader allocate more than the file itself could hold
@@ -31,14 +33,41 @@ pub const MAX_OUT_HEADS: usize = 16;
 pub const MAX_CLASSES: usize = 1024;
 pub const MAX_EXTRA: usize = 1 << 16;
 
+/// the shape limits for models with their own vocabulary (imported pretrained models),
+/// set far past any open checkpoint: they only stop a hostile header from asking for
+/// absurd tables that the weights' size check can't see (the rotary table)
+pub const BIG_D_MODEL: usize = 1 << 16;
+pub const BIG_HEAD_DIM: usize = 1 << 12;
+pub const BIG_HEADS: usize = 1 << 12;
+pub const BIG_LAYERS: usize = 1 << 12;
+pub const BIG_FF: usize = 1 << 20;
+pub const BIG_LEN: usize = 1 << 21;
+pub const BIG_VOCAB: usize = 1 << 24;
+
+/// a model's tokenizer as saved: its `tokenizer.json` and the lexicon's tokens
+#[derive(Serialize, Deserialize)]
+struct SavedLexicon {
+    tokenizer: String,
+    start: u32,
+    end: u32,
+    #[serde(default)]
+    stops: Vec<u32>,
+}
+
 #[derive(Serialize, Deserialize)]
 struct Header {
     config: Config,
     /// (heads, ff) of each block, which growth and pruning change
     blocks: Vec<(usize, usize)>,
     heads: Vec<HeadSpec>,
+    /// the generative head (version 2)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    generator: Option<GenSpec>,
     steer: Steer,
     meta: Meta,
+    /// the tokenizer of a model with its own vocabulary
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lexicon: Option<SavedLexicon>,
 }
 
 impl Classifier {
@@ -47,8 +76,15 @@ impl Classifier {
             config: self.net.cfg.clone(),
             blocks: self.net.blocks.iter().map(|b| (b.heads, b.ff)).collect(),
             heads: self.net.heads.iter().map(|h| h.spec.clone()).collect(),
+            generator: self.net.generator.clone(),
             steer: self.steer.clone(),
             meta: self.meta.clone(),
+            lexicon: self.net.lexicon.as_ref().map(|l| SavedLexicon {
+                tokenizer: l.tokenizer.source().to_string(),
+                start: l.start,
+                end: l.end,
+                stops: l.stops.clone(),
+            }),
         };
         let json = serde_json::to_vec(&header).expect("header serialises");
         let n = self.net.weight_count();
@@ -80,7 +116,7 @@ impl Classifier {
             return Err("not a classifier file".into());
         }
         let version = u32::from_le_bytes(take(8, 4)?.try_into().unwrap());
-        if version != VERSION {
+        if version != 1 && version != VERSION {
             return Err(format!(
                 "classifier format version {version}, this build reads {VERSION}"
             ));
@@ -103,13 +139,17 @@ impl Classifier {
         }
         let mut cfg = h.config.clone();
         cfg.layers = h.blocks.len();
-        let mut net = Net::new(cfg, &h.heads, 0)?;
+        let mut net = Net::with_gen(cfg, &h.heads, h.generator.clone(), 0)?;
         // reshape the blocks to what was saved, then fill every tensor
         for (blk, &(heads, ff)) in net.blocks.iter_mut().zip(&h.blocks) {
             let (d, a) = (h.config.d_model, heads * h.config.head_dim);
             blk.heads = heads;
             blk.ff = ff;
-            blk.wqkv = vec![0.0; d * 3 * a];
+            let w3 = blk.qkv_width(&h.config);
+            blk.wqkv = vec![0.0; d * w3];
+            if h.config.qkv_bias {
+                blk.bqkv = vec![0.0; w3];
+            }
             blk.wo = vec![0.0; a * d];
             blk.wg = vec![0.0; d * ff];
             blk.wu = vec![0.0; d * ff];
@@ -126,7 +166,22 @@ impl Classifier {
                 at += 4;
             }
         }
-        net.rope = Rope::new(net.cfg.max_len, net.cfg.head_dim, net.cfg.rope_base);
+        net.rope = Rope::of(&net.cfg);
+        if let Some(l) = h.lexicon {
+            let tokenizer = super::bpe::Tokenizer::from_json(&l.tokenizer)?;
+            let ok = |t: u32| (t as usize) < net.cfg.vocab_size;
+            if !ok(l.start) || !ok(l.end) || !l.stops.iter().all(|&t| ok(t)) {
+                return Err("the classifier file's start or end token is out of range".into());
+            }
+            net.lexicon = Some(std::sync::Arc::new(super::bpe::Lexicon {
+                tokenizer,
+                start: l.start,
+                end: l.end,
+                stops: l.stops,
+            }));
+        } else if net.cfg.vocab_size > 0 {
+            return Err("the classifier file has a vocabulary but no tokenizer".into());
+        }
         Ok(Classifier {
             net,
             steer: h.steer,
@@ -170,21 +225,39 @@ fn expected_weights(h: &Header) -> Result<usize, String> {
     use super::text::{LETTERS, ROOT_BUCKETS, SIDE, SUM_BUCKETS, VOCAB};
     let c = &h.config;
     let bad = |what: &str| Err(format!("the classifier file's {what} is out of range"));
-    if c.d_model == 0 || c.d_model > MAX_D_MODEL {
+    let big = c.vocab_size > 0;
+    let pick = |small: usize, large: usize| if big { large } else { small };
+    let (max_d, max_hd, max_heads) = (
+        pick(MAX_D_MODEL, BIG_D_MODEL),
+        pick(MAX_HEAD_DIM, BIG_HEAD_DIM),
+        pick(MAX_HEADS, BIG_HEADS),
+    );
+    let (max_layers, max_ff, max_len) = (
+        pick(MAX_LAYERS, BIG_LAYERS),
+        pick(MAX_FF, BIG_FF),
+        pick(MAX_LEN, BIG_LEN),
+    );
+    if c.d_model == 0 || c.d_model > max_d {
         return bad("width");
     }
-    if c.head_dim == 0 || c.head_dim > MAX_HEAD_DIM || !c.head_dim.is_multiple_of(2) {
+    if c.head_dim == 0 || c.head_dim > max_hd || !c.head_dim.is_multiple_of(2) {
         return bad("head width");
     }
-    if c.heads == 0 || c.heads > MAX_HEADS || c.d_ff == 0 || c.d_ff > MAX_FF {
+    if c.heads == 0 || c.heads > max_heads || c.d_ff == 0 || c.d_ff > max_ff {
         return bad("block shape");
     }
-    if h.blocks.is_empty() || h.blocks.len() > MAX_LAYERS {
+    if c.vocab_size > BIG_VOCAB || (big && h.lexicon.is_none()) {
+        return bad("vocabulary");
+    }
+    if c.kv_heads > 0 && (!c.heads.is_multiple_of(c.kv_heads) || h.blocks.iter().any(|b| b.0 != c.heads)) {
+        return bad("key/value heads");
+    }
+    if h.blocks.is_empty() || h.blocks.len() > max_layers {
         return bad("depth");
     }
     // windows overlap by at most three quarters: a stride of 1 on long windows would make
     // every long text cost thousands of times its length to read
-    if c.max_len < 3 || c.max_len > MAX_LEN || c.stride == 0 || c.stride > MAX_LEN || c.stride * 4 < c.max_len - 2 {
+    if c.max_len < 3 || c.max_len > max_len || c.stride == 0 || c.stride > max_len || c.stride * 4 < c.max_len - 2 {
         return bad("window");
     }
     if c.extra > MAX_EXTRA {
@@ -200,7 +273,7 @@ fn expected_weights(h: &Header) -> Result<usize, String> {
     if ![g.letter, g.word, g.side, g.extra].iter().all(|x| x.is_finite()) {
         return bad("gains");
     }
-    if h.heads.is_empty()
+    if (h.heads.is_empty() && h.generator.is_none())
         || h.heads.len() > MAX_OUT_HEADS
         || h.heads
             .iter()
@@ -220,14 +293,30 @@ fn expected_weights(h: &Header) -> Result<usize, String> {
         return bad("steering");
     }
     let d = c.d_model;
-    let mut n: usize = (VOCAB + LETTERS + 3 * SUM_BUCKETS + ROOT_BUCKETS) * d;
+    let mut n: usize = if big { c.vocab_size } else { VOCAB + c.numbers as usize } * d;
+    n += if c.letters { LETTERS * d } else { 0 }
+        + if c.words {
+            (3 * SUM_BUCKETS + ROOT_BUCKETS) * d
+        } else {
+            0
+        };
+    if c.numbers {
+        n += d;
+    }
+    if h.generator.is_some() {
+        if !c.causal {
+            return bad("generative head (needs a causal model)");
+        }
+        n += (d + 1) * c.gen_out();
+    }
     for &(heads, ff) in &h.blocks {
-        if heads == 0 || heads > MAX_HEADS || ff == 0 || ff > MAX_FF {
+        if heads == 0 || heads > max_heads || ff == 0 || ff > max_ff {
             return bad("block shape");
         }
         let a = heads * c.head_dim;
+        let w3 = (heads + 2 * c.kv_of(heads)) * c.head_dim;
         let qk = if c.qk_norm { 2 * c.head_dim } else { 0 };
-        n += 2 * d + 4 * d * a + qk + 3 * d * ff;
+        n += 2 * d + d * w3 + a * d + qk + 3 * d * ff + if c.qkv_bias { w3 } else { 0 };
     }
     n += d + if c.pooling == Pooling::Attention { d } else { 0 };
     let pooled = if c.pooling == Pooling::ClsMean { 2 * d } else { d };

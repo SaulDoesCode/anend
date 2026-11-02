@@ -252,3 +252,11 @@ form.find .sorts { padding: 0 2px 0 4px; }
 .badge[data-tip] { cursor: default; }
 .scroll { overflow-x: auto; }
 td > form.row:has(select) { flex-wrap: nowrap; }
+
+/* who sees a save or classifier: three choices in a row */
+.seg { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.seg label { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px solid var(--line, #8884); border-radius: 6px; cursor: pointer; }
+.seg label:has(input:checked) { border-color: currentColor; font-weight: 600; }
+.seg label input { margin: 0; }
+.pill.vis { display: inline-flex; align-items: center; gap: 3px; }
+.pill.vis svg.icon { width: 12px; height: 12px; }

@@ -3,104 +3,14 @@
 //! predicts, and the doors that must stay shut (other sites, other people, bad files,
 //! odd ids).
 
-use salvo::prelude::*;
 use salvo::test::{ResponseExt, TestClient};
 use serde_json::{Value, json};
 
-use crate::app::{self, Workspaces};
-use crate::auth::{self, Limiter};
-use crate::hub::{Config, Hub};
-use crate::store::{Role, Standing, Store, User};
+use crate::app;
+use crate::auth;
+use crate::store::Role;
+use crate::testkit::{BASE, body, get, multipart, person, post_form, post_json, setup};
 use crate::web;
-
-const BASE: &str = "http://127.0.0.1:5800";
-
-/// the hub every router test shares (it's a global, set once)
-fn setup() -> std::path::PathBuf {
-    static DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
-    DIR.get_or_init(start).clone()
-}
-
-fn start() -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("anend-hubhttp-{}", rand::random::<u64>()));
-    let hub = Hub {
-        store: Store::open(&dir).unwrap(),
-        config: Config {
-            name: "test hub".into(),
-            description: String::new(),
-            url: BASE.into(),
-            open: false,
-            max_upload: 8 << 20,
-        },
-        limiter: Limiter::new(true),
-    };
-    assert!(web::HUB.set(hub).is_ok(), "one test sets the hub");
-    app::WORKSPACES.set(Workspaces::new(dir.join("users"))).ok();
-    dir
-}
-
-fn person(name: &str, role: Role) -> String {
-    web::hub()
-        .store
-        .add_user(User {
-            name: name.into(),
-            role,
-            standing: Standing::Active,
-            ..Default::default()
-        })
-        .unwrap();
-    format!(
-        "{}={}",
-        auth::COOKIE,
-        auth::start_session(&web::hub().store, name).unwrap()
-    )
-}
-
-async fn body(mut r: Response) -> (u16, String) {
-    let code = r.status_code.map(|c| c.as_u16()).unwrap_or(200);
-    (code, r.take_string().await.unwrap_or_default())
-}
-
-async fn get(path: &str, cookie: Option<&str>) -> (u16, String) {
-    let mut b = TestClient::get(format!("{BASE}{path}"));
-    if let Some(c) = cookie {
-        b = b.add_header("cookie", c, true);
-    }
-    body(b.send(crate::router()).await).await
-}
-
-async fn post_json(path: &str, cookie: &str, v: Value, origin: Option<&str>) -> (u16, Value) {
-    let mut b = TestClient::post(format!("{BASE}{path}")).add_header("cookie", cookie, true);
-    if let Some(o) = origin {
-        b = b.add_header("origin", o, true);
-    }
-    let (code, text) = body(b.json(&v).send(crate::router()).await).await;
-    (code, serde_json::from_str(&text).unwrap_or(Value::String(text)))
-}
-
-async fn post_form(path: &str, cookie: &str, form: &str) -> (u16, String) {
-    let b = TestClient::post(format!("{BASE}{path}"))
-        .add_header("cookie", cookie, true)
-        .raw_form(form.to_string());
-    body(b.send(crate::router()).await).await
-}
-
-fn multipart(fields: &[(&str, &str)], file: &[u8]) -> (String, Vec<u8>) {
-    let boundary = "anendboundary7";
-    let mut b = Vec::new();
-    for (k, v) in fields {
-        b.extend(format!("--{boundary}\r\ncontent-disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n").as_bytes());
-    }
-    b.extend(
-        format!(
-            "--{boundary}\r\ncontent-disposition: form-data; name=\"file\"; filename=\"x.anendcls\"\r\ncontent-type: application/octet-stream\r\n\r\n"
-        )
-        .as_bytes(),
-    );
-    b.extend(file);
-    b.extend(format!("\r\n--{boundary}--\r\n").as_bytes());
-    (format!("multipart/form-data; boundary={boundary}"), b)
-}
 
 #[tokio::test]
 async fn classifier_site() {
@@ -122,7 +32,14 @@ async fn classifier_site() {
     )
     .await;
     assert_eq!(code, 403);
-    assert!(web::hub().store.classifiers().unwrap().is_empty());
+    assert!(
+        !web::hub()
+            .store
+            .classifiers()
+            .unwrap()
+            .iter()
+            .any(|c| c.author == "saul")
+    );
     // nor can nobody
     let (code, v) = post_json("/app/classifiers/share", "", json!({ "name": "kind" }), None).await;
     assert_eq!(code, 400, "{v}");
@@ -173,7 +90,7 @@ async fn classifier_site() {
     assert_eq!(get("/classifiers/upload", Some(&ann)).await.0, 200);
 
     let mut r = TestClient::get(format!("{BASE}/classifiers/{id}/download"))
-        .send(crate::router())
+        .send(&crate::testkit::both())
         .await;
     let bytes = r.take_bytes(None).await.unwrap();
     assert!(bytes.starts_with(b"ANENDCLM"));
@@ -215,7 +132,7 @@ async fn classifier_site() {
         .add_header("cookie", ann.as_str(), true)
         .add_header("content-type", ct.as_str(), true)
         .bytes(b)
-        .send(crate::router())
+        .send(&crate::testkit::both())
         .await;
     assert_eq!(body(r).await.0, 404);
     assert_eq!(web::hub().store.classifier(&id).unwrap().unwrap().name, "fruit or rock");
@@ -225,7 +142,7 @@ async fn classifier_site() {
         .add_header("cookie", saul.as_str(), true)
         .add_header("content-type", ct.as_str(), true)
         .bytes(b)
-        .send(crate::router())
+        .send(&crate::testkit::both())
         .await;
     assert_eq!(body(r).await.0, 303);
     assert_eq!(
@@ -251,7 +168,7 @@ async fn classifier_site() {
         if let Some(t) = auth {
             q = q.bearer_auth(t);
         }
-        let (code, text) = body(q.bytes(b).send(crate::router()).await).await;
+        let (code, text) = body(q.bytes(b).send(&crate::testkit::both()).await).await;
         assert_eq!(code, want, "{text}");
     }
     let (ct, b) = multipart(&[("name", "ann's copy")], &bytes);
@@ -259,7 +176,7 @@ async fn classifier_site() {
         .bearer_auth(token)
         .add_header("content-type", ct.as_str(), true)
         .bytes(b)
-        .send(crate::router())
+        .send(&crate::testkit::both())
         .await;
     let (code, text) = body(r).await;
     assert_eq!(code, 200, "{text}");
@@ -304,24 +221,24 @@ async fn doors() {
         }
         q.bytes(b)
     };
-    let (code, text) = body(send(None).send(crate::router()).await).await;
+    let (code, text) = body(send(None).send(&crate::testkit::both()).await).await;
     assert_eq!(code, 401, "{text}");
     assert!(!web::hub().store.saves().unwrap().iter().any(|s| s.author == "bea"));
     let token = auth::new_token(&web::hub().store, "bea", "test").unwrap();
-    let (code, text) = body(send(Some(token)).send(crate::router()).await).await;
+    let (code, text) = body(send(Some(token)).send(&crate::testkit::both()).await).await;
     assert_eq!(code, 200, "{text}");
     assert!(web::hub().store.saves().unwrap().iter().any(|s| s.author == "bea"));
 
     // no one gets the app's calls or a socket
     let (code, v) = post_json("/app/api/hello", "", json!({}), None).await;
-    assert_eq!(code, 400);
+    assert_eq!(code, 401);
     assert!(v["error"].as_str().unwrap().contains("log in"), "{v}");
     let r = TestClient::get(format!("{BASE}/app/ws"))
         .add_header("connection", "upgrade", true)
         .add_header("upgrade", "websocket", true)
         .add_header("sec-websocket-version", "13", true)
         .add_header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==", true)
-        .send(crate::router())
+        .send(&crate::testkit::both())
         .await;
     assert_eq!(body(r).await.0, 401);
     // bea does, from the hub's own page only
@@ -331,7 +248,7 @@ async fn doors() {
     assert_eq!(code, 403);
 
     // nothing is framed by another site; the app's page runs only the hub's scripts
-    let r = TestClient::get(format!("{BASE}/")).send(crate::router()).await;
+    let r = TestClient::get(format!("{BASE}/")).send(&crate::testkit::both()).await;
     assert_eq!(r.headers().get("x-frame-options").unwrap(), "DENY");
     assert!(
         r.headers()
@@ -341,7 +258,9 @@ async fn doors() {
             .unwrap()
             .contains("frame-ancestors 'none'")
     );
-    let r = TestClient::get(format!("{BASE}/app/")).send(crate::router()).await;
+    let r = TestClient::get(format!("{BASE}/app/"))
+        .send(&crate::testkit::both())
+        .await;
     assert_eq!(r.headers().get("content-security-policy").unwrap(), web::APP_CSP);
     assert_eq!(r.headers().get("x-content-type-options").unwrap(), "nosniff");
     // the app's page has no inline script for that policy to stop

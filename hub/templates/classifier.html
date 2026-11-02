@@ -5,7 +5,7 @@
   <section class="card">
     <h1>{{ c.name }}</h1>
     <p class="dim small">a classifier by <a href="/u/{{ c.author }}">{{ c.author }}</a> · version {{ c.version }} · updated {{ updated }} · shared {{ created }} · {{ size }}
-    {% if status != "approved" %} · <span class="pill {{ status }}">{{ status }}</span>{% endif %}</p>
+    {% if visibility != "public" %} · {% include "vis_pill_v.html" %}{% else if status != "approved" %} · <span class="pill {{ status }}">{{ status }}</span>{% endif %}</p>
     {% if !c.note.is_empty() %}<div class="flash bad">the admins said: {{ c.note }}</div>{% endif %}
     {% if !c.description.is_empty() %}<p style="white-space: pre-wrap">{{ c.description }}</p>{% endif %}
     {% if !c.tags.is_empty() %}<p class="tags">{% for t in c.tags %}<a class="tag" href="/classifiers?q=%23{{ t }}">#{{ t }}</a>{% endfor %}</p>{% endif %}
@@ -44,6 +44,13 @@
       </div>
       <p class="dim small" id="took">{% if can_take %}“Take” puts it in the save open in <a href="/app/">the app</a> here. {% endif %}Or download the .anendcls and import it in the app's classifiers view.</p>
     </section>
+    {% if own %}
+    <section class="card">
+      <h3>who sees it</h3>
+      {% let vis_action = "/classifiers/{}/visibility"|format(c.id) %}
+      {% include "vis_control.html" %}
+    </section>
+    {% endif %}
     {% if can_edit %}
     <section class="card">
       <h3>{% if is_admin %}admin{% else %}yours{% endif %}</h3>

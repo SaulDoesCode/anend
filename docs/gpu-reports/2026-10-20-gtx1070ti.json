@@ -1,0 +1,370 @@
+{
+  "anend": "0.1.0",
+  "arch": "x86_64",
+  "cpu": {
+    "kernels": "avx2",
+    "threads": 4
+  },
+  "debug_build": false,
+  "gpu": {
+    "backend": "Vulkan",
+    "device": "0x1b82",
+    "device_type": "DiscreteGpu",
+    "driver": "NVIDIA",
+    "driver_info": "580.178.04",
+    "limits": {
+      "all": "Limits { max_texture_dimension_1d: 32768, max_texture_dimension_2d: 32768, max_texture_dimension_3d: 16384, max_texture_array_layers: 2048, max_bind_groups: 8, max_bind_groups_plus_vertex_buffers: 24, max_bindings_per_bind_group: 4294967295, max_dynamic_uniform_buffers_per_pipeline_layout: 15, max_dynamic_storage_buffers_per_pipeline_layout: 16, max_sampled_textures_per_shader_stage: 524288, max_samplers_per_shader_stage: 524288, max_storage_buffers_per_shader_stage: 524288, max_storage_textures_per_shader_stage: 524288, max_uniform_buffers_per_shader_stage: 15, max_binding_array_elements_per_shader_stage: 1048576, max_binding_array_acceleration_structure_elements_per_shader_stage: 524288, max_binding_array_sampler_elements_per_shader_stage: 1048576, max_uniform_buffer_binding_size: 65536, max_storage_buffer_binding_size: 2147483644, max_vertex_buffers: 16, max_buffer_size: 4292870144, max_vertex_attributes: 32, max_vertex_buffer_array_stride: 2048, max_inter_stage_shader_variables: 31, min_uniform_buffer_offset_alignment: 256, min_storage_buffer_offset_alignment: 32, max_color_attachments: 8, max_color_attachment_bytes_per_sample: 128, max_compute_workgroup_storage_size: 49152, max_compute_invocations_per_workgroup: 1536, max_compute_workgroup_size_x: 1536, max_compute_workgroup_size_y: 1024, max_compute_workgroup_size_z: 64, max_compute_workgroups_per_dimension: 65535, max_immediate_size: 256, max_non_sampler_bindings: 4294967295, max_task_workgroup_total_count: 0, max_task_workgroups_per_dimension: 0, max_mesh_workgroup_total_count: 0, max_mesh_workgroups_per_dimension: 0, max_task_invocations_per_workgroup: 0, max_task_invocations_per_dimension: 0, max_mesh_invocations_per_workgroup: 0, max_mesh_invocations_per_dimension: 0, max_task_payload_size: 0, max_mesh_output_vertices: 0, max_mesh_output_primitives: 0, max_mesh_output_layers: 0, max_mesh_multiview_view_count: 0, max_blas_primitive_count: 536870911, max_blas_geometry_count: 16777215, max_tlas_instance_count: 16777215, max_acceleration_structures_per_shader_stage: 524288, max_buffers_and_acceleration_structures_per_shader_stage: 4294967295, max_multiview_view_count: 32, max_ray_dispatch_count: 1073741824, max_ray_recursion_depth: 31 }",
+      "max_buffer_size": 4292870144,
+      "max_compute_invocations_per_workgroup": 1536,
+      "max_compute_workgroup_size": [
+        1536,
+        1024,
+        64
+      ],
+      "max_compute_workgroup_storage_size": 49152,
+      "max_compute_workgroups_per_dimension": 65535,
+      "max_storage_buffer_binding_size": 2147483644,
+      "max_storage_buffers_per_shader_stage": 524288,
+      "max_uniform_buffer_binding_size": 65536,
+      "min_uniform_buffer_offset_alignment": 256
+    },
+    "name": "NVIDIA GeForce GTX 1070 Ti",
+    "probe": [
+      {
+        "exact": true,
+        "kernels": [
+          {
+            "differ": 0,
+            "kernel": "gemm",
+            "max_rel": 0.0,
+            "max_ulps": 0,
+            "values": 80652
+          },
+          {
+            "differ": 0,
+            "kernel": "dot",
+            "max_rel": 0.0,
+            "max_ulps": 0,
+            "values": 40
+          },
+          {
+            "differ": 0,
+            "kernel": "sum",
+            "max_rel": 0.0,
+            "max_ulps": 0,
+            "values": 40
+          },
+          {
+            "differ": 0,
+            "kernel": "norm",
+            "max_rel": 0.0,
+            "max_ulps": 0,
+            "values": 9879
+          },
+          {
+            "differ": 0,
+            "kernel": "norm_back",
+            "max_rel": 0.0,
+            "max_ulps": 0,
+            "values": 5054
+          },
+          {
+            "differ": 0,
+            "kernel": "softmax",
+            "max_rel": 0.0,
+            "max_ulps": 0,
+            "values": 4466
+          },
+          {
+            "differ": 0,
+            "kernel": "softmax_back",
+            "max_rel": 0.0,
+            "max_ulps": 0,
+            "values": 2233
+          },
+          {
+            "differ": 0,
+            "kernel": "exp",
+            "max_rel": 0.0,
+            "max_ulps": 0,
+            "values": 4006
+          },
+          {
+            "differ": 0,
+            "kernel": "sigmoid",
+            "max_rel": 0.0,
+            "max_ulps": 0,
+            "values": 4006
+          },
+          {
+            "differ": 0,
+            "kernel": "divide",
+            "max_rel": 0.0,
+            "max_ulps": 0,
+            "values": 4006
+          },
+          {
+            "differ": 0,
+            "kernel": "sqrt",
+            "max_rel": 0.0,
+            "max_ulps": 0,
+            "values": 4006
+          },
+          {
+            "differ": 0,
+            "kernel": "swiglu",
+            "max_rel": 0.0,
+            "max_ulps": 0,
+            "values": 4500
+          },
+          {
+            "differ": 0,
+            "kernel": "rope",
+            "max_rel": 0.0,
+            "max_ulps": 0,
+            "values": 3200
+          },
+          {
+            "differ": 0,
+            "kernel": "scores",
+            "max_rel": 0.0,
+            "max_ulps": 0,
+            "values": 800
+          }
+        ],
+        "max_rel": 0.0,
+        "precision": "exact",
+        "seconds": 0.013026764
+      },
+      {
+        "exact": false,
+        "kernels": [
+          {
+            "differ": 61749,
+            "kernel": "gemm",
+            "max_rel": 0.010021527297794819,
+            "max_ulps": 147404,
+            "values": 80652
+          },
+          {
+            "differ": 25,
+            "kernel": "dot",
+            "max_rel": 3.820767688011983e-6,
+            "max_ulps": 64,
+            "values": 40
+          },
+          {
+            "differ": 0,
+            "kernel": "sum",
+            "max_rel": 0.0,
+            "max_ulps": 0,
+            "values": 40
+          },
+          {
+            "differ": 3785,
+            "kernel": "norm",
+            "max_rel": 2.931902542968601e-7,
+            "max_ulps": 4,
+            "values": 9879
+          },
+          {
+            "differ": 1168,
+            "kernel": "norm_back",
+            "max_rel": 0.000014526518498314545,
+            "max_ulps": 174,
+            "values": 5054
+          },
+          {
+            "differ": 1160,
+            "kernel": "softmax",
+            "max_rel": 2.3082046141098544e-7,
+            "max_ulps": 3,
+            "values": 4466
+          },
+          {
+            "differ": 642,
+            "kernel": "softmax_back",
+            "max_rel": 9.345216312794946e-6,
+            "max_ulps": 135,
+            "values": 2233
+          },
+          {
+            "differ": 306,
+            "kernel": "exp",
+            "max_rel": 1.181717976805885e-7,
+            "max_ulps": 1,
+            "values": 4006
+          },
+          {
+            "differ": 905,
+            "kernel": "sigmoid",
+            "max_rel": 2.045595124400279e-7,
+            "max_ulps": 2,
+            "values": 4006
+          },
+          {
+            "differ": 1172,
+            "kernel": "divide",
+            "max_rel": 1.2607216604010318e-7,
+            "max_ulps": 2,
+            "values": 4006
+          },
+          {
+            "differ": 695,
+            "kernel": "sqrt",
+            "max_rel": 1.191432872360565e-7,
+            "max_ulps": 1,
+            "values": 4006
+          },
+          {
+            "differ": 563,
+            "kernel": "swiglu",
+            "max_rel": 0.000012051416888425592,
+            "max_ulps": 130,
+            "values": 4500
+          },
+          {
+            "differ": 319,
+            "kernel": "rope",
+            "max_rel": 5.1192037062719464e-6,
+            "max_ulps": 78,
+            "values": 3200
+          },
+          {
+            "differ": 207,
+            "kernel": "scores",
+            "max_rel": 0.000012008375051664189,
+            "max_ulps": 130,
+            "values": 800
+          }
+        ],
+        "max_rel": 0.010021527297794819,
+        "precision": "fast",
+        "seconds": 0.051631893
+      }
+    ],
+    "vendor": "0x10de"
+  },
+  "gpu_build": true,
+  "gpu_note": null,
+  "os": "linux",
+  "reading": {
+    "choice": "auto",
+    "device": "gpu",
+    "exact": true,
+    "gpu": "NVIDIA GeForce GTX 1070 Ti (Vulkan, DiscreteGpu)"
+  },
+  "report": "anend gpu.report",
+  "seconds": 471.486469938,
+  "sizes": [
+    {
+      "predict": {
+        "cpu": {
+          "seconds": 6.683176443,
+          "texts": 10000,
+          "texts_per_sec": 1496.2944769285662
+        },
+        "gpu": {
+          "against_cpu": {
+            "max_abs_difference": 0.0,
+            "texts_differing": 0
+          },
+          "seconds": 55.247912155,
+          "speedup_over_cpu": 0.12096704078608632,
+          "texts": 10000,
+          "texts_per_sec": 181.00231501861356
+        },
+        "gpu_fast": {
+          "against_cpu": {
+            "max_abs_difference": 1.1920928955078125e-7,
+            "texts_differing": 4608
+          },
+          "seconds": 52.98108804,
+          "speedup_over_cpu": 0.12614268015700794,
+          "texts": 10000,
+          "texts_per_sec": 188.74659562389763
+        },
+        "texts": 10000
+      },
+      "preset": "compact",
+      "train": {
+        "cpu": {
+          "seconds": 0.197005487,
+          "steps": 40,
+          "tokens_per_sec": 143270.12120225868
+        },
+        "gpu": {
+          "same_weights_as_cpu": true,
+          "seconds": 5.649332065,
+          "steps": 40,
+          "tokens_per_sec": 4996.1658608927955
+        },
+        "gpu_fast": {
+          "same_weights_as_cpu": false,
+          "seconds": 5.493192768,
+          "steps": 40,
+          "tokens_per_sec": 5138.177593988997
+        }
+      },
+      "weights": 88462
+    },
+    {
+      "predict": {
+        "cpu": {
+          "seconds": 54.127726253,
+          "texts": 10000,
+          "texts_per_sec": 184.74820008619437
+        },
+        "gpu": {
+          "against_cpu": {
+            "max_abs_difference": 0.0,
+            "texts_differing": 0
+          },
+          "seconds": 120.366829633,
+          "speedup_over_cpu": 0.38223626438721287,
+          "stopped": "after 8500 of 10000 texts: the time budget ran out",
+          "texts": 8500,
+          "texts_per_sec": 70.6174618532083
+        },
+        "gpu_fast": {
+          "against_cpu": {
+            "max_abs_difference": 1.1920928955078125e-7,
+            "texts_differing": 4468
+          },
+          "seconds": 123.165791789,
+          "speedup_over_cpu": 0.3955234072716834,
+          "stopped": "after 9000 of 10000 texts: the time budget ran out",
+          "texts": 9000,
+          "texts_per_sec": 73.0722375854023
+        },
+        "texts": 10000
+      },
+      "preset": "small",
+      "train": {
+        "cpu": {
+          "seconds": 4.865324258,
+          "steps": 40,
+          "tokens_per_sec": 11963.231413465228
+        },
+        "gpu": {
+          "same_weights_as_cpu": true,
+          "seconds": 21.255567813,
+          "steps": 40,
+          "tokens_per_sec": 2738.3413377647603
+        },
+        "gpu_fast": {
+          "same_weights_as_cpu": false,
+          "seconds": 21.309960334,
+          "steps": 40,
+          "tokens_per_sec": 2731.351869629435
+        }
+      },
+      "weights": 891614
+    }
+  ],
+  "version": 1,
+  "workload": {
+    "predict": "10000 texts of 20 to about 400 bytes, at most 120 s on each device",
+    "train": "40 steps of batch 8 on 64 two-class texts, seed 7"
+  }
+}

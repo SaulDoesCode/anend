@@ -516,6 +516,8 @@ impl Store {
                 not,
                 head: p.head,
                 preset: p.preset.clone(),
+                // as the weights were trained (retraining keeps the channels)
+                gematria: clf.net.cfg.letters || clf.net.cfg.words || clf.net.cfg.side,
                 steer: p.steer.clone(),
                 inputs: p
                     .inputs
@@ -529,6 +531,7 @@ impl Store {
                 history,
                 outputs: BTreeMap::new(),
                 version: 0,
+                starter: None,
                 seed: p.seed,
                 created: now.clone(),
                 modified: now,

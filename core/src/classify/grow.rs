@@ -69,8 +69,15 @@ pub fn widen_ff(net: &mut Net, b: usize, add: usize, seed: u64) {
     blk.ff = pick.len();
 }
 
+/// whether heads can be added or pruned: not when keys and values are grouped or the
+/// projections have biases (imported pretrained models)
+pub fn heads_change(net: &Net) -> bool {
+    net.cfg.kv_heads == 0 && !net.cfg.qkv_bias
+}
+
 /// adds `add` attention heads to block `b`; their output rows are zero
 pub fn add_heads(net: &mut Net, b: usize, add: usize, seed: u64) {
+    assert!(heads_change(net), "heads of grouped or biased attention don't change");
     let (d, dh) = (net.cfg.d_model, net.cfg.head_dim);
     let mut r = Rng::new(key(&[seed, 0x4ead, b as u64]));
     let blk = &mut net.blocks[b];
@@ -108,6 +115,7 @@ pub fn prune_ff(net: &mut Net, b: usize, keep: &[usize]) {
 
 /// keeps only the listed heads of block `b`
 pub fn prune_heads(net: &mut Net, b: usize, keep: &[usize]) {
+    assert!(heads_change(net), "heads of grouped or biased attention don't change");
     let (d, dh) = (net.cfg.d_model, net.cfg.head_dim);
     let blk = &mut net.blocks[b];
     let a = blk.heads * dh;
@@ -245,7 +253,7 @@ pub fn prune(clf: &mut Classifier, data: &[Example], val: &[usize], o: &PruneOpt
             rep.units += drop;
         }
         let hs = &imp.heads[l];
-        if o.heads && hs.len() > 1 {
+        if o.heads && hs.len() > 1 && heads_change(&clf.net) {
             let mean = hs.iter().sum::<f64>() / hs.len() as f64;
             let (worst, &w) = hs.iter().enumerate().min_by(|a, b| a.1.total_cmp(b.1)).unwrap();
             if w < 0.5 * mean {
@@ -336,7 +344,7 @@ impl Grower {
     fn allowed(&self, a: Action, net: &Net) -> bool {
         match a {
             Action::Widen => net.blocks.iter().any(|b| b.ff < self.max_ff),
-            Action::AddHead => net.blocks.iter().any(|b| b.heads < self.max_heads),
+            Action::AddHead => heads_change(net) && net.blocks.iter().any(|b| b.heads < self.max_heads),
             Action::Deepen => net.blocks.len() < self.max_layers,
             _ => true,
         }

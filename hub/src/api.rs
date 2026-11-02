@@ -5,9 +5,8 @@ use salvo::prelude::*;
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::game;
 use crate::hub::{Details, Hub, Sort};
-use crate::store::{ClassifierRec, Sample, Save, Standing, Status};
+use crate::store::{ClassifierRec, Sample, Save, Standing, Status, Visibility, may_see};
 use crate::web::{hub, me};
 
 #[derive(Serialize)]
@@ -26,6 +25,10 @@ pub struct SaveJson {
     created: String,
     updated: String,
     download_url: String,
+    /// private, unlisted or public
+    visibility: &'static str,
+    /// pending, approved or rejected (only a public one's matters)
+    status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     sample: Option<Vec<Sample>>,
 }
@@ -46,6 +49,8 @@ fn json_of(s: &Save, sample: bool) -> SaveJson {
         created: s.created.to_rfc3339(),
         updated: s.updated.to_rfc3339(),
         download_url: format!("/saves/{}/download", s.id),
+        visibility: s.visibility.name(),
+        status: crate::web::status_name(s.status),
         sample: sample.then(|| s.sample.clone()),
     }
 }
@@ -63,9 +68,12 @@ pub async fn about(res: &mut Response) {
     res.render(Json(json!({
         "name": h.config.name,
         "description": h.config.description,
-        "saves": saves.iter().filter(|s| s.status == Status::Approved).count(),
-        "classifiers": h.store.classifiers().unwrap_or_default().iter().filter(|c| c.status == Status::Approved).count(),
+        "saves": saves.iter().filter(|s| s.listed()).count(),
+        "classifiers": h.store.classifiers().unwrap_or_default().iter().filter(|c| c.listed()).count(),
         "users": users.iter().filter(|u| u.standing == Standing::Active).count(),
+        "join": h.join_policy().name(),
+        "mode": crate::mode::get().name(),
+        "version": env!("CARGO_PKG_VERSION"),
     })));
 }
 
@@ -83,30 +91,49 @@ pub async fn list(req: &mut Request, res: &mut Response) {
     }
 }
 
+/// one save: a listed one, an unlisted one by its id, or your own (with your token)
 #[handler]
-pub async fn one(req: &mut Request, res: &mut Response) {
+pub async fn one(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     let id = req.param::<String>("id").unwrap_or_default();
     match hub().store.save(&id) {
-        Ok(Some(s)) if s.status == Status::Approved => res.render(Json(json_of(&s, true))),
+        Ok(Some(s)) if may_see(s.visibility, s.status, &s.author, me(depot)) => res.render(Json(json_of(&s, true))),
         _ => error(res, StatusCode::NOT_FOUND, "no such save"),
     }
 }
 
+/// `GET /api/mine` with a token (or a session): every save and classifier of yours on
+/// the hub, private and unlisted ones too
 #[handler]
-pub async fn whoami(depot: &mut Depot, res: &mut Response) {
-    match me(depot) {
-        Some(u) => {
-            let level = game::level(u.points);
-            res.render(Json(json!({
-                "username": u.name,
-                "points": u.points,
-                "level": level,
-                "title": game::title(level),
-                "active": Hub::active(u),
-            })));
-        }
-        None => error(res, StatusCode::UNAUTHORIZED, "that token isn't known here"),
-    }
+pub async fn mine(depot: &mut Depot, res: &mut Response) {
+    let Some(u) = me(depot) else {
+        return error(
+            res,
+            StatusCode::UNAUTHORIZED,
+            "send an app token (Authorization: Bearer …)",
+        );
+    };
+    let mut saves: Vec<Save> = hub()
+        .store
+        .saves()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|s| s.author.eq_ignore_ascii_case(&u.name))
+        .collect();
+    saves.sort_by_key(|s| std::cmp::Reverse(s.updated));
+    let mut cls: Vec<ClassifierRec> = hub()
+        .store
+        .classifiers()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| c.author.eq_ignore_ascii_case(&u.name))
+        .collect();
+    cls.sort_by_key(|c| std::cmp::Reverse(c.updated));
+    res.render(Json(json!({
+        "saves": saves.iter().map(|s| json_of(s, false)).collect::<Vec<_>>(),
+        "classifiers": cls.iter().map(|c| classifier_json(c, false)).collect::<Vec<_>>(),
+        "used": hub().shared_bytes(&u.name).unwrap_or(0),
+        "quota": hub().config.share_quota,
+    })));
 }
 
 #[handler]
@@ -143,6 +170,7 @@ pub async fn share(req: &mut Request, res: &mut Response) {
     };
     let get = |k: &str| form.fields.get(k).cloned().unwrap_or_default();
     let (name, description, tags) = (get("name"), get("description"), get("tags"));
+    let vis = get("visibility");
     let Some(path) = form
         .files
         .get("file")
@@ -151,7 +179,7 @@ pub async fn share(req: &mut Request, res: &mut Response) {
     else {
         return error(res, StatusCode::BAD_REQUEST, "send the save as `file`");
     };
-    let details = match Details::new(&name, &description, &tags) {
+    let details = match Details::new(&name, &description, &tags).and_then(|d| d.seen_by(&vis)) {
         Ok(d) => d,
         Err(e) => return error(res, StatusCode::BAD_REQUEST, &e),
     };
@@ -159,6 +187,8 @@ pub async fn share(req: &mut Request, res: &mut Response) {
         Ok(s) => res.render(Json(json!({
             "id": s.id,
             "status": if s.status == Status::Approved { "approved" } else { "pending" },
+            "visibility": s.visibility.name(),
+            "url": format!("/saves/{}", s.id),
         }))),
         Err(e) => error(res, StatusCode::BAD_REQUEST, &e),
     }
@@ -191,6 +221,8 @@ pub struct ClassifierJson {
     updated: String,
     download_url: String,
     take_url: String,
+    visibility: &'static str,
+    status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<Value>,
 }
@@ -223,6 +255,8 @@ pub fn classifier_json(c: &ClassifierRec, detail: bool) -> ClassifierJson {
         updated: c.updated.to_rfc3339(),
         download_url: format!("/classifiers/{}/download", c.id),
         take_url: format!("/app/classifiers/{}/take", c.id),
+        visibility: c.visibility.name(),
+        status: crate::web::status_name(c.status),
         detail: detail.then(|| {
             json!({
                 "module": c.module,
@@ -250,10 +284,12 @@ pub async fn classifiers(req: &mut Request, res: &mut Response) {
 
 /// `GET /api/classifiers/{id}`
 #[handler]
-pub async fn classifier(req: &mut Request, res: &mut Response) {
+pub async fn classifier(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     let id = req.param::<String>("id").unwrap_or_default();
     match hub().store.classifier(&id) {
-        Ok(Some(c)) if c.status == Status::Approved => res.render(Json(classifier_json(&c, true))),
+        Ok(Some(c)) if may_see(c.visibility, c.status, &c.author, me(depot)) => {
+            res.render(Json(classifier_json(&c, true)))
+        }
         _ => error(res, StatusCode::NOT_FOUND, "no such classifier"),
     }
 }
@@ -308,6 +344,19 @@ pub async fn share_classifier(req: &mut Request, res: &mut Response) {
     };
     let get = |k: &str| form.fields.get(k).cloned().unwrap_or_default();
     let (name, description, tags) = (get("name"), get("description"), get("tags"));
+    let vis = match get("visibility").trim() {
+        "" => None,
+        v => match Visibility::parse(v) {
+            Some(v) => Some(v),
+            None => {
+                return error(
+                    res,
+                    StatusCode::BAD_REQUEST,
+                    "visibility is private, unlisted or public",
+                );
+            }
+        },
+    };
     let Some(path) = form
         .files
         .get("file")
@@ -317,12 +366,13 @@ pub async fn share_classifier(req: &mut Request, res: &mut Response) {
         return error(res, StatusCode::BAD_REQUEST, "send the module as `file`");
     };
     match hub()
-        .accept_classifier(&user, (&name, &description, &tags), &path, None)
+        .accept_classifier(&user, (&name, &description, &tags), vis, &path, None)
         .await
     {
         Ok(c) => res.render(Json(json!({
             "id": c.id,
             "status": if c.status == Status::Approved { "approved" } else { "pending" },
+            "visibility": c.visibility.name(),
             "url": format!("/classifiers/{}", c.id),
         }))),
         Err(e) => error(res, StatusCode::BAD_REQUEST, &e),

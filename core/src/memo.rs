@@ -179,6 +179,10 @@ pub fn stamp(stack: &Stack) -> u64 {
         h = fnv(h, &d.version.to_le_bytes());
         h = fnv(h, serde_json::to_string(&d.steer).unwrap_or_default().as_bytes());
     }
+    // rows read where the results aren't the CPU's bits are kept apart from the CPU's
+    if !stack.reading().exact {
+        h = fnv(h, b"inexact device");
+    }
     h
 }
 
@@ -196,13 +200,25 @@ pub fn read(stack: &Stack, stamp: u64, text: &str) -> Row {
     }
 }
 
-/// rows for many texts at once, in parallel, in the texts' order
+/// rows for many texts at once, in the texts' order, on the stack's device (in
+/// parallel on the CPU, windows packed on the GPU)
 pub fn read_many(stack: &Stack, stamp: u64, texts: &[&str], pool: &Pool) -> Vec<Row> {
-    let slots: Vec<std::sync::Mutex<Option<Row>>> = texts.iter().map(|_| Default::default()).collect();
-    pool.run(texts.len(), &|i| {
-        *slots[i].lock().unwrap() = Some(read(stack, stamp, texts[i]))
-    });
-    slots.into_iter().map(|s| s.into_inner().unwrap().unwrap()).collect()
+    stack
+        .read_many(texts, pool)
+        .into_iter()
+        .zip(texts)
+        .map(|((mut outs, embedding), t)| {
+            let o = outs.swap_remove(0);
+            Row {
+                stamp,
+                text_hash: text_hash(t),
+                probs: o.probs,
+                top: o.top,
+                members: o.members,
+                embedding,
+            }
+        })
+        .collect()
 }
 
 /// how indexing went

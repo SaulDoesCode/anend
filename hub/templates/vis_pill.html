@@ -1,0 +1,1 @@
+<span class="pill vis with-icon" tabindex="0" data-tip="{% if s.visibility == "private" %}private: only its owner sees it{% else %}unlisted: anyone with the link, never listed{% endif %}">{% if s.visibility == "private" %}{{ crate::web::icon("eye-off") }}{% else %}{{ crate::web::icon("link") }}{% endif %}{{ s.visibility }}</span>

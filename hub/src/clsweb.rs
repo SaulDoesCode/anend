@@ -9,70 +9,12 @@ use salvo::prelude::*;
 use crate::auth;
 use crate::clshub::may_edit;
 use crate::hub::{Hub, Sort, human_size};
-use crate::store::{ClassifierRec, Role, Status};
+use crate::saves::read_upload;
+use crate::store::{ClassifierRec, Role, Visibility, may_see};
 use crate::web::{
-    Field, Form, Layout, ago, client_ip, field, go, hub, hue, layout, me, need_active, need_admin, not_found,
-    read_upload, render, status_name, url,
+    ClsCard, Field, Form, Layout, ago, client_ip, cls_card, count, field, go, hub, hue, layout, me, mode, need_active,
+    need_admin, not_found, percent, render, status_name, url,
 };
-
-/// a classifier in the grid
-pub struct ClsCard {
-    pub id: String,
-    pub name: String,
-    pub author: String,
-    pub description: String,
-    pub tags: Vec<String>,
-    pub classes: Vec<String>,
-    /// classes not shown on the card
-    pub more: usize,
-    pub n_classes: usize,
-    pub accuracy: String,
-    pub preset: String,
-    pub weights: String,
-    pub stars: u64,
-    pub downloads: u64,
-    pub featured: bool,
-    pub hue: u64,
-    pub ago: String,
-}
-
-/// a share as a whole percent, or empty
-fn percent(x: Option<f64>) -> String {
-    x.filter(|v| v.is_finite())
-        .map(|v| format!("{:.0}%", v * 100.0))
-        .unwrap_or_default()
-}
-
-/// a weight count, short
-fn count(n: u64) -> String {
-    match n {
-        0..1_000 => n.to_string(),
-        1_000..1_000_000 => format!("{:.0}k", n as f64 / 1e3),
-        _ => format!("{:.1}M", n as f64 / 1e6),
-    }
-}
-
-pub fn cls_card(c: &ClassifierRec) -> ClsCard {
-    const SHOWN: usize = 6;
-    ClsCard {
-        id: c.id.clone(),
-        name: c.name.clone(),
-        author: c.author.clone(),
-        description: c.description.chars().take(160).collect(),
-        tags: c.tags.clone(),
-        classes: c.classes.iter().take(SHOWN).cloned().collect(),
-        more: c.classes.len().saturating_sub(SHOWN),
-        n_classes: c.classes.len(),
-        accuracy: percent(c.accuracy),
-        preset: c.preset.clone(),
-        weights: count(c.weights),
-        stars: c.stars,
-        downloads: c.downloads,
-        featured: c.featured,
-        hue: hue(&c.name),
-        ago: ago(c.updated),
-    }
-}
 
 #[derive(Template)]
 #[template(path = "classifiers.html")]
@@ -98,7 +40,7 @@ pub async fn grid(req: &mut Request, depot: &mut Depot, res: &mut Response) {
     let h = hub();
     let (found, more) = h.find_classifiers(&q, sort, page).unwrap_or_default();
     let all = h.store.classifiers().unwrap_or_default();
-    let approved: Vec<&ClassifierRec> = all.iter().filter(|c| c.status == Status::Approved).collect();
+    let approved: Vec<&ClassifierRec> = all.iter().filter(|c| c.listed()).collect();
     let mut authors: Vec<String> = approved.iter().map(|c| c.author.to_lowercase()).collect();
     authors.sort();
     authors.dedup();
@@ -123,8 +65,7 @@ pub async fn grid(req: &mut Request, depot: &mut Depot, res: &mut Response) {
 /// a classifier the asker may see: approved ones, their own, or any for an admin
 fn visible(depot: &Depot, id: &str) -> Option<ClassifierRec> {
     let c = hub().store.classifier(id).ok().flatten()?;
-    let mine = me(depot).is_some_and(|u| u.is_admin() || u.name.eq_ignore_ascii_case(&c.author));
-    (c.status == Status::Approved || mine).then_some(c)
+    may_see(c.visibility, c.status, &c.author, me(depot)).then_some(c)
 }
 
 /// a classifier the asker may change
@@ -151,6 +92,8 @@ struct Page {
     can_take: bool,
     can_edit: bool,
     is_admin: bool,
+    own: bool,
+    visibility: &'static str,
     missing: Vec<String>,
 }
 
@@ -177,9 +120,11 @@ pub async fn detail(req: &mut Request, depot: &mut Depot, res: &mut Response) {
             accuracy: percent(c.accuracy),
             macro_f1: percent(c.macro_f1),
             hue: hue(&c.name),
-            can_star: active && !mine && c.status == Status::Approved,
+            can_star: active && !mine && c.listed(),
+            own: mine,
+            visibility: c.visibility.name(),
             starred,
-            can_take: active && c.status == Status::Approved,
+            can_take: active && mode(depot).app,
             can_edit: may_edit(user, &c),
             is_admin,
             missing: c.upstream.iter().filter(|u| !u.1).map(|u| u.0.clone()).collect(),
@@ -219,9 +164,7 @@ pub async fn download(req: &mut Request, depot: &mut Depot, res: &mut Response) 
         Some(u) => u.name.to_lowercase(),
         None => auth::address_key(client_ip(req)),
     };
-    if c.status == Status::Approved {
-        hub().classifier_downloaded(&c, &who).ok();
-    }
+    hub().classifier_downloaded(&c, &who).ok();
     match tokio::fs::read(&path).await {
         Ok(bytes) => {
             res.headers_mut()
@@ -283,6 +226,15 @@ fn share_form(depot: &Depot, action: String, heading: String, c: Option<&Classif
                 )
             },
             Field {
+                hint: "private: only you; unlisted: anyone with its link; public: in the grid once an admin lets it in",
+                ..field(
+                    "visibility",
+                    "who sees it",
+                    "visibility",
+                    c.map(|c| c.visibility.name()).unwrap_or("public"),
+                )
+            },
+            Field {
                 required: c.is_none(),
                 hint: if c.is_some() {
                     "leave empty to keep the module and only change the words"
@@ -298,7 +250,7 @@ fn share_form(depot: &Depot, action: String, heading: String, c: Option<&Classif
             if me(depot).is_some_and(|u| matches!(u.role, Role::Trusted | Role::Admin)) {
                 "Yours go straight in."
             } else {
-                "An admin looks at each one before it shows in the grid."
+                "An admin looks at each public one before it shows in the grid; private and unlisted ones skip that and are never listed."
             }
         ),
     }
@@ -336,8 +288,16 @@ pub async fn upload(req: &mut Request, depot: &mut Depot, res: &mut Response) {
         return go(res, BACK, "!pick a module to share");
     };
     let words = (sent.name.as_str(), sent.description.as_str(), sent.tags.as_str());
-    match hub().accept_classifier(&user, words, &path, None).await {
-        Ok(c) if c.status == Status::Approved => go(res, &format!("/classifiers/{}", c.id), "shared: it's in the grid"),
+    let Ok(vis) = vis_of(&sent.visibility) else {
+        return go(res, BACK, "!visibility is private, unlisted or public");
+    };
+    match hub().accept_classifier(&user, words, vis, &path, None).await {
+        Ok(c) if c.listed() => go(res, &format!("/classifiers/{}", c.id), "shared: it's in the grid"),
+        Ok(c) if c.visibility != Visibility::Public => go(
+            res,
+            &format!("/classifiers/{}", c.id),
+            &crate::saves::visibility_said(c.visibility, false, false),
+        ),
         Ok(c) => go(
             res,
             &format!("/classifiers/{}", c.id),
@@ -382,12 +342,15 @@ pub async fn edit(req: &mut Request, depot: &mut Depot, res: &mut Response) {
         Err(e) => return go(res, &back, &format!("!{e}")),
     };
     let words = (sent.name.as_str(), sent.description.as_str(), sent.tags.as_str());
+    let Ok(vis) = vis_of(&sent.visibility) else {
+        return go(res, &back, "!visibility is private, unlisted or public");
+    };
     match sent.file {
         Some((path, _)) => {
             // the new version is the author's, even when an admin sends it
             let author = hub().store.user(&c.author).ok().flatten().unwrap_or(user);
-            match hub().accept_classifier(&author, words, &path, Some(&c)).await {
-                Ok(n) if n.status == Status::Approved => go(res, &page, "new version is in"),
+            match hub().accept_classifier(&author, words, vis, &path, Some(&c)).await {
+                Ok(n) if !n.waiting() => go(res, &page, "new version is in"),
                 Ok(_) => go(res, &page, "new version sent in: an admin will look at it"),
                 Err(e) => go(res, &back, &format!("!{e}")),
             }
@@ -407,6 +370,10 @@ pub async fn edit(req: &mut Request, depot: &mut Depot, res: &mut Response) {
                 x.description = details.description;
                 x.tags = details.tags;
             });
+            let r = match (r, vis) {
+                (Ok(_), Some(v)) if v != c.visibility => hub().set_classifier_visibility(&user, &c.id, v),
+                (r, _) => r,
+            };
             match r {
                 Ok(_) => go(res, &page, "saved"),
                 Err(e) => go(res, &back, &format!("!{e}")),
@@ -428,6 +395,44 @@ pub async fn delete(req: &mut Request, depot: &mut Depot, res: &mut Response) {
             go(res, "/classifiers", &format!("deleted “{}”", c.name))
         }
         Err(e) => go(res, &format!("/classifiers/{}", c.id), &format!("!{e}")),
+    }
+}
+
+/// a visibility as a form sent it: empty keeps it
+fn vis_of(s: &str) -> Result<Option<Visibility>, ()> {
+    match s.trim() {
+        "" => Ok(None),
+        v => Visibility::parse(v).map(Some).ok_or(()),
+    }
+}
+
+/// `POST /classifiers/{id}/visibility` with `visibility`: private, unlisted or public (its owner)
+#[handler]
+pub async fn visibility(req: &mut Request, depot: &mut Depot, res: &mut Response) {
+    let id = req.param::<String>("id").unwrap_or_default();
+    let Some(user) = need_active(res, depot).cloned() else {
+        return;
+    };
+    let Some(c) = hub()
+        .store
+        .classifier(&id)
+        .ok()
+        .flatten()
+        .filter(|c| c.author.eq_ignore_ascii_case(&user.name))
+    else {
+        return not_found(res, depot);
+    };
+    let back = format!("/classifiers/{}", c.id);
+    let Some(v) = Visibility::parse(&req.form::<String>("visibility").await.unwrap_or_default()) else {
+        return go(res, &back, "!visibility is private, unlisted or public");
+    };
+    match hub().set_classifier_visibility(&user, &c.id, v) {
+        Ok(n) => go(
+            res,
+            &back,
+            &crate::saves::visibility_said(n.visibility, n.listed(), n.waiting()),
+        ),
+        Err(e) => go(res, &back, &format!("!{e}")),
     }
 }
 
@@ -454,47 +459,6 @@ pub async fn admin_action(req: &mut Request, depot: &mut Depot, res: &mut Respon
     match hub().review_classifier(&admin, &id, &action, &note) {
         Ok(m) => go(res, &back, &m),
         Err(e) => go(res, &back, &format!("!{e}")),
-    }
-}
-
-/// a classifier's row in the admin panel
-pub struct AdminCls {
-    pub id: String,
-    pub name: String,
-    pub author: String,
-    pub classes: String,
-    pub accuracy: String,
-    pub preset: String,
-    pub size: String,
-    pub ago: String,
-    pub version: u32,
-    pub status: &'static str,
-    pub featured: bool,
-    pub stars: u64,
-    pub downloads: u64,
-    pub needs: usize,
-}
-
-pub fn admin_cls(c: &ClassifierRec) -> AdminCls {
-    let mut classes = c.classes.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
-    if c.classes.len() > 5 {
-        classes.push_str(&format!(" +{}", c.classes.len() - 5));
-    }
-    AdminCls {
-        id: c.id.clone(),
-        name: c.name.clone(),
-        author: c.author.clone(),
-        classes,
-        accuracy: percent(c.accuracy),
-        preset: c.preset.clone(),
-        size: human_size(c.size),
-        ago: ago(c.updated),
-        version: c.version,
-        status: status_name(c.status),
-        featured: c.featured,
-        stars: c.stars,
-        downloads: c.downloads,
-        needs: c.upstream.iter().filter(|u| !u.1).count(),
     }
 }
 

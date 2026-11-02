@@ -1,0 +1,2870 @@
+anend is a memory palace for short texts.
+You type a word or phrase and it is stored as an entry with its gematria sums.
+You find it again by its numbers, its words, its tags or the lists it's in, and you can fly through your memories laid out in space.
+It continues weum, whose numbers it reproduces exactly.
+a desktop app, and the same app built to WebAssembly for the browser;
+That includes the entry graph store, gematria, the app's API, and a deterministic transformer engine for classifiers and generators.
+Every view has the command bar at the bottom, and each view keeps its own text there.
+The top bar holds the view icons, the search line with its triangle, undo (Ctrl+Z) and settings.
+Settings are a dialog with folding sections:
+- the memory view's sizes and spacing, and the space's room colour;
+the bars fade while you rest, and the top bar can hide until the pointer reaches the top edge;
+A save is one file, an entry graph in redb.
+Every text, note, tag, list and setting is an entry with timestamps.
+Lists and tags are edges between entries.
+Identical texts are stored once, and an entry can borrow another's text.
+Saves from older anend versions aren't read.
+On Linux the app turns off WebKitGTK's DMA-BUF renderer, which leaves a white window ("Failed to create GBM buffer") on some drivers.
+Before a change goes in, run the checks:
+!the hub   This prints a one-time login link.
+the web app for members, each with their own saves;
+each save is private, unlisted or public.
+Members share saves, star and download each other's, and earn points, levels and badges when others use what they made.
+The admin panel reviews saves and people.
+Anything that speaks JSON can drive a save.
+The same inputs give the same output bits on any machine and thread count.
+classifiers that steer generation, by reranking, guidance or reinforcement.
+docs/guide.md is the guide for people using the app:
+The hub runs the app for the web:
+each member's saves live on the server in a workspace of their own.
+The account must be active.
+Without one, a post's body isn't read and the socket isn't opened.
+A member's app runs at most 4 calls at once (more wait their turn) over at most 8 sockets.
+past that, calls that would add something answer "your saves fill …" while reading and deleting still work.
+every text, note, list name and tag is an entry under a key, and lists, tags and notes-on are edges between entries.
+Sums are weum's ordinal and reversed;
+atbash is gone (it grouped texts as reversed does), and asking for it answers an error.
+In the forge an entry is its mime and rendered text:
+list pairs follow the same rules, tags come with the entries carrying them.
+the note shows that entry's text as it is now, and that entry may hold replacements of its own (recursive;
+one that comes back to itself is an error, shown as the note failing to render).
+Anything else between double braces stays as written.
+when a referenced entry changes, the notes that refer to it directly are indexed again (their sums and words follow).
+the stored note keeps the name.
+any list of the save is a set of words that may stand for each other;
+each is trained on lists, one class per list, the members' texts as examples (a note reads as its title and markdown).
+the hub adds only its quotas and job limits (two trainings or indexings at once per member, two hours each).
+- Training runs on a thread of its own:
+The weights are written when it finishes, so the save stays usable meanwhile;
+feedback on a classifier that's training is refused, and a run whose classifier changed meanwhile (feedback, another run) isn't written.
+a bias per class (added to the logits after the temperature), the temperature, the threshold for membership, and gains on the input channels.
+a few small steps on the text, replaying its earlier feedback and some of its training texts.
+It is left out when there are none, so older bundles read as before.
+Merging a bundle into a save leaves its classifiers out (their lists get new keys there), and so does the forge.
+an edited text is read again too.
+Calls fill what they need lazily;
+weights that no longer fit their definition's shape are unused, and the model answers as untrained.
+A save from before this keeps its definitions in the models file;
+opening it moves them into the save (nothing is lost).
+- Data comes from the save when training starts:
+its title and markdown) is one example.
+- Critics are other spec models of the save, or its trained classifiers (a classifier's head is its own name).
+The same seed gives the same candidates;
+without any the hub loads none.
+A picture is a PNG or JPEG, decoded when it comes in so only ones that read are kept.
+Lists hold pictures by name:
+Spec models train on them (models:
+a text block finds its text in the target by what it says, a picture block its picture by hash).
+A block shows a texture:
+The texture tiles at one tile per unit, so a bigger block shows more tiles rather than a stretched one (the app sets each face's UVs from its size, with repeat wrapping).
+A save as plain JSON:
+Importing it restores the save keys and all;
+merging it leaves the classifiers out and brings the spec models (untrained) and pictures in as described under spec models.
+The old JavaScript web app and its offline engine are retired:
+Running without a hub comes with the Rust core compiled to WebAssembly (next).
+the hub (a site for sharing saves and classifiers, with people, stars, levels and an API the desktop app uses) and the web app (the anend app in the browser, each member working on saves of their own on the server).
+It runs either half or both, over one account system.
+One data folder works in any mode:
+switching modes keeps every account, save and setting.
+A hub built without it still runs;
+A build without a half refuses a mode that needs it when it starts.
+The database code is in every build, so a data folder moves between builds.
+open it and set a password on your page.
+login links and invite links are printed or shown once, and you pass them on.
+A member who loses their password gets a fresh login link from an admin (admin panel → everyone → "make a login link").
+an account needs an invite code.
+trusted members may too when "trusted members may invite" is on in the admin panel.
+A code is shown once (only its hash is kept);
+every invite is listed in the admin panel with who used it, and can be taken back.
+an admin lets them in.
+An invite code skips the wait.
+anyone may join at once.
+Every save and classifier on the hub is private (its owner alone:
+Admins see every one listed in the admin panel and can remove any, but can't open a private one.
+A Caddyfile is two lines:
+requests in flight get up to 20 s to finish.
+Everything is in the data folder.
+For a consistent copy, stop the server (or snapshot the filesystem), then copy the folder:
+To sell access to the web app (with or without the hub):
+the customer joins with it.
+To end an account, ban it in the admin panel (its sessions end at once).
+Set the limits you sell:
+A plan with more room needs its own server today (quotas are per server, not per member).
+Billing is outside the server:
+there are no payment hooks;
+you make and revoke invites and ban accounts by hand (or script the admin panel's forms).
+The module docs hold the same detail next to the code.
+caps lock and the last lead reset at the start of each run (a body, each argument), so arguments decode on their own.
+Evaluation runs on an explicit continuation stack, never native recursion.
+A call in tail position replaces its frame instead of pushing one:
+text before it is already in the frame's output, which the call continues;
+Any other call pushes frames, up to the depth limit, past which evaluation stops with an error.
+refs that transclude themselves are an error;
+its rendered text changes only when it's edited;
+Reading one entry reads one row and skips to its slot.
+varint mime, prefix and suffix byte counts kept from the next newer version, then the packed middle.
+An edit of a plain entry stores the old text as such a delta, usually a few bytes.
+Sources must be within the depth limit and must not themselves read the entry being saved.
+when a source is edited or deleted, every plain entry borrowing from it is stored again from its old rendered text.
+Saving a text equal to an existing entry's (same mime) returns that entry.
+re-packing a value always gives the same bytes (the rotation search runs quantise∘dequantise to a fixed point, or the smallest value of the cycle it falls in).
+What anend is, what each part of it does, and how to use it.
+For building it, running a hub and the APIs, see the README.
+anend is a notes app with a game inside it.
+The notes side is plain:
+The game is a memory palace built on gematria.
+Every word or phrase you type has sums, and texts that share a sum share a room:
+You remember short texts, find what shares their sums (gsearch), fly through them in a 3D room, and gather them into lists.
+Then you grow lists into models:
+small transformers trained on your own lists, which you steer, correct with a yes or a no, and describe as plain data when you want more than a classifier.
+They are deterministic (the same save gives the same answers on any machine, to the last bit) and they are yours.
+There are two ways to run it, the same app in each:
+a window of its own, everything kept on your computer.
+open the hub, join and log in;
+the app keeps your saves on the hub, in a workspace of your own, within the hub's quota.
+the views as icons (hover for their names;
+- The command bar at the bottom:
+one place to type, doing what the open view needs (its placeholder says what).
+Each view keeps its own text.
+- Ctrl+Z outside the bar takes back the latest action:
+a forget, an edit, a list change, a yes or no to a classifier.
+!the memory view with its sum buckets  Weum's memory page:
+The strip over the bar holds the same toggles, the sidecar of the bar's sums (click one to gsearch it) and the sum buckets.
+The menu also says when the text was written and what kind it is (a link, an email address, a number, a date, a name, a phrase, a sentence…), told by its pattern;
+when the guess is wrong, pick the right one there and the save keeps it.
+Drag the field's edges to make it wider or narrower.
+the palette picker in the strip colours every text by its top class (fainter when less sure, grey when in none), with a legend.
+With one picked, C turns on its search:
+a class's name finds the texts it counts in that class, any other text the texts it reads most like.
+texts with the same sum cluster, deeper the higher the sum.
+Type in the bar and press Enter as in the memory view.
+Hover a text for its card of numbers;
+Shift+click and Ctrl+click pick the list and candidate.
+The room's colour is a setting.
+!a list's page  A list is a text heading other texts:
+Lists are how you tell anend what goes together, and what models learn from.
+or in the memory view, Shift+click a text to make it the list.
+or Alt+click several and put them in a list.
+- The lists view shows every list as a tile;
+the bar finds lists by name.
+A list's page has its name (editable), its members a page at a time (edit them, or take one out) and its figures:
+Deleting a list takes two clicks;
+newest first on the left, the editor on the right.
+tags go in their box.
+The bar narrows the list by words.
+notes and texts as cards, a page at a time.
+Click one (or Enter on it) to read it big;
+every tag with its count.
+Click picks one, Ctrl or Shift+click adds or drops it;
+all or any decides how several combine.
+Training runs on a thread of its own with a progress bar and the loss drawn as a line;
+the app stays usable, and cancel stops it without writing anything.
+!a trained classifier  A classifier reads a text and says which of your lists it belongs with:
+each list is a class, its members the examples.
+type in the command bar and each class's probability shows as you type.
+✓ and ✗ on a class teach it on the spot (a few small steps on that text);
+Ctrl+Z (after Esc leaves the bar) takes the latest one back exactly.
+texts like this lists the texts it reads most alike.
+The bias report says how much your steering moved its answers.
+import takes one in (each class goes to the list of its name, made when there's none).
+!a writer and its critic's scores  A spec model is a model described as plain data (the format):
+what it reads, how big it is, what comes out (classes, labels, numbers, or text it writes), what it learns from in this save, and for a writer, which other models judge what it writes.
+- new starts from a template, filled in with your lists:
+a classifier (one class of several), a tagger (any of several labels) or a generator (writes texts like a list's, judged by a trained classifier or spec model of the save when there is one).
+- The spec is a JSON editor.
+It's checked a beat after you stop typing:
+Edits to the data, critics, sampling or training options keep its training;
+a change to its input, trunk, heads or seed means it trains anew.
+loss, bits per byte for a writer (lower is better), each head's accuracy and confusion table when some examples were held out.
+type in the command bar and every head answers as you type.
+ones that break the spec's constraints come last, greyed.
+The same seed writes the same candidates.
+Enter in the command bar writes after the bar's text.
+guided steers each byte toward what the critics want (slower).
+On a shared hub only the folders the hub offers can be named.
+keep saves a filter by name in the save;
+the kept ones are chips to run again.
+The sections fold, and remember it.
+a palette to start from, then any colour by name;
+the top bar sliding away;
+- the memory view and the space:
+every save with its counts and size.
+the hub's address (sharing from the app comes back here when the hub's sharing moves to the entry graph;
+for now share on the hub's site).
+A hub is anend's server:
+Run for others, it's a website where people join, keep their saves in the web app, and share saves and classifiers, with stars, points, levels and badges.
+Everything shared waits for an admin unless you're trusted.
+Running one is in deploy.
+What the app (and anything else) uses to talk to an anend hub.
+Every response is JSON unless it's a download.
+Lists and searches only ever hold public, approved ones;
+Modules are read strictly before anything is kept (magic, version, checksum, sizes before allocating, every part parsed and matched to its hash, a panic is a bad file), on a worker thread;
+Uploads count towards a limit of 20 an hour from an address.
+Ids are lowercase letters and digits;
+A model is described by a spec:
+the planned scripting language and the UI will write the same structure) saying what goes in, how big the trunk is, what comes out, what it learns from, and — for generators — which other models judge what it writes.
+nothing in it assumes gematria.
+Gematria channels are optional input features you list, off unless you do.
+The same holds below the spec:
+Files and stored classifiers made while they defaulted on keep them, and answer bit for bit as before.
+class probabilities with the top class and members, values, or what the generate head writes after the input.
+The codebook is learned from the training pictures (integer k-means, deterministic) and saved with the model.
+the vector is written as fixed-width text for the trunk and given to the heads as numbers too.
+it learns to write the output after the input (sequence to sequence;
+those of a picture list;
+Checks give the first broken rule in words, e.g.
+A text generator steered by that classifier, keeping only short candidates with a byte sum in a range:
+A picture classifier trained on the save's pictures, by list:
+It goes wherever the save file goes:
+They are kept apart because of their size:
+in the save they would make every backup, bundle and hub share carry them, and a shared save would count them in its author's quota whether anyone wanted them or not.
+an edit that changes the shape drops them (as before);
+a definition that changes some other way (a merge, a restored backup) and no longer matches the recorded shape leaves them unused, and the model answers as untrained until it trains again.
+- Merging a save into another brings its definitions in untrained:
+the same spec JSON under the same name is the same model;
+The same machinery is open in Rust:
+the same data, spec and seeds give the same weights and the same samples on any thread count and CPU.
+A spec can start from a pretrained open model instead of fresh weights:
+a sliding window shortens the window to it.
+Anything that changes the computation and isn't supported is refused naming the field:
+Every window starts with the model's BOS (or its end token when it has none, as Qwen) and ends with its end token.
+The engine's own models keep reading bytes.
+classify, multi and regress heads are new and sit on the pretrained trunk (mean pooled), so a pretrained model can be a classifier too.
+Trunk sizes come from the checkpoint:
+critics, constraints, guidance and reinforcement work as for any generator, judging the decoded bytes.
+The saved model carries the weights (as f32) and the tokenizer, so it no longer needs the folder.
+the engine's results are still deterministic across threads and CPUs.
+Every model runs on the CPU unless a run asks for the GPU:
+the trunk (every block's norms, projections, attention with its KV cache when decoding, SwiGLU, the final norm) and the generative head, forward and backward.
+The embedding lookup, pooling, the classification heads, the losses and the optimizer stay on the CPU (a sliver of the work);
+weights are uploaded after each optimizer step.
+Critics judge on the CPU.
+On a device that rounds each operation once it gives the CPU's bits;
+whether a device does is measured, not assumed:
+faster on real GPUs, within about 1e-4 relative of the CPU per kernel, so results are close but not the CPU's bits.
+- Saved models answer on the CPU (the reference) unless a run asks for the GPU;
+a model trained on a device the probe did not find exact is a different (equally valid) set of weights from the CPU's.
+Sizes are bounded by the device:
+the largest buffer the adapter allows (all its limits are requested).
+The main lever to lift the compute limits is the GPU backend (above;
+Where the work stands, for picking it up in a new session.
+Nothing goes away without a line there saying why.
+the user's feedback on the Dioxus app):
+the Bevy frame and one command bar (no view name), Fira bundled, selects centred, the window icon really set;
+the lists view's Bevy cards.
+tags), then a polish pass, then GPU training in the app and hub, spatial saves, the grammar/spelling proof of concept, then the old backlog below.
+Spec JSONs and pictures in the save;
+they travel like the specs.
+word types on hover (tooltip and hover line in the memory view);
+templates, the JSON editor with inline errors, training, run from the bar, the write card with critic scores.
+word types on hover, the search filter panel, then the editor's replacements, the spatial table, space search modes, save checkpoints.
+finish the tints and a classifier search mode in memory.
+the older ones below are history):
+- Classifiers work in the Dioxus app, desktop and web alike.
+search by class with yes/no;
+a class as a list;
+implementation in core, the classifiers view, colouring and classifier search in the memory view);
+the tiny preset is weak on a few dozen texts (more texts help), Ctrl+Z in the bar undoes the bar (Esc first).
+a spec panel in the models view;
+The workspace is core, hub and app.
+That points to Actions billing or settings, not the code.
+Until the jobs run again, those local checks are the only gate.
+- Running when the session ran low:
+- If a track was cut off:
+- turn the gematria presets off by default when the classifiers move to the spec;
+- Were running when the session ran low:
+Then do the desktop side of item 4:
+Shortcuts now match the web app:
+NOT yet verified by driving except where said.
+The classifier list's names no longer wrap word by word (NoWrap).
+Clicking it adds the validator;
+The "indented text in name boxes after a redraw" is NOT investigated yet.
+the bar's tabs drop their words on a phone.
+Notes, memory texts and list names are meant to be one thing, not several.
+With timestamps (and mime types) coming, do a single schema change that unifies them:
+the save carries one, and opening an older save migrates it in place (with a backup copy first) so players never have to start fresh.
+they gain the version too, and old bundles migrate on import.
+- Do this before any more features build on the split.
+Checks to run before every push:
+the JS offline engine is frozen, see step 3)   New module beside the old store (apps not rewired yet;
+Clippy clean on the module.
+Rebuilding the indexes into memory at open:
+a bulk rebuild in key order doesn't help);
+the memory-mode rebuild needs to get faster (or be persisted as a snapshot) before it's the default;
+borrowing only finds sources the new text contains (a shorter variant saved after its longer form isn't stored as a slice);
+structured entries are indexed by their render at save time;
+Clippy clean for the hub's three feature builds and core.
+Open graphs are cached process-wide by file (weak refs), so a save still held by a training thread is shared instead of failing to open twice.
+merging and the forge dedup on that, keep times, and carry lists (in order), tags and other relations whose ends came along.
+Structured entries arrive as rendered text (left:
+whether it's a note comes from its mime.
+it answers the old op set and no longer matches the hub.
+modes are ordinal, reversed and frequency;
+run and yes/no with undo over the backend's classifier calls;
+labels are projected HTML sized by distance, crisp and shrinking near, since WebKitGTK flattens CSS 3D without compositing;
+click puts the triangle in the top bar;
+arrows ease onto the nearest text;
+the room colour is a setting with readable ink;
+the web build in Playwright's chromium renders the same (no hub there, so calls fail).
+each view keeps its bar text;
+the list picker offers the picked list while it's empty;
+zen (fade after a delay) and the top bar's autohide (from the window's top edge, kept while the pointer stays on it) in settings, as the old app's.
+Small screenshots with data for the README:
+a page saying how to build it when missing;
+its CSP allows wasm, the interop's eval and blob scripts;
+Bevy and the old JS app retired;
+keys typed into an input method (IME) while it composes are left to it (Enter doesn't search mid-composition;
+not tested with a real IME here).
+notes read as markdown (notes view's read mode and the reader;
+on a desktop it should), the reader's total, the space's labels under its overlays.
+a real IME session (keys are left to it while composing, untested here).
+The user asked for "the route that provides the most feature coverage and performance and ergonomics" and approved this plan.
+One entry graph is the core.
+runs of 5-bit packed text and references to other entries (borrowing and dedup;
+sums in every mode, tokens, time and classifier buckets.
+They can always be rebuilt from the two tables above.
+none with old saves or blog writs.
+Backups write a texts JSON and an other-data JSON.
+RSX components shared by the desktop app (Dioxus desktop:
+the desktop, web app and hub look the same.
+- The core runs in the browser:
+the Rust core compiles to WebAssembly, with redb on a storage backend over OPFS/IndexedDB.
+served from the same Rust code (Dioxus fullstack/SSR or Salvo serving the built app).
+a canvas in the app, starting with the existing three.js space through interop;
+a wgpu/Rust renderer later if it earns it.
+- Bevy and the old JS app:
+retired once the Dioxus app reaches parity.
+the desktop app is the primary product;
+the browser version exists for reach (the user:
+"only reason I desire the browser action is because it might not be as popular otherwise").
+Build and polish the desktop first.
+The web build follows from the same code, and where something only works well on the desktop, the desktop wins and the web gets a lighter version.
+The desktop, web app, scripts and lenses all use the same calls.
+Views are lenses over one query model:
+The user built and ran the app and imported their weum texts.
+Everything below comes from that feedback.
+Several items (the entry store, the gematria fixes, text quality) come first, because the rest builds on them.
+It's superseded by the store redesign below, apart from the keyboard bits, which may be reused.
+Notes, entries, memory texts, space texts and list names are one concept, on the same keys in one flat redb table of texts.
+Search, tags, classifier search and filters get time filters.
+The data is fat, and the user keeps many variants of a text (with a prefix or suffix missing, written differently).
+An entry can be made of references to other entries (borrowing), so variants share storage instead of duplicating it.
+- An escape code means the next token is a raw byte.
+- An uppercase code makes the next token uppercase.
+- A reference code means a replacement key follows.
+Decoding fetches that entry, which is also how the editor's replacements/templating are represented.
+- Notes are a relation, not a separate kind of thing.
+As in weum, notes go on entries:
+Notes are chronological, not organised by title.
+Rethink what a title is, since nothing else has one.
+- Importing must be a visual, per-save process in settings, because import and save semantics conflict today.
+it gave the same values as reversed, so only ordinal and reversed remain (the store's modes are ordinal 0 and reversed 1).
+colour by shared reversed sums;
+colour by shared ordinal sums;
+Study weum's memory to recreate its behaviour exactly.
+the sidecar's frequency letters grow long.
+Let them be toggled, or shown smaller or in another form.
+it comes to the top so it isn't hidden under another entry.
+The way text expands on hover is blurry and was always buggy;
+spacing between texts as a setting.
+The texts sit too close to the digit sums above them, and long texts need an overflow story (every view needs one for really large texts).
+dragging its edge sets its default width, and it stays centered.
+they stay highlighted, then pick a list visually to put them in.
+- A left-edge strip, shown only on hover and fading in and out:
+a line with circles, one per sum bucket, each with its number and sized by how many entries it holds.
+Hovering shows which bucket it is, for the active mode.
+Prefer no antialiasing at all to bad antialiasing.
+Try other fonts and bigger sizes.
+- Typing feels sluggish in the command bar:
+debounce the sum work, run it async, and cut latency.
+Ctrl and Page Up / Page Down zoom in and out, like a website.
+- clicking a text should put its triangle in the top bar;
+it currently stays plain text;
+- the triangle's middle bar should be centered.
+- the bracketed text at the right needs enough contrast against the space's background;
+- the background colour should be a setting;
+- on a dark background, texts must keep readable contrast.
+it should be dismissable, and its text is blurry.
+- Arrow keys ease the camera onto the nearest text in that direction.
+- Texts shrink as the camera comes close, so they stay readable.
+the camera can't fly through blocks or glTF models.
+- A right-click menu on any text in the memory view and the space:
+the text goes into the bar and the result replaces it under the same key;
+the next thing typed in the bar tags it;
+the bar's typing in the main views and the space can be undone back to the previous state.
+There's also an undo button for any recent action, including yes/no/why given to a classifier.
+a list's page shows its name at the top and its members as editable entries, with pagination.
+From there you go back out to the list of lists.
+A list's figures go at the bottom.
+deleting a list takes two steps.
+you can't really make lists today, so the classifiers are untested.
+- an expand mode for reading one thing big at a time;
+- thousands of tiny texts flowing in a grid instead of one row each.
+should cover the whole app, not just notes.
+- it resizes when the bars fade;
+- long titles show in full on hover, like a website's title attribute.
+remember which menus were collapsed.
+- it closes on a click outside it;
+- the rebind menu closes the same way, with its close button in the same place;
+smaller gaps between elements, none at the window's edges.
+a compile feature that leaves the hub out of the desktop app.
+This matters because the user is thinking of selling access as a cloud service.
+- public and private toggles on everything shared;
+- a professional finish that works nicely with the app, with promise as the app's social side.
+the web app and the hub are kept up to date with the desktop app, and look the same.
+all three builds are clippy-clean and pass their tests.
+settings and classifiers hide hub browsing).
+rewrite it, because it's very out of date (including the old blog import).
+Redo the screenshots or remove them.
+touch it up after these changes land.
+heads and a generative head share a trunk, trained jointly with per-head loss weights;
+gematria channels are opt-in model inputs, off for new models;
+- transpiled to concatenated Rust calls over a state machine, linked against a precompiled preamble so it compiles fast.
+- Views as templated modes of consumption, like little websites over the core's API:
+wgpu, behind the engine's kernel boundary;
+checked against the CPU results;
+benchmarked on the user's hardware, since this container has no GPU.
+the default build and wasm do not pull wgpu):
+On llvmpipe (the container's software Vulkan) every kernel, whole passes, decoding and training match the CPU bit for bit.
+batched decoding of several candidates per submission, AdamW on the device, a faster GEMM for big models, classification inference on the device, the WebGPU (browser) build.
+batched decoding, AdamW on the device, the faster GEMM and the bench table are not started.
+Byte models are unchanged bit for bit.
+Example to run on the user's machine:
+Each synthetic architecture matches an f64 reference written from the transformers code to 2e-3 relative, and the cached decoder equals the full pass bit for bit.
+a run on real checkpoints (outputs vs.
+small sizes only where measured compute requires them, and never gematria by default.
+It is always available as an opt-in input channel (letter, word-sum and side-vector features) and never on unless chosen.
+Spec-built models already work this way.
+generated pictures as block textures.
+a block's placement payload points to a generated or imported texture entry, and the generator (steered by classifiers as critics) makes texture sets in a chosen style.
+Do this after the editable space and blocks exist.
+Overall aim, in the user's words:
+every feature properly supported in the interface, not stubs.
+an icon takes its button's text colour, so the palette and zen reach it.
+hidden while zen fades, placed inside the window, scaled with the interface.
+The memory view's bucket and toggle words carry tips with their keys too.
+every tag with its count, narrowed by the command bar (Enter adds the first match, so typing tag after tag chooses them);
+the notes found show title, date, tags and a preview, and open in the editor when clicked.
+the pad's own glyphs go transparent, so editing, cursor, selection, IME and scrolling are untouched.
+Only visible glyphs are drawn;
+classes are recomputed once per layout change.
+Colours come from the palette, nudged until they read on the pad (night and paper work);
+a settings toggle turns it off.
+If glyphs ever fail to match the text, the pad shows its own text again.
+plain buttons (the note list, the tag list) take the card's text colour and button text picks dark or light by contrast, so dark palettes read;
+the editor's selection and cursor follow the palette instead of a stock blue;
+the memory view says how to start instead of showing an empty page;
+the note list toggle's setting names the right edge too;
+icons in buttons take the button's text colour (ThemedText) and fade with zen.
+the memory view's and space's text toggles in the bar stay words (they carry state);
+the pad doesn't scroll with the mouse wheel (bevy's EditableText;
+the overlay follows whatever offset it has).
+every one with an aria-label and a styled tip (name and shortcut), keyboard focus visible;
+tags with counts, found from the command bar, picked with all/any, their notes beside;
+On a phone it sits under the pad.
+by name when unchanged so counts are kept), keep, write to a list.
+Enter in the bar adds a words condition.
+Offline it says filters need a hub.
+once the name is fixed it can go back to not waiting.
+results from a closed save are dropped;
+steering sliders (bias per class, temperature, threshold, gains, coupling per upstream link) with the bias report measured live on a thread and kept after the hand stops;
+near texts by embedding or verdict;
+index the save with a moving bar and stop, counts per class with confidence histograms, open a bucket;
+the editor's classifier button opens a strip:
+memory results get a class-coloured bar, space texts take the class colour (fainter:
+validators editor and disagreements (core has them;
+the web app shows them), hub browse/take of shared classifiers, sum conditions in the filter builder, a file dialog (no dialog crate;
+built in, rendered with pulldown-cmark, text escaped, raw HTML shown as text, links only to its headings, the repository and https;
+the desktop app's help link (src/), and keeping the guide in step as features land (filters and validators on the desktop, the web space's editing and maps).
+security and CI done, a first UX walk done.
+steering checked when only measured;
+logins for unknown names take the same time as for known ones;
+filter presets are checked and run once each however often they're referred to (it was exponential), a loop from a bundle errors, and imported presets' size is checked;
+the thread names no longer carry the job key, and the web app doesn't wait.
+the classifier's five tabs now fit across a phone (the last hid past the edge), the tags view said "no tags yet" twice, a list card's letters line ran out of its card.
+"one class" / "labels" for a classifier's head reads oddly beside two classes, but the guide and the desktop use the same words, so change all three together if at all;
+the hub's own pages (not the app) weren't re-walked in this pass.
+A deterministic transformer encoder written from scratch, trained on lists.
+one classifier's outputs feed another, and its predictions become lists - feedback:
+yes/no per classifier on a result (the main kind), or end to end through a stack with a coupling strength per link;
+a result lists which classifiers contributed, so each can get its own yes/no - bit-exact on any thread count and CPU:
+make from lists, train with progress and metrics, steer with the bias metric live, classifier search with yes/no per contributing classifier, outputs as lists, near texts).
+Offline the web app says classifiers need a hub.
+a GPU backend behind the kernel boundary (wgpu in the app, WebGPU in the browser).
+Drivers may fuse multiply-adds, so saved models answer on the exact CPU path unless the GPU can be proven exact.
+the stored mime stays text/plain, since the search, classifiers and backups read texts by it.
+the text's kind and the counts with examples go on the hover line and as the tooltip's second line;
+the kind there is the detected one, not a hand-fixed one).
+kept in the app's prefs, a line says how many it hides).
+entry ids as replacements (recursive, with references to saved filter views;
+the note's sums are those of what it renders (a ref where the same text stood changes nothing), and notes referring to an entry are indexed again when it changes (one level:
+a ref to a ref isn't refreshed).
+no separate management view (the lists view is it), and the rendered text, not the stored one, is what's indexed.
+slug texts placed by hand in 3D, with coloured cubes/blocks/bricks and a gimbal to move, scale and rotate.
+redb savepoints, grouped under each save in the save menu.
+This file is the contract.
+Nothing is removed without a line here saying why.
+Change this file in the same commit as any change that adds, moves or drops a feature (docs/next.md's Resuming block says so too).
+the status column is kept current as items close.
+the undo stack and button, the right-click menu with kinds, the memory view's search filter, bucket strip, field width and selection, pictures, spec models, replacements and alternatives in the editor, the reader's pages and big reading, zoom.
+- A shared hub on the internet.
+Strangers can reach every route.
+Members (once admitted) upload saves and classifiers, and run the web app on their own workspace on the server.
+Any of them may be hostile:
+One person on their own machine, with no login.
+Saves and classifiers from the hub reach other people's apps, so notes (markdown) and modules are untrusted data.
+Anyone with an account can share a file by link without an admin looking.
+Admins see every unlisted item in the admin panel and can remove it;
+invite-only joining limits who can do this.
+They see the name, owner and size and can remove one, but not open it.
+redb isn't hardened against crafted files.
+a crafted file that makes redb loop or allocate a lot would cost that one thread or memory.
+Saves downloaded from a hub are opened by the desktop app the same way.
+Anyone holding a live session (a borrowed computer) can change them.
+Cross-site forms can't, thanks to the origin check.
+Names may use any letters, so look-alike names are possible.
+Workspaces are keyed by the lowercased name, so case differences can't share one.
+The 4-calls-per-member limit and the login requirement bound how much one member can hold at once.
+The socket opens on the first call and again after it drops;
+calls made meanwhile wait in a queue.
+the hub that served this page
+they live as long as the socket
+Every call runs on a worker thread and answers through a channel, so the interface never waits on the disk.
+the saves folder and the open save
+the list keeps its member
+made from lists, trained in the background, asked, told yes or no, and the answer taken back
+the classifiers go with the save:
+copied, then deleted with it
+A backend answers one call:
+The typed methods below are what the views use;
+they build on that call and can be overridden.
+The core in WebAssembly slots in the same way:
+a memory or a note as the views show it;
+one sum and how many texts it holds, in a mode
+a classifier) as the models view lists it;
+the rest of its details stay JSON until the declarative model spec lands (docs/models.md)
+what a backup wrote (the desktop:
+where the files went, when the backend wrote them
+what an import put in
+the app's data, wherever it lives
+every typed call goes through it
+whether the saves are files on this machine (backups go to a folder, imports read paths);
+on the web they're downloads and uploads
+a bundle into a save:
+the texts in one JSON, everything else in another;
+on disk the backend writes the two files (their paths come back), a hub hands the two documents back to be downloaded
+remembers a text unless it's there already;
+its key and whether it's new
+a memory's text replaced, keeping its key (or a forgotten one put back)
+every sum in a mode and how many texts it holds, lowest first
+every tag and how many entries carry it, the most used first
+the entries carrying all (or any) of these tags
+weum's notes on an entry, oldest first
+words, a sum range, a creation time range, a tag, a kind
+the time range, here so every backend has it
+a model's outputs for a text:
+the texts most likely in a class
+yes or no on a text for a class
+takes back the latest feedback on a model (the undo of yes/no/why)
+what making or saving a spec would say:
+every head's answer on a text
+candidates from a generator, judged by its critics;
+the other members of the lists a word is in (synonyms, registers), with their sums
+the lists that hold pictures:
+a picture file on this machine (the desktop) into the save
+None when it doesn't read
+The numbers the views show, computed in the app (no round trip):
+the gsearch modes (the memory view's buckets)
+the sum whose shared values colour the underlines in this mode:
+ordinal by reversed groups, reversed by ordinal groups (weum), frequency by ordinal ones
+the sum a text gsearches by in a mode
+weum's letter table as the letters themselves:
+the colour of its grouping sum, when that sum's string is two or more characters long (weum checks the key's length, so a lone text with a two digit sum is underlined too)
+the triangle's angles, or why it lies flat, for its tooltip
+the JavaScript string hash, as weum's seedCLR
+ordinal mode groups by reversed:
+Markdown highlighting in the note editor, ported from the Bevy app's highlight.rs:
+what a stretch of markdown is
+a list item's bullet or number
+a table's pipes and its alignment row
+a fence's char and length, if the line opens or closes one
+indented code (4 spaces or a tab, not inside a list item's text)
+pipes, and the alignment row
+the bullet or number, and a task box
+the matching run of the same length closes it
+a trailing dot ends a sentence, not the tag
+inside a word (snakecase) isn't emphasis
+inner marks and code stay what they are
+step over a whole character
+the CSS class of a span of this class
+a stretch of the text the checker flagged:
+a trailing newline gets a space after it so the layer is as tall as the textarea's content
+where the class changes or a flag starts or ends
+a flag never cuts a character in two
+what a hub sends is untrusted (links must stay on the hub, sizes are capped, names are cleaned before they touch the disk).
+The desktop calls with ureq on a blocking thread;
+the biggest save a download may be
+the biggest JSON answer read
+a typed hub address made tidy:
+a path on the hub;
+a path the hub sent can't lead anywhere else
+percent-encodes a query value
+a hub's ids are lowercase letters and digits
+a multipart/form-data body of text fields and one file, and its content type
+the hub's own words for a failed call, or its status
+the page's fetch, the body going in and out as base64
+The app's own icon is the window's and the web tab's, not the views'.
+an icon's svg by name;
+every keyboard action has a binding (a key and its modifiers) that the keys menu in the settings changes;
+Bindings with Ctrl or Alt work everywhere, even while typing;
+plain keys only act while no text box has focus.
+Each action has a scope:
+two actions only clash (and swap when one takes the other's key) when both can be pressed in the same place.
+where an action's key works
+whether two actions can be pressed in the same place, so can't share a key
+the space's flying keys act while held (space.js reads them), not on a press
+the stable name kept in the settings file
+the keys that can be bound:
+a key event as a binding
+chords work while typing, plain keys don't
+the defaults with the person's changes over them
+the person's changes, as kept in the settings file (action id → binding)
+one of that view's, else a global one
+the bindings the page's key listener should keep from the browser:
+the space's held keys for space.js:
+taking another action's key swaps them
+every default is nameable and distinct where both can be pressed
+the space's keys don't push the memory view's out
+held keys are space.js's
+the backend this build talks to
+first thing in main, before any thread is started.
+else the last save, else main.redb in the saves folder
+weum's texts into the save first
+the worker answers on its own thread;
+the icon goes on the window itself:
+the sand window's colour, so the first frame isn't a different shade
+Wayland desktops (GNOME, KDE) draw a window's icon from the desktop entry matching its app id, not from the window:
+a user-level entry and icon are put in place once (never overwriting one the person changed)
+Markdown to HTML for reading notes:
+raw HTML in a note is shown as text, and links and pictures only go to http(s), mailto or relative addresses.
+the settings keys and the views the app has.
+A key or a view that goes away fails these tests until the expected list here and docs/parity.md are changed together, saying why.
+add new ones here, and never take one out without a line in docs/parity.md
+the views, in their tab order
+every one the Bevy app had that still applies, and the ones added since
+the memory view's gematria underline (the colour of a text's reversed-sum group) stays under word-type labels:
+no rule on a text or its labelled words takes the underline away or draws one of its own
+the space's texts carry the same gematria grouping underline as the memory view's
+blocks keep their tiling UVs, their repeat wrapping and their gizmo, and the space keeps the window that makes them
+the command bar's input spans the bar with the same room at both ends, so its centred text doesn't move when what's beside it changes size
+the reader's note cards show when each note was written
+the web app in localStorage.
+colours changed from the palette's, by role
+the interface's text size in pixels
+the memory view's text size in pixels
+the gap between texts in the memory view, in pixels
+Enter on a text gsearches its sum (weum's gsch), not its words
+the classifier colouring the memory view's texts (empty:
+Enter in the memory view searches with that classifier:
+a class's name finds the texts most likely in it, any other text the texts it reads most like
+the space buckets by the reversed sum
+the space adds new results to what's there
+fade the bars away while the mouse and keys rest
+seconds of stillness before zen fades
+slide the top bar away until the pointer comes near it
+the save the desktop opens (a path)
+the hub (when built with it)
+the memory view's search filter panel is open
+what the memory view's search filter keeps
+the keys changed from their defaults:
+colour the markdown in the note editor
+the note list slid away
+the note list at the editor's right
+the memory view's white mode:
+the memory view labels every text's words with their types
+the space's panels, physics, history and last address
+the memory view's font family (empty:
+the top bar's and the command bar's heights in pixels
+the top bar at the bottom, the command bar at the top
+an app token from the hub's profile page (sharing needs one)
+the memory view's search filter:
+what of the shown texts it keeps (every part empty or off keeps everything)
+leave out notes / texts that aren't notes
+word types a text must have (each of them at least once)
+only texts the colouring classifier was given a yes or no on
+where saves live unless the settings say otherwise (the Bevy app's folder)
+keys the shell or the open view takes, sent to Rust;
+the keys menu waits for a key:
+every key goes to Rust
+its keys are its own, Enter included
+a text box keeps its own editing chords
+the bars fade while the mouse and keys rest;
+the top bar slides in near the top
+shown from the window's top edge, kept while the pointer stays on the bar
+the save's name and counts, and again whenever something changed
+the bar's text measured a beat after typing stops, off the input path
+the page's key listener keeps the keys bound here from the browser
+zoom only when it isn't 1 (WebKit's css zoom upsets the space's 3d transforms)
+a family the person named goes before the built-in ones
+the keys menu is waiting for a key
+the space keeps its own undo (moves, pins, removals) and falls back on this
+each view keeps its own bar text
+the bar names what Enter will do only while it does something else than search;
+it never names the view (the tabs say which one is open)
+when the entry was written, and its kind (told by its pattern;
+picked here when the guess is wrong, kept in the save)
+the prefs, changed and kept
+every one has a role (as in the web and Bevy apps) and a CSS variable.
+Sand is the old admin panel's;
+night, paper and sea start from it.
+the custom one, else the palette's
+whether dark ink reads on it
+the CSS variables for a palette and its custom colours
+from the palette, each readable on the writing pad, the hues the palette doesn't name turned from its link colour so they suit any preset
+readable ink for texts on a background (the space's room):
+dark on light, light on dark
+every highlighting colour reads on the pad
+The state every view shares (signals in a context), and the small pieces they all use:
+what the command bar asks for in this view
+a key press the shell hands to the open view:
+a text box (the bar or another) has the focus
+the action the keymap gives this press here (set by the shell)
+the search line in the top bar:
+what was searched and its triangle
+what the next Enter in the bar does instead of a search
+the bar holds the text;
+Enter puts it back under the same key
+the next text typed tags these
+the right-click menu on a text
+a recent action that can be taken back
+states it was in, coalesced while typing
+the command bar's text, mirrored on every input (the input itself isn't bound to it, so typing never waits on a render)
+the bar's text measured, a beat after typing stops
+bumped when the save's data changed (views reload)
+what the bar held in each view, put back when you return to it
+what each view says at the command bar's right end (its counts, what Enter does)
+the keys menu waits for a key for this action
+a note another view asked the notes view to open
+a tag another view asked the tags view to show
+the defaults with the person's changes
+what the key bound to an action is called, for tooltips
+what the view says at the command bar's right end
+a message in the top bar;
+errors stay a while longer
+puts a text in the command bar (and its undo history)
+a new undo state after a pause or at a word's end
+counts and the save's name again
+takes back the latest action
+an icon from the shared set
+The same view on the desktop and the web, through the backend.
+The left column lists them;
+Every yes/no can be taken back with Ctrl+Z.
+what the open classifier's page is showing
+the classifiers or the spec models
+the try card runs as you type
+the first one is open until another is picked
+the training's progress, while there is one
+a class's hue, spread round the wheel (the memo palette's order)
+the classifier as a file:
+written to Downloads on the desktop, a download on the web
+the CPU (the reference, bit for bit the same everywhere), the GPU in exact precision, or the GPU fast (plain operators, within a hair of the CPU)
+a job's device in words
+points of a line through (x, y) pairs fitted to w × h
+a beat after typing stops
+a class's probability for a text, with yes and no (Ctrl+Z takes either back)
+the buckets (every text filed by class and sureness in tenths, a column or a class opening its texts, index again);
+texts near a text by meaning or by verdict;
+other classifiers that must say a class for a verdict to stand, and the texts they disagree on);
+the growth it went through.
+the growth and training it went through, newest first
+the texts filed nearest a text, by what the classifier represents them as (meaning) or by how it judges them (verdict)
+a key as it is, else a text
+every text filed by class and sureness, in tenths;
+a cell opens its texts
+the validators (classifiers that check this one) and the texts they disagree on
+the classes of the classifier picked as a validator
+The filters view's builder, as the Bevy app's filtersui.rs had it:
+what the builder offers to add
+the expression without empty groups (a group with nothing in it lets everything by)
+"not" and remove, for a condition or a nested group
+your saves on the left, the ingredients chosen in the middle (each with its effect:
+Forging makes a new save;
+connect to an anend hub (its address and an app token from your profile there), browse the saves and classifiers people share, take one in, and share the open save or a classifier.
+On the desktop a taken save lands in the saves folder and opens;
+the setting, else (on the web) the page's own
+a hub save into this app:
+the desktop downloads it into the saves folder and opens it;
+the web asks its own hub to take it into the workspace
+the open save's file, to share
+every class's probability as a bar in that classifier's colours, the class it's put in, and a yes or a no that teaches it.
+Used by the notes editor (the classifier button, Ctrl+I) and the reader's opened item.
+a bare note key is taken as a note's)
+every list as a card with its figures, the list read as one text, its letters as a vector and its members as chips with their sums (× takes one out);
+how alike every two lists are (the cosine of their letter vectors);
+a chosen list the bar fills (Enter adds what's typed, remembering it when new), or, with none chosen, Enter chooses a list by its name or starts one.
+A list's own page (its name clicked) renames it, edits its members a page at a time, and holds its pictures.
+Unlisting takes two clicks, and Ctrl+Z brings a list back.
+Enter adds what's typed to it
+the text joins it (remembered when it's new)
+a list by that name:
+else a new list headed by the text, chosen
+how alike the lists are:
+the cosine of each two lists' letter vectors (1 is the same letters in the same proportions), as the Bevy app's grid
+a list as the Bevy app showed it:
+its name and key, choose and unlist, its figures, the list read as one text, its letters as bars, and its members as chips with their sums
+The results header (the sum and its pfR line) and the texts sit in a centre field whose width is dragged at its edges and stays centered;
+the sidecar and the toggles are on the strip over the bar.
+underlines by the opposite sum's group with seedCLR;
+the sum (or what was searched)
+the number pfR runs on
+the text under the pointer, for its words' types under the hover line
+the list commands typed in the bar
+the list and its members
+Enter in the bar (weum's term onkeydown)
+the right-click menu's edit and tag
+gsearch the text's sum, saturate it, toast its key
+the text itself, when it's there
+a class's name (and words after it) finds the texts most likely in that class;
+any other text, the texts the classifier reads most like it
+the texts it counts in the class;
+when there are none, the likeliest
+the ordinal sum, gsearched in ordinal
+the reversed sum, gsearched in reversed
+each word type's short label
+the spaces and punctuation between words kept as they are
+the words stay inline text, so a text's own underline (the gematria colour of its reversed-sum group) runs under them untouched;
+the type is the label under each word, in its colour, never an underline
+the word types shown, each in its colour, with how many of each
+the lists, and the picked list (Shift+click, or a new one) even while it's empty
+the search filter (the square at the strip's right):
+what it keeps of the results
+each key's class name under the colouring classifier ("unsure" when in none)
+whether the search filter keeps a text
+counts of a thing among the shown texts, most first
+what the shown texts are (their kinds, their words' types, their classes under the colouring classifier, which were given a verdict, the classifier's bias), each a chip that keeps only those
+its numbers go into the bar when clicked
+the tooltip has the word types on a line of their own
+the middle button opens a note in the editor
+each class shown, its colour, and how many texts it has here
+a classifier's tints as each key's colour (its class's, fainter when less sure;
+grey when it's in none) and the legend:
+each class, its colour, how many texts it has here
+the classifier colouring the memory view, picked in the strip, and its search mode
+a circle per sum bucket, sized by how many texts it holds
+the strip over the bar:
+the sidecar (the bar's sums) and the toggles
+Every view stays mounted (the space keeps its scene, each view its page and scroll) and loads when first shown;
+only the open one is visible.
+a view is built the first time it's shown, then kept
+what a view adds at the command bar's right end:
+the memory view's and the space's sums and toggles, the other views' counts and hints
+registers a view's key handler with the shell
+a toggle as small as an icon or a letter;
+its name and key in the tip
+a section that folds, remembered by name
+Filters are kept in the save's settings by name.
+remade when a kept filter or the bar fills it (its inputs aren't bound while typing)
+long titles show in full on hover.
+The layout is a grid, so the editor takes whatever room the window gives it.
+keeps the highlighting layer scrolled with the pad (once per page)
+Enter again on the same words opens the first note found
+leaving the view keeps a titled note's changes, as the Bevy app did
+a note another view asked to open (the reader's edit)
+how many notes there are, or match
+read mode shows the note as saved (its replacements and views put in) until it's edited
+with replacements, the note as written
+the colours, painted under the textarea's transparent glyphs
+not bound to the signal while typing (a round trip per key would drop letters typed fast);
+its text is put in when a note opens
+the text before the selection, the word, the text after, and the word's alternatives
+a word's synonyms and registers come from the lists it is in, those keeping the text's sum first
+(the text before the selection, the word, the text after) and its alternatives
+puts a new text into the pad and the signal
+the pad's text around its selection (the word under the caret when nothing is selected)
+a key as it is, a filter by its name, else the first text with those words
+the save's pictures as thumbnails, added by dropping files on the panel or picking them, put into lists (by name, beside the texts of the list with that head) and taken out, deleted with two clicks.
+In the lists view, for all the save's pictures (with a picker of the picture lists) and on a list's page for that list's (what is added there goes into it).
+the list whose pictures these are (None:
+list names to offer when putting a picture into a list
+the picture list shown when this is the save's panel ("" for all)
+the panel's list gets them too
+on the desktop a file's path works too (where the system's file dialog doesn't)
+bumped to empty the path field (it isn't bound to the signal, so fast typing keeps every letter)
+notes and texts as cards, a page at a time;
+short texts flow in a tight grid.
+The bar narrows by words.
+each note's dates, for its card (as the Bevy reader showed them)
+how long ago, in words
+when it was written and last changed (any entry)
+its rows and a sample
+choose the file, see what's in it, import, done
+into a save that isn't open:
+a weum file's rows read:
+on to the step that shows what's in it
+the desktop reads the file at a path typed in (when a file dialog isn't at hand)
+a file handed to the viewer (the web build's backups)
+the key pressed while it waited for one
+every action and its key:
+a key another action holds where both work is swapped with it;
+kept in the settings file
+the colouring classifier's class), space.js runs the free spread and draws, and they talk over one eval channel.
+As the Bevy app's space had it:
+the texts in the room (memory texts and notes), by key
+what the details window shows:
+the text under the pointer, else the selected one
+each text's bucket axis Q, for the shared-bucket underlines
+how many blocks and textures the save has
+the sliders (defaults and the person's changes)
+the letters of a text as counts a–z, for the "same letters" weight
+the bucket axis Q (r, or s when reversed) and how many of the room share it
+the gematria grouping underline, the memory view's colour for it
+the maps kept in the save:
+the memory texts of the map, with what they are
+the space's words (the Bevy terminal's commands)
+an edit started from the right-click menu or Enter on a text
+forget the memory under the key typed
+the room's texts to a file:
+a download on the web, a file in the data folder on the desktop
+the engine and its channel
+the save's blocks, whenever another save opens
+the room's colour and ink from the settings
+the flying keys as the keymap binds them
+the physics, whenever a slider moves
+the engine flies and hops on the rest itself
+the last address, opened the first time the space is shown
+puts a text in the bar to edit:
+Enter puts it back (a memory under its key, a free text in its place)
+an undo took back blocks just added, or put back blocks just deleted
+its triangle in the top bar
+what the engine needs to draw the textures:
+a text's grouping colour (its labels' underline), a picture's thumbnail as a data URL
+the open save's blocks into the room, in place of what was there
+a hub from before blocks:
+side by side, along its width
+make blocks from the selected text, a picture or a colour;
+the selected block's place and size;
+a window over the room that moves by its title bar and remembers where it was left;
+its close button shows when the pointer is over it
+while dragging, a sheet over everything follows the pointer
+the numbers of a hovered or clicked text (the Bevy app's metrics card), each gsearching itself;
+its key, bucket and whether it's pinned
+the window's width, for placing a window at the right the first time
+every slider (double click its name:
+the keys as they're bound, and what the mouse does
+what the space adds to the command bar:
+the bar's sums, the list state, the chips
+every slider is one of space.js's PHYSICS keys, with the same default
+no spiral and no anchors left in the engine
+A model's page has its spec in a JSON editor (checked as you type, a broken rule shown with where it is;
+candidates judged by its critics, each critic's score shown (Enter in the bar writes after the bar's text).
+what the models view shares with this tab:
+the open model, whether "new" is open, and a count the bar's Enter bumps (the write card writes after the bar's text)
+a judge a generator can use:
+a model's name, its head and a class of it
+a template's spec, filled in with the save's lists (by name), its picture lists and a judge if there is one
+written by hand so the fields keep the order docs/models.md gives them
+the template as it is)
+a judge for a writer:
+a trained classifier, else a spec model's classify head
+a spec's JSON in a monospace textarea, checked a beat after typing stops:
+a broken rule shows under it with where in the spec it is;
+the spec's heads, for their class names
+every head's answer on the command bar's text, as you type
+write after the bar's text
+the score is a weighted mean log;
+its exp is a geometric mean probability
+Stats for the whole app:
+every tag (on any entry, texts and notes alike) with its count;
+click picks one, Ctrl or Shift+click adds or drops it;
+The entries carrying them show beside.
+The bar narrows the tags;
+A save as plain JSON, keys and all:
+what the web app keeps in the browser when it runs without a hub, and how a save moves between the browser and a hub's workspace.
+their classes are lists by key, and merged lists get fresh keys.
+fills an empty save with a bundle, keeping its keys
+a bundle's contents by what they are, for merging into a save that has its own keys
+merges a bundle into a save:
+what's new gets fresh keys there
+merging the same again adds nothing;
+into another save it all arrives
+Classifiers kept in a save:
+Training data is read from the save's lists when training starts, so a classifier follows its lists as they grow.
+Training is split so a caller can run it off its own thread without holding the save:
+the desktop app can do the same.
+how many yes/no answers on a classifier can be taken back
+how many history events a definition keeps (oldest dropped first)
+the feedback it logged, and each classifier it wrote as it was before (its definition's JSON and its weights in base64)
+a list, by its head's label, and the list's name when it was chosen
+an upstream classifier whose steered outputs this one takes as extra inputs
+something that happened to a classifier:
+a training run, growth, a list written
+the head's metrics after training
+a list of texts that are none of the classes:
+an extra class for a single-label head, all labels off for a multi-label one
+definitions saved before it was optional had them on
+bumped by every write of the weights
+one yes or no a player gave
+the memory or note judged, when it was one (a label)
+end to end through the classifiers it builds on
+the class's unsteered probability before and after
+the sizes on offer, smallest first
+seconds for a few lists of short memories
+training options that suit a preset
+the largest batch a training run takes
+a class by name (or its index as text)
+the last training event, if any
+a fresh, untrained classifier for this definition;
+the extra inputs of every text
+the version of the weights it started from
+why it runs on the CPU when a GPU was asked for
+a training run's progress as the caller sees it
+start from new weights instead of the trained ones
+a GPU this build or machine doesn't have falls back to the CPU, saying why
+what yes/no feedback is about:
+a text, and the memory or note it came from
+removes a classifier, its weights and its feedback;
+refused while another classifier builds on it
+the classifier as stored (untrained weights when it has none yet), its steering from the definition
+a classifier and everything it builds on
+a list's members as stored
+what a classifier reads of a memory (its text) or a note (title and markdown)
+every memory and note a classifier can rank:
+the training examples a definition's lists give now
+snapshots what a training run needs
+more threads than the machine has only slows it (and each is a real thread)
+writes a finished run's weights and its history (keeping steering and anything else changed meanwhile)
+the yes/no answers before it can't be taken back past new weights
+prepare, run and commit in one go (for callers that may block)
+every classifier it wrote gets its definition and weights back as they were, and the feedback leaves the log (so training no longer replays it);
+the texts it filed under the classifier answer as before, so the memo stays
+a classifier's feedback log, oldest first
+texts from the classifier's lists to replay beside feedback, so one yes or no doesn't drag the rest along
+yes or no on one classifier's own weights:
+a few small steps, kept in its feedback for replay, and logged
+yes or no end to end:
+through the classifiers it builds on, each link scaled by its coupling;
+every classifier reached is written back
+returns the head and the member count
+a note as a classifier reads it
+a classifier in a bundle:
+writes bundled classifiers as they are (their lists keep their keys on import)
+validators after every classifier is in, since they name each other
+new definitions build without gematria;
+ones saved before the field existed keep the channels they were made with
+two lists of short texts, and a note in the first
+a short run, then everything back out
+the replayed list members outweigh one feedback of weight 1 on this byte-only (no gematria) tiny model
+a bundle carries them, and old bundles without them still read
+training arguments from a caller are kept in bounds, and steering is checked
+presets referring to presets many times over run once each, and a loop brought in by a bundle is an error rather than a hang
+the default preset on three lists of 50 short memories
+deterministic, matches a direct read, buckets filled
+an empty "any of" is refused
+a validator gating everything out
+round trip into another save, corrupt input refused
+a weights file whose header claims huge shapes is refused before allocating
+how fast this computer trains models of a ladder of sizes, and how the cost of a forward pass grows with sequence length.
+Limits here are measured compute, not convenience:
+a size is suggested when the training it implies fits the budget on this machine.
+one rung of the size ladder
+(tokens, milliseconds) for one forward pass of the second rung at that length:
+attention makes it grow faster than linearly
+the sizes measured, smallest first
+bigger ones would not be suggested)
+what a model is for, to size it
+seconds of training the person will wait
+the largest measured size whose training (examples × epochs × maxlen tokens at the measured rate, scaled for the window length by the forward-pass curve) fits the budget;
+the smallest rung when none does
+longer windows cost more per token
+The engine's own models read bytes and keep doing so;
+this is only the vocabulary a pretrained checkpoint was trained with.
+text in decomposed form may split differently than the reference implementation);
+Anything else (WordPiece or Unigram models, other normalizers, BPE dropout, word prefixes and suffixes) is refused with its name.
+text to token ids and back
+id → its piece as written in the vocabulary
+the metaspace character read as a space, and leading spaces stripped
+composed text is the common case;
+longest first, so a token that starts another one doesn't hide it
+the decoder decides how pieces read back
+the id of a piece or added token, as written in the vocabulary
+added tokens written in the text are recognised (as the reference implementation does).
+Nothing is added at the start or end:
+splits at added tokens, applying their lstrip/rstrip
+a linked list of symbols and a heap of candidate merges
+the bytes one token stands for (no leading-space stripping)
+the leading space a SentencePiece-style tokenizer adds is taken off again
+a tokenizer with the tokens a model starts sequences with and ends them with
+put before every window (BOS, or the end token for models without one)
+the end of a text:
+what training windows end in and the generative head's END
+tokens that also end generation (chat models have several)
+whether a token ends generation
+every byte is a token, a few merges, two special tokens
+special tokens in the text, bytes outside ASCII
+read as text, the special token is just bytes
+every byte string round trips
+unknown characters fall back to their bytes
+a generated token after a prompt keeps its space
+Other data as bytes, so the same transformers (classifiers and generators) work on it:
+numbers as fixed-width text, pictures as sequences of patch codes.
+Plus a minimal PNG writer (no compression, no dependencies) to look at generated pictures.
+an image is cut into square patches (8×8 pixels by default) and each patch is replaced by the nearest entry of a codebook learned from the training images (k-means, integer arithmetic, so the same images give the same codebook on any machine).
+Fixed width means every digit has a fixed position, which a model learns more easily than free-form numerals.
+the largest magnitude that fits
+the encoding of x, clamped to what fits and rounded half away from zero
+the nearest double to the decimal written
+an RGB picture, 8 bits a channel, rows top to bottom
+each pixel as an s×s block
+the end of a row of patches
+an entry left without patches keeps its value
+the code of the nearest entry (squared distance, ties to the lower code)
+per row of patches, the codes, then ROW
+bytes back to a width×height picture:
+rows restart at each ROW, a short row is padded with code 0, a long one is cut, codes past the codebook read as code 0
+zlib with stored (uncompressed) deflate blocks, so a few lines replace an image library;
+files are about the raw size
+a toy picture for demos and tests:
+uniform patches are reproduced exactly when the codebook holds them
+the IHDR's CRC as zlib's crc32 gives it
+each may take some earlier classifiers' steered outputs as its extra inputs, so the graph is acyclic by construction.
+the loss on the judged classifier backpropagates through its extra inputs into the classifiers that produced them, scaled by each edge's coupling (0 leaves the upstream classifier alone).
+one classifier's head feeding another classifier
+one node on a tape:
+traces of its windows, its extra inputs, mean logits, steered outputs
+a forward pass through the nodes a result depends on
+what one classifier had to do with a result
+gradnorm over the sum of them
+for the judged classifier's direct inputs:
+the judged class's unsteered probability before and after
+per node, the gradient norm of the last step (0 for nodes not reached)
+the trunk never sees the extra inputs) from one pass, its upstream run first
+each step backpropagates the loss through the graph (edges scaled by coupling) and steps every reached classifier's own optimizer.
+The feedback is remembered by the judged classifier.
+a head's outputs over some texts as lists:
+for each class, the indices of the texts that are members of it
+the same feedback again gives the same bits
+the upstream classifier is left alone
+Where a run's numbers are computed.
+The CPU is the default and the reference:
+the GPU in exact precision:
+the CPU's bits on a device the probe finds exact
+the GPU with plain operators:
+faster, within a small tolerance of the CPU
+whether this build and machine can run on the device;
+a net's training state on the device (uninhabited in builds without the GPU)
+one token at a time through a generative net:
+the logits for the next token
+a net uploaded for inference on the device (uninhabited without the GPU)
+the generator is fine-tuned on samples weighted by reward (critic scores relative to their mean, or a person's yes/no):
+likelihood for good ones, unlikelihood for bad.
+how each next byte is picked
+otherwise logits are divided by it
+keep the fewest most likely bytes whose probabilities reach p (1:
+bytes to write at most (the prompt not counted)
+a byte that ends the output (kept in it);
+picks a next token (an index into the logits) from them;
+Ties go to the lower token.
+reweights scaled next-byte logits in place, given the bytes written so far
+a vocabulary token can end past the limit
+anything that reads bytes into steered head outputs
+one node of a graph of classifiers, its upstream run first
+a regression value in lo, hi:
+a running sum a constraint can bound
+a critic's verdict that must (or must not) hold:
+what a kept candidate must satisfy
+sampling-time steering by the critics
+how many of the generator's most likely next bytes the critics weigh;
+the rest are dropped on guided steps
+added to each weighed byte's scaled logit:
+critics cost a pass each per weighed byte
+otherwise only the written bytes
+where the generator decodes (the CPU unless asked;
+critics stay on the CPU)
+the draw's index (its random stream)
+the generator's log-probability of the bytes
+every critic's outputs and score on some bytes
+each candidate is a function of (generator, critics, opts, its index) only, so the thread count changes nothing
+the generator on the device, when asked (one upload shared by every candidate)
+the scaled logit is raised by strength·score, so temperature still applies
+the candidates that pass the constraints, best score first (ties:
+a sample with how good it was:
+a person's yes on a sample
+candidates that broke constraints get −scale
+rewards with a smaller magnitude are skipped
+weight of the replayed examples (the generator's own training texts, which keep it from drifting off its data)
+sizes chosen for debug-build speed)
+a classifier trained on it
+must contain 'd' and be at most 6 bytes
+guidance raises the mean critic score
+the rewarded samples get likelier, the penalised less likely
+a person's yes and no
+the same WGSL is valid WebGPU, so a browser build can use it later).
+runs every kernel on random data on the device and on the CPU and reports whether the device matched bit for bit.
+The CPU path stays the reference.
+how the shaders do their arithmetic
+every product laundered so it cannot fuse into an add, division and square root correctly rounded in integer arithmetic:
+the CPU's bits on an IEEE device
+the driver may fuse multiply-adds and approximate ÷ and √
+a place in a buffer:
+the buffer and an offset in floats
+an f32 as a WGSL hexadecimal literal holding exactly its value
+the shader source for a precision:
+constants, the arithmetic, then the kernels
+the process's GPU, opened on first use;
+model sizes are bounded by the device, not by us
+the largest buffer the device takes, in f32s
+a zeroed buffer of n floats (at least one, as bindings cannot be empty)
+f32 has no padding and any bytes are valid u8s
+a list of kernel dispatches (and buffer copies and reads) submitted together, in order;
+each dispatch sees the writes of the ones before it
+submits everything and waits for the reads (and only then returns)
+causal limits row r's chain to p ≤ t0 + r (attention over the positions so far)
+with a trace, x̂ and rstd too
+softmax of rows in place;
+causal rows (nq per group, first at position t0) stop at their position
+row) and the stride between batched products
+product z reads this operand's slice z / per (B only)
+the weights uploaded once, each window's embedded tokens uploaded, every block run as a list of kernel dispatches in one submission, and only what the CPU needs read back (the final normed rows, the generative logits).
+The embedding lookup, pooling and the small classification heads stay on the CPU (they are a sliver of the work);
+the decoder keeps its key/value cache on the device.
+a block's weights on the device
+one block's activations for a window of n (the training trace keeps one per block)
+errors when a tensor is larger than the device takes
+writes a net's weights (same shapes) over the uploaded ones, as after an optimizer step
+one window through the trunk:
+the final normed rows n × d and, when asked and the net has one, the generative logits n × genout
+blocks of the same shape share one set of activation buffers
+pooled rows, the side vector and the extra inputs:
+one token at a time with the keys and values of every block cached on the device, the same restarts when the window fills.
+Each step is one submission and one read of the logits.
+keys and values kv × maxlen × dh
+one step's buffers (a single row)
+a decoder that has read the start token and these token ids
+the cache rows past the position are never read, so nothing to clear
+one that does not is still usable within the reported tolerance.
+the largest difference in units in the last place
+every kernel matched bit for bit
+compares device values against the reference
+runs the probe on a device in one precision
+tiled and per-output paths, A plain and transposed, fresh and accumulating
+backward from the device's own forward, so the comparison isolates the backward
+softmax rows (full and causal) and its backward
+rotary positions, forward and back
+tests skip, they do not fail
+zero-initialised output projections would hide the blocks
+past maxlen both restart from the last half window
+the embedding, pooling and head gradients are computed on the CPU into the caller's per-example buffer.
+a block's gradient tensors on the device
+the CPU tensors these mirror, in the same order
+backward's scratch for one window of up to maxlen rows
+a net's training state on the device
+the net's current weights uploaded, the sums zeroed
+the trunk backward on the device
+a group's key and value gradients, its heads summed in head order
+Growing and shrinking a trained classifier.
+Widening and deepening preserve what the classifier computes, so training picks up where it was:
+Same output up to rounding.
+fresh query, key and value weights, and zero rows in the output projection, so the new head adds exactly 0 until it learns.
+accepted only if validation accuracy holds within a tolerance, otherwise reverted.
+grow while accuracy is under target or falls (after new data), prune when it has stayed above target with margin for several evaluations.
+whether heads can be added or pruned:
+not when keys and values are grouped or the projections have biases (imported pretrained models)
+their output rows are zero
+per block, how much each SwiGLU unit and each head matters on some texts
+Texts run in parallel and add up in text order.
+share of each block's SwiGLU units to drop
+also drop each block's least important head when it is under half the mean
+how much validation accuracy may fall for the pruning to stand
+widen every block's feed-forward
+one more head in every block
+one more block at the top
+try pruning (kept only if accuracy holds)
+the validation accuracy aimed for
+accuracy above target + margin counts as spare capacity
+evaluations in a row with spare capacity before pruning
+a fall from the best accuracy this large counts as falling
+evaluations to wait after any change
+feed-forward growth per widening, as a share of the current width
+what counts as falling starts over
+what to do after an evaluation with this accuracy
+returns a line for the log (empty for Keep)
+a round of a growth cycle:
+what training did, the evaluation, the decision
+and they still train, and survive a save
+removing every unit but a few:
+whatever happens, the rule holds
+a pruning that must fail (no tolerance and a crippled net) is reverted
+pruning to a subset keeps the kept units' function
+a fall after new data grows again even above target
+2 adds optional feature channels, NUM tokens, causal models and the generative head;
+version 1 files read as version 2 files with the gematria channels on
+the largest shapes a file may claim, so a damaged or hostile header can't make the reader allocate more than the file itself could hold
+the shape limits for models with their own vocabulary (imported pretrained models), set far past any open checkpoint:
+they only stop a hostile header from asking for absurd tables that the weights' size check can't see (the rotary table)
+a model's tokenizer as saved:
+the tokenizer of a model with its own vocabulary
+the reader is careful, but a file is data:
+a panic anywhere in it is a bad file
+reshape the blocks to what was saved, then fill every tensor
+names a classifier by what it computes:
+its shapes, heads and every weight, but not its steering or history (the same weights steered two ways hash the same)
+how many weights a header's shapes hold, refusing shapes past the limits above
+windows overlap by at most three quarters:
+a stride of 1 on long windows would make every long text cost thousands of times its length to read
+the steering is read for every head, its bias zipped with the logits
+Two summation rules cover everything:
+- matrix products add their products one by one in ascending order of the contraction index, onto the output's current value:
+Each output element is its own chain, so the kernels vectorise across outputs (register tiles of 4 rows × 16 columns) without reordering any chain, and threads split output rows.
+Every multiply is rounded before its add (no fused multiply-add on any path).
+A GPU backend (wgpu/WebGPU compute shaders) would implement the same list.
+To stay bit-exact there it must keep each output's chain in order (one thread per output element, looping over p;
+storing the product through a bitcast or an integer round trip before the add is the usual guard).
+turns the explicit SIMD paths off (true) or back to what the CPU offers (false);
+for benchmarks and the tests that hold both paths to the same bits
+kernel families the profiler times
+times add up over all threads
+buffers given back on this thread, for reuse:
+a forward and backward pass allocate the same sizes over and over, and fresh pages from the system cost more than the arithmetic that fills them
+a zeroed buffer of n floats, reusing one this thread gave back when it can
+the AVX2 build of the same code vectorises it 8 wide
+a row-major rows × cols A
+products above this many multiply-adds split their rows across a pool
+y and b row-major with rows of m
+any split gives the same bits;
+whole tiles keep the kernels busy
+A packed for the register tiles:
+column strips outside, row tiles inside:
+of row r, scalar chains
+the transpose of a row-major rows × cols matrix
+softmax of each row in place:
+each output's chain written out plainly
+a product big enough to go parallel
+plus the seeded random numbers and hashes.
+Nothing here calls the platform's libm.
+Each function documents its operation order;
+a port must keep it, one rounding per written operation, never fusing a multiply and an add.
+Branch free, so loops over it vectorise.
+a key from several parts, order sensitive:
+Fisher–Yates from the back
+FNV-1a over bytes, with a seed folded in first
+How well a head does on labelled texts:
+squared and absolute error and R² for regression heads.
+Sums run in example order in f64, so the numbers are as deterministic as the predictions.
+the confusion matrix as aligned text, rows the truth
+transformer encoders over a text's bytes and its gematria, written here from the matrix products up and deterministic to the bit.
+they are the backend boundary a GPU implementation would replace.
+what a classifier remembers about itself besides its weights
+optimizer steps taken over its life
+training examples per class, per head, from the last training run
+the most recent feedback, replayed by later feedback steps
+growth and pruning events, oldest first
+the declarative spec the model was built from, and anything it learned besides weights (a picture codebook);
+how many feedback examples a classifier keeps
+optimizer moments carried between feedback calls (not saved)
+one text through a classifier, windows averaged
+per head, the mean of the windows' logits
+the mean of the windows' pooled vectors
+a model with pooled heads and optionally a generative head (causal configs only)
+class names of a head
+the input gains in force:
+the windows of any bytes (causal windows for a causal model)
+every window of a text through the net with the given gains, averaged in window order;
+windows run in parallel on the pool, or a lone window's big products do
+every head's steered output on a text
+every head's steered output on any bytes
+the same outputs, bit for bit on a device the probe finds exact
+steered outputs from window-averaged logits
+many texts in parallel (each text's windows in order on one thread);
+the pooled vector of a text, windows averaged:
+the bias metric for a head over some texts:
+how the encoder's token vectors become one vector
+the vector at the CLS token
+the mean over all tokens
+CLS and mean side by side (twice as wide)
+a learned query's softmax-weighted sum over the tokens
+how strongly each input channel is mixed in;
+the letter value embedding added to each token
+the word sum embeddings added to each token
+the text level side vector at the heads
+inputs from other classifiers at the heads
+width of one attention head (even, for the rotary pairs)
+heads per block at creation;
+blocks may grow or lose heads later
+SwiGLU hidden units per block at creation
+tokens per window, CLS and SEP included
+bytes between window starts on long texts
+RMSNorm on each head's queries and keys before the rotation
+whether the heads see the side vector
+width of the inputs from other classifiers
+residual output projections start at zero (each block starts as the identity)
+off for new models, on in files saved before it was optional
+each position sees only itself and what came before (needed by a generative head)
+a token row plus value × a learned direction
+0 means one per query head
+how rotary frequencies are stretched for longer contexts
+rotary frequency scaling, as pretrained checkpoints declare it
+for tests and CI only:
+a few thousand weights, so the suite runs in seconds in a debug build.
+Not a size to offer anyone;
+Like every preset it has no gematria channels;
+the gematria features (letter channel, word sum channels, side vector) on or off
+tokens in the embedding table
+bytes and END, or the vocabulary
+trains on a laptop in minutes
+bytes of text per window
+width of the pooled vector
+one class of K, softmax
+any of K labels, a sigmoid each
+K real values, squared error
+their count is the head's width
+how much this head's loss counts when heads train together
+next byte (or END) at every position of a causal model
+how much its loss counts when heads train together
+SwiGLU gate and up projections d × ff, down ff × d
+what a weight tensor is, which decides weight decay
+rotary angles per position and pair:
+the rotation a configuration asks for
+rotates one row as position t
+byte and special token embeddings vocab × d
+attention pooling query d (empty for other poolings)
+the NUM value direction d (empty without numbers)
+the width of the query, key and value projections together
+tensors new since the first file version draw last, so older shapes start as before
+a net of the same shape, all zeros:
+a gradient or optimizer moment
+what each output is called:
+the pooled heads, then the generative head
+every weight tensor in the fixed order the optimizer and the file format use
+empty when unused, so version 1 files read unchanged
+the transposed weights backward needs, computed once per optimizer step
+causal attention for position t:
+adds a bias to every row (nothing when it is empty)
+how a forward pass runs:
+dropout on with its key, or inference
+rotated keys and values per key/value head (one per head unless grouped);
+everything one window's forward pass leaves for backward
+pooled vector (after the pooling dropout)
+block l's SwiGLU activations n × ff
+block l's attention outputs before the projection n × heads·headdim
+one window through the trunk and every head;
+The pool parallelises big products only.
+this group's keys and values, normed and rotated once
+the probabilities after t stay 0, which backward relies on
+the generative head's logits at every position, n × GENOUT:
+row t predicts the token after position t
+a group's key and value gradients, summed over its heads in head order
+embeddings, token by token in order
+One token (a byte, or a vocabulary token for a pretrained model) at a time through a causal model with a key/value cache, giving the generative head's logits for the next one.
+When the window is full the decoder starts over from the start token (CLS, or the lexicon's) with the last half window.
+the tokens in the current window (after its start token)
+rotated keys and values, rows of headdim
+a model with a vocabulary encodes them with its tokenizer)
+a decoder that has read the start token and then these token ids
+bytes then END, or the vocabulary)
+the bytes the current window holds
+the tokens the current window holds (after the start token)
+reads one more byte (byte models)
+the channels of this position, as a causal window computes them
+the token every window starts with:
+CLS, or the lexicon's start
+END, or the lexicon's end token
+whether a generated index ends the output
+the bytes a generated index (or window token) stands for
+tokens back to bytes (special tokens of a lexicon left out)
+bytes as they are, or ids from the lexicon (prompt and continuation encoded apart)
+every window of a token sequence, and their starts
+a window for this net's sequence length
+central differences against backward for a sample of every tensor's weights
+nonzero gains everywhere, and a little noise on the zero-initialised ones
+a causal model with a generative head, numbers and no gematria:
+finite differences on every tensor through the generative logits and a pooled head
+a little noise at this eps
+decoding with the cache equals the full causal pass, bit for bit, including across a window restart
+past maxlen the decoder keeps the last half window
+Unicode properties use std's tables:
+in a class it must be a single item
+matches one character (for the iterative repeat)
+an empty iteration can't make progress;
+every non-overlapping match, leftmost first, as char ranges
+the matches of a string as substrings
+A small persistent thread pool.
+Which thread runs which index varies;
+callers only hand out independent work (each index writes its own output), so results never depend on the schedule or the thread count.
+threads std reports for this machine, at least 1
+one job at a time;
+claims and runs indices of the current job until none are left
+a slice that pool tasks write disjoint parts of
+Pretrained open models in the engine:
+From there it is an ordinary engine model:
+Anything else in the config that would change the computation is refused with the field named.
+how a pretrained model is brought in
+classifier heads to put on the trunk (new, untrained), besides the generator
+windows no longer than the sliding window see exactly what it lets through
+the engine configuration (biases and QK-norm as the checkpoint has them)
+BOS (or the first end token) to start, the end tokens to stop
+the engine model with the checkpoint's weights
+a pretrained model folder as an engine model
+a synthetic checkpoint's shapes (tests only:
+tiny so the suite stays fast;
+the loader itself has no size limits)
+what the reader will see after the dtype round trip
+the cached decoder gives the same bits as the full pass
+SentencePiece tokenizer with BOS, plain heads
+a missing or misshapen tensor names itself
+the engine's paths on a pretrained model
+a byte-model critic judges what the pretrained model writes
+fine-tuning on a text makes it likelier;
+the classifier head trains alongside
+the file keeps the vocabulary, the tokenizer and every weight
+checks name what a pretrained spec can't set
+the weights travel in the file, not the folder
+Tensors are read on demand (seek + read), so a checkpoint never has to fit in memory twice;
+Integer and quantised dtypes are refused by name.
+the element types read (and written)
+shift the full mantissa (with its hidden bit) into place
+one tensor's entry in a header
+byte range in the file (header included)
+its header read, tensors read on demand
+tensors by name, and the metadata strings
+one safetensors file or the shards of an index
+a sharded checkpoint from its index file
+every tensor the index names must be in its shard
+a tensor as f32, checked against the shape the caller expects
+the format pads the header with spaces to a multiple of 8
+a single file without an index
+the primary way to make a model.
+the newest spec version this build reads
+separates the input from the output of a pair in a sequence-to-sequence generator
+an optional input feature channel (all off unless listed)
+the ordinal, reversed and Atbash sums of the word a token is in, and digit roots
+a vector of named numbers, written as fixed-width text for the trunk and also given to the heads as they are
+on when there is a generate head
+any of several labels (a sigmoid each)
+a value of the model's input type
+where training data comes from:
+texts to learn to write;
+it learns to write the output after the input
+each scaled to the input's width and height
+examples written into the spec
+what a critic wants of its head
+another model judging what a generator writes
+the model's name, resolved when generating
+seconds of training to size an "auto" trunk for
+where the trunk comes from:
+a pretrained model folder instead of new weights
+where training and generation run:
+a model's starting point other than fresh weights
+the spec's classify/multi/regress heads go on its trunk, new
+the save (the entry store implements this), or memory
+by default the two lists side by side, in order
+lists and tags in memory
+the value, its head, its class or values
+a broken rule in a spec, and where:
+empty for the whole spec)
+parses JSON and checks it
+every rule a spec must keep, with the first broken one in words
+a data item's head and target, the path's field that is wrong and why
+parses a spec's JSON and checks it, saying where a problem is:
+the engine configuration this spec asks for
+a model made from a spec:
+the engine's network, and what it learned besides weights
+what the generate head wrote after the input, with the spec's sampling
+a fresh model for a spec;
+an existing classifier as an instance of a spec (sizes and features from its configuration, heads from its heads)
+an input value as the bytes the trunk reads, and the heads' number inputs
+generated bytes back as a value of the input's type
+every head's answer on an input, by head name
+what a generator continues from:
+a sequence-to-sequence model's input and PAIR
+the spec's data queries as training examples
+an "auto" trunk is sized for the data found)
+a critic's model as a generator's critics see it:
+what judges, and its heads (in the order its outputs come;
+this model as a critic
+the kept ones come best first
+a model, a stored classifier stack) and the sampling given;
+every candidate drawn comes back, the ones that keep the constraints first, each part best score first (ties:
+a continuation is judged whole (the start and what was written);
+a sequence to sequence model's output alone
+an old-style classifier converts
+the player's knobs on a trained classifier, which training never touches.
+Per head a logit bias per class, a temperature and a decision threshold;
+for the whole classifier a gain per input channel.
+Applied at inference only, with a bias metric that says how far the knobs move predictions from the model as trained.
+added to each class's logit after the temperature
+logits are divided by it:
+the probability at which a text counts as a member (of the top class, or of each label for multi-label heads)
+multiplies the trained channel gains
+a head's output on a text:
+what the model said, and what the steering makes of it
+window-averaged logits as trained (with the steered input gains)
+classes this text is a member of under the threshold
+the steered reading of a head's logits:
+how far steering moves a head's predictions from the unsteered model, and how skewed the classes were in training
+summed over labels for multi)
+share of texts whose decision changed (top class, or any label's membership)
+mean change in each class's probability
+largest over smallest class count (∞ when a class had no examples)
+compares the steered and unsteered outputs of one head over the same texts
+Whole-classifier tests on the tiny preset:
+learning, determinism across thread counts and kernel paths, the file format, windows, steering and feedback.
+a file whose windows nearly all overlap would make reading long texts endless
+the mean of the windows' own logits
+with the gematria channels, so the side vector's gain has something to change
+channel gains change the inputs, and so the outputs
+saved by the engine before format version 2 (gematria channels then always on)
+one trunk, two outputs trained together:
+a class head and a generative head, each example carrying both targets with per-head loss weights
+it keeps them, and answers with exactly the bits it gave then
+From data to model input.
+no vocabulary is learned or stored.
+Optional feature channels run next to each token.
+In a causal model (one that generates) the word channels are the sums of the word so far, so no token sees a byte after it.
+the token's embedding is its row plus value × a learned direction
+tokens without NUM (the table size of models without number inputs)
+rows of the letter value table:
+length of the side vector
+one window of a text, ready for the embedder
+empty when there are none
+each token's word channels are the sums of its word up to and including it (what a generator may see)
+the value at token t (0 when the window has no numbers)
+every window of some bytes;
+labelled examples, AdamW with linear warmup and cosine decay, global-norm clipping, dropout, label smoothing, class balancing, early stopping on a validation split with the best weights kept, and feedback (a yes or no on one result) applied as a few incremental steps.
+Threads compute examples side by side into their own buffers, a wave of one example per thread at a time, and the buffers are added in order, so the thread count changes the speed only.
+not this class (pushes its probability down, the rest up)
+a distribution over the classes
+one label known to hold or not, the others unknown
+the class an example is about, for balancing
+whether the target is for the generative head
+how much this example counts (feedback can weigh more than a list member)
+more targets on other heads of the same model, trained in the same pass
+an example over bytes that need not be text
+a text for the generative head to learn whole
+another head's target in the same pass
+the generative loss of one window:
+every token is a class (the end token included)
+whether a text falls in the validation share:
+a seeded hash of its bytes, so the same text always lands on the same side
+indices of training and validation examples
+AdamW's moments for every weight
+whether the moments still match the net's shapes (they don't after growth)
+one step, per element in this order:
+Tensors update in parallel on the pool (each element is independent).
+everything, or the heads only when the trunk is frozen (params end with the heads' pairs, then num, then the generative pair)
+one window of a training text:
+the whole text if it fits, else a crop placed by the key
+a causal model's crop ends in SEP only where the data ends
+every window of a text forward, and the mean of their logits (in window order)
+windows forward, and the mean of their logits (in window order)
+the loss weight of the head a target is for
+how an example's gradient is taken
+weighted mean loss, no label smoothing
+per head, when the data had examples for it
+the generative head's mean cross-entropy in bits per predicted byte
+the accuracy of the first head with metrics
+the cosine ends at lr·minlr
+share of all steps spent warming up
+share of examples held out for early stopping (by text hash)
+evaluations without a better validation loss before stopping
+keep an exponential moving average of the weights with this decay (0:
+evaluation, early stopping and the result use the average
+where the forward and backward passes run (the CPU unless asked;
+what the progress callback sees
+this step's weighted training loss
+the step whose weights were kept
+the kept weights on the validation examples
+checks every example against the classifier's heads
+class counts and balancing weights, per head
+a player's yes or no on one result of one classifier
+the text is of this class (or has this label);
+the example it amounts to for a head of this kind
+replayed examples per step, drawn from earlier feedback and the given data
+the probability of each fed-back class before and after (unsteered)
+the unsteered probability of a feedback's class
+applies yes/no feedback on this classifier's own weights:
+newer feedback on the same text, head and class supersedes the old
+a few AdamW steps at a flat rate on whole examples:
+count each predicted byte once, in the first window holding it
+A baked classifier on its own:
+taking a module in maps each class to a list by name (a new list, or the one headed by a memory of that text), or to lists the caller picks.
+sizes are checked before anything is allocated, every part must parse and match its definition (classes, head, inputs' widths, hash), names and numbers must be sane, and a panic anywhere is a bad file.
+the largest module read by default (a hub may take less)
+a classifier's definition as a module carries it:
+classes by name, not by list
+0 when it is only referenced
+the classifier itself (the last part)
+a module read and checked
+each part's weights file, when bundled
+carry the classifiers it builds on (else they're referenced by hash)
+a trained classifier (and what it builds on) as a module file
+a bundled part's weights against its definition
+replayed feedback examples must fit the net (a hand-made file could hold others)
+what taking a module in did
+the classifier's name in the save
+each class of the classifier and the list it went to (key, and whether it's new)
+a name for the classifier itself (its own name if left out, numbered when taken)
+the save's classifiers by weights hash
+takes a module into the save:
+its classifiers (reusing any the save has with the same weights) and lists for its classes
+everything is checked before anything is written
+as the weights were trained (retraining keeps the channels)
+its lists are the save's own already
+a short summary of a module, for pages and listings
+the classifiers it builds on, and whether each is bundled
+include and exclude texts by what classifiers say of them, nested with and / or / not, beside the word, sum, list, tag and kind conditions the searches already have.
+Filters are kept in the save as presets (materialized views, their own list system), can refer to each other, and their results can be written out as lists.
+a classifier can be attached as a validator of another.
+Its verdict gates the other's outputs (a text the validator doesn't pass counts in none of the other's classes) or weighs them (the other's probability times the validator's), in filters and in search;
+how deep presets may refer to presets, and how many conditions an expression holds
+the class must be its top one too
+the words search (with weum's variations)
+a gematria sum in a range:
+a member of a list (by its head's key)
+notes with these tags (all of them, or any)
+the classifiers it asks (presets left unexpanded)
+a short reading of it, for lists of presets
+the list its results were last written to (a label)
+how many texts it found the last time it ran
+a text the validator doesn't pass is in none of the classes
+the probabilities are multiplied by the validator's
+a classifier that checks another:
+a classifier's verdict on a text with its validators applied
+the probabilities after gating or weighing
+each validator's probability for its class, in order
+sets the validators of a classifier (checked:
+the validator's own validators would make a loop when it is checked by them
+takes a deleted classifier out of every validator list (and its own)
+a classifier's rows on texts with its validators applied
+saves a filter (new, or replacing one by that name), after checking it reads
+classifiers and classes exist, presets don't loop, numbers are in range, and it isn't too big
+an empty "any of" could only ever match nothing
+how strongly its classifier conditions hold (the weakest of them;
+the classifiers it read, and those it skipped because they aren't trained
+a classifier read over a run's texts:
+its classes, threshold, and checked rows
+the texts a run looks through, and what's worked out about them once
+the presets being worked out, to catch one that comes back to itself
+which texts match, and the score of each (the weakest positive class condition)
+over the entry graph the sums are its own (weum's), and atbash is gone
+runs a saved filter and writes what it finds as a list headed by the memory "filter:
+returns the head and the count
+notes the last run's count on a preset
+every preset, for a bundle
+a bundle is data from anywhere:
+only its size is checked here (what it reads may come with it), the rest when it runs
+The floating point the spread needs, the same everywhere.
+correctly rounded, so at most an ulp from any decent libm, and exact on easy points
+saves as ingredients, combined into a new save the way Oblivion's altar combines effects into a spell.
+Each ingredient has an effect:
+its memories, notes and lists join the result - take away:
+whatever it shares with the result leaves it (a subset) - keep shared:
+only what the result shares with it stays  applied in order, then the filters (words, sum ranges, which kinds of things) narrow it.
+Saves are compared by content, not by key:
+a memory is its text, a note its title and body, a list link the two things it joins.
+Writing gives everything fresh keys in the target, so the same machinery merges a save into the open one.
+a thing in a save, by what it is rather than where it's kept
+memory texts, each once, in the order they were kept
+drops list links whose ends are gone
+applies the ingredients in order to an empty result
+what the result is narrowed to
+words a memory or note must contain;
+inclusive ranges of a memory's ordinal and reversed sums
+whether the sum ranges narrow anything
+a sum range is about memories;
+notes only answer to words
+puts contents into a save, skipping what it already has;
+new keys after the highest one there
+lists, between the keys things have now
+copies the space's maps and settings from one save to another (a forged save takes its first ingredient's)
+silent left, so its list link did too
+forging the subset into a fresh save
+only what's new goes in, and again adds nothing
+What a save holds besides its entries:
+its spec models' definitions and its pictures, each in tables of the save's own database, so they travel with the file (copies, renames, the hub's share and take) and in its backups and bundles.
+the pictures of list "cats" sit beside the texts of the list whose head is "cats".
+a picture's details (its bytes are kept apart)
+what it was called when added (a file name), or what it was named since
+when it was added, milliseconds since the Unix epoch
+every picture's details, oldest first
+false when it was there already (its details are left as they were)
+takes a picture out of the save and its lists;
+the ids of a list's pictures
+the lists a picture is in
+all the texts in one JSON, everything else in another.
+the forgotten keys in reuse order;
+rows that were replaced (their key was taken), keeping the old text as a version
+entries stored partly as refs to others
+rows without times get the import time.
+borrowing applies in key order, so a variant borrows from shorter texts imported before it.
+shorter texts first within the order keys give, so variants find their sources
+the texts, and everything else
+restores a backup into this store (meant for an empty one;
+entries under the same keys are replaced)
+mimes first, so the texts' mime names map to the same ids
+past versions, newest first per entry:
+each is a delta against the one after
+a backup's spec model records and pictures (rows that don't read are skipped)
+blocks placed in the space, each showing a texture (a text of the save, one of its pictures, or a plain colour) tiled over its faces.
+The values sort by the id (big endian first), so a key's instances come back in the order they were made.
+Moving or scaling a block replaces its value;
+A region query reads every value once (no spatial index yet:
+the values are small and a save's blocks number in the thousands, not millions).
+A block's size is in the space's units;
+the side of one texture tile, in space units
+a side at least and at most
+how far from the origin a block may be
+a text of the save, by its entry label
+a picture of the save, by its content hash
+the key a texture is kept under
+a key's kind and texture
+where a block is and how big:
+its centre and its sides
+the id (big endian, so values sort by it) and six little endian f32s
+finite, inside the world, sides within bounds
+how many times the texture repeats across each face:
+how the blocks table is used:
+places several blocks in one write;
+moves or resizes blocks (each its whole new transform) in one write;
+the ones that weren't there are skipped, the rest come back as they are now
+the ones that were there, as they were (to put them back)
+the ids already in use are skipped
+every block, or (with a region) those whose boxes meet it, by id
+the instances of one texture
+how many blocks and distinct textures
+move and scale replace the value;
+the next id is past the highest
+Caps lock and the last lead start off at the start of every run, so a call's arguments decode on their own.
+A body (what an entry stores) is a run with a 3-bit header holding how many padding bits end its last byte;
+an empty body is zero bytes.
+how deep calls may nest inside a body (decoding recurses per level)
+a function (or any) entry, its body evaluated with the arguments
+a nested run (a call's argument)
+the bits ran out inside a token
+a reserved escape, a bad case token, a run without a lead, a bad digit
+how many continuation bytes a UTF-8 lead byte has
+switch the lock when the case run ahead is long enough to pay for it
+a run of characters sharing the last lead byte
+packs a run into a body
+how many bits a text takes inside a run (no body header), for weighing borrowing
+how many bits a ref to this id takes
+unpacks a body into its run
+the text of a body with no refs or calls in it
+the run's text with refs and calls left out (for a source view or a quick check)
+every entry a run refers to or calls, nested arguments included
+merges adjacent texts and drops empty ones, so equal runs compare equal
+any scalar value at all
+deep nesting is refused, not a stack overflow
+The measures an entry is filed under:
+which number a text is filed under
+everything a text is filed under
+Evaluation is a loop over an explicit continuation stack, so a Rust stack overflow can't happen.
+A call in tail position replaces the frame that makes it instead of pushing a new one, so tail recursion runs in constant stack, bounded only by fuel.
+Limits, each an error rather than a panic:
+fuel (one unit per step, plus the size of builtin work), the continuation stack depth, the size of any one output, and how long a text a builtin may be asked to make.
+evaluation is pure, so naive recursive Fibonacci runs in linear time.
+where the interpreter reads entries' bodies from
+steps an evaluation may take
+continuation frames that may be waiting at once (non-tail nesting)
+bytes any one output (or argument) may grow to
+non-tail calls nested deeper than the limit
+an output grew past the limit
+a ref or call names an entry that isn't there
+a builtin was given something it can't use
+how many calls one memo frame remembers (a tail loop adds one per turn)
+a call's value, to remember under these keys
+an entry's rendered text, to cache and unmark
+the rendered text of an entry
+evaluates a run with no arguments
+calls an entry with arguments
+the last piece of a concat in tail position continues the frame
+concat(x) in tail position is x in tail position
+a call with its arguments evaluated:
+a tail call from a frame that has emitted nothing has that frame's value:
+remember it under the memo just below (up to a few keys, so loops stay flat), or put one there
+a small way to write runs by hand (tests, examples, the backup's readable form)
+the same entry twice, not nested, is fine
+naive Fibonacci, linear thanks to the memo
+the same through a REF to an entry that calls it
+nor is the memo filled by a tail loop
+too little fuel is an error, not a hang
+text before a tail call
+the output limit stops a runaway
+the call is an argument
+a body calling itself forever through a non-tail position
+and through a tail position:
+The same entry can stand in several places and several maps;
+identical placements collapse into one edge.
+smallest-three quantisation alone isn't idempotent.
+When two components are nearly equal, the decoded largest can come out smaller than another decoded component, so re-packing picks another index (or rounds a component one step off after normalising).
+Both ends of a round trip land on the same cycle, so they agree, and the chosen value maps to itself.
+one placement of an entry in a map
+a quaternion, x y z w
+IEEE half precision, rounded to nearest even
+one smallest-three quantisation, without the fixed point search
+still a value both ends agree on
+the cases the first version got wrong:
+two or more components nearly equal
+and again from the decoded value, any number of times
+every 32-bit pattern a corrupt value might hold re-packs to a fixed point
+The content hash index is keyed by the hash's top 14 bits;
+A probe returns every id whose check matches;
+the content hash's bucket bits
+the ids of a chunk's set, ascending
+encodes ascending, distinct ids of one chunk
+adds and removes ids (all of one chunk) in an encoded set;
+the letter frequency term of a frequency key:
+its hash's top 14 bits, so a row holds a few anagram classes and readers check the key (most texts are alone in their class, and a row per class would be a row per entry)
+what an entry is filed under in the derived indexes
+the content hash of a plain entry's text
+an entry this one refers to or calls (what editing that entry must look after)
+words again, ordered, for prefix search
+creation buckets, ordered, for time ranges
+dense sets become bitmaps, and stay exact
+a small set is about a byte an id
+The query model the lenses read through:
+and the figures for a stats view.
+the relation's own order (a list's member order, notes oldest first), when the query has a relation;
+every filter given must hold
+entries with at least three quarters of the query's words
+entries filed under a sum
+entries with a sum in an inclusive range
+anagrams of a text (the same letter frequencies)
+entries carrying a tag entry
+entries related to an entry
+how many matched in all
+ids found under at least three quarters of the query's tokens, in the order they turn up
+candidates by the frequency key's hash, checked
+the first set keeps its order (relation order, search order)
+the figures of a stats view
+what a text measures (for a sidecar)
+packed body bytes of every entry
+The bytes an entry, a past version and an edge are stored as;
+the body holds only text and refs that borrow (its rendered text never changes unless the entry itself is edited);
+such entries are in the content hash index
+the body has refs (borrowed parts for a plain entry, transclusions or calls otherwise)
+how many borrow hops rendering may take (a hint for borrowing)
+mime types every store knows;
+milliseconds since the Unix epoch
+varint mime, prefix and suffix, then the packed middle)
+the target id (big endian) then the payload
+where each weum key length starts among the ids
+the first id with no weum key
+weum's key for an id:
+Ids past the four byte keys are their 8 big endian bytes.
+how weum shows a key:
+a polynomial hash over bytes, so any prefix or suffix hash comes from prefix hashes
+the poly hash of every prefix:
+the content hash the dedup index is keyed by, from a poly hash and a length
+id n + 1 is weum's next key after id n
+a u32 (little endian) with a bit per occupied slot, a varint length per occupied slot in slot order, then the records in slot order
+one slot's record straight from a block row, without decoding the rest
+See the module doc for the tables.
+the names of every table, for stats
+the relations every store knows;
+the payload is a u64 big endian order key
+an entry (from) carries a tag (to, an entry of mime tag whose text is its name)
+posting lists in redb tables
+only entries, edges and history on disk;
+the indexes are rebuilt into memory at open
+bytes a borrowed form must save to be used (a borrow also costs a mentions row)
+how many borrow hops a source may already have
+milliseconds since the Unix epoch from the system clock (0 where there's none, as in a browser without a clock passed in)
+a stored entry with its id
+what deleting an entry took away, enough to put it back
+one version of an entry
+when this version was written (its edited time)
+the tables a reader reads postings from
+what both a read view and a write transaction can read;
+most of the API is here
+the record bytes of an entry
+the ids under a term
+edges from an entry in a relation:
+the entries with an edge in a relation to this one
+every relation an entry has edges in, out and in
+an entry's run as stored (refs and calls unresolved)
+calls a function entry with arguments
+the entries whose text is exactly this (and of this mime, when given)
+every version of an entry, newest (the current one) first
+the members of a list, in order
+the entries a note is noted on
+what a map places, and where
+any reader as the interpreter's source
+a consistent read of the store
+the last few block rows read
+ids created in a bucket range (callers filter exact times)
+every value of a sum mode with how many entries have it, ascending
+every entry with its record, ascending by id
+the last id handed out (or imported)
+the forgotten ids waiting to be reused, in the order they'll be handed out
+index changes made in a transaction, not yet written
+borrowing on or off for this transaction (imports turn it off and on)
+what an entry is filed under
+how a text is to be stored
+the last id handed out (or imported), if any
+the id of a mime type, registering it when it's new
+the plain text of a borrow candidate, if it can be borrowed from
+never changes what it renders to
+prefixes end before a space, longest first
+suffixes start after a space, longest first, after the prefix
+each source costs a row in the mentions index too
+saves a text as a new entry (or returns the entry that already has exactly this text and mime);
+returns its id and whether it's new
+an entry already there is replaced as an edit would (its versions kept)
+a template or function) as a new entry;
+changes an entry's text, keeping the old version
+the plain mentioners of an entry with their texts as they render now
+the structured mentioners of an entry (templates, notes with replacements) with their texts as they render now
+indexes the transcluders of a changed entry by what they render now
+stores the borrowers' texts again after a source changed, so they render the same
+removes an entry, its edges and its versions;
+its id is reused later unless a structured entry still refers to it
+puts a deleted entry back as it was, under its id
+removes one edge with this payload;
+a note on an entry:
+saves the note's text (markdown) and links it
+adds a member at the end of a list (nothing when it's there already)
+puts a list's members in this order (members not named keep their place after)
+the tag entry of a name (made when it's new)
+gives an entry a structured body without keeping a version or touching its times (restores);
+entries borrowing from it are stored again
+writes a past version row (restores)
+marks an id forgotten (restores), so it's handed out again
+sets the last allocated id (restores)
+storage use of one table
+branch keys and other metadata
+bytes of pages the table holds
+how full its leaf pages are with keys and values
+a store held in memory (tests, the browser until a persistent backend is plugged in)
+the browser's, or a test's
+a write that's durable only once a later durable one commits (bulk work)
+the terms of every entry, from entries alone
+rebuilds every derived index from the entries (after a format change, or to check)
+keeps the derived indexes on disk or only in memory (rebuilt at every open)
+gives back space freed by deletes and rewrites (after imports, or on demand)
+a store in memory with a clock the test moves
+the same text of another mime is another entry
+forgotten ids are reused before new ones, in weum's key byte order
+the old words are gone from the index, the new ones are in
+the past versions are deltas:
+saving it again finds it (the hash is over the rendered text)
+a variant of the variant borrows from it
+editing a source doesn't change what borrows from it
+and the indexes still find them by their whole text
+a now becomes a longer text that starts with b's text:
+a ref to a deleted entry is an error, and the id isn't reused while referred to
+removing one placement keeps the reverse edge while the other stands
+deleting x drops its edges both ways, and undelete puts them back
+three quarters of the words must be there
+writes keep the memory index current
+the disk tables are emptied in memory mode
+new ids continue after the highest imported key
+more of everything, then a backup
+and a second backup is the same as the first
+What kind of text an entry is, told by its pattern:
+every kind, in the order they're offered
+the kind a text looks like
+its bytes in the text and its type
+the type of a word from its form alone, when its form tells
+every word of a text with its type:
+a name by its capital (not the first word of a sentence);
+the rest by a small lexicon, then by their endings, then by what comes before them (after a determiner or adjective:
+A tagger of rules, not a model:
+good enough to show what a text is made of.
+a text's word types in a line, for the hover line:
+every type is one of the list, and the byte ranges point at the words
+anend's saves, shared by the desktop app and the hub:
+each list's members, their sums added up and averaged, the list's gematria read as one text, and its letters as a 26-long vector, so lists can be compared like embeddings (the cosine of every two lists' vectors).
+the list head's own text
+all the members' texts as one, for measuring the list whole
+letter counts over all members, normalised to length 1
+texts' letters as a unit vector
+every list, in the order their heads are stored
+the cosine of every two lists' letter vectors, rounded to thousandths
+Turns markdown into simple layout blocks of styled text runs, which the UI then renders with Bevy text spans (there is no HTML to lean on in a native app).
+merge runs with identical styling
+a paragraph inside a list item continues that item
+the gematria idea generalised from letters to any data.
+the byte sums of some data
+how many bytes were summed
+the value of one byte:
+the sum of n's decimal digits
+the byte sum of each word (runs of bytes that are not ASCII whitespace or punctuation;
+each classifier's steered outputs on the save's memories and notes, memoized, so searching by a class, filtering on classifiers, colouring texts by class and finding near texts don't run the network again.
+A fifth bucket family beside the ordinal, reversed, atbash and frequency ones:
+a text is filed under its classifier's class and how sure it was.
+the classifier's and its upstream classifiers' weight versions and steering.
+Training, feedback, a steering change, or a retrain upstream give a new stamp, and the first use under it drops the old rows.
+A row also keeps a hash of the text it read, so an edited note (or a forgotten memory's key given to a new text) is read again.
+the same weights, steering and text give the same bytes on any thread count.
+a text is filed under each class it's a member of (the steered threshold:
+the class number texts in no class are filed under
+bumped when what a row holds changes
+rows written per transaction while indexing
+the band a probability falls in
+a text's hash as rows keep it
+one classifier's memoized reading of one text
+steered probabilities, one per class
+the classes it's in under the steered threshold
+the buckets it's filed under
+what a stack's outputs depend on:
+every classifier's weight version and steering
+one row from one pass of the stack
+rows for many texts at once, in parallel, in the texts' order
+rows read through the network now
+rows that were there already
+a member of a bucket
+what near texts are found by
+texts it reads the same way
+drops a classifier's rows and buckets (it was deleted or replaced)
+the rows kept for these refs, current or not (None where there's none)
+rows for texts (each a ref and what the classifier reads of it):
+the kept ones when current, the rest read now on the pool and kept
+false if the classifier moved on meanwhile
+fills a classifier's rows ahead of use:
+how many current rows a classifier has
+every current row of a classifier, with its ref
+texts that changed since they were read are left out (and counted as the second value)
+how many texts each bucket holds:
+ties by key, so the order is fixed
+a text that changed since is skipped (indexing again brings it back)
+the classifiers chosen to index a memory or note
+chooses the classifiers that index a memory or note (none:
+every memory and note with chosen classifiers
+takes a deleted classifier out of every choice
+drops every row and bucket of one classifier inside a transaction
+a fixed sand-friendly set for the first ten, then golden-angle hues
+how a text is tinted by a classifier:
+the tints of some memories and notes by a classifier, filling what isn't memoized (a ref with no text gets None)
+weum's memory, as tables in the notes database:
+memories are short texts under compact byte keys, and both memories and notes are indexed into the search tables.
+Memory keys come from weum's allocator:
+one byte keys first, then two, three and four byte ones, reusing the keys of forgotten memories before minting new ones.
+what a text is filed under in each gsearch bucket
+a sum for the numeric buckets, a frequency key for the letter table
+the texts a note is indexed by:
+its title for gematria, title and body for tokens
+shorter keys first, then by value
+stores many texts as new memories in one go;
+returns their keys in order
+the key of a memory with exactly this text, if there is one
+saturates a text unless the very same text is already a memory;
+returns its key and whether it was new
+removes a memory, freeing its key for reuse;
+drop it from every list, and drop the list it named
+refs found under at least three quarters of the query's tokens
+the ordinary search of the memory view:
+every query weum's variation expansion produces, results merged in the order they turn up
+everything filed under a key in one of the gsearch buckets
+how many texts share each of these reversed sums
+prefixes come from range scans of the token table
+adds many list members in one go
+every list and its members, as stored
+removes a whole list, returning how many members it had
+puts a forgotten memory back under its old key (undoing a forget)
+forgotten keys are reused before new ones are minted
+new keys continue after the highest imported one
+a forget undone gets its key back, and the key isn't handed out again
+A note is what the anend server called a "writ":
+a markdown document with a title, tags, a creation date and an edit history.
+the text shown in the editor:
+joins a title and a body into editor text
+cleans up a tag typed into the tag input
+every tag with how many notes carry it, the most used first (then by name)
+a tag listed twice on one note counts once
+the start of a note's body as plain text on one line, for previews:
+blocks a save holds at most on a shared hub (one's own machine:
+blocks one call adds or changes at most
+what a block shows, checked against the save:
+blocks as JSON, with what their textures are:
+each text once (however many blocks show it), each picture's size and name
+the fields given replace the block's, the rest stay
+the text is sent once for the two blocks showing it
+move keeps the size, scale keeps the place
+their copies are 3 further back
+a merge finds the text in the target, whatever its key there
+Training runs on a thread of its own:
+how many memories and notes a search, a list or a neighbour search looks through
+a generate head's held-out bits per byte (spec models)
+why it runs on the CPU when the GPU was asked for
+jobs by save file and classifier
+whether jobs may run on the GPU (a shared hub:
+each workspace runs at most this many trainings and indexings
+a hub's for its members
+the workspace folder a job key's save is in
+the job mustn't stay "running" with nothing behind it
+a class given by name or index
+the text a call is about:
+steering from the args over the current one:
+texts to measure the bias on:
+the classifier's own training texts, or the save's
+a list's head isn't one of its texts
+indexing jobs by save file and classifier
+the largest module taken through the app's calls
+every classifiers store open in this process, by file (redb holds a file once)
+shared with whoever has them open already (a training thread, say)
+the last holder may still be closing the file:
+its handle is gone from the map but redb hasn't let go of the lock yet, so wait a moment
+spec model records kept here by older saves move into the save
+the open save's name and classifiers
+the ops that need a save's models:
+the classifiers stay out (their lists would point elsewhere);
+a GPU asked for where there's none trains on the CPU and says so;
+a shared hub refuses the GPU unless its admin allowed it
+in the background, then waited for
+yes raises the class for that text, no lowers it
+taken back, one at a time, to exactly what it said before
+a bias towards fruit moves things, and the report says how much
+outputs become a list another classifier can train on
+it finishes, and another can start after
+merging one entry graph into another, and the forge (several saves added, taken away or kept where they agree, then narrowed by a filter).
+An entry is known by its mime and rendered text, so the same text in two saves is one entry in the result (the target's own, when it has it);
+new entries get fresh ids and keep their times.
+Lists come along as (head, member) pairs in their order, tags with the entries carrying them, and notes-on, placements and other relations when both ends came along.
+an entry as the forge sees it:
+which of the sources it came from
+what a save (or a combination of saves) holds
+where each key a link names can be read from
+everything in a save (tag entries come with what they tag, not on their own)
+the saves in order, each added, taken away or kept where it agrees with what's so far
+what the forge's result is narrowed to
+words a text must contain;
+new memories (entries that aren't notes) and notes
+their ends come along when the filter left them out
+tags, and the relations both of whose ends came
+one whole save into another
+a save's spec models, pictures and blocks into another (a merge's second half;
+Pictures are known by their content hash, so one in both saves stays one;
+A spec model whose name the target has already:
+the same spec (its JSON as written) is the same model and nothing changes;
+Spec models arrive untrained (their weights live in the source's models file).
+a text block finds its text in the target (the entries came first), a picture block its picture
+past this many lists the grid of how alike every two are (lists² numbers) is left out
+a note shows as its title
+everything worth knowing about a text's numbers:
+how many notes and memories (entries that are neither notes nor tags) a save holds
+for each key, its sums, length, kind, word types, when it was written and the lists it is in
+every list a text is in:
+the heads of the member edges pointing at it
+about the size the app's texts are:
+half a unit per character, half a unit high
+the ops that only read, or make room:
+they work whatever a quota says
+the ops that make a save
+saved filters' results where the note names them
+a save as a bundle:
+what a bundle holds to restore:
+its texts rows (weum's or a backup's) and, from a whole backup, everything else
+candidates a generate call draws at most, on a shared hub and on one's own machine
+bytes a generate or run call writes at most on a shared hub
+weights a spec model may have on a shared hub (an estimate from its trunk)
+models kept loaded for run and generate
+without any, a shared hub loads none.
+A machine of one's own (no limits) loads any folder.
+where a spec's pretrained folder is, under the limits
+the model folders a shared hub offers (each holding a config.json)
+a spec under the limits:
+on a shared hub its pretrained folder is one the hub allows, its trunk not too big, and it runs on the CPU
+a spec fit to store:
+checked, under the limits, its name free of the save's classifiers (critics find models by name)
+an entry's text as a value of the spec's input
+what the spec's data queries find in the save, read now (a training's snapshot)
+loaded models by save file and name, with the record version they were loaded at
+the spec with its pretrained folder where it is under the limits
+the model as stored (its current spec over its trained weights), or a fresh one from the spec (a pretrained one as its checkpoint has it)
+a generated or given value as JSON:
+the input of a run or generate call:
+a picture of the save, by id, scaled to a picture model's size
+a device asked for at training time overrides the spec's;
+a GPU this build or machine lacks falls back to the CPU, saying why
+a spec model, or a classifier of the save (its head is its name)
+the spec as text works too
+trained, in the background, then waited for
+it may have finished already
+the critic is the other model;
+the same seed, the same candidates
+a generator's run writes after the input
+a classifier of the save judges too:
+its head is its name
+a spec model can't take a classifier's name
+an edit that keeps the shape keeps the weights;
+one that changes it drops them
+across reopening, the models and their weights are there
+in a bundle, out and back into a new save
+a shape change drops the weights
+one's own machine loads any folder, untrained (as the checkpoint has it) or tuned
+a shared hub only its own folders, by name
+too big a trunk, the GPU
+a save from before records lived in it:
+its models file holds records and weights;
+opening it moves the records into the save, and the trained model answers as before
+put the layout back as it was:
+the record in the models file, no fit row
+the records travel in the save:
+the same spec is the same model)
+a backup's other.json carries them
+a different "kind" in the twin, then the twin merged into notes
+a picture model learns from the save's pictures by list, and reads one by id
+pictures data needs a picture input, and a list that has pictures
+a picture's bytes at most, on a shared hub and on one's own machine
+pictures a save holds at most on a shared hub (one's own machine:
+a side in pixels at most
+a thumbnail's side at most
+what a picture file is:
+its mime and size, decoded to check it reads
+a data URL's prefix is fine too
+a small PNG of one colour
+the same bytes again are the same picture
+a path only on one's own machine
+deleted, out of its lists too
+and a merge (the same picture stays one)
+most saves one forge call reads
+every graph this process has open, by file:
+redb holds a file once per process, so a save that's still busy elsewhere (a training thread, another call) is shared, not opened twice
+the graph in a file, shared with whoever has it open already;
+a file another holder is letting go of is tried again for a moment
+a save's name made safe for a file name
+a folder of saves and the open one
+the save made when there's none
+renamed, copied and deleted with it (the hub's classifiers)
+the open save, opening the last one (or making the default) the first time
+opens another save (made when it's new)
+let go of the old one first
+lets go of a save if it's the open one
+the open one, or another opened for the call
+the open one is counted;
+others only when nothing else has them open
+a new save from texts rows and, from a whole backup, the rest
+one op of the app API:
+the texts in one file, everything else in another
+whether a file is an entry graph save (read only;
+a file that needs repair is checked on a writable open).
+For checking uploads before opening them.
+a materialized view, its results put in as a list when the note is read.
+an entry's text as written:
+None when it holds calls (a function or template made elsewhere)
+a saved filter's results (the filters view's, by name) as a markdown list
+a list wants a line of its own
+the other members of the lists a word is in, with their sums:
+the list's head (its name) stands for the others too
+an entry that refers to another:
+the note with a ref has the sums of the same note written out
+and they're found by the sum they share
+when the referenced entry changes, the note shows it and is found by its words
+saving the source again keeps the ref (not the text it shows)
+a note can't refer to itself
+alternatives from lists, the ones keeping the sum first
+a copy holds the same
+notes take away a save holding only truth
+a note reads as its title and markdown and shows as its title.
+Lists are member edges, tags tag edges.
+an entry's ref, the way the apps' keys name it
+a note as a classifier reads it:
+its title, a blank line, its markdown
+SIMD text kernels, ported from weum:
+the whitespace tokenizer and the gematria dual sum, plus the letter frequency table.
+Each kernel has an AVX2 path (picked at runtime) and a scalar path, which is also the reference the tests hold the AVX2 path to.
+For Latin letters that is the reversed value, so the SIMD dual sum covers them and only text with Greek or Hebrew in it takes a scalar pass over its characters.
+the three gematria measures of a text and its letter count
+AVX2 support was just checked
+the Atbash sum of the Greek and Hebrew letters of a text:
+lowercase once, then one compare + popcount per letter
+the frequency table as a compact key, letters in order with their counts:
+texts that are anagrams of each other share it
+a readable form of a frequency key:
+tokens are the raw bytes between delimiters, in order
+one delimiter bitmask per block, from which word starts and ends fall out as bit transitions (carried across blocks)
+a bit per byte saying whether the byte before it was part of a word
+distinct tokens in order of first appearance
+a small deterministic generator, so failures reproduce
+every byte value, at every alignment
+models made from a declarative spec.
+weights whose shape no longer matches their record are stale and unused.
+one training, as the history keeps it
+the generate head's held-out bits per byte
+per head with validation examples:
+how many weights the trained model has
+a spec model as stored
+the spec's JSON as written (checked when it was stored)
+bumped by every change (an edit, a training), so a training that started before an edit doesn't write over it
+whether it has been trained (its weights may still be missing:
+what an edit does to the trained weights
+a spec model in a bundle:
+its record and the trained model in base64
+the parts of a spec that shape the weights:
+when they change, the trained weights no longer fit and are dropped;
+every spec model with its fitting weights, for a bundle
+puts a bundle's spec models in (replacing ones of the same name);
+moves the records a models file still holds (saves from before records lived in the save) into the save, losslessly:
+each record goes in as it was, its weights stay and are marked as fitting it.
+A record the save has already under that name is kept when its version is as new or newer;
+the save's own is newer:
+the older one is kept beside it, untrained
+its weights (from before fits were kept, so they are its) go with it
+only once they're all in the save do they leave the models file
+a models file from before:
+records and weights both in it
+the save has a newer "b" already
+a's weights fit it still;
+the models file keeps no records
+a shape change makes the weights stale
+memory texts laid out by their sums.
+only ASCII letters count, so bytes do the same
+adds a node, returning its index (an existing node's if the id is taken)
+steps until still, or the step or time budget runs out;
+the hue of a bucket's underline from its Q
+the triangle a text makes:
+the angles opposite s, r and t, in degrees
+t from the left corner, s from the right one
+Note storage in an embedded redb database:
+The same database holds the memories and search tables (see memory.rs);
+every note change updates those in the same transaction.
+Every write is a durable transaction.
+bumped when what gets indexed changes, so existing databases are re-indexed
+where the classifiers' texts and lists come from, when not these tables
+how many notes and memories a save holds, read without taking it over (it can't be the one that's open)
+a save the app didn't close cleanly needs redb's repair, which only a writable open does;
+it's not open anywhere else, so repair it the way loading it would
+how many notes and memories this one holds
+indexes notes written before the search tables existed (or by an older version)
+stores a note, giving new notes a key and creation time and recording an edit time for existing ones;
+writs exported from the old server's database) as they are, keeping their keys and dates
+Where a classifier's texts come from.
+without one, a store reads its own memories, notes and lists as before.
+a list's members, in order
+what a classifier reads of an entry (a note:
+how an entry is shown (a note:
+weum's word search with its variations, in the order found
+the entry with exactly this text (made when there's none);
+returns how many members it had
+whether an entry is a note
+the texts' source, when it isn't this store's own tables
+whether a ref is a note (by its kind, or the source's say)
+one place the app reads, writes, lists and moves them, and opens saves.
+opens (or makes) a redb database at a path, on a desktop or in the browser
+hands a file to the person:
+into Downloads on a desktop, through the browser's own download in the page;
+a piece of the reduction line;
+numbers are clickable in the view
+the prime factors and their sum, times the digit sum, then the chain of (prime factor sum × digit sum) steps until it repeats, its total and digit sums
+browsing and fetching saves and classifiers, sharing one with an app token, and who the token belongs to.
+pending, approved or rejected (only a public one's matters)
+a listed one, an unlisted one by its id, or your own (with your token)
+every save and classifier of yours on the hub, private and unlisted ones too
+the login cookie would ride along on a form another site posts here (the hub's own pages share through /upload, which checks where a form came from)
+the classifiers it builds on:
+the user behind the request's app token (and only a token:
+a cookie can ride along on a request from another site, a bearer token can't)
+The app, run by the hub:
+whose saves a call works on:
+otherwise the signed-in, active member's own
+how many saves a member may keep on a shared hub
+calls that only read, or make room:
+they work whatever the quota says
+the open save's name and graph
+the open save's name and its classifiers
+one operation on a workspace;
+runs off the async threads (redb blocks)
+into the open save instead of beside it)
+every op of the app API on the graph, through a workspace
+a note on an entry
+counts, and notes by all or any of them
+listen and silent are anagrams:
+their letter vectors point the same way
+a bundle it can't read leaves nothing behind
+weum's all-of-it.json and a backup's two documents
+a member's saves stay under the quota:
+past it, only reading and deleting work
+the calls that need room are the ones not listed as making none
+The web app's side of the hub:
+the status for a refusal:
+the page when the web app wasn't built into this binary
+signed in and let in, or off to log in (or a page saying it waits)
+the router matches both here
+how many calls one member's app may have running at once, and how many sockets it may hold open:
+one person's tabs can't take every thread the hub has
+each owner's turnstile for calls, and how many sockets they have open
+too many open) or out
+runs an operation for whoever's asking
+who's asking before anything is read:
+a body from no one isn't parsed at all
+whether a request comes from one of the hub's own pages (a WebSocket carries the login cookie, so another site mustn't open one)
+a WebSocket of calls and answers
+no socket for no one (the app posts instead, and hears why)
+a workspace save to take home
+it must be a save:
+the hub's own check, on a copy
+a hub save into the workspace, beside the others or merged into the open one
+an approved hub classifier into the open save;
+its classes go to lists by name.
+one member's tabs hold at most SOCKETS sockets and CALLSATONCE calls
+Passwords (argon2), sessions (a random cookie whose hash is stored), app tokens (the same, sent as a bearer token by the app), one time login links, and a small limit on how often an address may try to log in, join or upload.
+a random url-safe secret
+a short id for a save
+a hash to check a password against when there's no account by that name, so a login for nobody takes as long as one for someone
+returns it (it's shown once, only its hash is kept)
+makes a login link's secret, good once within an hour
+who an address is, kept as a hash so the hub never stores addresses
+Sharing classifiers on the hub, beside the saves:
+people browse, star and download them, and the web app takes one into its open save or shares one from it.
+Points and badges come the same way as for saves.
+the largest module the hub reads, whatever the upload limit
+a module read and summed up, off the async threads;
+a bad file (or a panic while reading it) is an error, never a crash
+the largest classifier module taken
+reads it strictly, files it, and queues it for review (or lets it straight in for trusted users).
+an empty name or description comes from the module.
+written beside, then moved in, so a half written file is never served
+stars or unstars a classifier;
+its author gets points for it
+counts a download (or a take into a save);
+the author gets a point the first time each person takes it
+an admin's verdict on a classifier:
+deletes a shared classifier and its file
+whether a user may change or delete a shared classifier:
+its author or an admin
+takes a hub classifier's module into a workspace's open save:
+Runs on a blocking thread.
+a classifier from a workspace's open save as module bytes, everything it builds on bundled.
+a workspace with a trained classifier "kind" telling fruit from rocks
+the save stars aren't the classifier's
+taken into another save, where it predicts
+its classes became lists of the same names there, new ones
+a new version keeps its stars and downloads;
+a trusted one goes straight in
+only its author or an admin may change it
+one flipped byte anywhere breaks the checksum
+forged with the checksum fixed up:
+a huge manifest length, weights that don't match their hash, a manifest that isn't JSON
+too big for the hub
+nothing filed, nothing left in the scratch place
+the good one still goes in
+a waiting account can't share
+The classifier sharing site end to end, through the router:
+sharing from a workspace save, review, the grid and the API, downloads, taking into another save where it predicts, and the doors that must stay shut (other sites, other people, bad files, odd ids).
+saul's workspace has a trained classifier (made, then let go so the hub opens it)
+another site can't make saul share
+not in the grid, not for others to see, nor to take
+the admin panel shows it waiting
+only an admin's verdict counts
+ann takes it into her save, where it predicts
+ann can't change or delete saul's
+the API takes uploads with a token only, and refuses bad files
+it's gone, file and all
+the doors around the app and the API:
+who may post what, from where, and what every answer says about framing
+sharing a save through the API takes a token:
+the login cookie alone, which another site's form would carry, is turned away
+no one gets the app's calls or a socket
+bea does, from the hub's own page only
+nothing is framed by another site;
+the app's page runs only the hub's scripts
+the app's page has no inline script for that policy to stop
+a classifier the asker may see:
+approved ones, their own, or any for an admin
+a classifier the asker may change
+a file name for a module's download
+the new version is the author's, even when an admin sends it
+a visibility as a form sent it:
+The game in the hub:
+points for sharing saves people use, levels with titles from the scribes and cipherers of old, and badges for milestones.
+Points come from what other people do with your saves, so they can't be farmed alone:
+a download counts once per person, a star once per account, and starring your own save earns nothing.
+Shared classifiers earn the same way as saves, and have badges of their own.
+an admin let one of your saves in
+someone starred one of your saves
+someone took one of your saves for the first time
+an admin featured one of your saves
+each level costs a little more than the last
+points needed to reach a level
+the badges a user has earned, from their saves, their classifiers and what they've done
+Both are built into the binary, so the page is the same static text for everyone.
+The markdown is turned into HTML here, every text escaped and any raw HTML in it shown as text, links kept to the page's own headings and to https.
+where the guide's links to the rest of the repository go
+a heading's anchor, the way GitHub makes them, so the guide's links work in both places
+where a link may go:
+the page's own headings, the repository's files, https
+Anything else is left out, and raw HTML shows as text.
+its source and alt text
+every link to a heading finds it, and every picture is built in
+What the server does, apart from how it's asked:
+The web pages and the API both call these.
+the address people reach the server at, for links printed in the terminal
+how to reach whoever runs the server, for the about page (may be empty)
+how many bytes of saves and classifiers each member may keep on the hub, private and unlisted ones included (0:
+the terms of use and the privacy note, as markdown files (they may be missing)
+how people get an account
+anyone may join, and is in at once
+an admin lets them in (an invite code skips the wait)
+only with an invite code from an admin (or a trusted member, if the admins allow it)
+in a few words, for the about page and the admin panel
+what an uploader says about a save
+none keeps what a new version replaces (or public, for a new one)
+with a visibility as sent:
+empty keeps it, anything else must be private, unlisted or public
+whether a user may share saves and star them, and use the web app
+whether trusted members may make invites too (admins always may)
+whether a user may make invite codes
+how many bytes a member keeps shared on the hub:
+every save and classifier of theirs, private and unlisted ones too
+takes an uploaded file in:
+checks it's a save, files it, and queues it for review (or lets it straight in for trusted users).
+check a copy, so nothing outside the hub's folder is opened
+the stored record, not the caller's copy:
+stars and downloads may have moved since
+who may see a save:
+A public one that wasn't let in yet waits for an admin (private and unlisted ones skip the review);
+one let in before earns its points the first time it's public.
+the save's author gets points for it
+counts a download of a listed save;
+the author gets a point the first time each person takes it (private and unlisted ones aren't counted)
+an admin's verdict on a save
+the points come with its first approval in public (a private one's when it's made public)
+deletes a save and its file
+an admin's verdict on an account
+makes or promotes an admin from the command line and returns a login link
+approving again pays nothing more
+a trusted user's new version goes straight in
+Looking inside an uploaded save:
+it has to be an entry graph the app made (a redb file with the graph's tables and format, docs/format.md), and its counts, some memories with their sums and the note titles go on its page.
+The hub opens its own copy of the upload, and a file that makes redb fail (or panic) is turned down rather than taking the hub with it.
+how many memories and titles a save's page shows
+(the web app only checks a file is a save;
+the hub keeps what it found)
+a save copied while the app has it open (the usual case) needs redb's repair, which a read only open won't do;
+the hub only ever reads its own copy, so it may write to it
+spread the sample over the whole save rather than its first keys
+a save like the app's:
+a note "Hello" and these memories
+a redb file without the graph's tables (an old save, say)
+the app still has it open, the way it does when it shares its save
+codes that let people join.
+Admins make them, and trusted members too when the admins allow it;
+each has a number of uses and may run out after some days.
+Only a code's hash is kept, so its link is shown once, when it's made.
+A code typed at the join form counts against the address (10 an hour), so codes can't be guessed.
+the most uses one invite may have, and the longest it may last
+spaces around it and the case don't matter
+twelve letters and digits easy to read aloud, in threes of four
+where an invite's code takes people
+until used up or taken back);
+its maker or an admin
+an invite in a list
+live, used up, run out or taken back
+someone who may make invites, or a page saying why not
+your invites, and a form for a new one
+shown once, on this page
+its maker or an admin takes it back
+the join form with the code filled in
+a self-hosted server for the anend notes app.
+As a hub it's a place to share saves and classifiers:
+people join (by invitation, application or freely), share saves, star and download each other's, and earn points, levels and badges for saves others use;
+the app browses and shares through its JSON API.
+As the app's server it runs the web app on each member's own saves.
+the server's routes for a mode:
+a route the mode doesn't serve doesn't exist
+between the app and the hub:
+only when both are served
+the router with the error pages
+the join policy at start:
+else what the database keeps;
+and for a new one, invite-only
+uploads that were being checked when the server stopped
+the flags, or what the admin panel saved
+made in the first admin's name
+the web app (each member's saves in a workspace of their own) and the app's API;
+all of it, over one account system;
+the web app alone for one person on their own machine, with no login.
+a mode the build doesn't carry is refused when the server starts.
+the sharing site and its API
+the web app and its API
+one workspace and no login (implies the app alone)
+what this build carries, which is also the default mode
+refused when the build left that half out
+whether this build can run the mode
+the mode the server started in (set once, by main)
+one workspace for everyone and no login:
+a daemon on your own machine
+Through the router, for each mode:
+a member still waiting for an admin, with a session
+a GET's status, where it redirects, and its body
+every mode has the account pages and the pages about the server;
+the hub's and the app's routes exist only in their modes, and the nav offers only what's there
+the app and the hub meet only in both
+the nav and the front page follow the mode
+a missing page is the hub's own page;
+no secrets in the log's paths
+the web app needs a signed-in, admitted member:
+its page sends others to log in, and its files, calls and socket refuse them;
+the app's page says which server it's on
+logging in goes back where it was asked from, and only to this server
+the policy, codes with uses and an end, taking them back, who may make them
+only admins invite, until they let trusted members
+an invite for two, shown once
+its link fills in the join form
+two people join with it, a third can't
+the admin panel lists every invite, and takes one back
+someone else can't take it back;
+its maker (or an admin) can
+a code that ran out
+under apply, a code skips the wait;
+private and unlisted saves and classifiers stay out of every list;
+a private one is its owner's alone, an unlisted one anyone's with the link
+the public one waits, so the classifier tests' grid stays theirs
+the owner sees theirs on their own page, marked
+its owner only (not other members, not admins, not the API without the token)
+downloads of unlisted ones aren't counted, so they earn nothing
+only the owner changes it;
+going public from a member's account waits for review
+a bad visibility is refused
+its script and wasm come with the right types
+built without the web app:
+plain lines, or one JSON object a line for a log collector
+a path fit for the log:
+the secrets in login links and invite links left out
+logs each request when its answer is ready:
+No addresses or names are logged.
+an error answer with nothing in it (a refused socket, a method not allowed, a panic) gets the hub's own page, or a JSON error for the APIs
+The pages about the server itself:
+what a quota allows, for people
+where the save or classifier it's about lives
+starring, unstarring and starring again is one thing worth telling
+only point at saves and classifiers everyone can see
+a listed one, an unlisted one by its link, their own, or (for an admin) a public one waiting for a verdict
+a file name for a save's download
+what an upload form sent
+an admin can only remove, not reveal)
+what changing who sees something did, in words
+back where the admin came from, unless the save is gone
+the https certificate and key.
+Saved in server.json in the data folder;
+the hub reads it when it starts.
+a browser on the hub's own machine:
+the connection comes from loopback and no proxy passed it on (a reverse proxy on the same machine makes every request look local, so anything carrying a forwarding header isn't, whatever --behind-proxy says)
+a PEM file that holds what it should
+only a browser on this machine, not one a proxy here passed on
+Everything is JSON in redb tables, like the app's notes.
+Every build has all of it (a hub-only or app-only build reads the same database), so the parts one build doesn't use aren't dead code to fix.
+settings kept in the database (the join policy, who may invite)
+their uploads skip the review
+waiting for an admin to let them in
+empty until they set one (an admin made by a login link)
+what they wrote when applying
+the order they joined in, from 1
+who made the invite they joined with
+the first characters, so a list of tokens can be told apart
+who may see a save or a classifier on the hub
+never listed, never reviewed, downloaded by its owner alone
+listed in the grids, search, feeds and the API once an admin lets it in (everything shared before visibility existed is public)
+a private one only its author;
+an unlisted one anyone with the link;
+a public one anyone once it's approved, and its author and the admins before
+a memory from a save, shown on its page
+why an admin turned it down
+its uploader got the points for its first approval
+and for its first feature
+in the grid, search, feeds and the API's lists:
+public and not yet looked at (private and unlisted ones skip the review)
+a classifier module shared on the hub:
+what its uploader said and what its file holds
+the classifier's own name inside the module
+weights bundled in the module
+public and not yet looked at
+its key in the stars and downloads tables, apart from the saves'
+the prefix of a classifier's key in the stars and downloads tables
+a record with stars and downloads counted on it
+an id the hub made (letters and digits only), so it's safe in a file's name
+a code (kept only as its hash) that lets people join an invite-only hub
+the start of the code's hash, as hex:
+how lists and links name it
+the code's first characters, so a list can be told apart
+what it's for, for whoever made it
+it doesn't run out by time
+how many people may join with it
+why it can't be used now, if it can't
+a save id, when it's about one
+where a save's file lives
+a scratch place for uploads being checked
+fails if the name is taken
+changes a user in place
+removes a user (a turned down application)
+ends every session of a user (banned, or their password changed)
+a user's tokens, with their hashes (as hex) to revoke them by
+uses up a login link
+removes a save's record, its stars and downloads (the file is the caller's)
+stars or unstars a save;
+returns whether it's starred now and its star count
+how many saves, and how many classifiers, a user has starred
+how many saves a user has starred
+true the first time this downloader takes this save
+removes a classifier's record, its stars and downloads (the file is the caller's)
+true the first time this downloader takes this classifier
+changes the invite with this id in place
+a classifier's stars and downloads sit beside the saves', apart
+What the router tests share:
+one hub for the whole test run (it's a global, set once), people with sessions, and requests through a router built for a mode.
+Not every build's tests use every helper.
+the hub every router test shares (it's a global, set once)
+an active member with a session;
+the server as main builds it, for a mode
+the server in both modes
+a GET in a mode
+a form POST in a mode, without a cookie when it's empty
+The pages every mode has, and what they share:
+The hub's own pages are in saves.rs and clsweb.rs.
+forms post back and redirect with a one-line message in a cookie.
+what the server runs, for this request
+A page on another site can make the browser send requests to a name it controls that resolves to this machine (DNS rebinding);
+such a request carries that name as its Host.
+no framing by other sites (the admin panel's buttons can't be clicked through a disguise), no sniffing a download into a page, and addresses kept to the hub when following a link out.
+The web app's page also gets a content security policy:
+scripts only from the hub, so a note that slipped some html past the markdown renderer still couldn't run anything.
+its own scripts, its WebAssembly, and what it builds in the page (Dioxus's interop evaluates JavaScript it sends;
+pictures from anywhere on the web;
+loads the user behind the session cookie (or app token), turns away forms posted from other sites, and picks up the message left by the last redirect
+leaves a message for the next page and goes there;
+a colour for a name, from its gematria
+saves and people waiting for an admin
+the sharing site is served
+the web app is served
+the web app alone, for one person, with no login
+the asker may make invite codes
+the server's line about itself, for the pages' description
+the front page, named for what's on it
+the logged in, active user, or a message saying why not
+a save the asker may see:
+approved ones, or their own, or any for an admin a classifier in the grid
+classes not shown on the card
+a share as a whole percent, or empty
+a classifier's row in the admin panel
+one of the three visibilities, as the controls show it
+private, unlisted and public, with their icons and what each means
+the join form, with an invite code filled in when there is one
+who sent the invite, when it's good
+checked before anything is made (a wrong one counts against the address, so codes can't be guessed)
+the invite's use is taken before the account is made:
+two people can't share its last use
+as slow as a real check, so the answer's time doesn't say who has an account
+a one time link from the terminal or an admin
+the owner's own that aren't in the grid:
+private, unlisted, waiting or turned down
+who the token or session belongs to
+the admin panel (with a just-made invite link shown once, when there is one)
+a new build that changes them changes the version
+asked for with this build's version:
+keep it for a year;
+It is only a picture:
+the control it sits in carries the name (its words, or an aria-label and a data-tip when it is only the icon)
+the icon beside a form's button, by what the button says
+every icon a page asks for is in the sprite (scripts/icons.mjs makes it from assets/icons), and the sprite is only shapes
+the sprite has the whole set:
+run scripts/icons.mjs when it changes

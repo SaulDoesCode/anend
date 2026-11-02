@@ -5,9 +5,13 @@
 #   install -d -o anend -g anend /var/lib/anend-hub
 #   install -m 755 anend-hub /usr/local/bin/
 #
-# For a daemon only you use, on your own machine, add --local and keep the address on
-# 127.0.0.1. For https, give --tls-cert and --tls-key (readable by the anend user), or
-# set them on /admin/server from the machine itself.
+# What it runs: --mode both (the default), hub (the sharing site alone) or app (the web
+# app alone); --join invite (the default for a new server), apply or open. For a daemon
+# only you use, on your own machine, use --local and keep the address on 127.0.0.1. For
+# https, give --tls-cert and --tls-key (readable by the anend user), or put it behind a
+# proxy (as below). Terms and privacy: terms.md and privacy.md in /var/lib/anend-hub
+# (examples in hub/config/). docs/deploy.md has the rest. Stopping waits for requests in
+# flight (up to 20 s).
 
 [Unit]
 Description=anend hub: shared saves, the web app and its API
@@ -18,9 +22,10 @@ Wants=network-online.target
 User=anend
 Group=anend
 WorkingDirectory=/var/lib/anend-hub
-ExecStart=/usr/local/bin/anend-hub --data /var/lib/anend-hub --addr 127.0.0.1:8080 --url https://hub.example.org --behind-proxy
+ExecStart=/usr/local/bin/anend-hub --data /var/lib/anend-hub --addr 127.0.0.1:8080 --url https://hub.example.org --behind-proxy --mode both --join invite --log json
 Restart=on-failure
 RestartSec=3
+TimeoutStopSec=30
 
 # keep it to its own folder
 NoNewPrivileges=true

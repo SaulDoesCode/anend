@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}invites · {% endblock %}
+{% block main %}
+<section class="card">
+  <h2 class="with-icon">{{ crate::web::icon("link") }}invite someone</h2>
+  <p class="dim">{% if join == "invite" %}This server is invite-only: an invite link is the way in.{% else if join == "apply" %}People can apply here, and an invite lets them in at once.{% else %}Anyone may join here; an invite still says who brought them.{% endif %}</p>
+  {% let extra = "" %}
+  {% include "invite_form.html" %}
+</section>
+<section class="card">
+  <h3>your invites</h3>
+  {% include "invites_table.html" %}
+</section>
+{% endblock %}

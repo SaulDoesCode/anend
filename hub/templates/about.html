@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}about · {% endblock %}
+{% block main %}
+<section class="card narrow">
+  <h2>{{ l.hub }}</h2>
+  {% if !about.is_empty() %}<p>{{ about }}</p>{% endif %}
+  <table class="facts">
+    <tr><th>what it runs</th><td>{% if l.local %}the anend app, for one person on this machine{% else if l.hub_on && l.app_on %}a hub for sharing saves and classifiers, and the anend app in the browser{% else if l.hub_on %}a hub for sharing saves and classifiers{% else %}the anend app in the browser{% endif %}</td></tr>
+    {% if !l.local %}<tr><th>joining</th><td>{{ join_about }}</td></tr>{% endif %}
+    {% if l.hub_on %}<tr><th>uploads</th><td>up to {{ max_upload }} each; {{ share_quota }} kept on the hub for each member, private ones included</td></tr>
+    <tr><th>review</th><td>an admin looks at each public save and classifier before it's listed; private and unlisted ones are never listed</td></tr>{% endif %}
+    {% if l.app_on && !l.local %}<tr><th>your saves in the app</th><td>{{ app_quota }} for each member</td></tr>{% endif %}
+    {% if !contact.is_empty() %}<tr><th>who runs it</th><td>{{ contact }}</td></tr>{% endif %}
+    <tr><th>address</th><td><code>{{ url }}</code></td></tr>
+    <tr><th>software</th><td><a href="https://github.com/SaulDoesCode/anend">anend</a> {{ version }}</td></tr>
+  </table>
+  <p class="row"><a class="btn small with-text" href="/terms">{{ crate::web::icon("text") }}terms of use</a><a class="btn small with-text" href="/privacy">{{ crate::web::icon("shield") }}privacy</a><a class="btn small with-text" href="/guide">{{ crate::web::icon("help") }}the guide</a></p>
+</section>
+{% endblock %}

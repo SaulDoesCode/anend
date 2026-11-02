@@ -106,7 +106,7 @@ fn vowel(c: u8) -> u64 {
 }
 
 fn consonant(c: u8) -> u64 {
-    // weum's table, t and v both 16 included
+    // weum's table, with t and v as separate values (t 16, v 17), as the user corrected it
     match c {
         b'b' => 1,
         b'c' => 2,
@@ -123,10 +123,11 @@ fn consonant(c: u8) -> u64 {
         b'q' => 13,
         b'r' => 14,
         b's' => 15,
-        b't' | b'v' => 16,
-        b'w' => 17,
-        b'x' => 18,
-        b'z' => 19,
+        b't' => 16,
+        b'v' => 17,
+        b'w' => 18,
+        b'x' => 19,
+        b'z' => 20,
         _ => 0,
     }
 }
@@ -387,12 +388,30 @@ mod tests {
     }
 
     #[test]
+    fn consonants_have_t_and_v_apart() {
+        assert_eq!(b"tvwxz".map(consonant), [16, 17, 18, 19, 20]);
+        assert_eq!(
+            b"bcdfghjklmnpqrstvwxz"
+                .iter()
+                .map(|&c| consonant(c))
+                .collect::<Vec<_>>(),
+            (1..=20).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn gsum_detail_matches_weum() {
         let r = reference();
         for (text, expected) in r["gsum"].as_object().unwrap() {
             let line = expected[2].as_str().unwrap();
             let got = gsum_detail(text);
-            assert!(got.starts_with(line), "gsum({:?}, 1): {:?} vs {:?}", text, got, line);
+            // weum's own table gave t and v both 16 (and w 17, x 18, z 19); the consonant
+            // figure follows the corrected table, everything else is weum's line verbatim
+            let (head, rest) = line.split_once(" c ").unwrap();
+            let (_, tail) = rest.split_once(' ').unwrap();
+            let c: u64 = text.bytes().map(|b| consonant(b.to_ascii_lowercase())).sum();
+            let line = format!("{head} c {c} {tail}");
+            assert!(got.starts_with(&line), "gsum({:?}, 1): {:?} vs {:?}", text, got, line);
         }
     }
 }

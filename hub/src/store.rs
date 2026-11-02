@@ -1,6 +1,10 @@
 //! The hub's own database: accounts, sessions, app tokens, login links, the saves' details,
 //! stars and downloads, and a log of what happened. The save files themselves sit next to
 //! it in `saves/`. Everything is JSON in redb tables, like the app's notes.
+//!
+//! Every build has all of it (a hub-only or app-only build reads the same database), so
+//! the parts one build doesn't use aren't dead code to fix.
+#![cfg_attr(not(all(feature = "hub", feature = "app")), allow(dead_code))]
 
 use chrono::{DateTime, Utc};
 use redb::{
@@ -28,7 +32,10 @@ const DOWNLOADERS: MultimapTableDefinition<&str, &str> = MultimapTableDefinition
 const CLASSIFIERS: TableDefinition<&str, &[u8]> = TableDefinition::new("classifiers");
 /// sequence number → event, newest last
 const EVENTS: TableDefinition<u64, &[u8]> = TableDefinition::new("events");
+/// settings kept in the database (the join policy, who may invite)
 const META: TableDefinition<&str, &str> = TableDefinition::new("meta");
+/// sha256 of an invite code → invite
+const INVITES: TableDefinition<&[u8], &[u8]> = TableDefinition::new("invites");
 
 pub type Result<T> = std::result::Result<T, String>;
 
@@ -72,6 +79,8 @@ pub struct User {
     pub points: i64,
     /// the order they joined in, from 1
     pub number: u64,
+    /// who made the invite they joined with
+    pub invited_by: String,
 }
 
 impl User {
@@ -99,6 +108,51 @@ pub struct Token {
 pub struct Link {
     pub user: String,
     pub expires: DateTime<Utc>,
+}
+
+/// who may see a save or a classifier on the hub
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Visibility {
+    /// only its owner: never listed, never reviewed, downloaded by its owner alone
+    Private,
+    /// anyone with its link; never listed, never reviewed
+    Unlisted,
+    /// listed in the grids, search, feeds and the API once an admin lets it in (everything
+    /// shared before visibility existed is public)
+    #[default]
+    Public,
+}
+
+impl Visibility {
+    pub fn parse(s: &str) -> Option<Visibility> {
+        match s.trim() {
+            "private" => Some(Visibility::Private),
+            "unlisted" => Some(Visibility::Unlisted),
+            "public" => Some(Visibility::Public),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Visibility::Private => "private",
+            Visibility::Unlisted => "unlisted",
+            Visibility::Public => "public",
+        }
+    }
+}
+
+/// whether `user` may see a thing `author` shared with `vis` and `status`: a private one
+/// only its author; an unlisted one anyone with the link; a public one anyone once it's
+/// approved, and its author and the admins before
+pub fn may_see(vis: Visibility, status: Status, author: &str, user: Option<&User>) -> bool {
+    let own = user.is_some_and(|u| u.name.eq_ignore_ascii_case(author));
+    match vis {
+        Visibility::Private => own,
+        Visibility::Unlisted => true,
+        Visibility::Public => status == Status::Approved || own || user.is_some_and(|u| u.is_admin()),
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,6 +198,19 @@ pub struct Save {
     pub rewarded: bool,
     /// and for its first feature
     pub feature_rewarded: bool,
+    pub visibility: Visibility,
+}
+
+impl Save {
+    /// in the grid, search, feeds and the API's lists: public and let in
+    pub fn listed(&self) -> bool {
+        self.visibility == Visibility::Public && self.status == Status::Approved
+    }
+
+    /// waiting for an admin: public and not yet looked at (private and unlisted ones skip the review)
+    pub fn waiting(&self) -> bool {
+        self.visibility == Visibility::Public && self.status == Status::Pending
+    }
 }
 
 /// a classifier module shared on the hub: what its uploader said and what its file holds
@@ -183,9 +250,20 @@ pub struct ClassifierRec {
     pub version: u32,
     pub rewarded: bool,
     pub feature_rewarded: bool,
+    pub visibility: Visibility,
 }
 
 impl ClassifierRec {
+    /// in the grid, search, feeds and the API's lists: public and let in
+    pub fn listed(&self) -> bool {
+        self.visibility == Visibility::Public && self.status == Status::Approved
+    }
+
+    /// waiting for an admin: public and not yet looked at
+    pub fn waiting(&self) -> bool {
+        self.visibility == Visibility::Public && self.status == Status::Pending
+    }
+
     /// its key in the stars and downloads tables, apart from the saves'
     pub fn key(&self) -> String {
         format!("{CLS}{}", self.id)
@@ -222,6 +300,43 @@ impl Counted for ClassifierRec {
 /// an id the hub made (letters and digits only), so it's safe in a file's name
 pub fn id_ok(id: &str) -> bool {
     (1..=16).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+}
+
+/// an invite: a code (kept only as its hash) that lets people join an invite-only hub
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Invite {
+    /// the start of the code's hash, as hex: how lists and links name it
+    pub id: String,
+    /// the code's first characters, so a list can be told apart
+    pub hint: String,
+    /// who made it
+    pub by: String,
+    /// what it's for, for whoever made it
+    pub note: String,
+    pub created: DateTime<Utc>,
+    /// none: it doesn't run out by time
+    pub expires: Option<DateTime<Utc>>,
+    /// how many people may join with it
+    pub max_uses: u32,
+    /// who joined with it
+    pub used_by: Vec<String>,
+    pub revoked: bool,
+}
+
+impl Invite {
+    /// why it can't be used now, if it can't
+    pub fn spent(&self) -> Option<&'static str> {
+        if self.revoked {
+            Some("that invite was taken back")
+        } else if self.expires.is_some_and(|e| e <= Utc::now()) {
+            Some("that invite has run out")
+        } else if self.used_by.len() as u32 >= self.max_uses {
+            Some("that invite has been used up")
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -264,6 +379,7 @@ impl Store {
         txn.open_table(CLASSIFIERS).map_err(err)?;
         txn.open_table(EVENTS).map_err(err)?;
         txn.open_table(META).map_err(err)?;
+        txn.open_table(INVITES).map_err(err)?;
         txn.commit().map_err(err)?;
         Ok(Store {
             db,
@@ -703,6 +819,89 @@ impl Store {
     /// counts a download; true the first time this downloader takes this classifier
     pub fn count_classifier_download(&self, id: &str, who: &str) -> Result<bool> {
         self.count_download_in::<ClassifierRec>(CLASSIFIERS, id, &format!("{CLS}{id}"), who)
+    }
+
+    // -------------------------------------------------------------- settings
+
+    pub fn meta(&self, key: &str) -> Result<Option<String>> {
+        let txn = self.db.begin_read().map_err(err)?;
+        let t = txn.open_table(META).map_err(err)?;
+        Ok(t.get(key).map_err(err)?.map(|v| v.value().to_string()))
+    }
+
+    pub fn set_meta(&self, key: &str, value: &str) -> Result<()> {
+        let txn = self.db.begin_write().map_err(err)?;
+        txn.open_table(META).map_err(err)?.insert(key, value).map_err(err)?;
+        txn.commit().map_err(err)
+    }
+
+    // -------------------------------------------------------------- invites
+
+    pub fn put_invite(&self, hash: &[u8], i: &Invite) -> Result<()> {
+        self.put_bytes(INVITES, hash, &put(i)?)
+    }
+
+    pub fn invite(&self, hash: &[u8]) -> Result<Option<Invite>> {
+        self.get_bytes(INVITES, hash)
+    }
+
+    /// every invite, newest first
+    pub fn invites(&self) -> Result<Vec<Invite>> {
+        let txn = self.db.begin_read().map_err(err)?;
+        let t = txn.open_table(INVITES).map_err(err)?;
+        let mut out: Vec<Invite> = Vec::new();
+        for row in t.iter().map_err(err)? {
+            let (_, v) = row.map_err(err)?;
+            out.push(get(v.value())?);
+        }
+        out.sort_by_key(|i| std::cmp::Reverse(i.created));
+        Ok(out)
+    }
+
+    /// uses an invite for `user` if it's still good, in one transaction, so two people
+    /// can't both take its last use
+    pub fn use_invite(&self, hash: &[u8], user: &str) -> Result<Invite> {
+        let txn = self.db.begin_write().map_err(err)?;
+        let inv = {
+            let mut t = txn.open_table(INVITES).map_err(err)?;
+            let mut inv: Invite = match t.get(hash).map_err(err)? {
+                Some(v) => get(v.value())?,
+                None => return Err("that invite code isn't known here".into()),
+            };
+            if let Some(why) = inv.spent() {
+                return Err(why.into());
+            }
+            inv.used_by.push(user.to_string());
+            t.insert(hash, put(&inv)?.as_slice()).map_err(err)?;
+            inv
+        };
+        txn.commit().map_err(err)?;
+        Ok(inv)
+    }
+
+    /// changes the invite with this id in place
+    pub fn update_invite(&self, id: &str, f: impl FnOnce(&mut Invite)) -> Result<Invite> {
+        let txn = self.db.begin_write().map_err(err)?;
+        let inv = {
+            let mut t = txn.open_table(INVITES).map_err(err)?;
+            let mut found = None;
+            for row in t.iter().map_err(err)? {
+                let (k, v) = row.map_err(err)?;
+                let inv: Invite = get(v.value())?;
+                if !id.is_empty() && inv.id == id {
+                    found = Some((k.value().to_vec(), inv));
+                    break;
+                }
+            }
+            let Some((k, mut inv)) = found else {
+                return Err("no such invite".into());
+            };
+            f(&mut inv);
+            t.insert(k.as_slice(), put(&inv)?.as_slice()).map_err(err)?;
+            inv
+        };
+        txn.commit().map_err(err)?;
+        Ok(inv)
     }
 
     // -------------------------------------------------------------- events

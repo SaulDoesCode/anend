@@ -101,12 +101,144 @@ buckets/bucket/near/tints/indexed/set_index/validators/disagreements/export/insp
 import, filters.list/save/delete/run/enlist; docs/app-api.md). The web app uses them all (docs/next.md item 4, "web UI"). Left (hub sharing site,
 web UI, screenshots): see docs/next.md item 4.
 
+## Phase 4 (in progress, 14 Oct): general models, generation, critics
+
+The user (14 Oct): transformers are general purpose, not gematria transformers; the byte
+sums are a separate measure; a high-level declarative spec is the primary interface;
+sizes are honest (tiny is for tests only).
+
+Done (tested; `cargo test -p anend-core classify` ~12 s in debug):
+
+| area | where | tests |
+|---|---|---|
+| byte sums (byte + 1, 256 − byte, digit sums, word sums), standalone, not a model input | `core/src/measure.rs` | `measure::tests` |
+| feature channels optional: `Config::{letters, words, side}` (`Config::gematria(on)`); files saved before keep theirs on | model.rs, io.rs | `version_1_files_still_load_bit_exact` (fixture `testdata/v1_tiny.anendcls`) |
+| NUM tokens (`text::NUM`, `Window::push_numbers`, `Config::numbers`): row + value × learned direction | text.rs, model.rs | in the generative gradient check |
+| causal attention (`Config::causal`, row by row via `attend_row`), causal word channels | model.rs, text.rs | gradient check; `causal_channels_and_numbers` |
+| generative head (`GenSpec`, `Net::{generator, gen_w, gen_b}`, `gen_logits`, `backward_gen`), next byte over 256 + END | model.rs | `generative_gradients_match_finite_differences` |
+| `Decoder`: KV cache, bit-equal to the full pass, restarts past `max_len` with the last half window | model.rs | `decoder_equals_the_full_pass` |
+| multi-output: heads + generative head share a trunk; `Example::and(head, target)`, `HeadSpec::weight` / `GenSpec::weight` loss weights; `Target::{Next{from}, Avoid{from}}`; `Example::raw` bytes; `Evaluation::bits_per_byte`; `train::{tune, nll, gen_loss}` | train.rs | `multi_output_models_train_heads_jointly` |
+| file format v2 (adds generator, flags; v1 reads) | io.rs | round trip in the tests above |
+| sampling (greedy, temperature, top-k, top-p, max length, stop byte, END), keyed by (seed, index) | generate.rs | `learns_sequences_and_samples_deterministically` (same seed same bytes, threads 2 = 3) |
+| critics (`Judge` for `Classifier`, `generate::Node` of a `Graph`, `classifiers::Stack`; `Want::{Class, Not, Near, Range}`), `Constraints` (gates must/must-not, sum ranges over `Measure::{Bytes, BytesReversed, Ordinal, Reversed, Length}`, length, contains/excludes), `draw` / `generate` (rank), `Guidance` (top-k next bytes reweighted by critics), `rewards` (score − mean), `reinforce` (reward-weighted likelihood + unlikelihood, replay), `Rewarded::{yes, no}` | generate.rs | `critics_rank_constrain_guide_and_reinforce` |
+| numbers as fixed-width text (`NumberCodec`), pictures as patch-codebook bytes (`Codebook::learn` integer k-means, `ROW` = 255, `encode/decode`), `png` writer (stored deflate), `toy` pictures | codec.rs | `codec::tests` |
+
+| declarative `ModelSpec` (versioned serde/JSON: input text with opt-in `letters`/`word_sums`/`side` features, bytes, image (patch codebook), numbers (fixed-width text + dense head inputs); trunk preset `test`/`compact`/`small`/`base`/`auto` or sizes, causal by default with a generate head; heads classify/multi/regress/generate with loss weights; data queries `list`/`tagged`/`pairs`/`inline` over a `Source` (`MemSource`); critics by model name; constraints; sampling), `build / train / Model::run / spec::generate`, `Model::{to_bytes, from_bytes, from_classifier}` (spec + codebook kept in `Meta::spec`), checks with clear errors | spec.rs, `docs/models.md` | `spec::tests` (classifier, steered generator, number regressor, picture generator, error messages) |
+| machine benchmark: `bench::{measure, load_or_measure, suggest}` (training throughput over a size ladder, forward cost by sequence length); the spec's `"auto"` preset uses it | bench.rs | `suggests_within_budget` |
+
+Examples (release, this machine: 4 vCPU, AVX2):
+
+- `cargo run --release -p anend-core --example generate [scale] [authors]`: author critic (359 k
+  weights, 71 % validation accuracy after 51 s) and one 670 k-weight generator per author (390
+  steps, ~55 s, ~14 k tokens/s, 2.1–2.65 held-out bits/byte). The critic agrees a 120-byte
+  passage is the right author's: plain sampling 61 %, the critic's top 3 of 12 89 %, guided
+  sampling 72 %, after one reinforce round 74 % (mean over 6 authors; per author 8–100 %,
+  Melville lowest). Drawing 12 candidates takes 0.1 s, guided 0.8–1.0 s, reinforce ~5 s.
+- `cargo run --release -p anend-core --example pictures [out-dir] [epochs]`: 192 toy 64×64
+  pictures → 8×8 patches, 128 codes, 72 tokens each; 870 k weights, 720 steps in 69 s, 0.87
+  bits per code held out; 16 samples in 0.25 s, written as PNG contact sheets. Forward cost of
+  one 64×64 picture by tokenisation (d 128, 4 blocks): 16×16 patches 20 tokens 1.5 ms, 8×8 72
+  tokens 4.9 ms, 4×4 272 tokens 28 ms, 2×2 1056 tokens 263 ms, a byte a pixel 4160 tokens
+  5.3 s (per-token cost ×16 from 72 to 4160 tokens: attention). Samples show the shapes and
+  backgrounds but are often blank or fragmentary; more data, steps and a critic would help.
+
+Left:
+- NUM tokens are in the engine but not fed from `Example` (numbers reach models as text and as
+  dense head inputs).
+- ~~The entry store's `Source`, the UI editing specs, hub ops for specs and generation~~:
+  done 19 Oct: `ops::models` (the save's lists by name or key, tags, pairs, snapshotted when
+  training starts; `models.*` in docs/app-api.md, the same on the desktop and the hub),
+  stored by `crate::specs` in the save's `.models` file and bundles, and the models view's
+  spec models tab. Left: the scripting language writing specs. ~~Picture data from the
+  save~~: done 19 Oct (`{"from": "pictures", "list": ..}` over the save's pictures table,
+  `ops::pictures`; spec definitions moved into the save's own tables, weights stay in
+  `.models`).
+- A patch-embedding (continuous) input for picture classifiers; images now always go through
+  the codebook.
+- Guidance is per byte and judges partial text; it helped 4 authors of 6 here. Sentence-level
+  guidance (judge at word or sentence ends) is the obvious next try.
+- `git`: commit 79b25ff on the branch duplicates another agent's hub commit (an `--amend` on a
+  shared working tree); harmless (identical changes, merged cleanly), noted here.
+
+## Pretrained open models (done in core, 18 Oct; synthetic checkpoints only)
+
+| area | where | tests |
+|---|---|---|
+| safetensors: header, F32/F16/BF16/F64 → f32 (halves exact), shards by `model.safetensors.index.json`, tensors read on demand, a writer | safetensors.rs | every half/bfloat16 value round trips; shards; bad headers refused in words |
+| regex subset for pre-tokenizers (alternation, groups, `(?i:)`, lookahead, quantifiers, classes, `\p{L}`/`\p{N}`…), leftmost-first backtracking | pattern.rs | GPT-2 and Llama 3 patterns split as the reference; unsupported constructs named |
+| BPE from `tokenizer.json`: byte-level and SentencePiece style (byte fallback, ▁), merges as strings or pairs, added/special tokens (lstrip/rstrip), normalizers, pre-tokenizers (ByteLevel, Split, Digits, Metaspace), decoders; `Lexicon` (start/end/stop tokens) | bpe.rs | hand-made fixtures of both kinds: encode, decode, specials, every byte round trips, unsupported parts named |
+| engine: grouped key/value heads (`Config::kv_heads`), q/k/v biases (`qkv_bias`), rope scaling (`linear`, `llama3`), a token vocabulary (`vocab_size`, `Net::lexicon`) through windows, crops, losses, evaluation, `Decoder` (`push_token`, `from_tokens`), sampling, guidance, the file format (tokenizer saved; larger shape limits for these models); growth refuses head changes there; byte models bit for bit as before (old fixtures, saved bytes, gradients hashed against the previous commit) | model.rs, train.rs, generate.rs, io.rs, grow.rs | model gradient checks; decoder = full pass with GQA |
+| `config.json` of llama / mistral / qwen2 / qwen3 → `Config`, weights mapped (transposed into `[in × out]`, q/k/v side by side, tied heads copied), unsupported fields named; spec `"from": {"pretrained": dir}` | pretrained.rs, spec.rs | four synthetic architectures (GQA, biases + BF16 shards, QK-norm + F16 + odd head_dim, SentencePiece + MHA) match an f64 reference from the transformers code; generate with critics and guidance (threads 1 = 2), fine-tune lowers NLL, save/load equal; a spec trains, runs, generates with a critic model and saves |
+
+Example for the user's machine: `core/examples/pretrained.rs` (SmolLM2-135M; download
+command in its doc). Left: see docs/next.md "Lifting the model ceiling".
+
+## The GPU backend (done, 18 Oct; tested on llvmpipe, benchmarked there only)
+
+`core/src/classify/gpu/` behind the cargo feature `gpu` (wgpu 30, WGSL compute shaders; the
+core's default build and wasm do not pull wgpu: `cargo tree -p anend-core | grep wgpu` is empty).
+Since 19 Oct the desktop app (`desktop` feature) and `anend-hub` (default feature `gpu`)
+build with it: `classify.train`/`classify.start` and `models.train` take `"device"`
+(`cpu`, `gpu`, `gpu_fast`), the job reports the device it ran on and, when it fell back to
+the CPU (no adapter, or a shared hub not started with `--gpu`), why (`device_note`). The
+app's training cards have the picker. Test: `ops::classify::devices_fall_back_and_hubs_decide`.
+
+| area | where | tests (`cargo test -p anend-core --features gpu gpu::`) |
+|---|---|---|
+| device, buffers, `Run` (dispatches recorded, one submission, reads), shader source with exact/fast preludes | gpu/mod.rs | — |
+| kernels: tiled GEMM 64×64 (strided A and B, batched with grouped B, causal row limits, accumulate), per-output GEMM for few rows, 8-lane dot rows, RMSNorm fwd/back + column sums, softmax fwd (causal rows)/back, SwiGLU fwd/back, RoPE fwd/back, causal scores, strided copies, elementwise ops; `math::exp`/sigmoid ported operation for operation | gpu/kernels.wgsl | `kernels_match_the_cpu` |
+| `Precision::Exact` (products laundered through an XOR with a uniform zero so they cannot fuse; ÷ and √ correctly rounded in integer arithmetic) and `Fast` (plain operators) | gpu/mod.rs | both probed |
+| exactness probe: every kernel on device and CPU, values differing, max ulps, max relative difference | gpu/probe.rs | `kernels_match_the_cpu` |
+| `GpuNet`: the trunk resident on the device (grouped KV heads, QKV biases, QK-norm, causal and bidirectional attention, the generative head); embedding, pooling and classification heads on the CPU | gpu/net.rs | `trunk_and_heads_match_the_cpu` |
+| `GpuDecoder`: KV cache on the device, `Decoder`'s restarts | gpu/net.rs | `decoder_matches_the_cpu` |
+| training: forward with dropout masks, backward through the trunk on the device (per-example sums in example order, like `batch_grad`), embedding/heads/losses/AdamW on the CPU | gpu/train.rs, device.rs | `training_matches_the_cpu` |
+| `device::Device::{Cpu, Gpu, GpuFast}`: `TrainOpts::device`, `GenOpts::device`, spec `"device"`; CPU default; a build without the feature refuses with a message | device.rs, train.rs, generate.rs, spec.rs | `devices_parse_and_the_gpu_needs_the_feature` |
+
+The probe on llvmpipe (LLVM 20, Mesa 25.2, lavapipe Vulkan; the container has no GPU):
+**every kernel bit-exact in both precisions** (llvmpipe does not fuse or approximate), and
+whole forward passes, decoding and 2 epochs of training with dropout give the CPU's bits
+(the tests assert equality wherever the probe reports exact, a tolerance elsewhere). One
+fix the probe found: the shader compiler simplified exp's `(x + 1.5·2^23) − 1.5·2^23`
+rounding trick away; `keep()` (XOR with the uniform zero) stops that in both precisions.
+
+`cargo run --release -p anend-core --features gpu --example gpu_bench -- 1 3` on this
+container (llvmpipe is software rendering on the same 4 vCPUs, so it measures overhead,
+not a GPU): small (0.9 M weights, 256 tokens) forward 10 842 tokens/s CPU vs 560 GPU,
+decoding 5090 vs 86, training 4829 vs 175; every GPU row matched the CPU's logits bit
+for bit. The numbers that matter come from running it on the user's hardware.
+
+Left: per-dispatch bind groups and a submission + read per decoding step cost the most on
+small models (batch decoding several candidates per submission, and bind group caching,
+would cut it); weights are re-uploaded after every optimizer step (AdamW on the device
+would avoid it); a subgroup/cooperative-matrix GEMM for large models (still one chain per
+output for exactness, so no split-k); classification-only inference (`Model::run`,
+`predict`) still on the CPU; pictures/patch paths untouched; the browser (WebGPU) build
+needs an async device request and a wasm feature set.
+
+## Spelling and word choice (a proof of concept, 19 Oct)
+
+`core/src/grammar`: two logistic regressions (not the transformer: a per-word detector over
+hashed features and a ranker over dense ones), trained the first time they're asked for
+(about a second in a release build) on deterministic corruptions of `corpus.txt` (2870
+sentences of the project's own prose), with a fifth held out. Measured on the held-out
+fifth, corrupted the same way: precision 0.958, recall 0.972 (misspellings 574 of 574,
+confused words 178 of 201, repeated words 60 of 60), the first suggestion right for 95.7%
+of the caught errors and among the first three for 99.1%, and 7.3 false alarms per 1000
+words of clean held-out text. These are numbers on errors made the way it was trained;
+the misspellings are non-words by construction, so a lexicon catches them. In real text
+expect more false alarms on names and jargon (the save's own words are exempt) and fewer
+confusables caught ("its" before "more", "quiet" before "big" go unflagged in the test
+sentence). In the notes editor (`grammar.check`), desktop and web.
+
 ## Next (not done)
 
-- ~~the desktop app's classifiers view~~: done (src/classify_ui.rs, filters_ui.rs, index_panel.rs, tint.rs; see docs/next.md item 4).
+- ~~the desktop app's classifiers view~~: done for the Bevy app (retired), and again for
+  the Dioxus app on 18 Oct (`app/src/views/classifiers.rs`, the memory view's colouring
+  and classifier search) over one implementation of the ops (`core/src/ops/classify.rs`)
+  for the desktop and the hub. `classify.unfeedback` undoes a yes/no bit for bit.
 - JS port of inference for offline use; search filter panel; default classifiers for
   new saves; filter presets as lists.
-- GPU backend behind `kernels` (see its module doc for bit-exactness notes).
+- GPU backend: done (above); what is left is listed there.
 - Row-parallel matmuls are used only for single long windows at inference; training is
   data-parallel over examples.
 - JS port of math/kernels with Math.fround.
