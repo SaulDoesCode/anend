@@ -2689,13 +2689,7 @@ mod tests {
         let mut r = Room::new();
         r.resize(1200.0, 800.0);
         let texts: Vec<Value> = (0..107)
-            .map(|i| {
-                text(
-                    &format!("0,{i}"),
-                    &["gko", "eaaafeam", "wj", "the", "pfdg"][i % 5],
-                    33.0,
-                )
-            })
+            .map(|i| text(&format!("0,{i}"), ["gko", "eaaafeam", "wj", "the", "pfdg"][i % 5], 33.0))
             .collect();
         r.place(&texts, false);
         r.settle();

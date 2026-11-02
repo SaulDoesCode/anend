@@ -488,7 +488,12 @@ The answers left these open. Each is written into the design as its default.
     `img` in the space's element (no script), and move to a native layer under the webview
     (a Metal layer on macOS, a child HWND under WebView2's composition on Windows) once
     one of those can be checked on a real machine. The web keeps space.js until WebGPU
-    draws from the same crate.
+    draws from the same crate. (2 Nov, later: the picture path is built (`app/src/picture.rs`)
+    and is what macOS and Windows use, so space.js and three.js are out of every desktop
+    build. Checked on Linux with `ANEND_SPACE_PICTURE=1` under Xvfb, and the Windows build
+    checked to compile (`cargo check --target x86_64-pc-windows-gnu`); not yet run on a Mac
+    or a Windows machine. Each frame is a 32-bit bitmap fetched by the page, so it costs a
+    copy into the page that the GTK path doesn't.)
 119. **The native room's sounds are mixed in Rust: symphonia decodes, cpal plays.** The
     room says which voice plays which sound and how loud each ear hears it (an
     equal-power pan by how far to the side the block is, a linear fade from one unit to

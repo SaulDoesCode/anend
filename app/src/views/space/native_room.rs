@@ -17,6 +17,11 @@ thread_local! {
     static ROOM: Rc<RefCell<Room>> = Rc::new(RefCell::new(Room::new()));
     static HOST: RefCell<Option<Rc<MountedData>>> = const { RefCell::new(None) };
     static RECT: RefCell<(f64, f64, f64, f64)> = const { RefCell::new((0.0, 0.0, 0.0, 0.0)) };
+    /// whether the space is the view on screen
+    static SHOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// the newest frame shown in the page (the picture path), and the signal its img reads
+    static FRAME: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static FRAME_SIG: RefCell<Option<Signal<u64>>> = const { RefCell::new(None) };
 }
 
 fn room() -> Rc<RefCell<Room>> {
@@ -25,7 +30,9 @@ fn room() -> Rc<RefCell<Room>> {
 
 /// the room's loop: the commands Rust sends, a step of the room, its events, its picture
 pub fn run(mut rx: futures_channel::mpsc::UnboundedReceiver<Value>, on_event: impl Fn(SpaceEvent) + 'static) {
-    {
+    // on Linux the picture goes under the page (GTK); elsewhere, into it (an img)
+    #[cfg(target_os = "linux")]
+    if !crate::picture::enabled() {
         let d = dioxus::desktop::window();
         crate::native::install(&d.window, &d.webview);
     }
@@ -38,7 +45,7 @@ pub fn run(mut rx: futures_channel::mpsc::UnboundedReceiver<Value>, on_event: im
             let r = room();
             // the prefabs' pictures, drawn off this thread
             let jobs = r.borrow_mut().take_thumbs();
-            crate::native::thumbs(jobs, thumbs_tx.clone());
+            crate::picture::thumbs(jobs, thumbs_tx.clone());
             while let Ok(data) = thumbs_rx.try_recv() {
                 if let Ok(e) =
                     serde_json::from_value::<SpaceEvent>(serde_json::json!({ "kind": "thumbs", "data": data }))
@@ -88,18 +95,39 @@ pub fn run(mut rx: futures_channel::mpsc::UnboundedReceiver<Value>, on_event: im
             }
             let mut rm = r.borrow_mut();
             rm.resize(w as f32, h as f32);
-            if crate::native::shown() && (rm.dirty || tick.is_multiple_of(30)) {
+            if SHOWN.with(|s| s.get()) && (rm.dirty || tick.is_multiple_of(30)) {
                 let scene = rm.scene();
                 let camera = rm.camera();
                 drop(rm);
-                crate::native::draw(crate::native::Job {
-                    scene,
-                    camera,
-                    x,
-                    y,
-                    w: w as u32,
-                    h: h as u32,
-                });
+                if crate::picture::enabled() {
+                    crate::picture::draw(crate::picture::Job {
+                        scene,
+                        camera,
+                        w: w as u32,
+                        h: h as u32,
+                    });
+                } else {
+                    #[cfg(target_os = "linux")]
+                    crate::native::draw(crate::native::Job {
+                        scene,
+                        camera,
+                        x,
+                        y,
+                        w: w as u32,
+                        h: h as u32,
+                    });
+                }
+            }
+            let _ = (x, y);
+            // a new frame in the page: the img asks for it
+            if crate::picture::enabled() {
+                let n = crate::picture::frame_no();
+                if FRAME.with(|f| f.get()) != n {
+                    FRAME.with(|f| f.set(n));
+                    if let Some(mut sig) = FRAME_SIG.with(|f| *f.borrow()) {
+                        sig.set(n);
+                    }
+                }
             }
         }
     });
@@ -128,8 +156,25 @@ pub fn NativeHost() -> Element {
     let ui = crate::ui::ui();
     // the room shows while the space is the view on screen (views are kept once built)
     let open = (ui.view)() == crate::ui::View::Space;
-    use_effect(move || crate::native::show((ui.view)() == crate::ui::View::Space));
-    use_drop(|| crate::native::show(false));
+    let picture = crate::picture::enabled();
+    let frame = use_signal(|| 0u64);
+    use_hook(move || FRAME_SIG.with(|f| *f.borrow_mut() = Some(frame)));
+    use_effect(move || {
+        let on = (ui.view)() == crate::ui::View::Space;
+        SHOWN.with(|s| s.set(on));
+        #[cfg(target_os = "linux")]
+        if !crate::picture::enabled() {
+            crate::native::show(on);
+        }
+    });
+    use_drop(move || {
+        SHOWN.with(|s| s.set(false));
+        #[cfg(target_os = "linux")]
+        if !crate::picture::enabled() {
+            crate::native::show(false);
+        }
+    });
+    #[cfg(target_os = "linux")]
     use_effect(move || {
         let p = ui.prefs.read();
         crate::native::set_window_colour(&crate::theme::colour(&p.palette, &p.colours, "window"));
@@ -140,7 +185,7 @@ pub fn NativeHost() -> Element {
     };
     rsx! {
         // the page is see-through where the room is: the window's colour is painted under it
-        if open {
+        if open && !picture {
             style { "html, body, #main, .app, .view.space, .space {{ background: transparent !important; }}" }
         }
         div { id: "space-host", class: "space-host native", tabindex: "0",
@@ -174,6 +219,9 @@ pub fn NativeHost() -> Element {
                 room().borrow_mut().wheel(x, y, d.y as f32);
             },
             oncontextmenu: move |e| e.prevent_default(),
+            if picture {
+                img { class: "space-frame", src: "{crate::picture::frame_url(frame())}", alt: "", draggable: "false" }
+            }
         }
     }
 }

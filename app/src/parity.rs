@@ -286,7 +286,7 @@ mod tests {
                 && tiles.contains("pub fn preview(")
         );
         // and the Linux desktop's build has no space.js nor three.js in it
-        assert!(sp.contains("#[cfg(not(all(feature = \"desktop\", target_os = \"linux\")))]\nconst THREE"));
+        assert!(sp.contains("#[cfg(not(feature = \"desktop\"))]\nconst THREE"));
     }
 
     /// wires drawn in the room and made by dragging

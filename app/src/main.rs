@@ -11,9 +11,11 @@ mod keys;
 mod md;
 #[cfg(all(feature = "desktop", target_os = "linux"))]
 mod native;
-#[cfg(all(feature = "desktop", target_os = "linux"))]
+#[cfg(feature = "desktop")]
 mod native_audio;
 mod parity;
+#[cfg(feature = "desktop")]
+mod picture;
 mod prefs;
 mod shell;
 mod theme;
@@ -184,6 +186,8 @@ fn main() {
         // closing hides the window; the shell saves what's open, then ends the app
         .with_close_behaviour(dioxus::desktop::WindowCloseBehaviour::WindowHides)
         .with_disable_context_menu(true)
+        // the native room's frames, for the page (macOS, Windows: picture.rs)
+        .with_custom_protocol("anendframe", picture::protocol)
         // the sand window's colour, so the first frame isn't a different shade
         .with_background_color((0x92, 0x7a, 0x4f, 0xff));
     dioxus::LaunchBuilder::desktop().with_cfg(cfg).launch(shell::App);

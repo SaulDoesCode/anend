@@ -31,6 +31,9 @@ pulldown-cmark = { version = "0.13", default-features = false, features = ["html
 redb = "4.3"
 # the space drawn natively (wgpu), on the desktop
 anend-render = { path = "../render", optional = true }
+# the native space's sounds: decoded with symphonia, mixed on cpal's output
+cpal = { version = "0.15", optional = true }
+symphonia = { version = "0.5", optional = true, default-features = false, features = ["wav", "pcm", "ogg", "vorbis", "flac", "mp3", "isomp4", "aac"] }
 
 tokio = { version = "1", features = ["rt", "time"], optional = true }
 png = { version = "0.17", optional = true }
@@ -44,6 +47,4 @@ web-sys = { version = "0.3", optional = true, features = ["WebSocket", "MessageE
 # the native space's drawing area under the webview (Linux: GTK, as tao and wry use)
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = { version = "0.18", optional = true }
-# the native space's sounds: decoded with symphonia, mixed on cpal's output
-cpal = { version = "0.15", optional = true }
-symphonia = { version = "0.5", optional = true, default-features = false, features = ["wav", "pcm", "ogg", "vorbis", "flac", "mp3", "isomp4", "aac"] }
+

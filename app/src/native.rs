@@ -4,7 +4,7 @@
 //! The HTML around and over the room (bars, windows, menus) stays on top; GTK puts the two
 //! together in one window.
 //!
-//! This is the Linux desktop's only room: neither space.js nor three.js is in its build
+//! macOS and Windows show the same room in the page instead (picture.rs); neither space.js nor three.js is in a desktop build
 //! (docs/wip/questions.md 118).
 
 use std::cell::RefCell;
@@ -96,11 +96,6 @@ pub fn set_window_colour(hex: &str) {
     redraw();
 }
 
-/// whether the room's picture shows now
-pub fn shown() -> bool {
-    paint().lock().map(|p| p.shown).unwrap_or(false)
-}
-
 /// whether the room's picture shows (the space is the view on screen)
 pub fn show(on: bool) {
     paint().lock().unwrap_or_else(|e| e.into_inner()).shown = on;
@@ -173,40 +168,4 @@ fn draw_loop(rx: Receiver<Job>) {
         });
         redraw();
     }
-}
-
-/// the prefabs' small pictures (112 pixels square, see-through round their parts), drawn
-/// on a renderer of their own: id → a PNG data URL, sent back when done
-pub fn thumbs(
-    jobs: Vec<(serde_json::Value, anend_render::Scene, anend_render::Camera)>,
-    done: Sender<serde_json::Value>,
-) {
-    if jobs.is_empty() {
-        return;
-    }
-    std::thread::spawn(move || {
-        const SIZE: u32 = 112;
-        let Ok(mut r) = anend_render::Renderer::new(SIZE, SIZE) else {
-            return;
-        };
-        let mut out = serde_json::Map::new();
-        for (id, scene, camera) in jobs {
-            let mut px = r.render(&scene, &camera);
-            // the picture's edges are blended with nothing: their colour back to full
-            for p in px.as_chunks_mut::<4>().0 {
-                let a = p[3] as f32 / 255.0;
-                if a > 0.0 && a < 1.0 {
-                    for c in &mut p[..3] {
-                        *c = ((*c as f32 / a).min(255.0)) as u8;
-                    }
-                }
-            }
-            let key = id.as_str().map(String::from).unwrap_or_else(|| id.to_string());
-            out.insert(
-                key,
-                serde_json::Value::String(anend_render::tiles::rgba_url(SIZE, SIZE, px)),
-            );
-        }
-        let _ = done.send(serde_json::Value::Object(out));
-    });
 }

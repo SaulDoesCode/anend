@@ -1,9 +1,9 @@
 //! The space. Rust searches and gathers what each text is (`space.features`: its sums,
 //! length, kind, word types, lists, time; the colouring classifier's class); the room runs
-//! the free spread and draws. On the Linux desktop the room is `anend_render::room::Room`,
-//! in Rust, drawn on wgpu under the see-through webview (native_room; no JavaScript, and
-//! neither space.js nor three.js is in that build). Elsewhere (the web, and the macOS and
-//! Windows desktops for now) it is the three.js room (app/src/space.js, over the vendored
+//! the free spread and draws. On the desktop the room is `anend_render::room::Room`, in
+//! Rust, drawn on wgpu (native_room; no JavaScript, and neither space.js nor three.js is in
+//! the desktop build): under the see-through webview on Linux, in the page on macOS and
+//! Windows. On the web it is the three.js room (app/src/space.js, over the vendored
 //! three.js in app/vendor) hosted through Dioxus's JS interop. Both take the same commands
 //! and send the same events.
 //!
@@ -19,7 +19,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use dioxus::prelude::*;
-#[cfg(not(all(feature = "desktop", target_os = "linux")))]
+#[cfg(not(feature = "desktop"))]
 use futures_util::{StreamExt, future::Either};
 use serde_json::{Value, json};
 
@@ -33,18 +33,18 @@ use crate::views::{TChip, use_keys};
 mod animwin;
 mod flightwin;
 mod lightwin;
-#[cfg(all(feature = "desktop", target_os = "linux"))]
+#[cfg(feature = "desktop")]
 mod native_room;
-#[cfg(all(feature = "desktop", target_os = "linux"))]
+#[cfg(feature = "desktop")]
 use native_room::NativeHost;
 mod prefabwin;
 mod soundwin;
 mod texwin;
 mod wirewin;
 
-#[cfg(not(all(feature = "desktop", target_os = "linux")))]
+#[cfg(not(feature = "desktop"))]
 const THREE: &str = include_str!("../../vendor/three.module.min.js");
-#[cfg(any(test, not(all(feature = "desktop", target_os = "linux"))))]
+#[cfg(any(test, not(feature = "desktop")))]
 const ENGINE: &str = include_str!("../space.js");
 
 /// a physics slider: its key (space.js `PHYSICS`), label, range, step, default and group
@@ -494,7 +494,7 @@ fn chrono_date(ms: u64) -> String {
     format!("{y}-{m:02}-{d:02} {:02}:{:02} UTC", rem / 3600, rem % 3600 / 60)
 }
 
-#[cfg(not(all(feature = "desktop", target_os = "linux")))]
+#[cfg(not(feature = "desktop"))]
 fn boot_js() -> String {
     format!(
         r#"
@@ -654,10 +654,10 @@ pub(super) struct Previews(pub Signal<HashMap<String, String>>);
 
 /// whether the room is the native one (Rust, drawn by anend-render, no JavaScript)
 pub(super) fn native_space() -> bool {
-    cfg!(all(feature = "desktop", target_os = "linux"))
+    cfg!(feature = "desktop")
 }
 
-#[cfg(not(all(feature = "desktop", target_os = "linux")))]
+#[cfg(not(feature = "desktop"))]
 #[component]
 fn NativeHost() -> Element {
     rsx! {}
@@ -1438,12 +1438,12 @@ pub fn Space() -> Element {
             let mut stx = sp.tx;
             stx.set(Some(tx));
             // the room in Rust, drawn natively (no JavaScript): its loop takes the commands
-            #[cfg(all(feature = "desktop", target_os = "linux"))]
+            #[cfg(feature = "desktop")]
             {
                 let api = api.clone();
                 native_room::run(rx, move |e| on_event(ui, api.clone(), sp, e));
             }
-            #[cfg(not(all(feature = "desktop", target_os = "linux")))]
+            #[cfg(not(feature = "desktop"))]
             spawn(async move {
                 let mut rx = rx;
                 let mut ev = document::eval(&boot_js());

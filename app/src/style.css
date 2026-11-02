@@ -997,3 +997,6 @@ input.tax-about { width: 100%; }
 /* the space drawn natively under the page: the page is see-through over it */
 .app:has(.space-host.native) { background: transparent; }
 .space-host.native { background: transparent; }
+
+/* the native room's picture in the page (macOS, Windows): under everything in the space */
+.space-frame { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; user-select: none; }
