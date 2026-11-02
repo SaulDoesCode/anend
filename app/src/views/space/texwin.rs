@@ -11,10 +11,45 @@
 use dioxus::prelude::*;
 use serde_json::{Value, json};
 
-use super::{SpaceEvent, Win, add_block_from, dress};
+use super::{Previews, SpaceEvent, Win, add_block_from, dress, native_space};
 use crate::gem::{self, Mode};
 use crate::shell::set_pref;
 use crate::ui::*;
+
+/// a preview the room draws: into a canvas (space.js), or as a picture the native room
+/// drew (its PNG, by the canvas's id)
+#[component]
+fn Preview(id: String, w: f64, h: f64, class: Option<String>, onclick: Option<EventHandler<MouseEvent>>) -> Element {
+    let class = class.unwrap_or_default();
+    let click = move |e: MouseEvent| {
+        if let Some(f) = onclick {
+            f.call(e);
+        }
+    };
+    if native_space() {
+        let src = try_use_context::<Previews>()
+            .and_then(|p| p.0.read().get(&id).cloned())
+            .unwrap_or_default();
+        rsx! { img { id: "{id}", class: "{class}", src: "{src}", width: "{w.round()}", height: "{h.round()}", alt: "", onclick: click } }
+    } else {
+        rsx! { canvas { id: "{id}", class: "{class}", width: "{w.round()}", height: "{h.round()}", onclick: click } }
+    }
+}
+
+/// the source's shape on screen (a picture's, 240 pixels on its longer side)
+fn source_px(src: &Value, pics: &[(String, String, u64, u64)]) -> (f64, f64) {
+    match src["picture"].as_str().and_then(|p| pics.iter().find(|x| x.0 == p)) {
+        Some((_, _, w, h)) => {
+            let (w, h) = (*w as f64, *h as f64);
+            if w >= h {
+                (240.0, (240.0 * h / w).max(40.0))
+            } else {
+                ((240.0 * w / h).max(40.0), 240.0)
+            }
+        }
+        None => (240.0, 240.0),
+    }
+}
 
 /// a fresh recipe: a colour, one unit a tile
 fn blank() -> Value {
@@ -171,7 +206,10 @@ pub(super) fn Textures(
         let a = about_now();
         let mut whole = a.clone();
         whole["recipe"] = json!({ "source": a["recipe"]["source"], "crop": [0, 0, 1, 1] });
-        on_send.call(json!({ "cmd": "preview", "id": "tx-source", "about": whole, "tiles": 1 }));
+        let (w, h) = source_px(&a["recipe"]["source"], &pictures());
+        on_send.call(
+            json!({ "cmd": "preview", "id": "tx-source", "about": whole, "tiles": 1, "w": w.round(), "h": h.round() }),
+        );
         on_send.call(json!({ "cmd": "preview", "id": "tx-tile", "about": a, "tiles": 1 }));
         // one variant: two by two units of it; more: a tile of each, side by side
         let sw = f(&a["recipe"]["scale"], 0).max(0.05);
@@ -241,17 +279,7 @@ pub(super) fn Textures(
     let block_id = block.as_ref().and_then(|b| b["id"].as_str()).map(str::to_string);
     let text = selected.clone().filter(|s| !s.free && !s.key.is_empty());
     // the source's shape on screen, so the crop box is drawn over it as it is
-    let (sw_px, sh_px) = match src["picture"].as_str().and_then(|p| pics.iter().find(|x| x.0 == p)) {
-        Some((_, _, w, h)) => {
-            let (w, h) = (*w as f64, *h as f64);
-            if w >= h {
-                (240.0, (240.0 * h / w).max(40.0))
-            } else {
-                ((240.0 * w / h).max(40.0), 240.0)
-            }
-        }
-        None => (240.0, 240.0),
-    };
+    let (sw_px, sh_px) = source_px(src, &pics);
     let crop = r["crop"].clone();
     let (cl, ct, cr, cb) = (f(&crop, 0), f(&crop, 1), f(&crop, 2), f(&crop, 3));
     let scale = r["scale"].clone();
@@ -289,7 +317,7 @@ pub(super) fn Textures(
                             let is_sky = sky_now == id;
                             rsx! {
                                 div { key: "{id}", class: "tx-item", title: "{label}: open it to change or use it",
-                                    canvas { id: "tx-saved-{id}", width: "56", height: "56",
+                                    Preview { id: "tx-saved-{id}", w: 56.0, h: 56.0,
                                         onclick: {
                                             let t = t.clone();
                                             let use_picture = use_picture.clone();
@@ -376,7 +404,7 @@ pub(super) fn Textures(
                         }
                     }
                     div { class: "tx-crop", hidden: src["plain"].is_string(), style: "width: {sw_px}px; height: {sh_px}px;",
-                        canvas { id: "tx-source", width: "{sw_px.round()}", height: "{sh_px.round()}" }
+                        Preview { id: "tx-source", w: sw_px, h: sh_px }
                         div { class: "tx-cropbox", style: "left: {cl * 100.0}%; top: {ct * 100.0}%; width: {(cr - cl) * 100.0}%; height: {(cb - ct) * 100.0}%;" }
                         div { class: "tx-crop-grip",
                             onpointerdown: move |e| {
@@ -409,7 +437,7 @@ pub(super) fn Textures(
                 div { class: "tx-step",
                     div { class: "tx-step-head", span { class: "tx-n", "3" } b { "tile" } span { class: "dim small", {format!("{tw:.2} × {th:.2} units")} } }
                     div { class: "tx-tile-row",
-                        canvas { id: "tx-tile", width: "96", height: "96" }
+                        Preview { id: "tx-tile", w: 96.0, h: 96.0 }
                         div { class: "tx-sliders",
                             label { span { "width" } input { r#type: "range", min: "0", max: "100", step: "1", value: "{side_to_slider(tw)}", oninput: move |e| set_at("scale", 0, slider_to_side(e.value().parse().unwrap_or(50.0))) } }
                             label { span { "height" } input { r#type: "range", min: "0", max: "100", step: "1", value: "{side_to_slider(th)}", oninput: move |e| set_at("scale", 1, slider_to_side(e.value().parse().unwrap_or(50.0))) } }
@@ -453,7 +481,7 @@ pub(super) fn Textures(
                         label { class: "row small", input { r#type: "checkbox", checked: r["turn_variants"].as_bool().unwrap_or(false), disabled: variants <= 1, oninput: move |e| set("turn_variants", json!(e.checked())) } "turned too" }
                     }
                     div { class: "dim small", if variants <= 1 { "two by two units, as a block shows it:" } else { "a tile of each variant (a block shows one all over):" } }
-                    canvas { id: "tx-patch", class: "tx-patch", width: "200", height: "200" }
+                    Preview { id: "tx-patch", class: "tx-patch", w: 200.0, h: 200.0 }
                 }
                 div { class: "tx-arrow", "↓" }
                 // 5. where it's used

@@ -636,10 +636,17 @@ struct Sp {
     mode: Signal<String>,
     /// the texts superflight flew through, in order: `{key, text}`
     collected: Signal<Vec<Value>>,
+    /// the native room's texture previews (`Previews`)
+    previews: Signal<HashMap<String, String>>,
 }
 
+/// the native room's texture previews (the textures window's), by canvas id: PNG data
+/// URLs the room draws in Rust, shown as pictures where space.js drew into canvases
+#[derive(Clone, Copy)]
+pub(super) struct Previews(pub Signal<HashMap<String, String>>);
+
 /// whether the room is the native one (Rust, drawn by anend-render, no JavaScript)
-fn native_space() -> bool {
+pub(super) fn native_space() -> bool {
     #[cfg(all(feature = "desktop", target_os = "linux"))]
     return crate::native::enabled();
     #[allow(unreachable_code)]
@@ -1389,7 +1396,9 @@ pub fn Space() -> Element {
         thumbs: use_signal(HashMap::new),
         mode: use_signal(|| "fly".to_string()),
         collected: use_signal(Vec::new),
+        previews: use_signal(HashMap::new),
     };
+    use_context_provider(|| Previews(sp.previews));
     // the pipes turned on: their effects on the room's texts, sent whenever they or the texts change
     {
         let api = api.clone();
@@ -1969,6 +1978,12 @@ fn on_event(mut ui: Ui, api: Api, sp: Sp, e: SpaceEvent) {
                     Err(e) => ui.fail(e),
                 }
             });
+        }
+        "preview" => {
+            if let (Some(id), Some(src)) = (e.data["id"].as_str(), e.data["src"].as_str()) {
+                let mut p = sp.previews;
+                p.write().insert(id.to_string(), src.to_string());
+            }
         }
         "thumbs" => {
             let mut t = sp.thumbs;

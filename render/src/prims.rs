@@ -166,6 +166,29 @@ pub fn ray_tris(o: Vec3, d: Vec3, tris: &[Vec3], m: Mat4) -> Option<f32> {
     best
 }
 
+/// the nearest hit, with the face's normal in the room
+pub fn ray_tris_n(o: Vec3, d: Vec3, tris: &[Vec3], m: Mat4) -> Option<(f32, Vec3)> {
+    let inv = m.inverse();
+    let (lo, ld) = (inv.transform_point3(o), inv.transform_vector3(d));
+    let mut best: Option<(f32, Vec3)> = None;
+    for t in tris.as_chunks::<3>().0 {
+        if let Some(s) = ray_tri(lo, ld, t[0], t[1], t[2])
+            && best.is_none_or(|b| s < b.0)
+        {
+            let n = (t[1] - t[0]).cross(t[2] - t[0]);
+            best = Some((s, n));
+        }
+    }
+    // normals go by the inverse transpose; facing back along the ray
+    best.map(|(s, n)| {
+        let mut w = inv.transpose().transform_vector3(n).normalize_or(Vec3::Y);
+        if w.dot(d) > 0.0 {
+            w = -w;
+        }
+        (s, w)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

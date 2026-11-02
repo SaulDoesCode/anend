@@ -402,6 +402,8 @@ pub struct Blocks {
     /// blocks drawn somewhere other than their place for now (dragged with a copy or
     /// many, posed by an animation): their whole placement
     pub poses: HashMap<String, Mat4>,
+    /// blocks showing another texture for now (an animation's key)
+    pub tex_over: HashMap<String, String>,
 }
 
 impl Blocks {
@@ -412,6 +414,16 @@ impl Blocks {
     pub fn get_mut(&mut self, id: &str) -> Option<&mut Value> {
         self.rev += 1;
         self.list.iter_mut().find(|(k, _)| k == id).map(|(_, b)| b)
+    }
+
+    /// a recipe's preview for the textures window (a PNG data URL)
+    pub fn preview(&mut self, about: &Value, tiles: u32, variants: bool, w: u32, h: u32) -> String {
+        tiles::preview(about, tiles, variants, w, h, &mut self.pictures)
+    }
+
+    /// the pictures made so far, by key
+    pub fn textures(&self) -> HashMap<String, Texture> {
+        self.textures.clone()
     }
 
     pub fn has(&self, id: &str) -> bool {
@@ -467,6 +479,27 @@ impl Blocks {
             }
         }
         best
+    }
+
+    /// the block a ray meets first (none further than `far`): its id, the point, and the
+    /// face's normal there
+    pub fn hit_n(&mut self, o: Vec3, d: Vec3, far: f32) -> Option<(String, Vec3, Vec3)> {
+        let (id, _) = self.hit(o, d)?;
+        let m = self.model(&id)?;
+        let tris = self.corners(&id);
+        let (t, n) = crate::prims::ray_tris_n(o, d, &tris, m)?;
+        (t <= far).then(|| (id, o + d * t, n))
+    }
+
+    /// the boxes round the blocks that are in the way (not zones)
+    pub fn solids(&mut self) -> Vec<(Vec3, Vec3)> {
+        let ids: Vec<String> = self
+            .list
+            .iter()
+            .filter(|(_, b)| b.get("zone").is_none_or(|z| z.is_null()))
+            .map(|(k, _)| k.clone())
+            .collect();
+        ids.iter().filter_map(|id| self.bounds(id)).collect()
     }
 
     /// the box round a block where it's drawn now (lowest and highest corners)
@@ -580,39 +613,43 @@ impl Blocks {
         }
     }
 
-    /// a block's meshes, built again when it (or its texture, or the lights) changed
-    fn build(&mut self, id: &str, b: &Value, model: Mat4, rot: Quat) -> Vec<Mesh> {
+    /// a block's triangles grouped by what they show (its own frame; lit where `model`
+    /// puts it), shown with another texture when one's given (an animation's key)
+    pub fn geometry(
+        &mut self,
+        b: &Value,
+        model: Mat4,
+        rot: Quat,
+        over: Option<&str>,
+    ) -> Vec<(Option<String>, Vec<Vert>)> {
         let key = format!(
             "{}:{}",
             b["kind"].as_str().unwrap_or(""),
             b["texture"].as_str().unwrap_or("")
         );
-        let faces: Vec<Option<String>> = b["faces"]
-            .as_array()
-            .map(|a| a.iter().map(|f| f.as_str().map(String::from)).collect())
-            .unwrap_or_default();
-        let mut abouts = String::new();
-        for k in std::iter::once(key.clone()).chain(faces.iter().flatten().map(|f| format!("texture:{f}"))) {
-            abouts.push_str(&self.abouts.get(&k).map(|a| a.to_string()).unwrap_or_default());
-        }
-        let lit = if self.lights.is_empty() { 0 } else { self.lights_rev };
-        let sig = format!("{b}|{abouts}|{lit}");
-        if let Some(x) = self.built.get(id)
-            && x.sig == sig
-        {
-            return x.meshes.clone();
-        }
+        let faces: Vec<Option<String>> = if over.is_some() {
+            Vec::new()
+        } else {
+            b["faces"]
+                .as_array()
+                .map(|a| a.iter().map(|f| f.as_str().map(String::from)).collect())
+                .unwrap_or_default()
+        };
         let shape = shape(b);
         let lights: Vec<Light> = self.lights.iter().map(Light::of).collect();
-        let variant = b["variant"].as_u64().unwrap_or(0) as u32;
+        let variant = if over.is_some() {
+            0
+        } else {
+            b["variant"].as_u64().unwrap_or(0) as u32
+        };
         let zone = b.get("zone").is_some_and(|z| !z.is_null());
-        // the faces grouped by what they show
         let mut groups: Vec<(Option<String>, [f32; 3], Vec<Vert>)> = Vec::new();
         for (i, face) in shape.faces.iter().enumerate() {
             let own = (!shape.round).then(|| faces.get(i).cloned().flatten()).flatten();
-            let (tex, uv, tint) = match &own {
-                Some(f) => self.look(&format!("texture:{f}"), 0),
-                None => self.look(&key, variant),
+            let (tex, uv, tint) = match (&own, over) {
+                (_, Some(o)) => self.look(o, 0),
+                (Some(f), None) => self.look(&format!("texture:{f}"), 0),
+                (None, None) => self.look(&key, variant),
             };
             let alpha = if zone { 0.22 } else { 1.0 };
             let verts = face.iter().map(|c| {
@@ -628,9 +665,40 @@ impl Blocks {
                 None => groups.push((tex, tint, verts.collect())),
             }
         }
+        groups.into_iter().map(|(t, _, v)| (t, v)).collect()
+    }
+
+    /// a block's meshes, built again when it (or its texture, or the lights) changed
+    fn build(&mut self, id: &str, b: &Value, model: Mat4, rot: Quat) -> Vec<Mesh> {
+        let key = format!(
+            "{}:{}",
+            b["kind"].as_str().unwrap_or(""),
+            b["texture"].as_str().unwrap_or("")
+        );
+        let over = self.tex_over.get(id).cloned();
+        let faces: Vec<String> = b["faces"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|f| f.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        let mut abouts = String::new();
+        for k in std::iter::once(key.clone())
+            .chain(faces.iter().map(|f| format!("texture:{f}")))
+            .chain(over.clone())
+        {
+            abouts.push_str(&self.abouts.get(&k).map(|a| a.to_string()).unwrap_or_default());
+        }
+        let lit = if self.lights.is_empty() { 0 } else { self.lights_rev };
+        let sig = format!("{b}|{abouts}|{lit}|{over:?}");
+        if let Some(x) = self.built.get(id)
+            && x.sig == sig
+        {
+            return x.meshes.clone();
+        }
+        let zone = b.get("zone").is_some_and(|z| !z.is_null());
+        let groups = self.geometry(b, model, rot, over.as_deref());
         let old = self.built.remove(id);
         let mut meshes = Vec::new();
-        for (i, (tex, _, verts)) in groups.into_iter().enumerate() {
+        for (i, (tex, verts)) in groups.into_iter().enumerate() {
             let (mid, version) = match old.as_ref().and_then(|o| o.meshes.get(i)) {
                 Some(m) => (m.id, m.version + 1),
                 None => {

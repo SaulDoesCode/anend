@@ -32,9 +32,20 @@ pub fn run(mut rx: futures_channel::mpsc::UnboundedReceiver<Value>, on_event: im
     spawn(async move {
         let mut last = std::time::Instant::now();
         let mut tick = 0u32;
+        let (thumbs_tx, thumbs_rx) = std::sync::mpsc::channel::<Value>();
         loop {
             crate::ui::sleep_ms(15).await;
             let r = room();
+            // the prefabs' pictures, drawn off this thread
+            let jobs = r.borrow_mut().take_thumbs();
+            crate::native::thumbs(jobs, thumbs_tx.clone());
+            while let Ok(data) = thumbs_rx.try_recv() {
+                if let Ok(e) =
+                    serde_json::from_value::<SpaceEvent>(serde_json::json!({ "kind": "thumbs", "data": data }))
+                {
+                    on_event(e);
+                }
+            }
             loop {
                 match rx.try_recv() {
                     Ok(c) => r.borrow_mut().command(&c),

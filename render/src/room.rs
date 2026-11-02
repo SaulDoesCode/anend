@@ -16,6 +16,7 @@ use serde_json::{Map, Value, json};
 use crate::text;
 
 mod edit;
+mod play;
 mod sounds;
 mod wires;
 pub use edit::{block_out, copy_of};
@@ -448,6 +449,8 @@ pub struct Room {
     wires: wires::Wires,
     /// what's sounding
     sounds: sounds::Sounds,
+    /// animations, walking, superflight, the grapple, the ghost
+    play: play::Play,
     /// whether anything changed since the last picture
     pub dirty: bool,
 }
@@ -507,6 +510,7 @@ impl Room {
             ed: Default::default(),
             wires: Default::default(),
             sounds: Default::default(),
+            play: Default::default(),
             dirty: true,
         };
         r.set_frame();
@@ -661,13 +665,14 @@ impl Room {
             "moving"
         };
         let text = format!(
-            "{:.1} {:.1} {:.1}   speed {:.1}   roll {}°   {} texts   spread {state}",
+            "{:.1} {:.1} {:.1}   speed {:.1}   roll {}°   {} texts   spread {state}{}",
             self.at.x,
             self.at.y,
             -self.at.z,
             self.speed,
             self.roll_deg().round() as i64,
-            self.order.len()
+            self.order.len(),
+            self.mode_info()
         );
         if text == self.last_info {
             return;
@@ -1730,7 +1735,11 @@ impl Room {
     pub fn command(&mut self, c: &Value) {
         let cmd = c["cmd"].as_str().unwrap_or("");
         let s = |k: &str| c[k].as_str().unwrap_or("").to_string();
-        if self.edit_command(cmd, c) || self.wire_command(cmd, c) || self.sound_command(cmd, c) {
+        if self.edit_command(cmd, c)
+            || self.wire_command(cmd, c)
+            || self.sound_command(cmd, c)
+            || self.play_command(cmd, c)
+        {
             self.dirty = true;
             return;
         }
@@ -1958,6 +1967,9 @@ impl Room {
             self.hop(code);
             return;
         }
+        if self.play_key(action.as_deref(), code) {
+            return;
+        }
         if code == "Escape" && self.edit_escape() {
             return;
         }
@@ -2058,6 +2070,9 @@ impl Room {
                 from: (tn.x, tn.y, tn.z, tn.pinned),
                 off: w - hit,
             });
+            return;
+        }
+        if self.ghost_down(button) {
             return;
         }
         if button == 0 && self.wire_down(x, y) {
@@ -2194,6 +2209,9 @@ impl Room {
             self.wake(0.3);
             return;
         }
+        if self.play_wheel(dy) {
+            return;
+        }
         self.speed = (self.speed * if dy > 0.0 { 0.9 } else { 1.1 }).clamp(0.5, 200.0);
         self.info(true);
     }
@@ -2205,7 +2223,9 @@ impl Room {
         let dt = dt.min(0.1);
         self.clock += dt;
         let rot = self.camera_rot();
-        if !self.held.is_empty() {
+        if self.play.mode != "fly" {
+            self.move_body(dt);
+        } else if !self.held.is_empty() {
             let fast = if self.held.contains("ShiftLeft") || self.held.contains("ShiftRight") {
                 4.0
             } else {
@@ -2265,6 +2285,10 @@ impl Room {
             self.dirty = true;
         }
         self.zone_check();
+        self.apply_anims();
+        if self.ghosting() {
+            self.aim_ghost();
+        }
         self.wire_timers();
         self.place_voices();
         if self.wires_moving() {
@@ -2337,6 +2361,7 @@ impl Room {
         scene.textures = textures;
         scene.meshes.push(self.grid());
         self.wire_meshes(&mut scene.meshes);
+        self.play_meshes(&mut scene.meshes);
         self.edit_meshes(&mut scene.meshes);
         scene.rects = self.edit_rects();
         // the labels, as the webview placed them: the farthest first

@@ -136,6 +136,8 @@ pub struct Scene {
     pub rects: Vec<Rect>,
     pub meshes: Vec<Mesh>,
     pub textures: HashMap<String, Texture>,
+    /// what the picture starts as, when not the sky (a see-through thumbnail)
+    pub clear: Option<[f32; 4]>,
 }
 
 impl PartialEq for Scene {
@@ -982,7 +984,7 @@ impl Renderer {
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
             let view = self.target.create_view(&Default::default());
-            let [r, g, b] = scene.sky;
+            let [r, g, b, alpha] = scene.clear.unwrap_or([scene.sky[0], scene.sky[1], scene.sky[2], 1.0]);
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("space"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -994,7 +996,7 @@ impl Renderer {
                             r: r as f64,
                             g: g as f64,
                             b: b as f64,
-                            a: 1.0,
+                            a: alpha as f64,
                         }),
                         store: wgpu::StoreOp::Discard,
                     },

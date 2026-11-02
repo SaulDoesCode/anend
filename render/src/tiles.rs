@@ -260,6 +260,67 @@ pub fn recipe_tile(about: &Value, extra: u32, size: u32, pictures: &mut Pictures
     c
 }
 
+/// a recipe's tiles as the textures window shows them (`w`×`h` pixels): `tiles` across,
+/// each block variant in turn when `variants`, each moved by its offset as the room
+/// samples it; a PNG data URL
+pub fn preview(about: &Value, tiles: u32, variants: bool, w: u32, h: u32, pictures: &mut Pictures) -> String {
+    let r = &about["recipe"];
+    let n = tiles.max(1);
+    let (w, h) = (w.clamp(1, 1024), h.clamp(1, 1024));
+    let pair = |k: &str, d: f32| -> [f32; 2] {
+        let a: Vec<f32> = r[k]
+            .as_array()
+            .map(|a| a.iter().map(|v| v.as_f64().unwrap_or(d as f64) as f32).collect())
+            .unwrap_or_default();
+        if a.len() == 2 { [a[0], a[1]] } else { [d, d] }
+    };
+    let ([sw, sh], [ou, ov]) = (pair("scale", 1.0), pair("offset", 0.0));
+    let nv = r["variants"].as_u64().unwrap_or(1).max(1) as u32;
+    let turns = variants && r["turn_variants"] == true;
+    let kinds = if variants { nv.max(if turns { 4 } else { 1 }) } else { 1 };
+    let made: Vec<Canvas> = (0..kinds)
+        .map(|k| recipe_tile(about, if r["turn_variants"] == true { k % 4 } else { 0 }, 128, pictures))
+        .collect();
+    // a tile keeps its shape (scale w by h)
+    let cw = w as f32 / n as f32;
+    let ch = cw * (sh / sw.max(1e-3));
+    let mut c = Canvas::new(w, h);
+    for py in 0..h {
+        for px in 0..w {
+            let (x, y) = (px as f32 + 0.5, py as f32 + 0.5);
+            let (cx, cy) = ((x / cw).floor(), (y / ch).floor());
+            let v = if variants {
+                ((cy as u32) * n + cx as u32) % nv
+            } else {
+                0
+            };
+            let tile = made.get(v as usize).unwrap_or(&made[0]);
+            let fu = (ou + v as f32 * 0.381966).rem_euclid(1.0);
+            let fv = (ov + v as f32 * 0.618034).rem_euclid(1.0);
+            let lx = (x - cx * cw + fu * cw).rem_euclid(cw) / cw;
+            let ly = (y - cy * ch - fv * ch).rem_euclid(ch) / ch;
+            c.px[(py * w + px) as usize] = sample(tile, lx * tile.w as f32, ly * tile.h as f32);
+        }
+    }
+    png_url(&c)
+}
+
+/// a picture as a PNG data URL
+pub fn png_url(c: &Canvas) -> String {
+    rgba_url(c.w, c.h, c.bytes())
+}
+
+/// RGBA bytes (alpha straight) as a PNG data URL
+pub fn rgba_url(w: u32, h: u32, rgba: Vec<u8>) -> String {
+    let mut png = Vec::new();
+    let img = image::RgbaImage::from_raw(w, h, rgba).unwrap_or_default();
+    let _ = image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png);
+    format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(&png)
+    )
+}
+
 /// pictures decoded once, by their data URL's hash
 #[derive(Default)]
 pub struct Pictures {
