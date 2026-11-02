@@ -66,6 +66,8 @@ fn lists_tables_and_locals() {
     assert_eq!(out("{a {1 >}} z {3 >} ?)"), "\n 3");
     assert_eq!(out("{5 :x# :x~ >} f$ f.. x~ >"), "\n 5\n 404");
     assert_eq!(out("{a,b,c} parts , /l parts #l =~ >"), "\n 3");
+    // `l` takes any number of values before the list name
+    assert_eq!(out("a b c xs l d xs l xs out l/ out~ > xs #l =~ >"), "\n a b c d\n 4");
 }
 
 #[test]

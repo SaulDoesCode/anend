@@ -204,7 +204,7 @@ Indices count from 0; a negative index counts from the end.
 
 | word | args | effect |
 |---|---|---|
-| `l` | value list | append |
+| `l` | value… list | append every value before the list name, in order: `a b c xs l` appends a, b and c |
 | `-l` | list | mem[`$`] = removed last value, `404` if empty |
 | `[l]` | list i dest | mem[dest] = item i; nothing if out of range |
 | `l=` | value list i | item i = value; nothing if out of range |
@@ -308,6 +308,7 @@ An error writes `s: message` to stderr, flushes stdout and ends the process with
 - Added: `>_ <_ % & == << >> <<= >>= l= #l /l l/ #s _f <- <-- ( ) ~ ##`, `x..`, `x@`, escapes, tail calls, `args`/`argc`, numbers[rc], an optional destination for `r`.
 - `x~` runs a one-word value as a word, as `~` did through ingest in s.v.
 - `><` definitions run as code (§11).
+- `l` is variadic: every value before the list name is appended, in order.
 
 ## 10. Web editor
 

@@ -971,8 +971,9 @@ impl<'h> Rt<'h> {
                 self.ow = !self.ow;
             }
             "l" => {
-                let a = self.args("l", 2)?;
-                self.list_mut(&a[1].text()).push(a[0].clone());
+                let mut a = self.args("l", 2)?;
+                let name = a.pop().map(|v| v.text()).unwrap_or_default();
+                self.list_mut(&name).extend(a);
             }
             "-l" => {
                 let a = self.args("-l", 1)?;
