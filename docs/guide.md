@@ -120,6 +120,14 @@ it (Esc closes it); **Ctrl+Shift+G** ungroups (Ctrl+Z groups it again). A select
 has *a copy beside it* and *make a prefab of it* (of its blocks). The room's colour is a
 setting.
 
+On the Linux desktop the room is drawn by the app itself, in Rust on the graphics card
+(wgpu), under the bars and windows: there is no JavaScript in it, and it behaves the same as
+the room on the web. Far blocks turn into flat cut-outs past 120 units and aren't drawn (or
+hit by rays) past 400, exactly, so you can build with those distances in mind. Sounds play
+through the system's audio.
+
+![building on the native renderer: many selected, the gizmo at their middle](guide/native-many.png)
+
 ### Building in the space
 
 Texts in the space are placements of memory entries: the same entry can stand in many

@@ -121,6 +121,8 @@ departure says why in its commit).
   and the web keep space.js for now.
 - Done (2 Nov): culling (back faces, the view, occlusion queries) and far billboards (120
   and 400 units, exact; questions 120).
+- In progress (2 Nov): the polish pass (the spread on threads; the room only in the space;
+  the guide and README describe the native room).
 - Next: the rest of the user's 27 Oct lines: the polish pass,
   then the ▶ point (building, grouping and wiring that feel finished, on the native
   renderer).

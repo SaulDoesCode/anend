@@ -202,6 +202,10 @@ measures: each line is checked against how the same action feels there.
       reachable by key and by menu; consistent spacing, type and icons in every view and
       window; undo everywhere a change is made. Each view gets a pass with screenshots
       before and after in app/docs/shots/.
+      (2 Nov, under way: the spread on threads, a full room of 2000 texts and 400 blocks
+      from about 100 to 30 ms a frame on four cores here; the native room showed behind
+      the other views and now doesn't; the empty-room hint no longer covers prefab copies;
+      shots polish-*.png. Still to do: the per-view pass, frame times on a real GPU.)
 - [ ] ▶ **usable:** building, grouping and wiring that feel finished, on the native renderer.
 - [x] Block rotation and packed storage (#5); the picture-to-texture pipeline (#7); the skybox
       (#23).
