@@ -4,20 +4,14 @@
 //! The HTML around and over the room (bars, windows, menus) stays on top; GTK puts the two
 //! together in one window.
 //!
-//! While the room moves over (the renderer line), this path is taken when the app starts
-//! with `ANEND_NATIVE_SPACE=1`; otherwise the space is space.js in the webview as before.
+//! This is the Linux desktop's only room: neither space.js nor three.js is in its build
+//! (docs/wip/questions.md 118).
 
 use std::cell::RefCell;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use gtk::prelude::*;
-
-/// whether the space is drawn natively (`ANEND_NATIVE_SPACE=1`)
-pub fn enabled() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("ANEND_NATIVE_SPACE").is_ok_and(|v| v == "1"))
-}
 
 /// a picture ready to paint: BGRA (cairo's order), where it goes in the window
 struct Frame {

@@ -231,6 +231,64 @@ mod tests {
         }
     }
 
+    /// the native room (the Linux desktop's) takes every command space.js takes, and has
+    /// what each of its parts does
+    #[test]
+    fn the_native_room_takes_every_command() {
+        let room = [
+            include_str!("../../render/src/room.rs"),
+            include_str!("../../render/src/room/edit.rs"),
+            include_str!("../../render/src/room/wires.rs"),
+            include_str!("../../render/src/room/sounds.rs"),
+            include_str!("../../render/src/room/play.rs"),
+        ]
+        .concat();
+        let sp = include_str!("views/space.rs");
+        let mut n = 0;
+        for part in sp.split("c.cmd === '").skip(1) {
+            let cmd = &part[..part.find('\'').unwrap_or(0)];
+            assert!(
+                room.contains(&format!("\"{cmd}\"")),
+                "the native room doesn't take `{cmd}`"
+            );
+            n += 1;
+        }
+        assert!(n > 50, "space.js's commands: {n}");
+        for needle in [
+            "fn pick_block(",
+            "fn start_block_drag(",
+            "fn toggle_multi(",
+            "fn end_box(",
+            "fn set_groups(",
+            "fn pick_copy(",
+            "fn set_wiring(",
+            "fn wire_meshes(",
+            "fn assign_zones(",
+            "fn play_sound(",
+            "fn set_mode(",
+            "fn walk_step(",
+            "fn grapple(",
+            "fn superflight(",
+            "fn aim_ghost(",
+            "fn apply_anims(",
+            "fn thumbs(",
+        ] {
+            assert!(room.contains(needle), "the native room lost {needle}");
+        }
+        let blocks = include_str!("../../render/src/blocks.rs");
+        assert!(
+            blocks.contains("pub fn bend_at(") && blocks.contains("fn light_at(") && blocks.contains("fn sky_mesh(")
+        );
+        let tiles = include_str!("../../render/src/tiles.rs");
+        assert!(
+            tiles.contains("pub fn text_tile(")
+                && tiles.contains("pub fn recipe_tile(")
+                && tiles.contains("pub fn preview(")
+        );
+        // and the Linux desktop's build has no space.js nor three.js in it
+        assert!(sp.contains("#[cfg(not(all(feature = \"desktop\", target_os = \"linux\")))]\nconst THREE"));
+    }
+
     /// wires drawn in the room and made by dragging
     #[test]
     fn wires_drawn_stay() {

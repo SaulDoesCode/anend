@@ -184,11 +184,15 @@ measures: each line is checked against how the same action feels there.
       ports visible while wiring, the same way in the window and in first-person mode.
       Undo covers wiring changes. (1 Nov: cables, lit by rays; J or the window's
       "connect by dragging", ports, drag to wire or unwire; `wiring.link`; undo.)
-- [ ] The renderer on wgpu, with WebGPU on the web sharing the code (#25). On the desktop the
+- [x] The renderer on wgpu, with WebGPU on the web sharing the code (#25). On the desktop the
       space, its windows' 3D previews and first-person mode run in Rust with no JavaScript;
       `space.js` and three.js leave the desktop build. Whatever JavaScript remains on the
       desktop (the webview's own glue, as long as Dioxus runs in a webview) is named in
       parity.md, and the choice of how to remove it is written in docs/wip/questions.md.
+      (2 Nov: `anend-render` (wgpu) and `anend_render::room`, the whole room in Rust; the
+      Linux desktop's only room, space.js and three.js compiled out; sounds on cpal; the
+      rest named in parity.md, questions 114–119. Not yet: the macOS and Windows desktops
+      (space.js until their picture path, questions 118) and the web's WebGPU canvas.)
 - [ ] Culling (#24); far billboards with deterministic fall-off (#22).
 - [ ] Polish across the app, measured against Obsidian and Logic World: 60 fps or better in
       the space with a full save on the user's GTX 1070 Ti class of machine; no visible

@@ -107,21 +107,21 @@ departure says why in its commit).
   notes and lists).
 - Done (1 Nov): groups (Ctrl+G, nesting, open by double-click, copy, prefab).
 - Done (1 Nov): wires drawn and made by dragging (J).
-- In progress (1 Nov): the space on wgpu with no JavaScript on the desktop. `render/`
-  (`anend-render`) draws blocks, spheres and lines into a picture (a headless test reads it
-  back). On the Linux desktop, `ANEND_NATIVE_SPACE=1` shows the room drawn that way under
-  the see-through webview (app/src/native.rs, views/space/native_room.rs): the save's
-  blocks and wires, flying with W A S D and looking with the right button
-  (app/docs/shots/desktop-native-space.png). The room itself is now Rust in native mode
-  (`render/src/room.rs`, space.js's protocol, so the app's handlers are unchanged): texts
-  laid out by the spread, labels drawn with Fira Sans from a glyph atlas, picked, dragged,
-  wheeled near and far, menus, copies, free texts, rows for scenes, flying, looking and the
-  arrows' hop (app/docs/shots/desktop-native-texts.png). Next: picking blocks, textures, lights, bends,
-  the gizmo and selection, groups and wires, walking, the ghost, sounds, animations,
-  zones; then space.js leaves the desktop build (questions.md 114–117).
-- Next: the rest of the user's 27 Oct
-  lines (grouped prefabs, shift and box selection, Ctrl+G groups, drawn wires, wgpu with no
-  JavaScript on the desktop, culling, polish, ▶).
+- Done (2 Nov): the space on wgpu with no JavaScript on the Linux desktop. `render/`
+  (`anend-render`) draws meshes with their textures, fog, see-through and over-everything
+  passes, and labels from a Fira Sans glyph atlas; `render/src/room.rs` and `room/` are the
+  whole room in Rust with space.js's protocol (the app's handlers unchanged): the spread
+  with zones, blocks and their tiles (`blocks.rs`, `tiles.rs`), the gizmo, copies, many,
+  boxes and groups (`room/edit.rs`), wires, rays and zones' events (`room/wires.rs`),
+  sounds (`room/sounds.rs`, mixed by app/src/native_audio.rs on cpal), animations,
+  walking, the grapple, superflight and the ghost (`room/play.rs`), the prefab pictures
+  and texture previews. GTK paints the picture under the see-through webview
+  (app/src/native.rs). It's the Linux desktop's only room: space.js and three.js are out
+  of that build (questions 114–119; shots app/docs/shots/native-*.png). macOS, Windows
+  and the web keep space.js for now.
+- Next: the rest of the user's 27 Oct lines: culling and far billboards, the polish pass,
+  then the ▶ point (building, grouping and wiring that feel finished, on the native
+  renderer).
   Open further up: the language lines (s, the standard library), taxonomies and pipes,
   the wgpu renderer and culling.
 

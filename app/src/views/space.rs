@@ -1,8 +1,11 @@
-//! The space: the three.js room (app/src/space.js, over the vendored three.js in app/vendor)
-//! hosted through Dioxus's JS interop. Rust searches and gathers what each text is
-//! (`space.features`: its sums, length, kind, word types, lists, time; the colouring
-//! classifier's class), space.js runs the free spread and draws, and they talk over one
-//! eval channel.
+//! The space. Rust searches and gathers what each text is (`space.features`: its sums,
+//! length, kind, word types, lists, time; the colouring classifier's class); the room runs
+//! the free spread and draws. On the Linux desktop the room is `anend_render::room::Room`,
+//! in Rust, drawn on wgpu under the see-through webview (native_room; no JavaScript, and
+//! neither space.js nor three.js is in that build). Elsewhere (the web, and the macOS and
+//! Windows desktops for now) it is the three.js room (app/src/space.js, over the vendored
+//! three.js in app/vendor) hosted through Dioxus's JS interop. Both take the same commands
+//! and send the same events.
 //!
 //! As the Bevy app's space had it: the terminal (the command bar: Enter, Ctrl+Enter,
 //! Shift+Enter, Delete, ↑ ↓ history, `#123` `#r123` `#name`, the words Enlist List Delist
@@ -16,6 +19,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use dioxus::prelude::*;
+#[cfg(not(all(feature = "desktop", target_os = "linux")))]
 use futures_util::{StreamExt, future::Either};
 use serde_json::{Value, json};
 
@@ -38,7 +42,9 @@ mod soundwin;
 mod texwin;
 mod wirewin;
 
+#[cfg(not(all(feature = "desktop", target_os = "linux")))]
 const THREE: &str = include_str!("../../vendor/three.module.min.js");
+#[cfg(any(test, not(all(feature = "desktop", target_os = "linux"))))]
 const ENGINE: &str = include_str!("../space.js");
 
 /// a physics slider: its key (space.js `PHYSICS`), label, range, step, default and group
@@ -488,6 +494,7 @@ fn chrono_date(ms: u64) -> String {
     format!("{y}-{m:02}-{d:02} {:02}:{:02} UTC", rem / 3600, rem % 3600 / 60)
 }
 
+#[cfg(not(all(feature = "desktop", target_os = "linux")))]
 fn boot_js() -> String {
     format!(
         r#"
@@ -647,10 +654,7 @@ pub(super) struct Previews(pub Signal<HashMap<String, String>>);
 
 /// whether the room is the native one (Rust, drawn by anend-render, no JavaScript)
 pub(super) fn native_space() -> bool {
-    #[cfg(all(feature = "desktop", target_os = "linux"))]
-    return crate::native::enabled();
-    #[allow(unreachable_code)]
-    false
+    cfg!(all(feature = "desktop", target_os = "linux"))
 }
 
 #[cfg(not(all(feature = "desktop", target_os = "linux")))]
@@ -1430,17 +1434,18 @@ pub fn Space() -> Element {
     {
         let api = api.clone();
         use_hook(move || {
-            let (tx, mut rx) = futures_channel::mpsc::unbounded::<Value>();
+            let (tx, rx) = futures_channel::mpsc::unbounded::<Value>();
             let mut stx = sp.tx;
             stx.set(Some(tx));
             // the room in Rust, drawn natively (no JavaScript): its loop takes the commands
             #[cfg(all(feature = "desktop", target_os = "linux"))]
-            if crate::native::enabled() {
+            {
                 let api = api.clone();
                 native_room::run(rx, move |e| on_event(ui, api.clone(), sp, e));
-                return;
             }
+            #[cfg(not(all(feature = "desktop", target_os = "linux")))]
             spawn(async move {
+                let mut rx = rx;
                 let mut ev = document::eval(&boot_js());
                 loop {
                     let got = {

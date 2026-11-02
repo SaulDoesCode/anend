@@ -1878,6 +1878,34 @@ impl Room {
                 let ch = c.get("chain").cloned();
                 self.set_chain(&k, ch.as_ref());
             }
+            "addchain" => {
+                // a new chain (from a cut) beside the head it came from
+                let ch = &c["chain"];
+                let near = key_text(&c["near"]);
+                let h = self
+                    .order
+                    .iter()
+                    .find(|k| {
+                        self.nodes
+                            .get(*k)
+                            .is_some_and(|n| n.head.is_none() && n.entry() == near)
+                    })
+                    .cloned();
+                let key = key_text(&ch["key"]);
+                let t = json!({ "key": ch["key"], "text": ch["title"]["text"], "note": false, "titleKey": ch["title"]["key"], "isChain": true, "chain": ch["members"] });
+                let nk = self.nodes.contains_key(&key).then(|| self.copy_key(&key));
+                let n = self.make(t.as_object().cloned().unwrap_or_default(), false, nk, 0, None);
+                let at = h
+                    .and_then(|h| self.nodes.get(&h))
+                    .map(|h| (h.x + h.hw * 2.0 + 1.5, h.y, h.z));
+                if let Some(x) = self.nodes.get_mut(&n) {
+                    if let Some((hx, hy, hz)) = at {
+                        (x.x, x.y, x.z) = (hx, hy, hz);
+                    }
+                    x.pinned = true;
+                }
+                self.dirty = true;
+            }
             "own" => {
                 let node = s("node");
                 let t = c["text"].as_str().map(String::from);

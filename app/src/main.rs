@@ -175,7 +175,7 @@ fn main() {
         .with_inner_size(LogicalSize::new(1200.0, 820.0));
     // the native space shows through the page: the window (and so the webview) is see-through
     #[cfg(target_os = "linux")]
-    let window = window.with_transparent(native::enabled());
+    let window = window.with_transparent(true);
     #[cfg(target_os = "linux")]
     desktop_entry();
     let cfg = Config::new()

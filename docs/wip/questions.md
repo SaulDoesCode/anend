@@ -474,3 +474,26 @@ The answers left these open. Each is written into the design as its default.
     full, GTK draws it into the window over the drawing area, so the room shows through
     and the bars and windows stay (a 1 % blend of what's under them, which isn't seen).
     The window is see-through (an RGBA visual) in native mode only.
+118. **The Linux desktop has only the native room; macOS and Windows keep space.js for
+    now.** The room's Rust port (`anend_render::room`: the spread, texts, blocks and their
+    tiles, the gizmo, copies, many, boxes, groups, wires, zones, sounds, animations,
+    walking, the grapple, superflight, the ghost, the prefab pictures and the texture
+    previews) takes every command space.js took and sends the same events, so the app's
+    windows and menus are unchanged. On Linux it is the only room: space.js and three.js
+    are compiled out of that build (`cfg(all(feature = "desktop", target_os = "linux"))`),
+    there is no switch back. The picture reaches the screen through GTK (114), which macOS
+    and Windows don't have; there the room stays space.js until the picture is put under
+    or into their webviews too. The way chosen for them: serve each frame to the page
+    through a custom protocol (`anend-frame://`) as an uncompressed bitmap shown by an
+    `img` in the space's element (no script), and move to a native layer under the webview
+    (a Metal layer on macOS, a child HWND under WebView2's composition on Windows) once
+    one of those can be checked on a real machine. The web keeps space.js until WebGPU
+    draws from the same crate.
+119. **The native room's sounds are mixed in Rust: symphonia decodes, cpal plays.** The
+    room says which voice plays which sound and how loud each ear hears it (an
+    equal-power pan by how far to the side the block is, a linear fade from one unit to
+    its range, as Web Audio's `PannerNode` did with `equalpower` and `linear`); a small
+    mixer on cpal's output thread adds the voices, easing gains so nothing clicks. rodio
+    was the other choice; its API changed a lot across 0.20–0.23 and the mixing needed is
+    small. On Linux this needs ALSA's headers to build (`libasound2-dev`, added to CI and
+    the README); webm/opus sounds don't decode (symphonia has no Opus), the rest do.

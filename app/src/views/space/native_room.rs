@@ -48,7 +48,17 @@ pub fn run(mut rx: futures_channel::mpsc::UnboundedReceiver<Value>, on_event: im
             }
             loop {
                 match rx.try_recv() {
-                    Ok(c) => r.borrow_mut().command(&c),
+                    Ok(c) => {
+                        // the room's element takes the keys
+                        if c["cmd"] == "focus"
+                            && let Some(m) = HOST.with(|h| h.borrow().clone())
+                        {
+                            spawn(async move {
+                                let _ = m.set_focus(true).await;
+                            });
+                        }
+                        r.borrow_mut().command(&c)
+                    }
                     Err(futures_channel::mpsc::TryRecvError::Closed) => return,
                     Err(_) => break,
                 }
