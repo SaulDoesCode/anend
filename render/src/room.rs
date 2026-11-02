@@ -1085,12 +1085,48 @@ impl Room {
     fn weights(&mut self) {
         let n = self.order.len();
         let mut sim = vec![0.0f32; n * n];
-        for i in 0..n {
-            for j in i + 1..n {
-                let (a, b) = (&self.nodes[&self.order[i]], &self.nodes[&self.order[j]]);
-                let s = if a.free || b.free { 0.0 } else { self.alike(a, b) };
-                sim[i * n + j] = s;
-                sim[j * n + i] = s;
+        let nodes: Vec<&Node> = self.order.iter().map(|k| &self.nodes[k]).collect();
+        // each row on its own (the rows split across threads in a big room); the matrix is
+        // symmetric, each pair worked out as (lower, higher) so both halves agree
+        let me = &*self;
+        let fill = |i: usize, row: &mut [f32]| {
+            for (j, out) in row.iter_mut().enumerate() {
+                if j == i {
+                    continue;
+                }
+                let (a, b) = if i < j {
+                    (nodes[i], nodes[j])
+                } else {
+                    (nodes[j], nodes[i])
+                };
+                *out = if a.free || b.free { 0.0 } else { me.alike(a, b) };
+            }
+        };
+        let threads = if cfg!(target_arch = "wasm32") || n < 300 {
+            1
+        } else {
+            std::thread::available_parallelism()
+                .map(|t| t.get())
+                .unwrap_or(1)
+                .min(16)
+        };
+        if n > 0 {
+            if threads <= 1 {
+                for (i, row) in sim.chunks_mut(n).enumerate() {
+                    fill(i, row);
+                }
+            } else {
+                let per = n.div_ceil(threads);
+                std::thread::scope(|sc| {
+                    for (c, rows) in sim.chunks_mut(per * n).enumerate() {
+                        let fill = &fill;
+                        sc.spawn(move || {
+                            for (k, row) in rows.chunks_mut(n).enumerate() {
+                                fill(c * per + k, row);
+                            }
+                        });
+                    }
+                });
             }
         }
         self.sim = Some(sim);
@@ -1185,47 +1221,100 @@ impl Room {
             self.p.f("pad"),
         );
         let depth_none = self.p.s("depth_by") == "none";
-        let sim = self.sim.clone().unwrap_or_default();
-        let nodes: Vec<Node> = self.order.iter().map(|k| self.nodes[k].clone()).collect();
+        let sim = self.sim.take().unwrap_or_default();
+        let nodes: Vec<&Node> = self.order.iter().map(|k| &self.nodes[k]).collect();
+        // each text's zone as a number, and whether it's a chain's member (no strings in
+        // the pair loop)
+        let mut zone_no: HashMap<&str, u32> = HashMap::new();
+        let zid: Vec<u32> = nodes
+            .iter()
+            .map(|x| {
+                x.zone
+                    .as_deref()
+                    .map(|z| {
+                        let k = zone_no.len() as u32 + 1;
+                        *zone_no.entry(z).or_insert(k)
+                    })
+                    .unwrap_or(0)
+            })
+            .collect();
         let dragged = self.drag.as_ref().map(|d| d.n.clone());
-        let mut fx = vec![0.0f32; n];
-        let mut fy = vec![0.0f32; n];
-        let mut fz = vec![0.0f32; n];
-        for i in 0..n {
-            let aa = &nodes[i];
-            // a text in a zone moves under the zone's physics, toward its centre
-            let zf = aa.zone.as_ref().and_then(|z| zones.get(z));
-            let (repel, attract, link) = match zf {
+        // the pair forces on plain arrays, each text's row worked out on its own (the rows
+        // split across threads in a big room)
+        let pos: Vec<Vec3> = nodes.iter().map(|x| Vec3::new(x.x, x.y, x.z)).collect();
+        let member: Vec<bool> = nodes.iter().map(|x| x.head.is_some()).collect();
+        let params: Vec<(f32, f32, f32)> = nodes
+            .iter()
+            .map(|x| match x.zone.as_ref().and_then(|z| zones.get(z)) {
                 Some(f) => (f.p.f("repel"), f.p.f("attract"), f.p.f("link")),
                 None => (repel, attract, link),
-            };
-            for j in i + 1..n {
-                let bb = &nodes[j];
-                if aa.head.is_some() || bb.head.is_some() || aa.zone != bb.zone {
+            })
+            .collect();
+        let keys_ref: Vec<&str> = nodes.iter().map(|x| x.key.as_str()).collect();
+        let row = |i: usize| -> Vec3 {
+            let mut f3 = Vec3::ZERO;
+            if member[i] {
+                return f3;
+            }
+            let (repel, attract, link) = params[i];
+            for j in 0..n {
+                if j == i || member[j] || zid[i] != zid[j] {
                     continue;
                 }
-                let (mut dx, mut dy, dz) = (bb.x - aa.x, bb.y - aa.y, bb.z - aa.z);
-                let mut d2 = dx * dx + dy * dy + dz * dz;
+                let (lo, hi) = if i < j { (i, j) } else { (j, i) };
+                let mut dv = pos[j] - pos[i];
+                let mut d2 = dv.length_squared();
                 if d2 < 1e-6 {
-                    dx = (hash01(&format!("{}{}", aa.key, bb.key), 7) - 0.5) * 0.01;
-                    dy = (hash01(&format!("{}{}", bb.key, aa.key), 9) - 0.5) * 0.01;
-                    d2 = dx * dx + dy * dy + 1e-6;
+                    // the same nudge both ways, as the pair (lo, hi) has it
+                    let a = (hash01(&format!("{}{}", keys_ref[lo], keys_ref[hi]), 7) - 0.5) * 0.01;
+                    let b = (hash01(&format!("{}{}", keys_ref[hi], keys_ref[lo]), 9) - 0.5) * 0.01;
+                    let sgn = if i == lo { 1.0 } else { -1.0 };
+                    dv = Vec3::new(a * sgn, b * sgn, dv.z);
+                    d2 = a * a + b * b + 1e-6;
                 }
                 let d = d2.sqrt();
-                let s = sim[i * n + j];
+                let s = sim[lo * n + hi];
                 let mut f = -repel * (1.0 + (-s).max(0.0) * 2.0) / (d2 + 0.5);
                 if s > 0.0 {
                     f += attract * s * (d - link * (1.15 - s));
                 }
-                let (ux, uy, uz) = (dx / d, dy / d, dz / d);
-                fx[i] += f * ux;
-                fy[i] += f * uy;
-                fz[i] += f * uz;
-                fx[j] -= f * ux;
-                fy[j] -= f * uy;
-                fz[j] -= f * uz;
+                f3 += dv * (f / d);
             }
-            if let Some(f) = zf {
+            f3
+        };
+        let mut forces = vec![Vec3::ZERO; n];
+        let threads = if cfg!(target_arch = "wasm32") || n < 400 {
+            1
+        } else {
+            std::thread::available_parallelism()
+                .map(|t| t.get())
+                .unwrap_or(1)
+                .min(16)
+        };
+        if threads <= 1 {
+            for (i, f) in forces.iter_mut().enumerate() {
+                *f = row(i);
+            }
+        } else {
+            let chunk = n.div_ceil(threads);
+            std::thread::scope(|sc| {
+                for (c, part) in forces.chunks_mut(chunk).enumerate() {
+                    let row = &row;
+                    sc.spawn(move || {
+                        for (k, f) in part.iter_mut().enumerate() {
+                            *f = row(c * chunk + k);
+                        }
+                    });
+                }
+            });
+        }
+        let mut fx: Vec<f32> = forces.iter().map(|f| f.x).collect();
+        let mut fy: Vec<f32> = forces.iter().map(|f| f.y).collect();
+        let mut fz: Vec<f32> = forces.iter().map(|f| f.z).collect();
+        for i in 0..n {
+            let aa = nodes[i];
+            // gravity to the centre (a zone's own), and toward the depth the measure gives
+            if let Some(f) = aa.zone.as_ref().and_then(|z| zones.get(z)) {
                 let g = f.p.f("gravity");
                 fx[i] -= g * (aa.x - f.c.x);
                 fy[i] -= g * (aa.y - f.c.y);
@@ -1237,6 +1326,8 @@ impl Room {
             let zt = if depth_none { 0.0 } else { self.depth_of(aa) * depth };
             fz[i] -= flat * (aa.z - zt);
         }
+        drop(nodes);
+        self.sim = Some(sim);
         let mut ke = 0.0;
         let drag_k = (-damping * h).exp();
         for (i, key) in self.order.clone().iter().enumerate() {
@@ -1298,9 +1389,16 @@ impl Room {
             let fixed = x.pinned || x.head.is_some() || dragged.as_deref() == Some(x.key.as_str());
             moves.push(if fixed { 0.0f32 } else { 1.0 });
         }
+        let max_hw = hws.iter().cloned().fold(0.0f32, f32::max);
         for _pass in 0..2 {
-            for i in 0..n {
-                for j in i + 1..n {
+            // swept along x: only pairs whose boxes can meet across are looked at
+            let mut by_x: Vec<usize> = (0..n).collect();
+            by_x.sort_by(|&a, &b| xs[a].total_cmp(&xs[b]));
+            for (ai, &i) in by_x.iter().enumerate() {
+                for &j in &by_x[ai + 1..] {
+                    if xs[j] - xs[i] > hws[i] + max_hw + pad {
+                        break;
+                    }
                     if (zs[i] - zs[j]).abs() > 1.5 || zone[i] != zone[j] {
                         continue;
                     }
@@ -2539,6 +2637,51 @@ mod tests {
         r.take_events();
         r.undo_last();
         assert_eq!(r.blocks.list.len(), 2);
+    }
+
+    /// a full room's cost a frame: `cargo test --release -p anend-render -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn a_full_room_a_frame() {
+        let mut r = Room::new();
+        r.resize(1280.0, 800.0);
+        let texts: Vec<Value> = (0..2000)
+            .map(|i| text(&format!("k{i}"), &format!("word {i}"), (i % 300) as f64))
+            .collect();
+        r.place(&texts, false);
+        let blocks: Vec<Value> = (0..400)
+            .map(|i| json!({"id": format!("b{i}"), "kind": "plain", "texture": "#a08060", "x": (i % 20) as f64 * 3.0 - 30.0, "y": -2, "z": -((i / 20) as f64) * 3.0 - 5.0, "w": 2, "h": 2, "d": 2}))
+            .collect();
+        r.command(&json!({"cmd": "blocks", "blocks": blocks}));
+        let mut ren = crate::Renderer::new(1280, 800).ok();
+        let t0 = std::time::Instant::now();
+        let mut ts = (0.0, 0.0, 0.0);
+        for _ in 0..60 {
+            let a = std::time::Instant::now();
+            r.frame(1.0 / 60.0);
+            let b = std::time::Instant::now();
+            let sc = r.scene();
+            let c = std::time::Instant::now();
+            if let Some(ren) = &mut ren {
+                ren.render(&sc, &r.camera());
+            }
+            if ts.0 == 0.0 {
+                eprintln!(
+                    "the first step (the weights too): {:.0} ms",
+                    (b - a).as_secs_f64() * 1e3
+                );
+            }
+            ts.0 += (b - a).as_secs_f64();
+            ts.1 += (c - b).as_secs_f64();
+            ts.2 += c.elapsed().as_secs_f64();
+        }
+        eprintln!(
+            "60 frames: {:.0} ms; a frame: step {:.1} ms, scene {:.1} ms, draw {:.1} ms",
+            t0.elapsed().as_secs_f64() * 1e3,
+            ts.0 / 60.0 * 1e3,
+            ts.1 / 60.0 * 1e3,
+            ts.2 / 60.0 * 1e3
+        );
     }
 
     #[test]
